@@ -1,0 +1,14 @@
+===== realsense-ros =====
+https://github.com/IntelRealSense/realsense-ros.git
+branch: 
+commit: ae45d4969f5a7105a6a9e0deeadc785004d72441
+
+===== DynamixelSDK =====
+https://github.com/ROBOTIS-GIT/DynamixelSDK.git
+branch: main
+commit: 54cabbf8e6c38fac205bc4dd14e747dd0e32e56f
+
+===== xsens driver =====
+https://github.com/bluespace-ai/bluespace_ai_xsens_ros_mti_driver.git
+branch: ros2_0_galactic
+commit: 6a35755f3c6e2c9091940e069ee18d6580297840

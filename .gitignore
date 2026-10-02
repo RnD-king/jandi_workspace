@@ -1,11 +1,28 @@
+# ROS2 generated
 build/
 install/
 log/
 
+# External repositories - versions are recorded separately
+src/realsense-ros/
+src/DynamixelSDK/
+src/bluespace_ai_xsens_ros_mti_driver/
+
+# Local tool/config
+.codex
+.colcon/
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Model files are generally ignored
 *.engine
 *.onnx
 *.pt
 
-__pycache__/
-*.pyc
-.vscode/
+# But preserve the competition model
+!src/dataset/best.engine
+!src/dataset/best.pt
