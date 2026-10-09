@@ -128,6 +128,13 @@ class CameraMotion {
 public:
     enum class Result { Idle, Running, Command, Finished };
     explicit CameraMotion(CameraConfig config = {}) : config_(config) { config_.Validate(); }
+    // Keep the startup FORWARD head target during subsequent body JSON playback.
+    void HoldForward() {
+        if (active_) throw std::logic_error("cannot hold FORWARD during camera motion");
+        start_ = target_ = current_ = config_.forward;
+        settling_ = false;
+        override_enabled_ = true;
+    }
     void Start(uint8_t request, const RawPositions& base, Clock::time_point now) {
         const auto target = config_.Target(request);
         const CameraPose start{base.at(config_.yaw_id), base.at(config_.pitch_id)};
