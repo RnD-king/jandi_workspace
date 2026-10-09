@@ -1,0 +1,115 @@
+vision_algorithm:
+  line_features:
+    max_centers: 8
+    guide_min_points: 3
+    image_center_u: 320.0
+    curve_min_points: 5
+    curve_min_v_span_px: 80.0
+    curve_local_fit_points: 4
+    guide_fit_rmse_full_scale_px: 20.0
+
+  line:
+    line_stable_window: 10
+    line_stable_min_hits: 7
+
+  line_p2p:
+    offset_gain: 1.0
+    heading_gain: 1.0
+    steering_deadband: 0.10
+    ready_lead_sec: 0.25  # Match forward_walk; estimate the 40% sampling point
+    failure_observation_sec: 2.0
+    failure_min_valid_samples: 5
+    no_evidence_max_retries: 5
+    recovery_max_turns: 5
+    recovery_turn_yaw_deg: 15
+
+  ball:
+    stable_window: 10
+    stable_min_hits: 7
+    lost_frames: 5
+    smooth_alpha: 0.45
+    far_u_des_norm: 0.50
+    approach_u_deadband: 0.025
+    upper_acquire_v_norm: 0.65
+    tilt_down_v_norm: 0.75
+    tilt_down_window: 10
+    tilt_down_min_hits: 7
+    pickup_max_attempts: 3
+    ball_ignore_duration_sec: 5.0
+    fine_target_u_norm: 0.50
+    fine_target_v_norm: 0.70
+    fine_u_deadband: 0.06
+    fine_v_deadband: 0.06
+    fine_settle_duration_sec: 0.60
+    recovery_timeout_sec: 5.0
+    recovery_reacquire_min_hits: 3
+    recovery_center_tolerance_norm: 0.12
+    recovery_settle_duration_sec: 0.60
+
+  hurdle:
+    stable_window: 30
+    stable_min_hits: 20
+    lost_frames: 5
+    smooth_alpha: 0.45
+    acquire_min_v_norm: 0.60
+    tilt_trigger_v_norm: 0.75
+    tilt_trigger_window: 10
+    tilt_trigger_min_hits: 7
+    hurdle_ignore_duration_sec: 5.0
+    recovery_reacquire_min_hits: 3
+    recovery_timeout_sec: 5.0
+    recovery_center_tolerance_norm: 0.12
+    recovery_settle_duration_sec: 0.60
+
+  goal:
+    stable_window: 10
+    stable_min_hits: 7
+    lost_frames: 5
+    smooth_alpha: 0.45
+    post_pickup_wait_sec: 3.0
+    target_u_norm: 0.50
+    approach_u_deadband: 0.025
+    fine_adjust_start_z_m: 0.80
+    hoop_radius_m: 0.10
+    throwing_range_m: 0.40
+    position_tolerance_m: 0.08
+    fine_settle_duration_sec: 0.60
+    shoot_yaw_limit_deg: 30.0
+
+  line_detection:
+    class_id: 0
+    confidence: 0.60
+    min_box_width: 1.0
+    min_box_height: 1.0
+
+  object_targets:
+    ball_class_id: 1
+    goal_class_id: 2
+    backboard_class_id: 3
+    hurdle_class_id: 4
+    ball_confidence: 0.60
+    goal_confidence: 0.60
+    backboard_confidence: 0.60
+    hurdle_confidence: 0.60
+    min_box_width: 2.0
+    min_box_height: 2.0
+
+  object_association:
+    missing_frame_limit: 5
+    max_center_distance_norm: 0.25
+    max_size_log_ratio: 0.80
+    center_distance_weight: 1.0
+    size_change_weight: 0.25
+
+  command:
+    first_action_id: 1
+    action_ack_timeout_sec: 10.0
+
+  mission:
+    camera_motion_timeout_sec: 3.0
+    backboard_min_depth_m: 0.20
+    backboard_max_depth_m: 5.00
+    enable_ball: true
+    enable_hurdle: true
+    enable_goal: true
+    initial_has_ball: false
