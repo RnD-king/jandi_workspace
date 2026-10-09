@@ -63,8 +63,11 @@ Dxl::Dxl()
         for (uint8_t i = 0; i < NUMBER_OF_DYNAMIXELS; i++)
         {
             dxl_comm_result = packetHandler->write1ByteTxRx(portHandler, dxl_id[i], DxlReg_OperatingMode, Current_Control_Mode, &dxl_error);
-            if (dxl_comm_result != COMM_SUCCESS)
-                std::cerr << "[Error] Failed to set current control mode for ID: " << int(dxl_id[i]) << std::endl;
+            if (dxl_comm_result != COMM_SUCCESS || dxl_error != 0)
+                throw std::runtime_error("Dynamixel initialization failed: current mode ID " +
+                    std::to_string(dxl_id[i]) + " comm=" +
+                    packetHandler->getTxRxResult(dxl_comm_result) +
+                    " motor_error=" + std::to_string(dxl_error));
             else
                 std::cout << "[Info] Set current control mode for ID: " << int(dxl_id[i]) << std::endl;
         }
@@ -74,15 +77,18 @@ Dxl::Dxl()
         for (uint8_t i = 0; i < NUMBER_OF_DYNAMIXELS; i++)
         {
             dxl_comm_result = packetHandler->write1ByteTxRx(portHandler, dxl_id[i], DxlReg_OperatingMode, Position_Control_Mode, &dxl_error);
-            if (dxl_comm_result != COMM_SUCCESS)
-                std::cerr << "[Error] Failed to set position control mode for ID: " << int(dxl_id[i]) << std::endl;
+            if (dxl_comm_result != COMM_SUCCESS || dxl_error != 0)
+                throw std::runtime_error("Dynamixel initialization failed: position mode ID " +
+                    std::to_string(dxl_id[i]) + " comm=" +
+                    packetHandler->getTxRxResult(dxl_comm_result) +
+                    " motor_error=" + std::to_string(dxl_error));
             else
                 std::cout << "[Info] Set position control mode for ID: " << int(dxl_id[i]) << std::endl;
         }
     }
     else
     {
-        std::cerr << "[Error] Invalid mode set." << std::endl;
+        throw std::runtime_error("Dynamixel initialization failed: invalid operating mode");
     }
 
 
@@ -91,8 +97,11 @@ Dxl::Dxl()
     for (uint8_t i = 0; i < NUMBER_OF_DYNAMIXELS; i++)
     {
         dxl_comm_result = packetHandler->write1ByteTxRx(portHandler, dxl_id[i], DxlReg_TorqueEnable, 1, &dxl_error);
-        if (dxl_comm_result != COMM_SUCCESS)
-            std::cerr << "[Error] Failed to enable torque for ID: " << int(dxl_id[i]) << std::endl;
+        if (dxl_comm_result != COMM_SUCCESS || dxl_error != 0)
+            throw std::runtime_error("Dynamixel initialization failed: torque enable ID " +
+                std::to_string(dxl_id[i]) + " comm=" +
+                packetHandler->getTxRxResult(dxl_comm_result) +
+                " motor_error=" + std::to_string(dxl_error));
         else
             std::cout << "[Info] Torque enabled for ID: " << int(dxl_id[i]) << std::endl;
     }
