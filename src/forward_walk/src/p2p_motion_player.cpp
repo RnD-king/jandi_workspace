@@ -6,8 +6,22 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <utility>
+
+namespace {
+int ParseMotorId(const std::string& text)
+{
+    std::size_t consumed = 0;
+    const int id = std::stoi(text, &consumed);
+    if (consumed != text.size() ||
+        std::find(Dxl::MotorIds().begin(), Dxl::MotorIds().end(), id) == Dxl::MotorIds().end()) {
+        throw std::runtime_error("invalid motor ID: " + text);
+    }
+    return id;
+}
+}
 
 P2PMotionPlayer::P2PMotionPlayer(Dxl* dxl) : dxl_(dxl) {}
 
@@ -22,6 +36,24 @@ P2PMotionPlayer::Motion P2PMotionPlayer::LoadMotion(
     Motion motion;
     motion.name = root.get<std::string>("name", json_path.string());
 
+    // Optional editor PD metadata is validated, but the verified P850/I0/D0
+    // initialization is preserved. Preparation never applies hardware gains.
+    if (const auto gains = root.get_child_optional("pd_gains")) {
+        if (!gains->data().empty()) throw std::runtime_error("pd_gains must be an object");
+        std::unordered_map<int, bool> seen;
+        for (const auto& entry : *gains) {
+            const int id = ParseMotorId(entry.first);
+            if (!seen.emplace(id, true).second || entry.second.empty()) {
+                throw std::runtime_error("invalid/duplicate PD gain motor ID");
+            }
+            const int p = entry.second.get<int>("p_gain");
+            const int d = entry.second.get<int>("d_gain");
+            if (p < 0 || p > 16383 || d < 0 || d > 16383) {
+                throw std::runtime_error("PD gain outside 0..16383");
+            }
+        }
+    }
+
     const auto frames = root.get_child_optional("keyframes");
     if (!frames) {
         throw std::runtime_error(
@@ -29,12 +61,18 @@ P2PMotionPlayer::Motion P2PMotionPlayer::LoadMotion(
     }
 
     for (const auto& frame_entry : *frames) {
+        if (!frame_entry.first.empty()) throw std::runtime_error("keyframes must be an array");
         const ptree& source = frame_entry.second;
         Keyframe frame;
         frame.name = source.get<std::string>("name", "unnamed");
-        frame.duration_sec = source.get<double>("duration_sec", 1.0);
-        frame.hold_sec = source.get<double>("hold_sec", 0.0);
-        frame.max_speed_deg_s = source.get<double>("max_speed_deg_s", 30.0);
+        // get(path, default) also defaults on conversion failure. Only absent
+        // fields may use defaults; malformed present fields must reject before ACK.
+        const auto timing = [&](const std::string& key, double fallback) {
+            return source.get_child_optional(key) ? source.get<double>(key) : fallback;
+        };
+        frame.duration_sec = timing("duration_sec", 1.0);
+        frame.hold_sec = timing("hold_sec", 0.0);
+        frame.max_speed_deg_s = timing("max_speed_deg_s", 30.0);
 
         const std::string kind =
             source.get<std::string>("interpolation", "smoothstep");
@@ -43,16 +81,27 @@ P2PMotionPlayer::Motion P2PMotionPlayer::LoadMotion(
         else if (kind == "minimum_jerk") frame.interpolation = Interpolation::kMinimumJerk;
         else throw std::runtime_error("unknown interpolation: " + kind);
 
-        if (frame.duration_sec <= 0.0 || frame.hold_sec < 0.0 ||
-            frame.max_speed_deg_s <= 0.0) {
+        if (!std::isfinite(frame.duration_sec) || !std::isfinite(frame.hold_sec) ||
+            !std::isfinite(frame.max_speed_deg_s) || frame.duration_sec <= 0.0 ||
+            frame.duration_sec * 50.0 >= static_cast<double>(std::numeric_limits<std::size_t>::max()) ||
+            frame.hold_sec < 0.0 || frame.max_speed_deg_s <= 0.0) {
             throw std::runtime_error("invalid timing/speed in keyframe: " + frame.name);
         }
 
         const auto positions = source.get_child_optional("positions");
         if (!positions) throw std::runtime_error("keyframe has no positions: " + frame.name);
         for (const auto& position : *positions) {
-            frame.positions.emplace(std::stoi(position.first),
-                                    position.second.get_value<int32_t>());
+            const int id = ParseMotorId(position.first);
+            const auto tick = position.second.get_value<int32_t>();
+            if (tick < 0 || tick > 4095 || !frame.positions.emplace(id, tick).second) {
+                throw std::runtime_error("invalid/duplicate position for ID " + position.first);
+            }
+        }
+        for (const int id : Dxl::MotorIds()) {
+            if (frame.positions.find(id) == frame.positions.end()) {
+                throw std::runtime_error("keyframe '" + frame.name +
+                                         "' is missing motor ID " + std::to_string(id));
+            }
         }
         motion.keyframes.push_back(std::move(frame));
     }
@@ -85,6 +134,7 @@ void P2PMotionPlayer::LoadProgram(
             "JSON is neither a motion nor a mission: " + json_path.string());
     }
     for (const auto& entry : *mission_motions) {
+        if (!entry.first.empty()) throw std::runtime_error("mission motions must be an array");
         const std::string filename = entry.second.get<std::string>("filename");
         const std::filesystem::path motion_path =
             motion_directory / std::filesystem::path(filename);
@@ -115,7 +165,8 @@ void P2PMotionPlayer::ApplyStartOptions(
         throw std::runtime_error("repeat_count must be greater than zero");
     }
     if (options.duration_override_sec &&
-        *options.duration_override_sec <= 0.0) {
+        (!std::isfinite(*options.duration_override_sec) || *options.duration_override_sec <= 0.0 ||
+         *options.duration_override_sec * 50.0 >= static_cast<double>(std::numeric_limits<std::size_t>::max()))) {
         throw std::runtime_error(
             "duration_override_sec must be greater than zero");
     }
@@ -211,35 +262,61 @@ bool P2PMotionPlayer::Start(
     const std::string& motion_directory,
     const StartOptions& options)
 {
+    try {
+        return StartPrepared(PrepareProgram(json_path, motion_directory, options));
+    } catch (const std::exception& e) {
+        error_ = e.what();
+        return false;
+    }
+}
+
+P2PMotionPlayer::PreparedProgram P2PMotionPlayer::PrepareProgram(
+    const std::string& json_path, const std::string& motion_directory,
+    const StartOptions& options) const
+{
+    P2PMotionPlayer parser(nullptr);
+    parser.LoadProgram(json_path, motion_directory);
+    parser.ApplyStartOptions(options, motion_directory);
+    PreparedProgram prepared;
+    prepared.motions = std::move(parser.motions_);
+    return prepared;
+}
+
+bool P2PMotionPlayer::StartPrepared(const PreparedProgram& program)
+{
+    try {
+        if (dxl_ == nullptr) throw std::runtime_error("Dxl is null");
+        const auto initial_pose = dxl_->GetRawPositions();
+        return StartPrepared(program, initial_pose, Clock::now());
+    } catch (const std::exception& e) {
+        Stop();
+        error_ = e.what();
+        return false;
+    }
+}
+
+bool P2PMotionPlayer::StartPrepared(const PreparedProgram& program,
+                                   const RawPositions& initial_pose,
+                                   Clock::time_point now)
+{
     Stop();
     error_.clear();
     try {
-        if (dxl_ == nullptr) throw std::runtime_error("Dxl is null");
-        LoadProgram(json_path, motion_directory);
-        ApplyStartOptions(options, motion_directory);
-        SelectMotion(0);
-
-        start_positions_ = dxl_->GetRawPositions();
-
-        // ACK 전에 mission의 모든 motion/frame을 검사한다.
-        for (const auto& motion : motions_) {
-            for (const auto& frame : motion.keyframes) {
-                for (const auto& motor : start_positions_) {
-                    if (frame.positions.find(motor.first) == frame.positions.end()) {
-                        throw std::runtime_error(
-                            "keyframe '" + frame.name +
-                            "' is missing motor ID " +
-                            std::to_string(motor.first));
-                    }
-                }
+        if (program.motions.empty()) throw std::runtime_error("empty prepared program");
+        for (const int id : Dxl::MotorIds()) {
+            if (initial_pose.find(id) == initial_pose.end()) {
+                throw std::runtime_error("initial pose missing motor ID " + std::to_string(id));
             }
         }
+        motions_ = program.motions;
+        SelectMotion(0);
+        start_positions_ = initial_pose;
         playing_ = true;
-        BeginKeyframe(Clock::now());
+        BeginKeyframe(now);
         return true;
     } catch (const std::exception& e) {
         error_ = e.what();
-        playing_ = false;
+        Stop();
         return false;
     }
 }
@@ -259,14 +336,19 @@ void P2PMotionPlayer::BeginKeyframe(Clock::time_point now)
     }
     // 사용자가 지정한 시간보다 속도 제한에 필요한 시간이 길면 자동으로 늘린다.
     effective_duration_sec_ = std::max(
-        frame.duration_sec, max_delta_deg / frame.max_speed_deg_s);
-    phase_started_at_ = now;
+        std::max(0.02, frame.duration_sec),
+        max_delta_deg / std::max(1.0, frame.max_speed_deg_s));
+    // Python round()와 같은 ties-to-even 반올림을 사용한다.
+    total_steps_ = static_cast<std::size_t>(std::max(
+        2.0, std::nearbyint(effective_duration_sec_ * 50.0)));
+    completed_steps_ = 0;
+    next_command_at_ = now;
     holding_ = false;
 }
 
 double P2PMotionPlayer::Interpolate(Interpolation kind, double x)
 {
-    // 타이머 지연으로 x가 1보다 커질 수 있으므로 반드시 0~1로 제한한다.
+    // 보간 입력은 반드시 0~1로 제한한다.
     x = std::clamp(x, 0.0, 1.0);
     if (kind == Interpolation::kLinear) return x;
     if (kind == Interpolation::kMinimumJerk) {
@@ -275,20 +357,29 @@ double P2PMotionPlayer::Interpolate(Interpolation kind, double x)
     return x*x*(3.0 - 2.0*x);
 }
 
-P2PMotionPlayer::UpdateResult P2PMotionPlayer::Update()
+P2PMotionPlayer::UpdateResult P2PMotionPlayer::Update(RawPositions* output,
+                                                    Clock::time_point now)
 {
+    if (output == nullptr) throw std::invalid_argument("P2P output is null");
+    output->clear();
     if (!playing_) return UpdateResult::kIdle;
     try {
-        const auto now = Clock::now();
-        const double elapsed =
-            std::chrono::duration<double>(now - phase_started_at_).count();
         const Keyframe& frame = keyframes_.at(keyframe_index_);
 
-        // 목표 keyframe에는 이미 도착했고 hold_sec만큼 자세를 유지하는 단계다.
-        // hold 중에는 새 목표값을 계속 쓰지 않고 시간만 확인한다.
-        if (holding_) {
-            if (elapsed < frame.hold_sec) return UpdateResult::kRunning;
-            // 다음 keyframe 보간의 시작점은 방금 끝난 keyframe 목표값이다.
+        // 사이트는 마지막 목표 전송 뒤에도 한 주기를 쉰 다음 hold를 시작한다.
+        // hold/구간 전환을 마친 호출에서 다음 구간의 첫 단계를 바로 전송한다.
+        if (completed_steps_ == total_steps_) {
+            if (now < next_command_at_) return UpdateResult::kRunning;
+            if (frame.hold_sec > 0.0) {
+                if (!holding_) {
+                    holding_ = true;
+                    phase_started_at_ = now;
+                    return UpdateResult::kRunning;
+                }
+                const double held_sec =
+                    std::chrono::duration<double>(now - phase_started_at_).count();
+                if (held_sec < frame.hold_sec) return UpdateResult::kRunning;
+            }
             start_positions_ = frame.positions;
             ++keyframe_index_;
             if (keyframe_index_ >= keyframes_.size()) {
@@ -299,48 +390,63 @@ P2PMotionPlayer::UpdateResult P2PMotionPlayer::Update()
                 SelectMotion(motion_index_ + 1);
             }
             BeginKeyframe(now);
-            return UpdateResult::kRunning;
         }
 
-        // 현재 구간 진행률과 interpolation 곡선의 비율 alpha를 계산한다.
-        const double progress = elapsed / effective_duration_sec_;
-        const double alpha = Interpolate(frame.interpolation, progress);
+        if (now < next_command_at_) return UpdateResult::kRunning;
+        const Keyframe& active_frame = keyframes_.at(keyframe_index_);
+        const double progress =
+            static_cast<double>(completed_steps_ + 1) / total_steps_;
+        const double alpha = Interpolate(active_frame.interpolation, progress);
         RawPositions command;
 
         // 각 motor ID별로 start와 target 사이의 이번 timer tick 목표를 만든다.
         for (const auto& motor : start_positions_) {
-            const int32_t target = frame.positions.at(motor.first);
+            const int32_t target = active_frame.positions.at(motor.first);
             const double value = static_cast<double>(motor.second) +
                 alpha * (static_cast<double>(target) - motor.second);
-            command.emplace(motor.first, static_cast<int32_t>(std::lround(value)));
+            command.emplace(motor.first, static_cast<int32_t>(std::nearbyint(value)));
         }
-        // 23개 목표를 하나의 GroupSyncWrite 패킷으로 동시에 전송한다.
-        dxl_->SyncWriteRawPositions(command);
-
-        if (progress < 1.0) return UpdateResult::kRunning;
-        start_positions_ = frame.positions;
-        // 이동이 끝났어도 hold가 있으면 아직 전체 keyframe 완료가 아니다.
-        if (frame.hold_sec > 0.0) {
-            holding_ = true;
-            phase_started_at_ = now;
-            return UpdateResult::kRunning;
-        }
-        // hold가 없으면 바로 다음 keyframe을 준비한다.
-        ++keyframe_index_;
-        if (keyframe_index_ >= keyframes_.size()) {
-            if (motion_index_ + 1 >= motions_.size()) {
-                Stop();
-                return UpdateResult::kFinished;
-            }
-            SelectMotion(motion_index_ + 1);
-        }
-        BeginKeyframe(now);
+        // MainNode merges the camera override and owns the only packet writer.
+        *output = std::move(command);
+        ++completed_steps_;
+        // 다음 deadline은 이번 전송 기준이다. 지연 후 과거 deadline을 따라잡으려
+        // 여러 단계를 압축하지 않는다. 통신 자체가 20 ms 이상 걸리면 sleep은 없다.
+        next_command_at_ = now + kCommandPeriod;
         return UpdateResult::kRunning;
     } catch (const std::exception& e) {
         error_ = e.what();
         playing_ = false;
         return UpdateResult::kError;
     }
+}
+
+void P2PMotionPlayer::OnCommandWritten(Clock::time_point write_started,
+                                      Clock::time_point written_at)
+{
+    next_command_at_ = std::max(write_started + kCommandPeriod, written_at);
+}
+
+double P2PMotionPlayer::RemainingNominalSec(Clock::time_point now) const
+{
+    if (!playing_) return 0.0;
+    // READY only applies to the final frame of the entire program.
+    if (motion_index_ + 1 != motions_.size() || keyframe_index_ + 1 != keyframes_.size()) {
+        return std::numeric_limits<double>::infinity();
+    }
+    const auto& frame = keyframes_.at(keyframe_index_);
+    if (holding_) {
+        return std::max(0.0, frame.hold_sec -
+            std::chrono::duration<double>(now - phase_started_at_).count());
+    }
+    // Move-phase readiness depends only on successfully generated steps, never
+    // elapsed wall time. The final packet's wait is still honored by Update().
+    return (total_steps_ - completed_steps_) * 0.02 + frame.hold_sec;
+}
+
+bool P2PMotionPlayer::IsNearCompletion(double lead_sec, Clock::time_point now) const
+{
+    return playing_ && std::isfinite(lead_sec) && lead_sec >= 0.0 &&
+           RemainingNominalSec(now) <= lead_sec;
 }
 
 void P2PMotionPlayer::Stop()
@@ -351,4 +457,6 @@ void P2PMotionPlayer::Stop()
     motion_index_ = 0;
     keyframe_index_ = 0;
     effective_duration_sec_ = 0.0;
+    total_steps_ = 0;
+    completed_steps_ = 0;
 }

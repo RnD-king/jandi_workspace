@@ -6,6 +6,7 @@
 #include <thread>
 #include <chrono>
 #include <unordered_map>
+#include <array>
 #include "dynamixel_sdk/dynamixel_sdk.h"
 
 // #include <unordered_map> //자료구조 중 더 빠른 map탐색 key:value
@@ -19,7 +20,7 @@
 #define BAUDRATE                 4000000 
 // #define DEVICE_NAME              "/dev/ttyU2D2"
 // #define DEVICE_NAME              "/dev/ttyUSB0"
-#define DEVICE_NAME              "/dev/ttyUSB0"
+#define DEVICE_NAME              "/dev/jandi_dxl"
 
 // const char* getAvailableDeviceName();
 
@@ -115,12 +116,17 @@ enum DynamixelStandardRegisterTable
 
 class Dxl
 {
+    public:
+        // Preparation can validate all required IDs without communicating with motors.
+        inline static constexpr std::array<uint8_t, NUMBER_OF_DYNAMIXELS> motor_ids = {
+            10, 8, 6, 4, 2, 0, 11, 9, 7, 5, 3, 1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22};
+        static const auto& MotorIds() { return motor_ids; }
     //Member Variable
     private:
         dynamixel::PortHandler* portHandler;
         dynamixel::PacketHandler* packetHandler;
         // const uint8_t dxl_id[NUMBER_OF_DYNAMIXELS] = {12,18,2};
-        const uint8_t dxl_id[NUMBER_OF_DYNAMIXELS] = {10, 8, 6, 4, 2, 0, 11, 9, 7, 5, 3, 1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22};
+        const std::array<uint8_t, NUMBER_OF_DYNAMIXELS>& dxl_id = motor_ids;
         float zero_manual_offset[NUMBER_OF_DYNAMIXELS] = { 0 };
         uint32_t position[NUMBER_OF_DYNAMIXELS] = { 0 };
         uint32_t velocity[NUMBER_OF_DYNAMIXELS] = { 0 };

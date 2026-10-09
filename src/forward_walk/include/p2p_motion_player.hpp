@@ -13,8 +13,15 @@
 
 class P2PMotionPlayer
 {
+    struct Motion;
 public:
-    // main.cpp의 100 Hz 타이머가 Update() 결과를 보고 다음 처리를 결정한다.
+    using Clock = std::chrono::steady_clock;
+    using RawPositions = std::unordered_map<int, int32_t>;
+    class PreparedProgram {
+        friend class P2PMotionPlayer;
+        std::vector<Motion> motions;
+    };
+    // main.cpp 타이머가 Update()를 호출하고, player가 50 Hz 전송을 조절한다.
     // kFinished일 때만 해당 ActionCommand에 대한 DONE을 보내야 한다.
     enum class UpdateResult { kIdle, kRunning, kFinished, kError };
 
@@ -37,9 +44,22 @@ public:
                const std::string& motion_directory,
                const StartOptions& options);
 
-    // ROS timer에서 주기적으로 호출한다. 현재 시각을 기준으로 목표 raw tick을
-    // 한 번 계산하고 Dynamixel에 한 번 전송하므로 ROS callback을 오래 막지 않는다.
-    UpdateResult Update();
+    // Parse and apply options to a separate local program. No hardware/state changes.
+    PreparedProgram PrepareProgram(const std::string& json_path,
+                                   const std::string& motion_directory,
+                                   const StartOptions& options) const;
+    bool StartPrepared(const PreparedProgram& program);
+    // Explicit initial pose/clock permits hardware-free verification of fixed steps.
+    bool StartPrepared(const PreparedProgram& program, const RawPositions& initial_pose,
+                       Clock::time_point now);
+
+    // ROS timer에서 주기적으로 호출한다. 사이트와 같은 step/steps 보간으로
+    // 한 번에 한 단계만 전송한다. 지연되어도 단계를 건너뛰거나 몰아서 보내지 않는다.
+    UpdateResult Update(RawPositions* output, Clock::time_point now = Clock::now());
+    // Only MainNode writes the merged packet; account for its actual write time.
+    void OnCommandWritten(Clock::time_point write_started, Clock::time_point written_at);
+    double RemainingNominalSec(Clock::time_point now = Clock::now()) const;
+    bool IsNearCompletion(double lead_sec, Clock::time_point now = Clock::now()) const;
 
     // 재생 상태만 정지/초기화한다. Torque OFF 명령은 수행하지 않는다.
     void Stop();
@@ -71,9 +91,6 @@ private:
         std::vector<Keyframe> keyframes;
     };
 
-    using Clock = std::chrono::steady_clock;
-    using RawPositions = std::unordered_map<int, int32_t>;
-
     Motion LoadMotion(const std::filesystem::path& json_path) const;
     void LoadProgram(const std::filesystem::path& json_path,
                      const std::filesystem::path& motion_directory);
@@ -94,7 +111,11 @@ private:
     RawPositions start_positions_;       // 현재 구간을 시작한 실제/직전 목표 위치
     std::size_t keyframe_index_{0};       // 지금 실행 중인 JSON keyframe 번호
     double effective_duration_sec_{0.0};
-    Clock::time_point phase_started_at_{}; // 이동 또는 hold를 시작한 시각
+    static constexpr std::chrono::milliseconds kCommandPeriod{20};
+    std::size_t total_steps_{0};
+    std::size_t completed_steps_{0};
+    Clock::time_point next_command_at_{};
+    Clock::time_point phase_started_at_{}; // hold를 시작한 시각
     bool holding_{false};                  // false=이동 중, true=hold 중
     bool playing_{false};                  // 전체 모션 재생 여부
 };

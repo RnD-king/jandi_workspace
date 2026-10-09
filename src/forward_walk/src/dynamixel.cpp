@@ -45,12 +45,14 @@ Dxl::Dxl()
     packetHandler = dynamixel::PacketHandler::getPacketHandler(PROTOCOL_VERSION);
 
     if (!portHandler->openPort())
-        std::cerr << "[Error] Failed to open the port!" << std::endl;
+        throw std::runtime_error("Failed to open Dynamixel port: " + std::string(DEVICE_NAME));
     else 
         std::cout << "[Info] Succeeded to open the port!" << std::endl;
 
-    if (!portHandler->setBaudRate(BAUDRATE))
-        std::cerr << "[Error] Failed to set the baudrate!" << std::endl;
+    if (!portHandler->setBaudRate(BAUDRATE)) {
+        portHandler->closePort();
+        throw std::runtime_error("Failed to set Dynamixel baudrate: " + std::to_string(BAUDRATE));
+    }
     else 
         std::cout << "[Info] Succeeded to set the baudrate!" << std::endl;
 
@@ -160,8 +162,16 @@ void Dxl::syncReadTheta()
 {
     dynamixel::GroupSyncRead groupSyncRead(portHandler, packetHandler, DxlReg_PresentPosition, 4);
     for(uint8_t i=0; i < NUMBER_OF_DYNAMIXELS; i++) groupSyncRead.addParam(dxl_id[i]);
-    groupSyncRead.txRxPacket();
-    for(uint8_t i=0; i < NUMBER_OF_DYNAMIXELS; i++) position[i] = groupSyncRead.getData(dxl_id[i], DxlReg_PresentPosition, 4);
+    const int result = groupSyncRead.txRxPacket();
+    if (result != COMM_SUCCESS) {
+        throw std::runtime_error(packetHandler->getTxRxResult(result));
+    }
+    for(uint8_t i=0; i < NUMBER_OF_DYNAMIXELS; i++) {
+        if (!groupSyncRead.isAvailable(dxl_id[i], DxlReg_PresentPosition, 4)) {
+            throw std::runtime_error("Present Position unavailable for ID " + std::to_string(dxl_id[i]));
+        }
+        position[i] = groupSyncRead.getData(dxl_id[i], DxlReg_PresentPosition, 4);
+    }
     groupSyncRead.clearParam();
     for(uint8_t i=0; i < NUMBER_OF_DYNAMIXELS; i++) th_[i] = convertValue2Radian(position[i]) - PI - zero_manual_offset[i];
 }

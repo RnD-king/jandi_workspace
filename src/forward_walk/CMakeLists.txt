@@ -90,4 +90,31 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+include(CTest)
+if(BUILD_TESTING)
+  enable_testing()
+  add_executable(executor_logic_test
+    tests/executor_logic_test.cpp
+    src/p2p_motion_player.cpp
+    src/dynamixel.cpp
+  )
+  ament_target_dependencies(executor_logic_test dynamixel_sdk Eigen3)
+  target_compile_definitions(executor_logic_test PRIVATE
+    FORWARD_WALK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_test(NAME executor_logic_test COMMAND executor_logic_test)
+  # Compile the real MainNode against an in-memory Dxl, never the device driver.
+  add_executable(executor_integration_test
+    tests/executor_integration_test.cpp src/p2p_motion_player.cpp)
+  ament_target_dependencies(executor_integration_test
+    rclcpp ament_index_cpp vision Eigen3)
+  target_compile_options(executor_integration_test PRIVATE
+    -include ${CMAKE_CURRENT_SOURCE_DIR}/tests/fake_dynamixel.hpp)
+  add_test(NAME executor_integration_test COMMAND executor_integration_test)
+  set_tests_properties(executor_integration_test PROPERTIES
+    TIMEOUT 20 ENVIRONMENT "ROS_DOMAIN_ID=87;ROS_LOCALHOST_ONLY=1")
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME executor_source_contract
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/source_contract_test.py)
+endif()
+
 ament_package()
