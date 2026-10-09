@@ -181,6 +181,14 @@ int main() {
                 config.Target(2).yaw==2077 && config.Target(2).pitch==1537 &&
                 config.Target(3).yaw==2054 && config.Target(3).pitch==966, "calibration mapping");
         Rejects([&] { config.Target(0); });
+        CameraMotion startup_camera(config);
+        startup_camera.HoldForward();
+        auto startup_body = InitialPose();
+        startup_camera.Merge(startup_body);
+        Require(startup_body.at(21) == 2077 && startup_body.at(22) == 1537 &&
+                startup_camera.OverrideEnabled() && !startup_camera.Active(),
+                "startup FORWARD not latched");
+        pass("persistent startup FORWARD head");
         CameraMotion camera(config);
         auto base = InitialPose();
         auto unmodified = base;
