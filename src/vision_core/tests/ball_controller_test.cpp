@@ -76,6 +76,9 @@ int main() {
   r = recovery.Compute(Ball(0.3, 0.3), 100, 100, 0, {}, {});
   r = recovery.Compute(Ball(0.3, 0.8), 100, 100, .1, {}, done);
   r = recovery.Compute(Ball(0.3, 0.6), 100, 100, .2, down, {});
+  // DONE(.2) clears FORWARD-view tracking. A NEW DOWN-view sighting
+  // is required before recovery may use the remembered left direction.
+  r = recovery.Compute(Ball(0.3, 0.6), 100, 100, .25, down, {});
   r = recovery.Compute(std::nullopt, 100, 100, .3, down, {});
   r = recovery.Compute(std::nullopt, 100, 100, .4, down, {});
   assert(r.mode == BallMode::kBallRecoveryDown);
