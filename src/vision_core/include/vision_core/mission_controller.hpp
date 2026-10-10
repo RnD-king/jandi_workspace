@@ -201,6 +201,8 @@ private:
   ObjectAssociationTracker hurdle_association_tracker_;
   MissionType active_mission_{MissionType::kLine};
   bool has_ball_{false};
+  bool object_tracking_camera_moving_{false};
+  CameraMode object_tracking_camera_mode_{CameraMode::kForward};
   BallResult ball_result_;
   HurdleResult hurdle_result_;
   GoalResult goal_result_;

@@ -29,5 +29,16 @@ int main() {
   r = controller.Compute(H(0.8), 100, 100, .4,
                          {CameraMode::kDown, true}, done);
   assert(r.action.action == MissionAction::kHurdle);
+  // Camera-transition observations cannot contaminate the DOWN-view evidence.
+  HurdleController fresh_down(c,3.0);
+  fresh_down.Compute(H(.5),100,100,0,{},{});
+  r=fresh_down.Compute(H(.8),100,100,.1,{},done);
+  assert(r.mode==HurdleMode::kWaitCameraDown);
+  r=fresh_down.Compute(H(.8),100,100,.15,
+                       {CameraMode::kTransition,false},{});
+  assert(r.mode==HurdleMode::kWaitCameraDown);
+  r=fresh_down.Compute(H(.8),100,100,.2,
+                       {CameraMode::kDown,true},{});
+  assert(r.mode==HurdleMode::kContactWalk && !r.tracked.visible);
   return 0;
 }

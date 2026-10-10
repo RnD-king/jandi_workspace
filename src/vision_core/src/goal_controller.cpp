@@ -84,6 +84,7 @@ const char *GoalController::ModeName(GoalMode mode) {
   case GoalMode::kReturnCameraToLine: return "GOAL_CAMERA_FORWARD";
   case GoalMode::kHeadingRecovery: return "GOAL_LINE_RECOVERY";
   case GoalMode::kFailed: return "GOAL_FAILED";
+  case GoalMode::kRecoverySearch: return "GOAL_RECOVERY_SEARCH";
   }
   return "UNKNOWN";
 }
@@ -144,6 +145,8 @@ void GoalController::UpdateGoalTracker(
       tracked_.h_norm = observed.h_norm;
       tracked_.confidence = observed.confidence;
     }
+    last_seen_u_norm_ = tracked_.u_norm;
+    if (mode_ != GoalMode::kLineFollow) seen_after_camera_goal_ = true;
   } else {
     ++lost_count_;
     tracked_.visible = false;
@@ -236,8 +239,13 @@ GoalResult GoalController::Compute(
     const GoalPoseObservation &pose, int image_width, int image_height,
     double now_sec, bool line_reference_valid, const CameraFeedback &camera,
     const ActionExecutionFeedback &feedback) {
-  UpdateGoalTracker(backboard, image_width, image_height);
-  UpdatePoseTracker(backboard, pose);
+  // Intermediate camera angles must not add object evidence to either tracker.
+  const bool camera_switching = mode_ == GoalMode::kWaitCameraGoal ||
+                                mode_ == GoalMode::kReturnCameraToLine;
+  if (!camera_switching) {
+    UpdateGoalTracker(backboard, image_width, image_height);
+    UpdatePoseTracker(backboard, pose);
+  }
 
   if (mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_) {
     if (!line_reference_valid) {
@@ -277,6 +285,9 @@ GoalResult GoalController::Compute(
     if (camera.actual_mode == CameraMode::kGoal && camera.settled) {
       mode_ = GoalMode::kSearch;
       ClearTracking();
+      last_seen_u_norm_ = config_.target_u_norm;
+      seen_after_camera_goal_ = false;
+      recovery_visible_count_ = 0;
       result.mode = mode_;
       result.camera_request = CameraRequest::kNone;
       result.tracked = {};
@@ -288,6 +299,18 @@ GoalResult GoalController::Compute(
     }
     return result;
   case GoalMode::kSearch:
+    // No past GOAL-view sighting, or a centered last sighting: wait in place.
+    if (!tracked_.visible && seen_after_camera_goal_ &&
+        lost_count_ >= std::max(1, config_.lost_frames) &&
+        std::abs(last_seen_u_norm_ - config_.target_u_norm) >
+            config_.recovery_center_tolerance_norm) {
+      mode_ = GoalMode::kRecoverySearch;
+      state_enter_sec_ = now_sec;
+      recovery_visible_count_ = 0;
+      settle_until_sec_ = now_sec;
+      result.mode = mode_;
+      return result;
+    }
     if (PoseReadyForFineAdjust()) {
       mode_ = GoalMode::kFineAdjust;
       settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
@@ -377,10 +400,42 @@ GoalResult GoalController::Compute(
       result.mode = GoalMode::kLineFollow;
     }
     return result;
+  case GoalMode::kRecoverySearch: {
+    // An accepted turn finishes before any subsequent recovery decision.
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (feedback.action_done) {
+      settle_until_sec_ = now_sec + config_.recovery_settle_duration_sec;
+      return result;
+    }
+    if (now_sec + kEpsilon < settle_until_sec_) return result;
+    if (tracked_.visible) ++recovery_visible_count_;
+    else recovery_visible_count_ = 0;
+    if (recovery_visible_count_ >=
+        std::max(1, config_.recovery_reacquire_min_hits)) {
+      mode_ = GoalMode::kSearch;
+      result.mode = mode_;
+      return result;
+    }
+    if (now_sec - state_enter_sec_ >= config_.recovery_timeout_sec) {
+      mode_ = GoalMode::kFailed;
+      result.mode = mode_;
+      return result;
+    }
+    if (!tracked_.visible) result.action = SearchRecoveryAction();
+    return result;
+  }
   case GoalMode::kFailed:
     return result;
   }
   return result;
+}
+
+ActionRequest GoalController::SearchRecoveryAction() const {
+  const double error = last_seen_u_norm_ - config_.target_u_norm;
+  if (std::abs(error) <= config_.recovery_center_tolerance_norm) return {};
+  const MissionAction turn = error < 0.0 ? MissionAction::kTurnLeft
+                                          : MissionAction::kTurnRight;
+  return {turn, ActionCategory::kLocomotion, 15, false};
 }
 
 void GoalController::ClearTracking() {
@@ -406,6 +461,9 @@ void GoalController::Reset() {
   post_pickup_line_wait_active_ = false;
   camera_trigger_latched_ = false;
   fine_trigger_latched_ = false;
+  last_seen_u_norm_ = config_.target_u_norm;
+  seen_after_camera_goal_ = false;
+  recovery_visible_count_ = 0;
   ClearTracking();
 }
 

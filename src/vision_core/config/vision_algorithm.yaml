@@ -75,6 +75,11 @@ vision_algorithm:
     position_tolerance_m: 0.08
     fine_settle_duration_sec: 0.60
     shoot_yaw_limit_deg: 30.0
+    # After GOAL camera settles: center -> hold; off-center loss -> 15deg turn.
+    recovery_timeout_sec: 5.0
+    recovery_reacquire_min_hits: 3
+    recovery_center_tolerance_norm: 0.12
+    recovery_settle_duration_sec: 0.60
 
   line_detection:
     class_id: 0

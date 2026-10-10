@@ -202,6 +202,19 @@ int main() {
     retry_time += 0.1;
     assert(r.mode == BallMode::kVerifyPickupObservation);
   }
+  // Camera-moving frames must not survive into the DOWN-view fine adjustment.
+  BallController fresh_down(c,3.0);
+  fresh_down.Compute(Ball(.3,.3),100,100,0,{},{});
+  r=fresh_down.Compute(Ball(.3,.8),100,100,.1,{},done);
+  assert(r.mode==BallMode::kWaitCameraDown);
+  r=fresh_down.Compute(Ball(.9,.9),100,100,.15,
+                       {CameraMode::kTransition,false},{});
+  assert(r.mode==BallMode::kWaitCameraDown && r.tracked.u_norm < .4);
+  r=fresh_down.Compute(Ball(.9,.9),100,100,.2,down,{});
+  assert(r.mode==BallMode::kFineAdjustForPickup && !r.tracked.visible);
+  r=fresh_down.Compute(Ball(.2,.7),100,100,.3,down,{});
+  assert(r.action.action==MissionAction::kLeftSideStep);
+
   assert(actual_picks == verify_config.pickup_max_attempts);
   r = three_attempts.Compute(Ball(0.5, 0.7), 100, 100,
                             retry_time, down, {});

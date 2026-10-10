@@ -111,7 +111,10 @@ HurdleResult HurdleController::Compute(
     const ActionExecutionFeedback &feedback) {
   if (mode_ == HurdleMode::kLineFollow && now_sec < ignore_until_sec_)
     return {};
-  UpdateTracker(target, image_width, image_height);
+  // No tracking/near-evidence from the moving camera view.
+  if (mode_ != HurdleMode::kWaitCameraDown &&
+      mode_ != HurdleMode::kReturnCameraToLine)
+    UpdateTracker(target, image_width, image_height);
   if (mode_ == HurdleMode::kLineFollow) {
     const int acquire_hits = static_cast<int>(std::count(
         acquire_history_.begin(), acquire_history_.end(), true));
@@ -155,8 +158,11 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kWaitCameraDown:
     result.camera_request = CameraRequest::kDown;
     if (camera.actual_mode == CameraMode::kDown && camera.settled) {
+      ClearTracking();  // Intermediate camera observations are discarded.
+      last_seen_u_norm_ = 0.5;
       mode_ = HurdleMode::kContactWalk;
       result.mode = mode_;
+      result.tracked = {};
       result.camera_request = CameraRequest::kNone;
       // CONTACT_WALK(20)은 protocol에만 예약한다. executor mapping 전까지 10.
       result.action = Locomotion(MissionAction::kStepForwardOne);
@@ -220,8 +226,7 @@ HurdleResult HurdleController::Compute(
   return result;
 }
 
-void HurdleController::ResetToLine(bool clear_ignore) {
-  mode_ = HurdleMode::kLineFollow;
+void HurdleController::ClearTracking() {
   hit_history_.clear();
   acquire_history_.clear();
   tilt_history_.clear();
@@ -229,6 +234,11 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   recovery_visible_count_ = 0;
   has_smoothed_ = false;
   tracked_ = {};
+}
+
+void HurdleController::ResetToLine(bool clear_ignore) {
+  mode_ = HurdleMode::kLineFollow;
+  ClearTracking();
   last_seen_u_norm_ = 0.5;
   state_enter_sec_ = 0.0;
   settle_until_sec_ = 0.0;

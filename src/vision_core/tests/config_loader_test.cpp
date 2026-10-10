@@ -31,6 +31,9 @@ int main(int argc, char **argv) {
   assert(c.line_p2p.recovery_max_turns == 5);
   assert(c.line_p2p.recovery_turn_yaw_deg == 15);
   assert(c.goal.shoot_yaw_limit_deg == 30.0);
+  assert(c.goal.recovery_timeout_sec == 5.0);
+  assert(c.goal.recovery_reacquire_min_hits == 3);
+  assert(c.goal.recovery_center_tolerance_norm == 0.12);
   assert(c.ball.fine_target_u_norm == 0.50);
   assert(c.camera_motion_timeout_sec == 3.0);
   assert(c.line_features.guide_min_points == 3);
@@ -86,6 +89,13 @@ int main(int argc, char **argv) {
   try { vision_core::ValidateAlgorithmConfig(direct); }
   catch (const std::runtime_error &) { direct_rejected = true; }
   assert(direct_rejected);
+
+  auto invalid_goal = c;
+  invalid_goal.goal.recovery_reacquire_min_hits = 0;
+  bool rejected_goal = false;
+  try { vision_core::ValidateAlgorithmConfig(invalid_goal); }
+  catch (const std::runtime_error &) { rejected_goal = true; }
+  assert(rejected_goal);
 
   auto relaxed_association = c;
   relaxed_association.object_association.max_center_distance_norm = 1.2;

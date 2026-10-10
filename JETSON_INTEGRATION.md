@@ -2,8 +2,8 @@
 
 The source packages here are copied from the independent upstream repositories:
 
-- `src/vision/` — RnD-king/vision main, source snapshot `293073c`
-- `src/vision_core/` — RnD-king/vision_core main, source snapshot `3807d1e`
+- `src/vision/` — RnD-king/vision main, source snapshot `05e2583`
+- `src/vision_core/` — RnD-king/vision_core main, source snapshot `0a88cfe`
 - `src/forward_walk/` — Jandi-integrated P2P executor (do not overwrite with the 2026_motion original)
 
 `vision_core` is a **standalone CMake** library (project `shared_vision_core`),
@@ -46,3 +46,11 @@ Before trying the real robot:
   as `my_cv` and `decision`, so this guide only validates the individual
   integrated packages, not the full launch.
 - Local build/test and motor deployment have **not** been verified remotely.
+
+## Current integration behavior
+
+- GOAL-camera last sighting: centered (±0.12 normalized) or never seen -> stationary search; left/right -> corresponding 15° turns after the target is lost. After a turn, wait 0.60 s and reacquire for 3 consecutive observations. Directional recovery stops after 5 s without reacquisition.
+- Camera transitions FORWARD/DOWN/GOAL never contribute object tracking evidence. Reset object association on camera transition; BALL/HURDLE/GOAL wait stages discard old tracking and restart once DONE and settled.
+- LINE READY uses observations from 40% of estimated motion duration until READY; inspect `[LINE OBS]` logs before tuning the number of required valid frames.
+- Existing fail-stop semantics and A→B Dynamixel SyncRead remain unchanged.
+- C++ build/CTest results for this newly synced revision must still be verified on the work PC and Jetson.

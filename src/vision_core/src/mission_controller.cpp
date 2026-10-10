@@ -469,6 +469,18 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   output.perception.raw_line_centers =
       ExtractLineCenters(detections, config_.line_detection);
   output.perception.line_centers = output.perception.raw_line_centers;
+  // Never carry an association identity across a camera movement.
+  const bool camera_moving = !input.camera_feedback.settled ||
+      input.camera_feedback.actual_mode == CameraMode::kTransition;
+  const CameraMode current_mode = input.camera_feedback.actual_mode;
+  if (camera_moving || object_tracking_camera_moving_ ||
+      current_mode != object_tracking_camera_mode_) {
+    ball_association_tracker_.Reset();
+    backboard_association_tracker_.Reset();
+    hurdle_association_tracker_.Reset();
+  }
+  object_tracking_camera_moving_ = camera_moving;
+  if (!camera_moving) object_tracking_camera_mode_ = current_mode;
   ObjectTargetSelection selection;
   const auto lower_raw_rank =
       [](const ObjectTargetCandidate &a, const ObjectTargetCandidate &b) {
@@ -479,7 +491,7 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   const auto goals = ExtractObjectTargetCandidates(
       detections, config_.object_targets.goal_class_id,
       config_.object_targets.goal_confidence, config_.object_targets);
-  if (!goals.empty()) {
+  if (!camera_moving && !goals.empty()) {
     const auto best = std::max_element(
         goals.begin(), goals.end(), lower_raw_rank);
     selection.targets.goal = best->target;
@@ -489,7 +501,9 @@ PerceptionMissionFrameResult MissionController::StepPerception(
       detections, config_.object_targets.ball_class_id,
       config_.object_targets.ball_confidence, config_.object_targets);
   ObjectAssociationSelection ball;
-  if (active_mission_ == MissionType::kBall &&
+  if (camera_moving) {
+    // No candidates may become tracked targets until the camera settles.
+  } else if (active_mission_ == MissionType::kBall &&
       ball_result_.mode == BallMode::kVerifyPickupObservation) {
     // Verification asks whether a ball remains, not whether its old identity
     // matches. Reset so the next normal frame can acquire the new position.
@@ -503,12 +517,14 @@ PerceptionMissionFrameResult MissionController::StepPerception(
     ball = ball_association_tracker_.Update(
         ball_candidates, input.image_width, input.image_height);
   }
-  const auto board = backboard_association_tracker_.Update(
+  const auto board = camera_moving ? ObjectAssociationSelection{} :
+      backboard_association_tracker_.Update(
       ExtractObjectTargetCandidates(detections,
           config_.object_targets.backboard_class_id,
           config_.object_targets.backboard_confidence, config_.object_targets),
       input.image_width, input.image_height);
-  const auto hurdle = hurdle_association_tracker_.Update(
+  const auto hurdle = camera_moving ? ObjectAssociationSelection{} :
+      hurdle_association_tracker_.Update(
       ExtractObjectTargetCandidates(detections,
           config_.object_targets.hurdle_class_id,
           config_.object_targets.hurdle_confidence, config_.object_targets),
@@ -604,6 +620,8 @@ void MissionController::Reset() {
   line_stability_history_.clear(); line_guide_accumulator_.Reset();
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;
+  object_tracking_camera_moving_ = false;
+  object_tracking_camera_mode_ = CameraMode::kForward;
   ball_controller_.Reset(); hurdle_controller_.Reset(); goal_controller_.Reset();
   command_coordinator_.Reset(); ball_association_tracker_.Reset();
   backboard_association_tracker_.Reset(); hurdle_association_tracker_.Reset();

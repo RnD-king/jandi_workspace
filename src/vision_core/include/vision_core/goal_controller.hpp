@@ -18,6 +18,7 @@ enum class GoalMode {
   kReturnCameraToLine,
   kHeadingRecovery,
   kFailed,
+  kRecoverySearch, // Preserve existing goal mission phase values.
 };
 
 struct GoalConfig {
@@ -34,6 +35,10 @@ struct GoalConfig {
   double position_tolerance_m{};
   double fine_settle_duration_sec{};
   double shoot_yaw_limit_deg{};
+  double recovery_timeout_sec{};
+  int recovery_reacquire_min_hits{};
+  double recovery_center_tolerance_norm{};
+  double recovery_settle_duration_sec{};
 };
 
 struct GoalPoseObservation {
@@ -110,6 +115,7 @@ private:
   ActionRequest FineAction(const GoalPoseObservation &pose) const;
   double ComputeShootYawRad(double x_m, double z_m, double yaw_rad) const;
   void ClearTracking();
+  ActionRequest SearchRecoveryAction() const;
 
   GoalConfig config_;
   double camera_motion_timeout_sec_{};
@@ -133,6 +139,9 @@ private:
   double post_pickup_line_wait_start_sec_{0.0};
   bool camera_trigger_latched_{false};
   bool fine_trigger_latched_{false};
+  double last_seen_u_norm_{0.5};
+  bool seen_after_camera_goal_{false};
+  int recovery_visible_count_{0};
 };
 
 } // namespace vision_core

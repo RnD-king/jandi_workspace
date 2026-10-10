@@ -153,7 +153,10 @@ BallResult BallController::Compute(
     result.has_ball = has_ball_;
     return result;
   }
-  UpdateTracker(target, image_width, image_height);
+  // Ignore all intermediate DOWN/FORWARD camera frames.
+  if (mode_ != BallMode::kWaitCameraDown &&
+      mode_ != BallMode::kReturnCameraToLine)
+    UpdateTracker(target, image_width, image_height);
 
   if (mode_ == BallMode::kLineFollow) {
     const int upper_hits = static_cast<int>(std::count(
@@ -206,8 +209,11 @@ BallResult BallController::Compute(
   case BallMode::kWaitCameraDown:
     result.camera_request = CameraRequest::kDown;
     if (camera.actual_mode == CameraMode::kDown && camera.settled) {
+      ClearTracking();  // Start fine control with fresh DOWN-view evidence.
+      last_seen_u_norm_ = config_.far_u_des_norm;
       mode_ = BallMode::kFineAdjustForPickup;
       settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
+      result.tracked = {};
       result.mode = mode_;
       result.camera_request = CameraRequest::kNone;
     } else if (now_sec - state_enter_sec_ >= camera_motion_timeout_sec_) {

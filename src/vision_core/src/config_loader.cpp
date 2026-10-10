@@ -160,6 +160,13 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.goal.fine_settle_duration_sec,
               "goal.fine_settle_duration_sec");
   Nonnegative(c.goal.shoot_yaw_limit_deg, "goal.shoot_yaw_limit_deg");
+  Nonnegative(c.goal.recovery_timeout_sec, "goal.recovery_timeout_sec");
+  PositiveInt(c.goal.recovery_reacquire_min_hits,
+              "goal.recovery_reacquire_min_hits");
+  Unit(c.goal.recovery_center_tolerance_norm,
+       "goal.recovery_center_tolerance_norm");
+  Nonnegative(c.goal.recovery_settle_duration_sec,
+              "goal.recovery_settle_duration_sec");
 
   NonnegativeInt(c.line_detection.class_id, "line_detection.class_id");
   Unit(c.line_detection.confidence, "line_detection.confidence");
@@ -317,6 +324,10 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "position_tolerance_m", c.goal.position_tolerance_m);
   Assign(g, "fine_settle_duration_sec", c.goal.fine_settle_duration_sec);
   Assign(g, "shoot_yaw_limit_deg", c.goal.shoot_yaw_limit_deg);
+  Assign(g, "recovery_timeout_sec", c.goal.recovery_timeout_sec);
+  Assign(g, "recovery_reacquire_min_hits", c.goal.recovery_reacquire_min_hits);
+  Assign(g, "recovery_center_tolerance_norm", c.goal.recovery_center_tolerance_norm);
+  Assign(g, "recovery_settle_duration_sec", c.goal.recovery_settle_duration_sec);
 
   const auto ld = a["line_detection"];
   Assign(ld, "class_id", c.line_detection.class_id);

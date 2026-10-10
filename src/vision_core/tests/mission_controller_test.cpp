@@ -369,6 +369,32 @@ int main() {
   in.now_sec=.5; r=hurdle_timeout.Step(in);
   assert(r.hurdle.mode==HurdleMode::kFailed);
 
+  // Suspend association during camera motion and use only fresh settled IDs.
+  auto association_config=c;
+  MissionController camera_tracking(association_config);
+  PerceptionFrameInput frame;
+  frame.image_width=640; frame.image_height=480;
+  frame.command_transport_enabled=false;
+  frame.camera_feedback={CameraMode::kForward,true};
+  PerceptionDetection camera_ball;
+  camera_ball.detection.class_id=association_config.object_targets.ball_class_id;
+  camera_ball.detection.confidence=1.0;
+  camera_ball.detection.box={80,80,40,40};
+  frame.detections={camera_ball};
+  auto scan=camera_tracking.StepPerception(frame);
+  assert(scan.perception.targets.ball.has_value());
+  frame.camera_feedback={CameraMode::kTransition,false};
+  camera_ball.detection.box={310,80,40,40};
+  frame.detections={camera_ball};
+  scan=camera_tracking.StepPerception(frame);
+  assert(!scan.perception.targets.ball.has_value());
+  frame.camera_feedback={CameraMode::kDown,true};
+  camera_ball.detection.box={550,80,40,40};
+  frame.detections={camera_ball};
+  scan=camera_tracking.StepPerception(frame);
+  assert(scan.perception.targets.ball.has_value());
+  assert(scan.perception.targets.ball->center_px.u>500.0);
+
   camera_config.enable_hurdle=false; camera_config.enable_goal=true;
   camera_config.initial_has_ball=true;
   camera_config.goal.post_pickup_wait_sec=0;

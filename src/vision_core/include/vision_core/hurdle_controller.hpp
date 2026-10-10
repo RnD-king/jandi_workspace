@@ -69,6 +69,7 @@ private:
                      int image_width, int image_height);
   ActionRequest RecoveryAction() const;
   void ResetToLine(bool clear_ignore);
+  void ClearTracking();
 
   HurdleConfig config_;
   double camera_motion_timeout_sec_{};

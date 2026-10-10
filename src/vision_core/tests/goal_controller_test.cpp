@@ -21,6 +21,8 @@ int main() {
   c.target_u_norm=.5; c.approach_u_deadband=.05; c.fine_adjust_start_z_m=.8;
   c.hoop_radius_m=.1; c.throwing_range_m=.5; c.position_tolerance_m=.05;
   c.fine_settle_duration_sec=0; c.shoot_yaw_limit_deg=30;
+  c.recovery_timeout_sec=5; c.recovery_reacquire_min_hits=3;
+  c.recovery_center_tolerance_norm=.12; c.recovery_settle_duration_sec=.6;
   GoalController controller(c, 3.0); controller.StartAfterPickup(0);
   BallResult carrying; carrying.has_ball=true; carrying.mode=BallMode::kLineFollow;
   controller.UpdateBallState(carrying);
@@ -59,5 +61,81 @@ int main() {
   r=timeout_controller.Compute({}, {}, {},100,100,3.1,true,{},{});
   assert(r.mode==GoalMode::kFailed);
   assert(r.camera_request==CameraRequest::kNone);
+
+  // No GOAL-camera observation yet: stay still despite intermediate detections.
+  GoalController unseen(c, 3.0);
+  unseen.StartAfterPickup(0); unseen.UpdateBallState(carrying);
+  unseen.Compute({}, {}, {},100,100,0,true,{},{});
+  r=unseen.Compute({},Board(.9),Pose(0,1.2),100,100,.05,true,
+                   {CameraMode::kTransition,false},{});
+  assert(r.mode==GoalMode::kWaitCameraGoal);
+  r=unseen.Compute({}, {}, {},100,100,.1,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kSearch && !r.tracked.visible);
+  r=unseen.Compute({}, {}, {},100,100,.8,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kSearch && r.action.action==MissionAction::kNone);
+
+  // A previously centered target remains stationary when lost.
+  GoalController centered(c, 3.0);
+  centered.StartAfterPickup(0); centered.UpdateBallState(carrying);
+  centered.Compute({}, {}, {},100,100,0,true,{},{});
+  centered.Compute({}, {}, {},100,100,.1,true,{CameraMode::kGoal,true},{});
+  r=centered.Compute({},Board(.52),Pose(0,1.2),100,100,.2,true,
+                     {CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kApproach);
+  centered.Compute({}, {}, {},100,100,.3,true,{CameraMode::kGoal,true},{});
+  centered.Compute({}, {}, {},100,100,.4,true,{CameraMode::kGoal,true},{});
+  centered.Compute({}, {}, {},100,100,.5,true,{CameraMode::kGoal,true},{});
+  r=centered.Compute({}, {}, {},100,100,.6,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kSearch && r.action.action==MissionAction::kNone);
+
+  // Left loss -> 15-degree left turn, hold while active, then settle and reacquire.
+  GoalController left(c, 3.0);
+  left.StartAfterPickup(0); left.UpdateBallState(carrying);
+  left.Compute({}, {}, {},100,100,0,true,{},{});
+  left.Compute({}, {}, {},100,100,.1,true,{CameraMode::kGoal,true},{});
+  r=left.Compute({},Board(.2),Pose(0,1.2),100,100,.2,true,
+                 {CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kApproach);
+  left.Compute({}, {}, {},100,100,.3,true,{CameraMode::kGoal,true},{});
+  left.Compute({}, {}, {},100,100,.4,true,{CameraMode::kGoal,true},{});
+  left.Compute({}, {}, {},100,100,.5,true,{CameraMode::kGoal,true},{});
+  r=left.Compute({}, {}, {},100,100,.6,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kRecoverySearch);
+  r=left.Compute({}, {}, {},100,100,.7,true,{CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kTurnLeft && r.action.target_yaw_deg==15);
+  ActionExecutionFeedback busy; busy.action_active=true;
+  r=left.Compute({}, {}, {},100,100,.75,true,{CameraMode::kGoal,true},busy);
+  assert(r.action.action==MissionAction::kNone);
+  ActionExecutionFeedback finished; finished.action_done=true;
+  r=left.Compute({}, {}, {},100,100,.8,true,{CameraMode::kGoal,true},finished);
+  assert(r.action.action==MissionAction::kNone);
+  r=left.Compute({}, {}, {},100,100,1.0,true,{CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kNone);
+  r=left.Compute({},Board(.25),Pose(0,1.2),100,100,1.5,true,
+                 {CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kRecoverySearch && r.action.action==MissionAction::kNone);
+  left.Compute({},Board(.25),Pose(0,1.2),100,100,1.6,true,
+               {CameraMode::kGoal,true},{});
+  r=left.Compute({},Board(.25),Pose(0,1.2),100,100,1.7,true,
+                 {CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kSearch && r.action.action==MissionAction::kNone);
+  r=left.Compute({},Board(.25),Pose(0,1.2),100,100,1.8,true,
+                 {CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kApproach);
+
+  GoalController right(c, 3.0);
+  right.StartAfterPickup(0); right.UpdateBallState(carrying);
+  right.Compute({}, {}, {},100,100,0,true,{},{});
+  right.Compute({}, {}, {},100,100,.1,true,{CameraMode::kGoal,true},{});
+  right.Compute({},Board(.8),Pose(0,1.2),100,100,.2,true,
+                {CameraMode::kGoal,true},{});
+  right.Compute({}, {}, {},100,100,.3,true,{CameraMode::kGoal,true},{});
+  right.Compute({}, {}, {},100,100,.4,true,{CameraMode::kGoal,true},{});
+  right.Compute({}, {}, {},100,100,.5,true,{CameraMode::kGoal,true},{});
+  right.Compute({}, {}, {},100,100,.6,true,{CameraMode::kGoal,true},{});
+  r=right.Compute({}, {}, {},100,100,.7,true,{CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kTurnRight);
+  r=right.Compute({}, {}, {},100,100,5.7,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kFailed && r.action.action==MissionAction::kNone);
   return 0;
 }
