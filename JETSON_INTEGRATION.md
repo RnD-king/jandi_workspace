@@ -2,8 +2,8 @@
 
 The source packages here are copied from the independent upstream repositories:
 
-- `src/vision/` — RnD-king/vision main, source snapshot `05e2583`
-- `src/vision_core/` — RnD-king/vision_core main, source snapshot `0a88cfe`
+- `src/vision/` — RnD-king/vision main, source snapshot `1c67deb`
+- `src/vision_core/` — RnD-king/vision_core main, source snapshot `870acc0`
 - `src/forward_walk/` — Jandi-integrated P2P executor (do not overwrite with the 2026_motion original)
 
 `vision_core` is a **standalone CMake** library (project `shared_vision_core`),

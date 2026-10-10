@@ -97,29 +97,27 @@ int main() {
                  {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kApproach);
   left.Compute({}, {}, {},100,100,.3,true,{CameraMode::kGoal,true},{});
-  left.Compute({}, {}, {},100,100,.4,true,{CameraMode::kGoal,true},{});
-  left.Compute({}, {}, {},100,100,.5,true,{CameraMode::kGoal,true},{});
-  r=left.Compute({}, {}, {},100,100,.6,true,{CameraMode::kGoal,true},{});
+  r=left.Compute({}, {}, {},100,100,.4,true,{CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kRecoverySearch);
-  r=left.Compute({}, {}, {},100,100,.7,true,{CameraMode::kGoal,true},{});
+  r=left.Compute({}, {}, {},100,100,.5,true,{CameraMode::kGoal,true},{});
   assert(r.action.action==MissionAction::kTurnLeft && r.action.target_yaw_deg==15);
   ActionExecutionFeedback busy; busy.action_active=true;
-  r=left.Compute({}, {}, {},100,100,.75,true,{CameraMode::kGoal,true},busy);
+  r=left.Compute({}, {}, {},100,100,.55,true,{CameraMode::kGoal,true},busy);
   assert(r.action.action==MissionAction::kNone);
   ActionExecutionFeedback finished; finished.action_done=true;
-  r=left.Compute({}, {}, {},100,100,.8,true,{CameraMode::kGoal,true},finished);
+  r=left.Compute({}, {}, {},100,100,.6,true,{CameraMode::kGoal,true},finished);
   assert(r.action.action==MissionAction::kNone);
-  r=left.Compute({}, {}, {},100,100,1.0,true,{CameraMode::kGoal,true},{});
+  r=left.Compute({}, {}, {},100,100,.8,true,{CameraMode::kGoal,true},{});
   assert(r.action.action==MissionAction::kNone);
-  r=left.Compute({},Board(.25),Pose(0,1.2),100,100,1.5,true,
+  r=left.Compute({},Board(.25),Pose(0,1.2),100,100,1.3,true,
                  {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kRecoverySearch && r.action.action==MissionAction::kNone);
-  left.Compute({},Board(.25),Pose(0,1.2),100,100,1.6,true,
+  left.Compute({},Board(.25),Pose(0,1.2),100,100,1.4,true,
                {CameraMode::kGoal,true},{});
-  r=left.Compute({},Board(.25),Pose(0,1.2),100,100,1.7,true,
+  r=left.Compute({},Board(.25),Pose(0,1.2),100,100,1.5,true,
                  {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kSearch && r.action.action==MissionAction::kNone);
-  r=left.Compute({},Board(.25),Pose(0,1.2),100,100,1.8,true,
+  r=left.Compute({},Board(.25),Pose(0,1.2),100,100,1.6,true,
                  {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kApproach);
 
@@ -130,12 +128,11 @@ int main() {
   right.Compute({},Board(.8),Pose(0,1.2),100,100,.2,true,
                 {CameraMode::kGoal,true},{});
   right.Compute({}, {}, {},100,100,.3,true,{CameraMode::kGoal,true},{});
-  right.Compute({}, {}, {},100,100,.4,true,{CameraMode::kGoal,true},{});
-  right.Compute({}, {}, {},100,100,.5,true,{CameraMode::kGoal,true},{});
-  right.Compute({}, {}, {},100,100,.6,true,{CameraMode::kGoal,true},{});
-  r=right.Compute({}, {}, {},100,100,.7,true,{CameraMode::kGoal,true},{});
+  r=right.Compute({}, {}, {},100,100,.4,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kRecoverySearch);
+  r=right.Compute({}, {}, {},100,100,.5,true,{CameraMode::kGoal,true},{});
   assert(r.action.action==MissionAction::kTurnRight);
-  r=right.Compute({}, {}, {},100,100,5.7,true,{CameraMode::kGoal,true},{});
+  r=right.Compute({}, {}, {},100,100,5.5,true,{CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kFailed && r.action.action==MissionAction::kNone);
   return 0;
 }

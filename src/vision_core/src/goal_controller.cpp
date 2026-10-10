@@ -146,7 +146,6 @@ void GoalController::UpdateGoalTracker(
       tracked_.confidence = observed.confidence;
     }
     last_seen_u_norm_ = tracked_.u_norm;
-    if (mode_ != GoalMode::kLineFollow) seen_after_camera_goal_ = true;
   } else {
     ++lost_count_;
     tracked_.visible = false;
@@ -154,6 +153,8 @@ void GoalController::UpdateGoalTracker(
   const int hits = static_cast<int>(
       std::count(hit_history_.begin(), hit_history_.end(), true));
   tracked_.stable = hits >= std::max(1, config_.stable_min_hits);
+  if (detected && tracked_.stable && mode_ != GoalMode::kLineFollow)
+    seen_after_camera_goal_ = true;
 }
 
 void GoalController::UpdatePoseTracker(
@@ -334,7 +335,15 @@ GoalResult GoalController::Compute(
       return result;
     }
     if (lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = GoalMode::kSearch;
+      const bool directional = seen_after_camera_goal_ &&
+          std::abs(last_seen_u_norm_ - config_.target_u_norm) >
+              config_.recovery_center_tolerance_norm;
+      mode_ = directional ? GoalMode::kRecoverySearch : GoalMode::kSearch;
+      if (directional) {
+        state_enter_sec_ = now_sec;
+        recovery_visible_count_ = 0;
+        settle_until_sec_ = now_sec;
+      }
       ClearTracking();
       result.mode = mode_;
       return result;

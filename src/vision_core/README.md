@@ -56,7 +56,7 @@ current DONE 뒤 queued action을 시작한다. [LINE OBS] 로그에 사용 프�
 - GOAL: camera GOAL → backboard RGB-D geometry → 거리 우선 fine → shoot yaw
   ±30도 이내 signed SHOOT, 아니면 side step 후 settle → 현재 frame의 fresh
   raw RGB-D pose로 geometry 재계산. GOAL 카메라에서 이전 백보드 관측이 없거나
-  마지막 관측이 중앙(설정 기본 ±0.12)이면 Search에서 정지 관측한다. 왼쪽/오른쪽
+  마지막 관측이 중앙(설정 기본 ±0.12)이면 Search에서 정지 관측한다. 기존 안정 인식 조건을 충족했던 왼쪽/오른쪽
   마지막 관측을 잃었으면 같은 방향으로 15도 TURN을 실행하고, 완료 후 0.6초
   정착 관측 및 연속 3회 재인식으로 Search에 복귀한다. 방향 복구가 5초 내
   성공하지 않으면 FAILED에서 정지한다.
