@@ -86,6 +86,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.line_p2p.ready_lead_sec, "line_p2p.ready_lead_sec");
   Nonnegative(c.line_p2p.failure_observation_sec,
               "line_p2p.failure_observation_sec");
+  Nonnegative(c.line_p2p.recovery_observation_sec,
+              "line_p2p.recovery_observation_sec");
   PositiveInt(c.line_p2p.failure_min_valid_samples,
               "line_p2p.failure_min_valid_samples");
   NonnegativeInt(c.line_p2p.no_evidence_max_retries,
@@ -223,6 +225,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
 
   Positive(c.backboard_min_depth_m, "mission.backboard_min_depth_m");
   Nonnegative(c.camera_motion_timeout_sec, "mission.camera_motion_timeout_sec");
+  Nonnegative(c.post_motion_observation_sec,
+              "mission.post_motion_observation_sec");
   Positive(c.backboard_max_depth_m, "mission.backboard_max_depth_m");
   if (c.backboard_min_depth_m > c.backboard_max_depth_m)
     throw std::runtime_error(
@@ -267,6 +271,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(lp, "steering_deadband", c.line_p2p.steering_deadband);
   Assign(lp, "ready_lead_sec", c.line_p2p.ready_lead_sec);
   Assign(lp, "failure_observation_sec", c.line_p2p.failure_observation_sec);
+  Assign(lp, "recovery_observation_sec", c.line_p2p.recovery_observation_sec);
   Assign(lp, "failure_min_valid_samples", c.line_p2p.failure_min_valid_samples);
   Assign(lp, "no_evidence_max_retries", c.line_p2p.no_evidence_max_retries);
   Assign(lp, "recovery_max_turns", c.line_p2p.recovery_max_turns);
@@ -356,6 +361,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(cmd, "action_ack_timeout_sec", c.command.action_ack_timeout_sec);
   const auto m = a["mission"];
   Assign(m, "camera_motion_timeout_sec", c.camera_motion_timeout_sec);
+  Assign(m, "post_motion_observation_sec", c.post_motion_observation_sec);
   Assign(m, "backboard_min_depth_m", c.backboard_min_depth_m);
   Assign(m, "backboard_max_depth_m", c.backboard_max_depth_m);
   Assign(m, "enable_ball", c.enable_ball);

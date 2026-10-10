@@ -2,7 +2,7 @@
 
 The source packages here are copied from the independent upstream repositories:
 
-- `src/vision/` — RnD-king/vision main, source snapshot `1c67deb`
+- `src/vision/` — RnD-king/vision main, source snapshot `73675f1`
 - `src/vision_core/` — RnD-king/vision_core main, source snapshot `870acc0`
 - `src/forward_walk/` — Jandi-integrated P2P executor (do not overwrite with the 2026_motion original)
 
@@ -54,3 +54,13 @@ Before trying the real robot:
 - LINE READY uses observations from 40% of estimated motion duration until READY; inspect `[LINE OBS]` logs before tuning the number of required valid frames.
 - Existing fail-stop semantics and A→B Dynamixel SyncRead remain unchanged.
 - C++ build/CTest results for this newly synced revision must still be verified on the work PC and Jetson.
+
+## Fresh observation contract (Oct 2026)
+
+- `vision` **73675f1**, `vision_core` **564e80a**. ROS adapter discards RGB frames with capture header timestamps at/before the newest Action/Camera DONE event (ROS time clock).
+- Long LINE (11/12/13) keeps its 40%-to-READY weighted observations and one-slot queue. LINE failure remains a 2 s observation, but LINE recovery TURN uses 1 s of fresh O/H.
+- Short, perception-driven Action DONE is deferred in the control coordinator while at least 1 s of newly acquired frames is observed; BALL/HURDLE/GOAL use a fresh 10-frame sliding window with >=7 detections. If insufficient, HOLD; no pre-DONE history is counted.
+- Camera DOWN/GOAL DONE starts the same 1 s fresh-view observation. Camera FORWARD return continues with the existing LINE reacquisition logic. HURDLE's fixed DOWN -> STEP_FORWARD_ONE -> HUDDLE sequence waits the 1 s camera window but does not require a fresh 7/10 detection at the fixed contact step.
+- Existing deterministic mission motion chains (PICK_BALL/RECATCH, HUDDLE, SHOOT, post-pickup stand/back-away) are exempt from generic Action-DONE observation; previously agreed fail-stop behavior stays unchanged.
+- `forward_walk`, its JSON motions, ACK/READY/DONE contract, SyncRead, and `2026_motion` are unchanged.
+- **Unverified:** new C++ core CTest/ROS vision build on the user's PC, live Vision-to-executor communication, Jetson real hardware. Do not run the motor executor until tests pass and the robot is secured.

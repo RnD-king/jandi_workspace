@@ -447,6 +447,20 @@ ActionRequest GoalController::SearchRecoveryAction() const {
   return {turn, ActionCategory::kLocomotion, 15, false};
 }
 
+void GoalController::ObserveOnly(const std::optional<ObjectTarget> &target,
+                                 const GoalPoseObservation &pose,
+                                 int width, int height) {
+  if (mode_ != GoalMode::kWaitCameraGoal &&
+      mode_ != GoalMode::kReturnCameraToLine) {
+    UpdateGoalTracker(target, width, height);
+    UpdatePoseTracker(target, pose);
+  }
+}
+
+void GoalController::ClearObservationHistory() {
+  ClearTracking();
+}
+
 void GoalController::ClearTracking() {
   hit_history_.clear();
   pose_hit_history_.clear();

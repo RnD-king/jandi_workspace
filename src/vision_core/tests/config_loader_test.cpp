@@ -31,6 +31,10 @@ int main(int argc, char **argv) {
   assert(c.line_p2p.recovery_max_turns == 5);
   assert(c.line_p2p.recovery_turn_yaw_deg == 15);
   assert(c.goal.shoot_yaw_limit_deg == 30.0);
+  assert(c.hurdle.stable_window == 10);
+  assert(c.hurdle.stable_min_hits == 7);
+  assert(c.post_motion_observation_sec == 1.0);
+  assert(c.line_p2p.recovery_observation_sec == 1.0);
   assert(c.goal.recovery_timeout_sec == 5.0);
   assert(c.goal.recovery_reacquire_min_hits == 3);
   assert(c.goal.recovery_center_tolerance_norm == 0.12);

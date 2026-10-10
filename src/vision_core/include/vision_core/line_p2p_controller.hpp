@@ -18,6 +18,8 @@ struct LineP2pConfig {
   double ready_lead_sec{}; // Matches the motion executor's READY remaining time.
   // 판단 실패 또는 recovery 회전 뒤 stationary re-observation 시간이다.
   double failure_observation_sec{};
+  // Observation after a LINE loss-recovery turn, separate from 2s loss wait.
+  double recovery_observation_sec{};
   // 이 개수 이상의 유효 O/H 표본만 정상 LINE 판단에 사용한다.
   int failure_min_valid_samples{};
   // 방향 기억 없이 정지 재관측하는 추가 횟수와 방향 기억을 따라 회전하는

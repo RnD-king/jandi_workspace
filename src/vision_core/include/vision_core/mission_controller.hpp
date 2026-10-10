@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <deque>
 #include <optional>
 #include <vector>
@@ -29,6 +30,8 @@ struct MissionControllerConfig {
   ObjectAssociationConfig object_association;
   // 모든 object mission의 camera settled 대기 제한 시간이다.
   double camera_motion_timeout_sec{};
+  // Fresh, post-DONE observation interval for non-queued actions and camera turns.
+  double post_motion_observation_sec{};
   // YOLO backboard 후보 중심의 aligned depth가 이 범위 안에 있어야 실제
   // backboard 관측으로 인정한다.
   double backboard_min_depth_m{};
@@ -76,6 +79,12 @@ struct MissionFrameResult {
   std::optional<LineWindowStats> line_window_stats;
   bool line_in_recovery{true};
   bool has_ball{false};
+  // Diagnostics of post-DONE observations, never counting pre-DONE history.
+  bool post_motion_observing{false};
+  std::size_t post_motion_frames{0};
+  std::size_t post_motion_window_frames{0};
+  int post_motion_valid{0};
+  double post_motion_elapsed_sec{0.0};
   BallResult ball;
   HurdleResult hurdle;
   GoalResult goal;
@@ -169,6 +178,13 @@ private:
   void AddObservation(const LineGuide &guide);
   std::optional<LineGuide> FinishObservation() const;
   void BeginLineReacquisition();
+  bool ShouldDeferDone(const CommandDeliveryFeedback &feedback) const;
+  void BeginDecisionObservation(double now_sec, MissionType mission,
+                                bool camera_only,
+                                const CommandDeliveryFeedback &done);
+  void AddDecisionObservation(const MissionFrameInput &input);
+  bool DecisionObservationReady(double now_sec) const;
+  std::optional<LineGuide> DecisionLineGuide() const;
   void EnterMission(MissionType mission);
   void FinishMission();
 
@@ -191,6 +207,20 @@ private:
   int line_recovery_turns_{0};
   bool recovery_turn_issued_{false};
   std::deque<bool> line_stability_history_;
+  bool decision_observation_active_{false};
+  bool decision_observation_camera_only_{false};
+  bool decision_observation_first_frame_{false};
+  MissionType decision_observation_mission_{MissionType::kLine};
+  CommandDeliveryFeedback deferred_done_;
+  double decision_observation_start_sec_{0.0};
+  std::deque<bool> decision_object_hits_;
+  std::size_t decision_observation_total_frames_{0};
+  int decision_line_valid_count_{0};
+  double decision_line_offset_sum_{0.0};
+  double decision_line_heading_sum_{0.0};
+  double decision_line_confidence_sum_{0.0};
+  bool previous_camera_settled_{true};
+  CameraMode previous_camera_mode_{CameraMode::kForward};
   BallController ball_controller_;
   HurdleController hurdle_controller_;
   GoalController goal_controller_;

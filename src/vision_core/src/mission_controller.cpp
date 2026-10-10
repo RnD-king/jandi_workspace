@@ -141,8 +141,10 @@ ActionRequest MissionController::ComputeLineAction(
       line_state_ == LineState::kRecoveryObserve) {
     if (action_active) return {};
     AddObservation(guide);
-    const double wait =
-        std::max(0.0, config_.line_p2p.failure_observation_sec);
+    const double wait = std::max(0.0,
+        line_state_ == LineState::kRecoveryObserve
+            ? config_.line_p2p.recovery_observation_sec
+            : config_.line_p2p.failure_observation_sec);
     if (input.now_sec + 1e-9 < line_observation_start_sec_ + wait) return {};
     const auto observed = FinishObservation();
     line_observation_active_ = false;
@@ -226,14 +228,212 @@ void MissionController::FinishMission() {
   ball_result_ = {}; hurdle_result_ = {}; goal_result_ = {};
 }
 
+bool MissionController::ShouldDeferDone(
+    const CommandDeliveryFeedback &feedback) const {
+  if (!feedback.done || config_.post_motion_observation_sec <= 0.0 ||
+      feedback.action_id == 0 || feedback.action_id != last_command_.action_id)
+    return false;
+  const MissionAction action = last_command_.action;
+  const MissionType mission = last_command_.mission;
+  // The READY queue and the existing 1s/2s LINE recovery observation
+  // must not be delayed by the generic post-motion gate.
+  // Long LINE READY skips the gate ONLY while the active mission remains LINE.
+  // An object entered during that walk must still collect fresh post-DONE data.
+  if (mission == MissionType::kLine && active_mission_ == MissionType::kLine &&
+      (IsLongLineAction(action) || line_state_ != LineState::kNormal))
+    return false;
+  // If the mission has already committed to moving the camera, let the
+  // camera command run; its DONE starts the fresh 1 s object-view window.
+  if ((active_mission_ == MissionType::kBall &&
+       ball_result_.mode == BallMode::kWaitCameraDown) ||
+      (active_mission_ == MissionType::kHurdle &&
+       hurdle_result_.mode == HurdleMode::kWaitCameraDown) ||
+      (active_mission_ == MissionType::kGoal &&
+       goal_result_.mode == GoalMode::kWaitCameraGoal))
+    return false;
+  // Fixed multi-motion chains have no perception-dependent successor.
+  if (action == MissionAction::kPickBall ||
+      action == MissionAction::kRecatch ||
+      action == MissionAction::kDefaultPosition ||
+      action == MissionAction::kShoot ||
+      (mission == MissionType::kBall && action == MissionAction::kStepBack &&
+       ball_result_.mode == BallMode::kPostPickupBackAway) ||
+      (mission == MissionType::kHurdle &&
+       (action == MissionAction::kStepForwardOne ||
+        action == MissionAction::kHurdle)))
+    return false;
+  return true;
+}
+
+void MissionController::BeginDecisionObservation(
+    double now_sec, MissionType mission, bool camera_only,
+    const CommandDeliveryFeedback &done) {
+  decision_observation_active_ = true;
+  decision_observation_camera_only_ = camera_only;
+  decision_observation_first_frame_ = true;
+  decision_observation_mission_ = mission;
+  decision_observation_start_sec_ = now_sec;
+  deferred_done_ = done;
+  decision_object_hits_.clear();
+  decision_observation_total_frames_ = 0;
+  decision_line_valid_count_ = 0;
+  decision_line_offset_sum_ = decision_line_heading_sum_ = 0.0;
+  decision_line_confidence_sum_ = 0.0;
+  if (!camera_only) {
+    // Never reuse target stability or O/H evidence from the moving action.
+    ball_association_tracker_.Reset();
+    hurdle_association_tracker_.Reset();
+    backboard_association_tracker_.Reset();
+    ball_controller_.ClearObservationHistory();
+    hurdle_controller_.ClearObservationHistory();
+    goal_controller_.ClearObservationHistory();
+    line_stability_history_.clear();
+  }
+}
+
+void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
+  if (!decision_observation_active_) return;
+  ++decision_observation_total_frames_;
+  bool detected = false;
+  switch (decision_observation_mission_) {
+  case MissionType::kBall: detected = input.ball_target.has_value(); break;
+  case MissionType::kHurdle: detected = input.hurdle_target.has_value(); break;
+  case MissionType::kGoal: detected = input.backboard_target.has_value(); break;
+  default: break;
+  }
+  if (decision_observation_mission_ != MissionType::kLine) {
+    decision_object_hits_.push_back(detected);
+    while (decision_object_hits_.size() > 10) decision_object_hits_.pop_front();
+    return;
+  }
+  const LineGuide guide = input.line_decision_guide_override
+      ? *input.line_decision_guide_override
+      : ComputeLineFeatures(input.line_centers, input.image_width,
+                            input.image_height, config_.line_features).guide;
+  if (guide.valid && std::isfinite(guide.offset) &&
+      std::isfinite(guide.heading_rad)) {
+    ++decision_line_valid_count_;
+    decision_line_offset_sum_ += guide.offset;
+    decision_line_heading_sum_ += guide.heading_rad;
+    if (std::isfinite(guide.confidence))
+      decision_line_confidence_sum_ += guide.confidence;
+  }
+}
+
+bool MissionController::DecisionObservationReady(double now_sec) const {
+  if (!decision_observation_active_ ||
+      now_sec - decision_observation_start_sec_ + 1e-9 <
+          config_.post_motion_observation_sec) return false;
+  if (decision_observation_mission_ == MissionType::kLine) return true;
+  // DOWN-camera HURDLE contact is a fixed sequence, not a new target choice.
+  if (decision_observation_camera_only_ &&
+      decision_observation_mission_ == MissionType::kHurdle) return true;
+  return decision_object_hits_.size() >= 10 &&
+      std::count(decision_object_hits_.begin(),
+                 decision_object_hits_.end(), true) >= 7;
+}
+
+std::optional<LineGuide> MissionController::DecisionLineGuide() const {
+  if (decision_line_valid_count_ <
+      std::max(1, config_.line_p2p.failure_min_valid_samples)) return std::nullopt;
+  LineGuide guide;
+  guide.valid = true;
+  guide.offset = decision_line_offset_sum_ / decision_line_valid_count_;
+  guide.heading_rad = decision_line_heading_sum_ / decision_line_valid_count_;
+  guide.confidence = decision_line_confidence_sum_ / decision_line_valid_count_;
+  return guide;
+}
+
 MissionFrameResult MissionController::Step(const MissionFrameInput &input) {
   return StepWithLineImageCenter(input, std::nullopt);
 }
 
 MissionFrameResult MissionController::StepWithLineImageCenter(
-    const MissionFrameInput &input,
+    const MissionFrameInput &source,
     std::optional<double> line_image_center_u) {
+  MissionFrameInput input = source;
   MissionFrameResult output;
+  // Observe the camera transition edge even if no ActionCommand is pending.
+  const bool camera_settle_edge =
+      (!previous_camera_settled_ ||
+       previous_camera_mode_ == CameraMode::kTransition) &&
+      input.camera_feedback.settled &&
+      (input.camera_feedback.actual_mode == CameraMode::kDown ||
+       input.camera_feedback.actual_mode == CameraMode::kGoal);
+  previous_camera_settled_ = input.camera_feedback.settled;
+  previous_camera_mode_ = input.camera_feedback.actual_mode;
+  if (!decision_observation_active_ &&
+      config_.post_motion_observation_sec > 0.0 && camera_settle_edge)
+    BeginDecisionObservation(input.now_sec, active_mission_, true, {});
+  if (!decision_observation_active_ && ShouldDeferDone(input.delivery_feedback))
+    BeginDecisionObservation(input.now_sec, active_mission_, false,
+                             input.delivery_feedback);
+  // A deferred DONE remains pending at the coordinator while new, post-DONE
+  // frames are collected. This makes the next action impossible before 1 s.
+  bool observation_hold = decision_observation_active_;
+  if (observation_hold) {
+    if (!decision_observation_first_frame_ || !decision_observation_camera_only_)
+      AddDecisionObservation(input);
+    if (DecisionObservationReady(input.now_sec)) {
+      if (!decision_observation_camera_only_)
+        input.delivery_feedback = deferred_done_;
+      if (decision_observation_mission_ == MissionType::kLine) {
+        const auto averaged = DecisionLineGuide();
+        if (averaged) input.line_decision_guide_override = *averaged;
+        else {
+          LineGuide invalid;
+          input.line_decision_guide_override = invalid;
+        }
+      }
+      decision_observation_active_ = false;
+      observation_hold = false;
+    } else if (!decision_observation_camera_only_ &&
+               deferred_done_.action_id != 0) {
+      input.delivery_feedback = {deferred_done_.action_id, true, false, false};
+    } else {
+      input.delivery_feedback = {};
+    }
+  }
+  // During a gate, collect fresh evidence without advancing the mission phase.
+  // Only the first camera-settled frame transitions WAIT_CAMERA into the new
+  // view; subsequent frames update tracking but do not choose an action.
+  const bool camera_settle_transition_frame =
+      observation_hold && decision_observation_camera_only_ &&
+      decision_observation_first_frame_;
+  if (observation_hold && !camera_settle_transition_frame) {
+    output.line_features = ComputeLineFeatures(input.line_centers,
+        input.image_width, input.image_height, config_.line_features);
+    output.line_computed = true;
+    if (active_mission_ == MissionType::kBall)
+      ball_controller_.ObserveOnly(input.ball_target, input.image_width,
+                                    input.image_height);
+    else if (active_mission_ == MissionType::kHurdle)
+      hurdle_controller_.ObserveOnly(input.hurdle_target, input.image_width,
+                                      input.image_height);
+    else if (active_mission_ == MissionType::kGoal)
+      goal_controller_.ObserveOnly(input.backboard_target, input.goal_pose,
+                                    input.image_width, input.image_height);
+    output.command = command_coordinator_.Compute(active_mission_, 0, {},
+        CameraRequest::kNone, input.delivery_feedback, input.now_sec);
+    output.post_motion_observing = true;
+    output.post_motion_frames = decision_observation_total_frames_;
+    output.post_motion_window_frames = decision_object_hits_.size();
+    output.post_motion_valid = decision_observation_mission_ == MissionType::kLine
+        ? decision_line_valid_count_
+        : static_cast<int>(std::count(decision_object_hits_.begin(),
+                                      decision_object_hits_.end(), true));
+    output.post_motion_elapsed_sec =
+        std::max(0.0, input.now_sec - decision_observation_start_sec_);
+    last_command_ = output.command;
+    output.active_mission = active_mission_;
+    output.line_in_recovery = line_state_ != LineState::kNormal;
+    output.ball = ball_result_;
+    output.hurdle = hurdle_result_;
+    output.goal = goal_result_;
+    output.has_ball = has_ball_;
+    return output;
+  }
+  decision_observation_first_frame_ = false;
   ActionExecutionFeedback action_feedback = input.action_feedback;
   const bool matching_feedback = last_command_.action_id != 0 &&
       input.delivery_feedback.action_id == last_command_.action_id;
@@ -432,6 +632,10 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   if (active_mission_ == MissionType::kLine &&
       !input.allow_new_line_action)
     request = {};
+  if (observation_hold) {
+    request = {};
+    camera_request = CameraRequest::kNone;
+  }
   output.command = command_coordinator_.Compute(
       active_mission_, phase, request, camera_request,
       input.delivery_feedback, input.now_sec);
@@ -620,6 +824,17 @@ void MissionController::Reset() {
   line_stability_history_.clear(); line_guide_accumulator_.Reset();
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;
+  decision_observation_active_ = false;
+  decision_observation_camera_only_ = false;
+  decision_observation_first_frame_ = false;
+  deferred_done_ = {};
+  decision_object_hits_.clear();
+  decision_observation_total_frames_ = 0;
+  decision_line_valid_count_ = 0;
+  decision_line_offset_sum_ = decision_line_heading_sum_ = 0.0;
+  decision_line_confidence_sum_ = 0.0;
+  previous_camera_settled_ = true;
+  previous_camera_mode_ = CameraMode::kForward;
   object_tracking_camera_moving_ = false;
   object_tracking_camera_mode_ = CameraMode::kForward;
   ball_controller_.Reset(); hurdle_controller_.Reset(); goal_controller_.Reset();

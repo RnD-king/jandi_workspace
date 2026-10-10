@@ -83,6 +83,10 @@ public:
   void SetHasBall(bool has_ball) { has_ball_ = has_ball; }
   void CompleteLineRecovery(double now_sec);
   void ClearEntryEvidence();
+  // Discard all observations made before the most recent motion DONE.
+  // The mission phase and last known recovery direction are retained.
+  void ClearObservationHistory();
+  void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
   void Reset();
 
 private:

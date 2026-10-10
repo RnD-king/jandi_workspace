@@ -226,6 +226,17 @@ HurdleResult HurdleController::Compute(
   return result;
 }
 
+void HurdleController::ObserveOnly(const std::optional<ObjectTarget> &target,
+                                   int width, int height) {
+  if (mode_ != HurdleMode::kWaitCameraDown &&
+      mode_ != HurdleMode::kReturnCameraToLine)
+    UpdateTracker(target, width, height);
+}
+
+void HurdleController::ClearObservationHistory() {
+  ClearTracking();
+}
+
 void HurdleController::ClearTracking() {
   hit_history_.clear();
   acquire_history_.clear();

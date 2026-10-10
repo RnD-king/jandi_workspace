@@ -18,6 +18,7 @@ vision_algorithm:
     steering_deadband: 0.10
     ready_lead_sec: 0.25  # Match forward_walk; estimate the 40% sampling point
     failure_observation_sec: 2.0
+    recovery_observation_sec: 1.0
     failure_min_valid_samples: 5
     no_evidence_max_retries: 5
     recovery_max_turns: 5
@@ -47,8 +48,8 @@ vision_algorithm:
     recovery_settle_duration_sec: 0.60
 
   hurdle:
-    stable_window: 30
-    stable_min_hits: 20
+    stable_window: 10
+    stable_min_hits: 7
     lost_frames: 5
     smooth_alpha: 0.45
     acquire_min_v_norm: 0.60
@@ -112,6 +113,7 @@ vision_algorithm:
 
   mission:
     camera_motion_timeout_sec: 3.0
+    post_motion_observation_sec: 1.0
     backboard_min_depth_m: 0.20
     backboard_max_depth_m: 5.00
     enable_ball: true

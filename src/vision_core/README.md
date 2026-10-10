@@ -81,3 +81,22 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 cmake --install build
 ```
+
+## DONE 이후 관측 창 (실기 기본값)
+
+- `mission.post_motion_observation_sec=1.0`: 짧은 움직임 및 카메라 DOWN/GOAL 완료 이후
+  이전 추적 이력을 초기화하고, 새로운 영상으로 최소 1초 관측한다.
+- BALL/HURDLE/GOAL: 이 관측 구간에서 촬영한 최근 **10프레임 중 최소 7회**
+  유효 검출이 있어야 객체 기반 다음 동작을 선택한다. 프레임 7개만 도착했다고
+  즉시 결정하지 않으며, 새 관측이 부족하면 추가 명령 없이 HOLD한다.
+- 일반 DONE은 최소 1초 관측을 마칠 때까지 coordinator에 전달하지 않는다.
+  모션 도중의 추적값을 다음 동작의 판단 근거로 재사용하지 않는다.
+- GOAL/BALL 카메라 전환은 완료 직후 추적을 초기화하며, 새 시야에서의
+  1초 관측까지 고정한다. HURDLE DOWN 이후 `STEP_FORWARD_ONE`은 고정 시퀀스이므로
+  카메라 관측시간만 적용하고 10/7 타깃 검출은 요구하지 않는다.
+- 긴 LINE 11/12/13은 기존 READY 40% 관측 및 one-slot queue 유지.
+- LINE 인식 실패의 정지 관측은 2초, LINE 복구 회전 완료 뒤는 1초로 구분한다.
+- 픽업 → 재집기 검증, 허들 접근 마지막 1걸음 → 넘기기, 슛 → 복귀 같은
+  이미 결정된 연속 시퀀스에는 추가 관측 대기를 삽입하지 않는다.
+- 실기 ROS 이미지 어댑터는 DONE 수신 이전 timestamp의 이미지를 폐기한다.
+  카메라/시스템 ROS clock과 이미지 header stamp가 같은 시계 기준이어야 한다.

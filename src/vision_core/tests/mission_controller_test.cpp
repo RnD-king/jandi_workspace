@@ -172,6 +172,7 @@ int main() {
   // directional recovery는 정확히 설정된 5회만 TURN하고 그 뒤 terminal이다.
   auto turn_config=c;
   turn_config.line_p2p.failure_observation_sec=0.0;
+  turn_config.line_p2p.recovery_observation_sec=0.0; // Legacy instant-turn fixture.
   turn_config.line_p2p.recovery_max_turns=5;
   MissionController turning(turn_config);
   in=Frame(0); in.line_decision_guide_override=Guide(-.3);
@@ -406,5 +407,89 @@ int main() {
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
   in.now_sec=.5; r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kFailed);
+  // GOAL camera DONE starts a fresh 1-second 10-frame / 7-hit observation.
+  // Pre-DONE observations, and early 7-hit streaks, cannot start a motion.
+  auto camera_gate_cfg = c;
+  camera_gate_cfg.enable_ball = camera_gate_cfg.enable_hurdle = false;
+  camera_gate_cfg.enable_goal = true;
+  camera_gate_cfg.initial_has_ball = true;
+  camera_gate_cfg.goal.post_pickup_wait_sec = 0.0;
+  camera_gate_cfg.post_motion_observation_sec = 1.0;
+  camera_gate_cfg.goal.stable_window = 10;
+  camera_gate_cfg.goal.stable_min_hits = 7;
+  MissionController camera_gate(camera_gate_cfg);
+  for (int i = 0; i < 7; ++i) {
+    in = Frame(.1 * i);
+    in.allow_new_line_action = false;
+    r = camera_gate.Step(in);
+  }
+  assert(r.active_mission == MissionType::kGoal);
+  assert(r.goal.mode == GoalMode::kWaitCameraGoal);
+  in = Frame(1.0);
+  in.camera_feedback = {CameraMode::kTransition, false};
+  r = camera_gate.Step(in);
+  assert(r.command.action_id == 0);
+  in = Frame(1.1);
+  in.camera_feedback = {CameraMode::kGoal, true};
+  r = camera_gate.Step(in);
+  assert(r.goal.mode == GoalMode::kSearch);
+  assert(r.command.action_id == 0);
+  for (int i = 0; i < 9; ++i) {
+    in = Frame(1.2 + 0.1 * i);
+    in.camera_feedback = {CameraMode::kGoal, true};
+    if (i < 7) in.backboard_target = Ball(.8, .3);
+    r = camera_gate.Step(in);
+    assert(r.command.action_id == 0);
+    assert(r.command.action == MissionAction::kNone);
+    assert(r.post_motion_observing);
+    assert(r.post_motion_frames == static_cast<std::size_t>(i+1));
+  }
+  in = Frame(2.1);
+  in.camera_feedback = {CameraMode::kGoal, true};
+  in.backboard_target = Ball(.8, .3);
+  r = camera_gate.Step(in);
+  assert(r.active_mission == MissionType::kGoal);
+  assert(r.command.action == MissionAction::kStepForwardRight);
+  assert(r.command.action_id != 0);
+  // The next OBJECT action must use 10 NEW frames after this actual Action DONE.
+  // Its camera remained GOAL throughout, so only the Action event resets evidence.
+  const std::uint64_t approach_id = r.command.action_id;
+  in = Frame(2.15);
+  in.camera_feedback = {CameraMode::kGoal, true};
+  in.backboard_target = Ball(.8, .3);
+  in.delivery_feedback = {approach_id, true, false, false};
+  r = camera_gate.Step(in);
+  assert(r.command.command_type == CommandType::kHold);
+  in = Frame(2.2);
+  in.camera_feedback = {CameraMode::kGoal, true};
+  in.backboard_target = Ball(.8, .3);
+  in.delivery_feedback = {approach_id, true, true, false};
+  r = camera_gate.Step(in);
+  assert(r.post_motion_observing);
+  for (int i = 1; i <= 9; ++i) {
+    in = Frame(2.2 + 0.1 * i);
+    in.camera_feedback = {CameraMode::kGoal, true};
+    in.backboard_target = Ball(.8, .3);
+    r = camera_gate.Step(in);
+    assert(r.command.command_type == CommandType::kHold);
+    assert(r.post_motion_observing);
+  }
+  assert(r.post_motion_window_frames == 10);
+  assert(r.post_motion_valid == 10);
+  in = Frame(3.2);
+  in.camera_feedback = {CameraMode::kGoal, true};
+  in.backboard_target = Ball(.8, .3);
+  r = camera_gate.Step(in);
+  assert(!r.post_motion_observing);
+  assert(r.command.command_type == CommandType::kAction);
+  assert(r.command.action_id != 0 && r.command.action_id != approach_id);
+
+  // HURDLE initial stable acquisition is now recent 10 frames / 7 hits.
+  const auto defaults = LoadDefaultAlgorithmConfig();
+  assert(defaults.hurdle.stable_window == 10);
+  assert(defaults.hurdle.stable_min_hits == 7);
+  assert(defaults.post_motion_observation_sec == 1.0);
+  assert(defaults.line_p2p.failure_observation_sec == 2.0);
+  assert(defaults.line_p2p.recovery_observation_sec == 1.0);
   return 0;
 }

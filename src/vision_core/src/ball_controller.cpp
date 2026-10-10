@@ -363,6 +363,17 @@ BallResult BallController::Compute(
   return result;
 }
 
+void BallController::ObserveOnly(const std::optional<ObjectTarget> &target,
+                                 int width, int height) {
+  if (mode_ != BallMode::kWaitCameraDown &&
+      mode_ != BallMode::kReturnCameraToLine)
+    UpdateTracker(target, width, height);
+}
+
+void BallController::ClearObservationHistory() {
+  ClearTracking();
+}
+
 void BallController::ClearTracking() {
   hit_history_.clear();
   upper_acquire_history_.clear();

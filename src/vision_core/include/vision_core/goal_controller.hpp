@@ -103,6 +103,11 @@ public:
                      const CameraFeedback &camera_feedback,
                      const ActionExecutionFeedback &action_feedback);
   static const char *ModeName(GoalMode mode);
+  // Discard all observations made before the most recent motion DONE.
+  // The mission phase and last known recovery direction are retained.
+  void ClearObservationHistory();
+  void ObserveOnly(const std::optional<ObjectTarget> &target,
+                   const GoalPoseObservation &pose, int width, int height);
   void Reset();
 
 private:

@@ -61,6 +61,10 @@ public:
                        const CameraFeedback &camera_feedback,
                        const ActionExecutionFeedback &action_feedback);
   static const char *ModeName(HurdleMode mode);
+  // Discard all observations made before the most recent motion DONE.
+  // The mission phase and last known recovery direction are retained.
+  void ClearObservationHistory();
+  void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
   void Reset();
 
 private:
