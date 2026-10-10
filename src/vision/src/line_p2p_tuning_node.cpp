@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -110,7 +111,7 @@ public:
     declare_parameter<double>("imu_abs_limit_deg", 45.0);
     declare_parameter<double>("inference_hz", 15.0);
     declare_parameter<bool>("show_debug_view", true);
-    declare_parameter<double>("line_tuning_observation_sec", 1.5);
+    declare_parameter<double>("line_tuning_observation_sec", 1.0);
 
     declare_parameter<int>("max_centers", config.line_features.max_centers);
     declare_parameter<double>("line_p2p_offset_gain",
@@ -212,6 +213,7 @@ public:
     }
     if (show_debug_view_) {
       cv::namedWindow(kWindowName, cv::WINDOW_NORMAL);
+      cv::namedWindow(kStatusWindowName, cv::WINDOW_NORMAL);
     }
     RCLCPP_INFO(get_logger(),
                 "LINE P2P tuning node ready. Call /%s/start_line_tuning_trial",
@@ -219,12 +221,16 @@ public:
   }
 
   ~LineP2pTuningNode() override {
-    if (show_debug_view_) cv::destroyWindow(kWindowName);
+    if (show_debug_view_) {
+      cv::destroyWindow(kWindowName);
+      cv::destroyWindow(kStatusWindowName);
+    }
   }
 
 private:
   enum class State { kIdle, kObserving, kDeciding, kWaitingDone, kHolding };
-  static constexpr const char *kWindowName = "Line P2P Tuning";
+  static constexpr const char *kWindowName = "Line P2P Camera";
+  static constexpr const char *kStatusWindowName = "Line P2P Tuning Status";
 
   static const char *StateName(State state) {
     switch (state) {
@@ -269,6 +275,7 @@ private:
   }
 
   void OnImage(const sensor_msgs::msg::Image::SharedPtr image) {
+    ++received_frames_;
     if (inference_hz_ <= 0.0) {
       ProcessImage(image);
       return;
@@ -317,6 +324,9 @@ private:
     } else {
       return;
     }
+    if (feedback.done) {
+      last_done_stamp_sec_ = get_clock()->now().seconds();
+    }
     std::lock_guard<std::mutex> lock(feedback_mutex_);
     feedback_queue_.push_back(feedback);
   }
@@ -339,16 +349,36 @@ private:
     }
     ++trial_id_;
     if (trial_id_ == 0) ++trial_id_;
-    start_sec_ = get_clock()->now().seconds();
-    accumulator_.Begin(trial_id_, start_sec_);
-    state_ = State::kObserving;
+    trial_received_start_ = received_frames_;
+    trial_processed_start_ = processed_frames_;
+    trial_line_start_ = line_frames_;
+    trial_valid_start_ = valid_frames_;
     action_id_ = 0;
-    last_action_ = vision_core::MissionAction::kNone;
-    response->success = true;
-    response->message = "collecting for " + std::to_string(observation_sec_) +
-                        " sec";
-    RCLCPP_INFO(get_logger(), "Trial %lu: collecting for %.2f sec",
-                static_cast<unsigned long>(trial_id_), observation_sec_);
+    motion_window_started_ = false;
+    motion_window_finished_ = false;
+    last_window_stats_.reset();
+    start_sec_ = get_clock()->now().seconds();
+    if (stored_guide_ && stored_guide_->valid) {
+      // Re-evaluate cached O/H with the newest IDLE gains, without re-observing.
+      last_guide_ = *stored_guide_;
+      state_ = State::kDeciding;
+      response->success = true;
+      response->message = "dispatching stored guide with current gains";
+      RCLCPP_INFO(get_logger(), "Trial %lu: dispatch cached guide O=%+.3f H=%+.3f",
+                  static_cast<unsigned long>(trial_id_),
+                  last_guide_.offset, last_guide_.heading_rad);
+    } else {
+      // The first action or insufficient moving evidence needs a fresh 1s
+      // stationary observation before a motion may be selected.
+      last_guide_ = {};
+      accumulator_.Begin(trial_id_, start_sec_);
+      state_ = State::kObserving;
+      response->success = true;
+      response->message = "collecting a fresh stationary guide for " +
+                          std::to_string(observation_sec_) + " sec";
+      RCLCPP_INFO(get_logger(), "Trial %lu: stationary observation %.2f sec",
+                  static_cast<unsigned long>(trial_id_), observation_sec_);
+    }
   }
 
   rcl_interfaces::msg::SetParametersResult OnTuningParameters(
@@ -415,29 +445,31 @@ private:
       if (now_sec + 1e-9 >= hold_until_sec_) {
         state_ = State::kIdle;
         hold_until_sec_ = 0.0;
-        RCLCPP_INFO(get_logger(), "Pose hold finished; trigger unlocked");
-        return false;
+        RCLCPP_INFO(get_logger(), "Observation hold finished; trial unlocked");
       }
       return false;
     }
-    if (state_ != State::kObserving ||
-        now_sec - start_sec_ < observation_sec_) {
-      return true;
+    if (state_ == State::kObserving &&
+        now_sec - start_sec_ >= observation_sec_) {
+      const auto guide = accumulator_.FinishAll(trial_id_);
+      if (!guide) {
+        state_ = State::kHolding;
+        hold_until_sec_ = now_sec + hold_sec_;
+        RCLCPP_WARN(get_logger(),
+                    "No valid stationary LineGuide; hold %.2f sec, next trial re-observes",
+                    hold_sec_);
+        return false;
+      }
+      last_guide_ = *guide;
+      state_ = State::kDeciding;
     }
-    const auto guide = accumulator_.FinishAll(trial_id_);
-    if (!guide) {
-      state_ = State::kHolding;
-      hold_until_sec_ = now_sec + hold_sec_;
-      RCLCPP_WARN(get_logger(),
-                  "No valid LineGuide; holding current pose for %.2f sec",
-                  hold_sec_);
-      return false;
+    if (state_ == State::kDeciding) {
+      input.line_decision_guide_override = last_guide_;
+      input.allow_new_line_action = true;
+      input.advance_line_fsm = true;
     }
-    last_guide_ = *guide;
-    input.line_decision_guide_override = *guide;
-    input.allow_new_line_action = true;
-    input.advance_line_fsm = true;
-    state_ = State::kDeciding;
+    // While walking, still pass every ACK/READY/DONE to the shared
+    // coordinator, but never let it send an automatic READY-queued action.
     return true;
   }
 
@@ -446,9 +478,10 @@ private:
       const vision_core::CommandDeliveryFeedback &delivered_feedback,
       const vision_core::PerceptionMissionFrameResult &result) {
     std::lock_guard<std::mutex> lock(state_mutex_);
+    const auto &guide = result.mission.line_features.guide;
+    if (guide.valid) ++valid_frames_;
     if (state_ == State::kObserving) {
-      accumulator_.Add(trial_id_, now_sec,
-                       result.mission.line_features.guide);
+      accumulator_.Add(trial_id_, now_sec, guide);
       return;
     }
     if (state_ == State::kDeciding) {
@@ -457,28 +490,62 @@ private:
           result.mission.command.action_id != 0) {
         action_id_ = result.mission.command.action_id;
         last_action_ = result.mission.command.action;
+        stored_guide_.reset();
+        motion_window_started_ = false;
+        motion_window_finished_ = false;
         state_ = State::kWaitingDone;
         RCLCPP_INFO(get_logger(),
-                    "Trial action: id=%lu action=%u(%s); waiting for executor "
-                    "ACK/DONE",
+                    "Trial action: id=%lu action=%u(%s); awaiting ACK/READY/DONE",
                     static_cast<unsigned long>(action_id_),
-                    static_cast<unsigned>(last_action_),
-                    ActionName(last_action_));
+                    static_cast<unsigned>(last_action_), ActionName(last_action_));
       } else {
+        stored_guide_.reset();
         state_ = State::kHolding;
         hold_until_sec_ = now_sec + hold_sec_;
-        RCLCPP_INFO(get_logger(),
-                    "No line action selected; holding current pose for %.2f sec",
-                    hold_sec_);
+        RCLCPP_WARN(get_logger(), "No action selected; hold for %.2f sec", hold_sec_);
       }
       return;
     }
-    if (state_ == State::kWaitingDone && delivered_feedback.done &&
-        delivered_feedback.action_id == action_id_ &&
+    if (state_ != State::kWaitingDone) return;
+
+    const bool feedback_matches = delivered_feedback.action_id == action_id_;
+    if (!motion_window_started_ && feedback_matches &&
+        delivered_feedback.acknowledged) {
+      // The perception node also starts collecting at the first ACK-visible
+      // frame, not when the ActionCommand was originally published.
+      accumulator_.Begin(action_id_, now_sec);
+      motion_window_started_ = true;
+    }
+    if (motion_window_started_ && !motion_window_finished_) {
+      accumulator_.Add(action_id_, now_sec, guide);
+    }
+    if (feedback_matches && !motion_window_finished_ &&
+        (delivered_feedback.ready || delivered_feedback.done)) {
+      const double remaining = delivered_feedback.ready &&
+              !delivered_feedback.done ? line_p2p_config_.ready_lead_sec : 0.0;
+      const auto aggregated = motion_window_started_
+          ? accumulator_.Finish(action_id_, now_sec, remaining)
+          : std::optional<vision_core::LineGuide>{};
+      last_window_stats_ = accumulator_.LastStats();
+      stored_guide_ = aggregated && aggregated->valid ? aggregated
+                                                         : std::nullopt;
+      motion_window_finished_ = true;
+      RCLCPP_INFO(get_logger(),
+          "[TUNING WINDOW] action_id=%lu total=%zu valid=%zu window=%zu used=%zu next=%s",
+          static_cast<unsigned long>(action_id_),
+          last_window_stats_ ? last_window_stats_->total_frames : 0,
+          last_window_stats_ ? last_window_stats_->valid_frames : 0,
+          last_window_stats_ ? last_window_stats_->window_frames : 0,
+          last_window_stats_ ? last_window_stats_->used_frames : 0,
+          stored_guide_ ? "READY (internal only)" : "NONE (stationary retry)");
+    }
+    if (feedback_matches && delivered_feedback.done &&
         result.mission.command.action_id == 0) {
       state_ = State::kIdle;
       action_id_ = 0;
-      RCLCPP_INFO(get_logger(), "Action DONE: parameters unlocked");
+      RCLCPP_INFO(get_logger(),
+                  "Action DONE: idle; stored next=%s",
+                  stored_guide_ ? "valid" : "none");
     }
   }
 
@@ -494,6 +561,15 @@ private:
   }
 
   void ProcessImage(const sensor_msgs::msg::Image::SharedPtr &message) {
+    // Match the production node: never reuse an image captured before DONE.
+    const double captured = static_cast<double>(message->header.stamp.sec) +
+                            1e-9 * static_cast<double>(message->header.stamp.nanosec);
+    if (last_done_stamp_sec_ > 0.0 &&
+        (!std::isfinite(captured) || captured <= last_done_stamp_sec_)) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+          "Discarding camera frame captured at/before Action DONE");
+      return;
+    }
     cv_bridge::CvImageConstPtr image;
     try {
       image = cv_bridge::toCvShare(message, "bgr8");
@@ -503,6 +579,10 @@ private:
     }
     std::vector<Detection> detections;
     if (!yolo_->Infer(image->image, detections)) return;
+    ++processed_frames_;
+    if (std::any_of(detections.begin(), detections.end(), [this](const auto &d) {
+          return d.class_id == line_class_id_ && d.confidence >= conf_thres_;
+        })) ++line_frames_;
 
     vision_core::CommandDeliveryFeedback feedback;
     {
@@ -554,55 +634,106 @@ private:
 
   void DrawDebug(const cv::Mat &image,
                  const std::vector<Detection> &detections,
-                 const vision_core::PerceptionMissionFrameResult &result) {
-    cv::Mat view = image.clone();
+                 const vision_core::PerceptionMissionFrameResult &) {
+    // Camera window intentionally contains detections and no text.
+    cv::Mat camera = image.clone();
     for (const auto &detection : detections) {
       if (detection.class_id != line_class_id_ ||
-          detection.confidence < conf_thres_) {
-        continue;
-      }
-      cv::rectangle(view, detection.box, cv::Scalar(0, 255, 0), 2);
+          detection.confidence < conf_thres_) continue;
+      cv::rectangle(camera, detection.box, cv::Scalar(70, 215, 115), 2);
     }
+    cv::imshow(kWindowName, camera);
+
+    cv::Mat panel(670, 850, CV_8UC3, cv::Scalar(25, 28, 34));
+    const cv::Scalar muted(158, 164, 173);
+    const cv::Scalar white(240, 240, 240);
+    const cv::Scalar accent(110, 200, 255);
+    const auto label = [&](int x, int y, const std::string &value,
+                           double scale = 0.66, cv::Scalar color = cv::Scalar(240,240,240)) {
+      cv::putText(panel, value, cv::Point(x, y), cv::FONT_HERSHEY_SIMPLEX,
+                  scale, color, 1, cv::LINE_AA);
+    };
     State state;
-    vision_core::LineGuide guide = result.mission.line_features.guide;
     vision_core::LineP2pConfig gains;
-    vision_core::MissionAction action;
+    std::optional<vision_core::LineGuide> preview_guide;
+    vision_core::MissionAction previous;
+    std::optional<vision_core::LineWindowStats> window;
+    std::uint64_t active_id;
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
       state = state_;
       gains = line_p2p_config_;
-      action = last_action_;
-      if ((state == State::kDeciding || state == State::kWaitingDone) &&
-          last_guide_.valid) {
-        guide = last_guide_;
-      }
+      preview_guide = stored_guide_;
+      if (state == State::kDeciding && last_guide_.valid)
+        preview_guide = last_guide_;
+      previous = last_action_;
+      window = last_window_stats_;
+      active_id = action_id_;
     }
-    char text[320];
-    int y = 26;
-    const auto draw = [&](const cv::Scalar &color) {
-      cv::putText(view, text, cv::Point(10, y), cv::FONT_HERSHEY_SIMPLEX,
-                  0.55, color, 2);
-      y += 23;
-    };
-    std::snprintf(text, sizeof(text), "STATE: %s", StateName(state));
-    draw(cv::Scalar(0, 255, 255));
-    std::snprintf(text, sizeof(text), "O=%+.3f H=%+.3f C=%+.3f(%s)",
-                  guide.offset, guide.heading_rad, guide.curvature_rad,
-                  guide.curvature_valid ? "valid" : "invalid");
-    draw(cv::Scalar(255, 255, 0));
-    const double offset_term = gains.offset_gain * guide.offset;
-    const double heading_term = gains.heading_gain * guide.heading_rad;
-    const double score = offset_term + heading_term;
-    std::snprintf(text, sizeof(text), "TERMS O=%+.3f H=%+.3f",
+    vision_core::MissionAction next = vision_core::MissionAction::kNone;
+    double offset_term = 0.0, heading_term = 0.0, score = 0.0;
+    if (preview_guide && preview_guide->valid) {
+      const auto decision = vision_core::LineP2pController(gains).Compute(*preview_guide);
+      offset_term = gains.offset_gain * preview_guide->offset;
+      heading_term = gains.heading_gain * preview_guide->heading_rad;
+      score = offset_term + heading_term;
+      if (decision.direction == vision_core::CruiseDirection::kLeft)
+        next = vision_core::MissionAction::kStepForwardLeft;
+      else if (decision.direction == vision_core::CruiseDirection::kRight)
+        next = vision_core::MissionAction::kStepForwardRight;
+      else if (decision.direction == vision_core::CruiseDirection::kStraight)
+        next = vision_core::MissionAction::kStepForwardFive;
+    }
+    // The service uses the SAME retained guide and the same shared selector,
+    // so modifying gains in IDLE updates this preview immediately.
+    label(24, 38, "LINE P2P TUNING", 0.85, white);
+    label(605, 38, std::string("STATE: ") + StateName(state), 0.58, accent);
+    cv::line(panel, cv::Point(20, 54), cv::Point(830, 54), muted, 1);
+
+    cv::rectangle(panel, cv::Rect(20, 70, 394, 105), cv::Scalar(41, 47, 57), cv::FILLED);
+    cv::rectangle(panel, cv::Rect(430, 70, 400, 105), cv::Scalar(41, 47, 57), cv::FILLED);
+    label(36, 98, "PREVIOUS ACTION", 0.53, muted);
+    label(36, 135, ActionName(previous), 0.75, white);
+    label(448, 98, "NEXT ACTION (INTERNAL)", 0.53, muted);
+    label(448, 135, ActionName(next), 0.75, preview_guide ? accent : muted);
+    if (!preview_guide)
+      label(448, 162, "No guide: next trial observes 1s", 0.42, muted);
+
+    char text[180];
+    label(24, 210, "STORED GUIDE / CURRENT GAINS", 0.62, muted);
+    std::snprintf(text, sizeof(text), "O = %+.4f    Ko = %.3f",
+                  preview_guide ? preview_guide->offset : 0.0, gains.offset_gain);
+    label(30, 248, text, 0.72, white);
+    std::snprintf(text, sizeof(text), "H = %+.4f rad    Kh = %.3f",
+                  preview_guide ? preview_guide->heading_rad : 0.0, gains.heading_gain);
+    label(30, 286, text, 0.72, white);
+    std::snprintf(text, sizeof(text), "O term = %+.4f     H term = %+.4f",
                   offset_term, heading_term);
-    draw(cv::Scalar(255, 255, 0));
-    std::snprintf(text, sizeof(text), "SCORE=%+.3f BAND=+/-%.3f",
+    label(30, 327, text, 0.69, accent);
+    std::snprintf(text, sizeof(text), "SCORE = %+.4f     BAND = +/- %.3f",
                   score, gains.steering_deadband);
-    draw(cv::Scalar(255, 255, 0));
-    std::snprintf(text, sizeof(text), "ACTION: %u %s",
-                  static_cast<unsigned>(action), ActionName(action));
-    draw(cv::Scalar(0, 200, 255));
-    cv::imshow(kWindowName, view);
+    label(30, 369, text, 0.77, white);
+    cv::line(panel, cv::Point(20, 391), cv::Point(830, 391), muted, 1);
+
+    label(24, 425, "FRAMES (SINCE LAST TRIAL START)", 0.62, muted);
+    std::snprintf(text, sizeof(text), "Received: %zu     Inferred: %zu",
+                  received_frames_ - trial_received_start_,
+                  processed_frames_ - trial_processed_start_);
+    label(30, 463, text, 0.68, white);
+    std::snprintf(text, sizeof(text), "LINE detected: %zu     Valid O/H: %zu",
+                  line_frames_ - trial_line_start_,
+                  valid_frames_ - trial_valid_start_);
+    label(30, 502, text, 0.68, white);
+    std::snprintf(text, sizeof(text), "Window total: %zu   window frames: %zu   used valid: %zu",
+                  window ? window->total_frames : 0,
+                  window ? window->window_frames : 0,
+                  window ? window->used_frames : 0);
+    label(30, 543, text, 0.63, accent);
+    std::snprintf(text, sizeof(text), "Active action ID: %llu   |   Observation: 40%% -> READY",
+                  static_cast<unsigned long long>(active_id));
+    label(30, 581, text, 0.58, muted);
+    label(24, 630, "IDLE gain updates re-evaluate NEXT from the stored O/H.", 0.55, muted);
+    cv::imshow(kStatusWindowName, panel);
     cv::waitKey(1);
   }
 
@@ -638,6 +769,15 @@ private:
   State state_{State::kIdle};
   std::uint64_t trial_id_{0};
   std::uint64_t action_id_{0};
+  std::optional<vision_core::LineGuide> stored_guide_;
+  std::optional<vision_core::LineWindowStats> last_window_stats_;
+  bool motion_window_started_{false};
+  bool motion_window_finished_{false};
+  double last_done_stamp_sec_{0.0};
+  std::size_t received_frames_{0}, processed_frames_{0};
+  std::size_t line_frames_{0}, valid_frames_{0};
+  std::size_t trial_received_start_{0}, trial_processed_start_{0};
+  std::size_t trial_line_start_{0}, trial_valid_start_{0};
   double start_sec_{0.0};
   double observation_sec_{1.5};
   double hold_sec_{0.0};

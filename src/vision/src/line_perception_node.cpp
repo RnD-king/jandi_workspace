@@ -49,6 +49,7 @@
 #include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <std_srvs/srv/trigger.hpp>
 
 #include <sys/utsname.h>
 
@@ -346,8 +347,29 @@ public:
     camera_status_sub_ = create_subscription<vision::msg::CommandStatus>(
         camera_status_topic_, command_qos,
         std::bind(&LinePerceptionNode::OnCameraStatus, this, std::placeholders::_1));
+    start_service_ = create_service<std_srvs::srv::Trigger>(
+        "start",
+        [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+               std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          if (started_) {
+            response->success = false;
+            response->message = "mission already started";
+            return;
+          }
+          // Disarmed YOLO operation never advances mission state, and start
+          // uses the next camera frame instead of the latest buffered frame.
+          mission_controller_->Reset();
+          {
+            std::lock_guard<std::mutex> lock(image_mutex_);
+            latest_image_.reset();
+          }
+          started_ = true;
+          response->success = true;
+          response->message = "mission armed; waiting for fresh camera frames";
+          RCLCPP_INFO(get_logger(), "[CONTROL] START accepted");
+        });
 
-    RCLCPP_INFO(get_logger(), "vision node started.");
+    RCLCPP_INFO(get_logger(), "vision node initialized (DISARMED). Call /line_perception_node/start to begin motions.");
     RCLCPP_INFO(get_logger(), "  image_topic    : %s", image_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  depth_topic    : %s", depth_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  camera_info    : %s", camera_info_topic_.c_str());
@@ -1126,6 +1148,44 @@ private:
       RCLCPP_ERROR(get_logger(), "[YOLO] Infer failed -> skip remaining stages");
       return;
     }
+    if (!started_) {
+      // Disarmed: inference and visualization continue, but StepPerception
+      // does not run at all. This freezes ALL mission/controller states and
+      // prevents both ActionCommand and CameraCommand from being generated.
+      if (show_debug_view_ || show_yolo_debug_view_) {
+        try {
+          if (show_yolo_debug_view_) {
+            cv::Mat raw_view = bgr.clone();
+            DrawYoloDetections(raw_view, dets);
+            cv::imshow(kYoloDebugWindowName, raw_view);
+          }
+          if (show_debug_view_) {
+            cv::Mat camera_view = bgr.clone();
+            DrawYoloDetections(camera_view, dets);
+            cv::imshow(kDebugWindowName, camera_view);
+            cv::Mat state_view(360, 1100, CV_8UC3, cv::Scalar(20, 20, 20));
+            cv::putText(state_view, "DISARMED / WAIT_START",
+                        cv::Point(28, 70), cv::FONT_HERSHEY_SIMPLEX,
+                        1.1, cv::Scalar(0, 210, 255), 2);
+            cv::putText(state_view, "YOLO active. No ROS motion commands will be sent.",
+                        cv::Point(28, 125), cv::FONT_HERSHEY_SIMPLEX,
+                        0.65, cv::Scalar(230, 230, 230), 1);
+            cv::putText(state_view, "Call /line_perception_node/start (std_srvs/Trigger).",
+                        cv::Point(28, 165), cv::FONT_HERSHEY_SIMPLEX,
+                        0.64, cv::Scalar(230, 230, 230), 1);
+            cv::imshow(kStateWindowName, state_view);
+          }
+          cv::waitKey(1);
+        } catch (const cv::Exception &error) {
+          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                               "[VIEW] disarmed debug error: %s", error.what());
+        }
+      }
+      UpdatePerfOverlayOncePerSecond(
+          static_cast<double>(dt_yolo_us) * 1e-6,
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+      return;
+    }
 
     // 4) ROS/sensor 형식을 core의 raw perception 입력으로만 변환한다.
     const auto t3 = std::chrono::steady_clock::now();
@@ -1488,6 +1548,8 @@ private:
   rclcpp::Publisher<vision::msg::CameraCommand>::SharedPtr camera_cmd_pub_;
   rclcpp::Subscription<vision::msg::CommandStatus>::SharedPtr action_status_sub_;
   rclcpp::Subscription<vision::msg::CommandStatus>::SharedPtr camera_status_sub_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_service_;
+  bool started_{false};
   rclcpp::TimerBase::SharedPtr hb_timer_;
   rclcpp::TimerBase::SharedPtr inference_timer_;
 
