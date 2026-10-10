@@ -128,13 +128,6 @@ class CameraMotion {
 public:
     enum class Result { Idle, Running, Command, Finished };
     explicit CameraMotion(CameraConfig config = {}) : config_(config) { config_.Validate(); }
-    // Keep the startup FORWARD head target during subsequent body JSON playback.
-    void HoldForward() {
-        if (active_) throw std::logic_error("cannot hold FORWARD during camera motion");
-        start_ = target_ = current_ = config_.forward;
-        settling_ = false;
-        override_enabled_ = true;
-    }
     void Start(uint8_t request, const RawPositions& base, Clock::time_point now) {
         const auto target = config_.Target(request);
         const CameraPose start{base.at(config_.yaw_id), base.at(config_.pitch_id)};
@@ -175,6 +168,14 @@ public:
     }
     bool Active() const { return active_; }
     bool OverrideEnabled() const { return override_enabled_; }
+    // 시작 자세 완료 후 기본 FORWARD 목표를 유지한다. 외부 카메라 명령/상태 ID는 만들지 않는다.
+    // 실제 전송은 MainNode의 단일 writer가 수행하고, 이후 DOWN/GOAL 명령은 이 자세를 변경할 수 있다.
+    void HoldForward() {
+        start_ = target_ = current_ = config_.forward;
+        step_ = steps_ = 0;
+        active_ = settling_ = false;
+        override_enabled_ = true;
+    }
     // Retain the last successfully transmitted override if the writer fails.
     void Abort(const RawPositions& last_sent) {
         active_ = false;

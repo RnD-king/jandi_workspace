@@ -3,6 +3,20 @@
 #include <stdexcept>
 #include <string>
 
+namespace {
+// 통신 실패와 모터가 응답한 설정 오류를 모두 확인한다. 설정이 불완전하면 재생을 시작하지 않는다.
+void CheckRegisterWrite(dynamixel::PacketHandler* packet, int result, uint8_t error,
+                        uint8_t id, const char* operation)
+{
+    if (result != COMM_SUCCESS || error != 0) {
+        const std::string detail = result != COMM_SUCCESS
+            ? packet->getTxRxResult(result) : packet->getRxPacketError(error);
+        throw std::runtime_error(std::string(operation) + " failed for ID " +
+                                 std::to_string(id) + ": " + detail);
+    }
+}
+}
+
 // const char* getAvailableDeviceName()
 // {
 //     std::vector<const char*> candidates = {"/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyUSB2"};
@@ -56,6 +70,8 @@ Dxl::Dxl()
     else 
         std::cout << "[Info] Succeeded to set the baudrate!" << std::endl;
 
+    // 생성 중 예외가 발생하면 Dxl 소멸자가 호출되지 않으므로 열린 포트는 여기서 닫는다.
+    try {
     int16_t current_mode = SetPresentMode(Mode);
 
     if (current_mode == Current_Control_Mode)
@@ -63,13 +79,8 @@ Dxl::Dxl()
         for (uint8_t i = 0; i < NUMBER_OF_DYNAMIXELS; i++)
         {
             dxl_comm_result = packetHandler->write1ByteTxRx(portHandler, dxl_id[i], DxlReg_OperatingMode, Current_Control_Mode, &dxl_error);
-            if (dxl_comm_result != COMM_SUCCESS || dxl_error != 0)
-                throw std::runtime_error("Dynamixel initialization failed: current mode ID " +
-                    std::to_string(dxl_id[i]) + " comm=" +
-                    packetHandler->getTxRxResult(dxl_comm_result) +
-                    " motor_error=" + std::to_string(dxl_error));
-            else
-                std::cout << "[Info] Set current control mode for ID: " << int(dxl_id[i]) << std::endl;
+            CheckRegisterWrite(packetHandler, dxl_comm_result, dxl_error, dxl_id[i], "Current operating mode");
+            std::cout << "[Info] Set current control mode for ID: " << int(dxl_id[i]) << std::endl;
         }
     }
     else if (current_mode == Position_Control_Mode)
@@ -77,18 +88,13 @@ Dxl::Dxl()
         for (uint8_t i = 0; i < NUMBER_OF_DYNAMIXELS; i++)
         {
             dxl_comm_result = packetHandler->write1ByteTxRx(portHandler, dxl_id[i], DxlReg_OperatingMode, Position_Control_Mode, &dxl_error);
-            if (dxl_comm_result != COMM_SUCCESS || dxl_error != 0)
-                throw std::runtime_error("Dynamixel initialization failed: position mode ID " +
-                    std::to_string(dxl_id[i]) + " comm=" +
-                    packetHandler->getTxRxResult(dxl_comm_result) +
-                    " motor_error=" + std::to_string(dxl_error));
-            else
-                std::cout << "[Info] Set position control mode for ID: " << int(dxl_id[i]) << std::endl;
+            CheckRegisterWrite(packetHandler, dxl_comm_result, dxl_error, dxl_id[i], "Position operating mode");
+            std::cout << "[Info] Set position control mode for ID: " << int(dxl_id[i]) << std::endl;
         }
     }
     else
     {
-        throw std::runtime_error("Dynamixel initialization failed: invalid operating mode");
+        throw std::invalid_argument("Invalid Dynamixel operating mode");
     }
 
 
@@ -97,13 +103,8 @@ Dxl::Dxl()
     for (uint8_t i = 0; i < NUMBER_OF_DYNAMIXELS; i++)
     {
         dxl_comm_result = packetHandler->write1ByteTxRx(portHandler, dxl_id[i], DxlReg_TorqueEnable, 1, &dxl_error);
-        if (dxl_comm_result != COMM_SUCCESS || dxl_error != 0)
-            throw std::runtime_error("Dynamixel initialization failed: torque enable ID " +
-                std::to_string(dxl_id[i]) + " comm=" +
-                packetHandler->getTxRxResult(dxl_comm_result) +
-                " motor_error=" + std::to_string(dxl_error));
-        else
-            std::cout << "[Info] Torque enabled for ID: " << int(dxl_id[i]) << std::endl;
+        CheckRegisterWrite(packetHandler, dxl_comm_result, dxl_error, dxl_id[i], "Torque enable");
+        std::cout << "[Info] Torque enabled for ID: " << int(dxl_id[i]) << std::endl;
     }
 
 
@@ -130,6 +131,10 @@ Dxl::Dxl()
     VectorXd PID_Gain(3);
     PID_Gain << 850, 0, 0;
     SetPIDGain(PID_Gain);
+    } catch (...) {
+        portHandler->closePort();
+        throw;
+    }
 }
 
 Dxl::~Dxl()
@@ -378,33 +383,32 @@ void Dxl::SetTorqueRef(VectorXd a_torque)
 
 // Setter() : PID gain setter()
 void Dxl::SetPIDGain(VectorXd PID_Gain)
-{
+{    
+    uint8_t dxl_error = 0;
+    
     if (PID_Gain.size() != 3)
-        throw std::invalid_argument("PID_Gain requires P, I, D");
-    const uint16_t values[3] = {
-        static_cast<uint16_t>(PID_Gain(0)),
-        static_cast<uint16_t>(PID_Gain(1)),
-        static_cast<uint16_t>(PID_Gain(2))
-    };
-    const uint16_t registers[3] = {
-        DxlReg_PositionPGain, DxlReg_PositionIGain, DxlReg_PositionDGain
-    };
-    const char* names[3] = {"P", "I", "D"};
-    for (uint8_t i = 0; i < NUMBER_OF_DYNAMIXELS; ++i) {
-        for (int gain = 0; gain < 3; ++gain) {
-            uint8_t dxl_error = 0;
-            const int result = packetHandler->write2ByteTxRx(
-                portHandler, dxl_id[i], registers[gain], values[gain], &dxl_error);
-            if (result != COMM_SUCCESS || dxl_error != 0) {
-                throw std::runtime_error(
-                    "Dynamixel initialization failed: position " +
-                    std::string(names[gain]) + " gain ID " +
-                    std::to_string(dxl_id[i]) + " value=" +
-                    std::to_string(values[gain]) + " comm=" +
-                    packetHandler->getTxRxResult(result) +
-                    " motor_error=" + std::to_string(dxl_error));
-            }
-        }
+    {
+        throw std::invalid_argument("PID_Gain must contain exactly P, I and D");
+    }
+    
+    uint16_t P_gain = static_cast<uint16_t>(PID_Gain(0));
+    uint16_t I_gain = static_cast<uint16_t>(PID_Gain(1));
+    uint16_t D_gain = static_cast<uint16_t>(PID_Gain(2));
+
+    // P, I, D Gain을 각각의 레지스터에 설정
+    for (uint8_t i = 0; i < NUMBER_OF_DYNAMIXELS; i++)
+    {
+        // P Gain 설정
+        int result = packetHandler->write2ByteTxRx(portHandler, dxl_id[i], DxlReg_PositionPGain, P_gain, &dxl_error);
+        CheckRegisterWrite(packetHandler, result, dxl_error, dxl_id[i], "Position P gain");
+
+        // I Gain 설정
+        result = packetHandler->write2ByteTxRx(portHandler, dxl_id[i], DxlReg_PositionIGain, I_gain, &dxl_error);
+        CheckRegisterWrite(packetHandler, result, dxl_error, dxl_id[i], "Position I gain");
+
+        // D Gain 설정
+        result = packetHandler->write2ByteTxRx(portHandler, dxl_id[i], DxlReg_PositionDGain, D_gain, &dxl_error);
+        CheckRegisterWrite(packetHandler, result, dxl_error, dxl_id[i], "Position D gain");
     }
 }
 

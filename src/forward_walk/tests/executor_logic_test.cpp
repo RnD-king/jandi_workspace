@@ -181,26 +181,28 @@ int main() {
                 config.Target(2).yaw==2077 && config.Target(2).pitch==1537 &&
                 config.Target(3).yaw==2054 && config.Target(3).pitch==966, "calibration mapping");
         Rejects([&] { config.Target(0); });
-        CameraMotion startup_camera(config);
-        startup_camera.HoldForward();
-        auto startup_body = InitialPose();
-        startup_camera.Merge(startup_body);
-        Require(startup_body.at(21) == 2077 && startup_body.at(22) == 1537 &&
-                startup_camera.OverrideEnabled() && !startup_camera.Active(),
-                "startup FORWARD not latched");
-        pass("persistent startup FORWARD head");
         CameraMotion camera(config);
         auto base = InitialPose();
         auto unmodified = base;
         camera.Merge(base);
         Require(base == unmodified, "camera changed startup before first command");
+        camera.HoldForward();
+        camera.Merge(base);
+        Require(!camera.Active() && camera.OverrideEnabled(), "FORWARD hold started an active camera command");
+        for (int id : Dxl::MotorIds()) {
+            Require(base.at(id)==(id==21?2077:id==22?1537:2048), "FORWARD hold changed body or missed calibrated head pose");
+        }
+        auto startup_body = InitialPose();
+        camera.Merge(startup_body);
+        Require(startup_body.at(21)==2077 && startup_body.at(22)==1537, "body overwrote startup FORWARD hold");
+        Require(camera.Update(t0)==CameraMotion::Result::Idle, "FORWARD hold generated fake camera activity");
         camera.Start(3, base, t0);
         Require(camera.Update(t0) == CameraMotion::Result::Command, "camera did not start");
         camera.Merge(base);
         Require(camera.Update(t0+90ms) == CameraMotion::Result::Command, "delayed camera step");
         camera.Merge(base);
         const double x=2.0/25.0, alpha=x*x*(3-2*x);
-        Require(base.at(22)==static_cast<int32_t>(std::nearbyint(2048+alpha*(966-2048))), "camera skipped interpolation step");
+        Require(base.at(22)==static_cast<int32_t>(std::nearbyint(1537+alpha*(966-1537))), "camera skipped interpolation step from FORWARD");
         auto now=t0+90ms;
         for (int i=2;i<25;++i) { now+=20ms; camera.Update(now); }
         camera.Merge(base);

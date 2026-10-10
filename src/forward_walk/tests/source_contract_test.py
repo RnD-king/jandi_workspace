@@ -25,6 +25,16 @@ checks = {
     "no CONTACT_WALK mapping": 'case vision::msg::ActionCommand::CONTACT_WALK:' not in main,
     "open/baud failure throws": 'throw std::runtime_error("Failed to open Dynamixel port:' in dxl and
         'portHandler->closePort();\n        throw std::runtime_error("Failed to set Dynamixel baudrate:' in dxl,
+    "register writes reject communication and device errors":
+        'result != COMM_SUCCESS || error != 0' in dxl and 'throw std::runtime_error(std::string(operation)' in dxl,
+    "critical register writes checked": all(
+        f'CheckRegisterWrite(packetHandler, {result}, dxl_error, dxl_id[i], "{operation}")' in dxl
+        for result, operation in [
+            ('dxl_comm_result', 'Current operating mode'), ('dxl_comm_result', 'Position operating mode'),
+            ('dxl_comm_result', 'Torque enable'), ('result', 'Position P gain'),
+            ('result', 'Position I gain'), ('result', 'Position D gain')]),
+    "startup failure port cleanup": 'catch (...) {\n        portHandler->closePort();\n        throw;' in dxl,
+    "failure IDs logged before reset": main.index('action_id=%llu queued_id=%llu camera_id=%llu') < main.index('action_transactions_.Abort();'),
 }
 for action, filename in {
     'STEP_FORWARD_LEFT': 'motions/보행_좌회전전진_20도_최종_초기X.json',

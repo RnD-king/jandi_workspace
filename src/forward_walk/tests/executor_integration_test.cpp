@@ -49,10 +49,7 @@ void WriteMotion(const fs::path& path, bool startup=false) {
         bool first=true;
         for(int id:Dxl::MotorIds()) {
             if(!first)stream<<',';first=false;
-            const int32_t tick = startup && id==21 ? 2077 :
-                                 startup && id==22 ? 1537 :
-                                 id==0 && !startup ? 2148+frame*100 : 2048;
-            stream<<'"'<<id<<"\":"<<tick;
+            stream<<'"'<<id<<"\":"<<(id==0&&!startup?2148+frame*100:2048);
         }
         stream<<"}}";
     }
@@ -105,10 +102,19 @@ int main() {
         };
         pump([&]{return !node->startup_pose_in_progress_;});flush();
         Check(node->action_cmd_sub_&&node->camera_cmd_sub_,"subscriptions missing after startup");
-        Check(actions.empty()&&node->camera_motion_->OverrideEnabled(),"startup must latch FORWARD without camera status");
-        Check(Dxl::current.at(21)==2077 && Dxl::current.at(22)==1537,
-              "startup did not reach FORWARD head pose");
-        std::cout<<"PASS real MainNode startup cache/subscription/camera preservation\n";
+        Check(actions.empty()&&cameras.empty()&&node->camera_motion_->OverrideEnabled()&&
+              !node->camera_motion_->Active(),"startup status or FORWARD hold state mismatch");
+        for(std::size_t i=0;i+1<Dxl::packets.size();++i)
+            Check(Dxl::packets[i].at(21)==2048&&Dxl::packets[i].at(22)==2048,"camera override began before startup completed");
+        Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537,"startup FORWARD goal was not transmitted");
+        for(int id:Dxl::MotorIds())if(id!=21&&id!=22)
+            Check(Dxl::current.at(id)==2048,"startup FORWARD hold changed body");
+        // A normal body JSON contains different head ticks; the automatic FORWARD hold wins.
+        action(9001,11);
+        pump([&]{return node->action_transactions_.completed.Contains(9001);});flush();
+        Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537,"ordinary P2P JSON overwrote FORWARD head pose");
+        Check(cameras.empty(),"automatic FORWARD hold emitted a camera command status");
+        std::cout<<"PASS real MainNode startup FORWARD transmission/hold and ordinary P2P override\n";
 
         action(1001,11);action(1001,11);action(1002,12);action(0,11);
         camera(1001,3);camera(1001,3);camera(2002,2);camera(0,2);camera(9000,9);
