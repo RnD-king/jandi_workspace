@@ -2448,7 +2448,7 @@ private:
   std::deque<ReadyMotionSample> ready_motion_samples_;
   std::optional<vision_core::PerceptionFrameInput> ready_window_input_;
   cv::Mat ready_window_image_;
-  cv::Mat preview_image_;  // frozen RGB decision evidence for WAIT_NEXT
+  cv::Mat preview_image_;  // frozen RGB decision evidence for WAIT_COMMIT
   bool manual_action_active_{false};
   std::uint64_t manual_action_id_{0};
   std::optional<vision_core::LineGuide> cached_ready_guide_;
