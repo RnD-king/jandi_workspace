@@ -16,13 +16,13 @@
 ## 동작
 
 1. 실행 직후 1초간 관측한다. 카메라 변경이 필요하면 자동으로 CameraCommand를 발행하고 DONE 이후 새 관측을 수집한다.
-2. 화면에 다음 몸체 Action이 표시되면 `WAIT_NEXT`이다. 이 시점에서 RQT로 파라미터 변경 시 **저장된 동일 관측에 새 파라미터**를 적용해 표시만 갱신한다. FSM/Action ID/모터는 변하지 않는다.
+2. 화면에 다음 몸체 Action이 표시되면 `WAIT_NEXT`이다. 이 시점에만 RQT로 18개 튜닝 파라미터를 변경할 수 있다. **저장된 동일 관측에 새 파라미터**를 적용해 Action 및 디버그 수치를 재계산한다. 디버그 RGB 역시 Preview 당시 저장한 프레임을 표시하며 LINE 기준 중심은 실선으로 표시한다. FSM/Action ID/모터는 변하지 않는다.
 3. `ros2 service call /perception_tuning_node/next std_srvs/srv/Trigger "{}"`로 현재 표시된 Action을 확정·전송한다. ACK/DONE까지 NEXT는 거부한다.
 4. DONE 후 일반 물체 접근·미세 이동은 1초간 유효 관측을 평균해 다음 행동을 판단한다. 최초 객체 검출 진입 조건인 **최근 10프레임 중 7프레임**은 계속 유지한다. DONE 후 별도의 10/7 게이트를 반복하지 않으며, 관측 실패 시 기존 객체 복구/탐색 FSM으로 보낸다.
 5. LINE 11·12·13 보행은 40%-to-READY 보행 관측을 내부에 보관하지만, **다음 Action을 forward_walk에 큐잉하지 않는다**.
-6. 완료되고 카메라도 대기하지 않는 상태에서 `ros2 service call /perception_tuning_node/reset std_srvs/srv/Trigger "{}"`로 처음부터 시험한다. Action ID는 보존한다.
+6. 완료되고 카메라도 대기하지 않는 RUNNING/OBSERVING 상태에서 `ros2 service call /perception_tuning_node/reset std_srvs/srv/Trigger "{}"`로 처음부터 시험한다. RESET은 기존 CameraCommand(FORWARD)를 자동 송신하고 카메라 DONE 이후에만 새 1초 관측을 시작한다. Action ID는 보존한다. 카메라 전송을 끈 경우(카메라 시뮬레이션 제외) RESET은 거부한다.
 
-대기 중에 파라미터를 바꾸는 것은 가능하지만, 실제 몸체 Action이나 카메라 이동 중에는 거부한다. 현재 튜닝 값은 YAML 파일에 자동 저장되지 않는다.
+**WAIT_NEXT에서만** 18개 튜닝 파라미터 변경을 허용한다. 초기 관측, DONE 후 1초 관측, 몸체 Action/카메라 실행 및 RESET 카메라 복귀 중에는 거부한다. 현재 튜닝 값은 YAML 파일에 자동 저장되지 않는다. LINE READY 구간에서 이미 평균한 guide는 과거 기준 중심으로 계산된 값이므로, 기준 중심 보정은 가능한 한 초기 정지 관측에서 완료한다.
 
 ## RQT 튜닝 파라미터
 
