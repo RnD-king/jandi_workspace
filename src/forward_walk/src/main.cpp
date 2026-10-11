@@ -586,8 +586,8 @@ private:
                 return;
             }
         }
-        // READY는 종료 예정 시간에 가까워진 지원 LINE 동작에서 한 번만 보낸다.
-        // READY 뒤에는 다음 지원 LINE 명령 한 개를 검증·저장하고 미리 ACK할 수 있다.
+        // READY is an observation event for 11/12/13 in ANY mission.
+        // The next-action one-slot queue is still LINE -> LINE only.
         if (motion_in_progress_ && !action_transactions_.ready_sent &&
             p2p_player_->IsNearCompletion(ready_lead_sec_, std::chrono::steady_clock::now()) &&
             action_transactions_.MarkReady()) {
