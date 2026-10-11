@@ -427,6 +427,7 @@ public:
           preview_ready_ = false;
           preview_image_.release();
           preview_command_ = {};
+          cached_ready_guide_.reset();  // fresh PREVIEW supersedes old READY
           manual_observation_request_pending_ = true;
           BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
@@ -717,11 +718,12 @@ private:
       response.reason = "line_reference_u_px must be finite and in [0,640)";
       return response;
     }
-    if (run_state_ != RunState::kRunning || !preview_ready_ ||
+    if (run_state_ != RunState::kRunning ||
+        (!preview_ready_ && !manual_wait_preview_) ||
         manual_action_active_ || !outstanding_actions_.empty() ||
         !outstanding_cameras_.empty() || pending_camera_id_ != 0) {
       response.successful = false;
-      response.reason = "Tuning parameters can change only in WAIT_NEXT";
+      response.reason = "Tuning parameters may change in WAIT_PREVIEW/WAIT_COMMIT only";
       return response;
     }
     try {
@@ -747,15 +749,19 @@ private:
         if (trial_ready_guide && trial_ready_guide->valid)
           trial_ready_guide->offset += delta;
       }
-      const auto updated = trial_controller.PreviewPerception(trial_input);
-      // A parameter edit may legitimately produce HOLD/NONE. Keep WAIT_NEXT
-      // open for further edits, while NEXT itself rejects non-ACTION results.
+      // WAIT_PREVIEW has no frozen evidence; never accidentally advance a
+      // speculative FSM on a zero-dimension/default PerceptionFrameInput.
+      std::optional<vision_core::PerceptionMissionFrameResult> updated;
+      if (preview_ready_)
+        updated = trial_controller.PreviewPerception(trial_input);
       *mission_controller_ = std::move(trial_controller);
       tuning_config_ = candidate;
-      preview_input_ = std::move(trial_input);
+      if (preview_ready_) {
+        preview_input_ = std::move(trial_input);
+        preview_result_ = *updated;
+        preview_command_ = updated->mission.command;
+      }
       cached_ready_guide_ = std::move(trial_ready_guide);
-      preview_result_ = updated;
-      preview_command_ = updated.mission.command;
     } catch (const std::exception &e) {
       response.successful = false;
       response.reason = e.what();
