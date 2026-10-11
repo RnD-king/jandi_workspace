@@ -2152,7 +2152,7 @@ private:
           };
           char tune_buf[230];
           std::snprintf(tune_buf, sizeof(tune_buf),
-              "NEXT: %s (mission=%u)",
+              "COMMIT: %s (mission=%u)",
               preview_ready_ ? ActionName(preview_command_.action) : "--",
               static_cast<unsigned>(preview_ready_ ?
                   preview_command_.mission : mission_result.active_mission));
