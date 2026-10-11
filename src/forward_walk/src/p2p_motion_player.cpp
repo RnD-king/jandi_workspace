@@ -237,6 +237,23 @@ void P2PMotionPlayer::ApplyStartOptions(
     for (const auto& trailing_path : options.trailing_program_paths) {
         AppendProgram(trailing_path, motion_directory);
     }
+    // 회전 뒤 걷기 등 뒤에 붙인 모션까지 같은 선택적 목표를 적용한다.
+    // 옵션이 비어 있으면 기존 JSON 재생 동작을 그대로 유지한다.
+    for (const auto& override : options.position_overrides) {
+        if (std::find(Dxl::MotorIds().begin(), Dxl::MotorIds().end(), override.first) == Dxl::MotorIds().end() ||
+            override.second < 0 || override.second > 4095) {
+            throw std::runtime_error("invalid position override motor ID/tick");
+        }
+        for (auto& motion : motions_) {
+            for (auto& frame : motion.keyframes) {
+                auto position = frame.positions.find(override.first);
+                if (position == frame.positions.end()) {
+                    throw std::runtime_error("position override motor missing from keyframe");
+                }
+                position->second = override.second;
+            }
+        }
+    }
     if (options.duration_override_sec) {
         for (auto& motion : motions_) {
             for (auto& frame : motion.keyframes) {

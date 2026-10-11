@@ -119,16 +119,28 @@ ActionRequest BallController::FarAction() const {
 ActionRequest BallController::FineAction() const {
   if (!tracked_.visible) return {};
   const double u_error = tracked_.u_norm - config_.fine_target_u_norm;
-  if (u_error < -config_.fine_u_deadband)
-    return Locomotion(MissionAction::kLeftSideStep);
-  if (u_error > config_.fine_u_deadband)
-    return Locomotion(MissionAction::kRightSideStep);
+  const double ru = config_.fine_u_deadband > 0.0
+      ? std::max(0.0, std::abs(u_error) - config_.fine_u_deadband) /
+            config_.fine_u_deadband
+      : std::abs(u_error);
   const double v_error = tracked_.v_norm - config_.fine_target_v_norm;
+  const double rv = config_.fine_v_deadband > 0.0
+      ? std::max(0.0, std::abs(v_error) - config_.fine_v_deadband) /
+            config_.fine_v_deadband
+      : std::abs(v_error);
+  if (ru <= 0.0 && rv <= 0.0) return Mission(MissionAction::kPickBall);
+  // Act first on the axis farther outside its normalized pickup tolerance.
+  if (ru >= rv) {
+    if (u_error < -config_.fine_u_deadband)
+      return Locomotion(MissionAction::kLeftSideStep);
+    if (u_error > config_.fine_u_deadband)
+      return Locomotion(MissionAction::kRightSideStep);
+  }
   if (v_error < -config_.fine_v_deadband)
     return Locomotion(MissionAction::kStepForwardHalf);
   if (v_error > config_.fine_v_deadband)
     return Locomotion(MissionAction::kStepBack);
-  return Mission(MissionAction::kPickBall);
+  return {};
 }
 
 ActionRequest BallController::RecoveryAction() const {
@@ -142,7 +154,8 @@ ActionRequest BallController::RecoveryAction() const {
 BallResult BallController::Compute(
     const std::optional<ObjectTarget> &target, int image_width,
     int image_height, double now_sec, const CameraFeedback &camera,
-    const ActionExecutionFeedback &feedback) {
+    const ActionExecutionFeedback &feedback,
+    bool allow_new_body_actions) {
   if (mode_ == BallMode::kLineFollow && has_ball_) {
     BallResult result;
     result.has_ball = true;
@@ -237,7 +250,8 @@ BallResult BallController::Compute(
       return result;
     }
     result.action = FineAction();
-    if (result.action.action == MissionAction::kPickBall) {
+    if (allow_new_body_actions &&
+        result.action.action == MissionAction::kPickBall) {
       ++pickup_attempt_count_;
       result.pickup_attempt_count = pickup_attempt_count_;
       mode_ = BallMode::kPickupBall;

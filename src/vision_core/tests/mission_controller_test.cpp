@@ -4,6 +4,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 using namespace vision_core;
@@ -64,6 +65,12 @@ int main() {
   assert(r.command.action==MissionAction::kStepForwardFive);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
   assert(r.line_window_stats && r.line_window_stats->used_frames >= 2);
+  // Debug telemetry must report the SAME READY average used to select B.
+  const auto ready_decision_guide = controller.LastReadyLineGuide();
+  assert(ready_decision_guide && r.line_decision_guide);
+  assert(std::abs(r.line_decision_guide->offset - ready_decision_guide->offset) < 1e-9);
+  assert(std::abs(r.line_decision_guide->heading_rad -
+                  ready_decision_guide->heading_rad) < 1e-9);
 
   // ACK 전 정지 관측은 long-action 후반 accumulator에 포함하지 않는다.
   // ACK 뒤 관측은 모두 straight이므로 READY 예약도 straight여야 한다.
@@ -407,8 +414,8 @@ int main() {
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
   in.now_sec=.5; r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kFailed);
-  // GOAL camera DONE starts a fresh 1-second 10-frame / 7-hit observation.
-  // Pre-DONE observations, and early 7-hit streaks, cannot start a motion.
+  // GOAL camera DONE starts a fresh 1-second observation. Its final mean
+  // must also satisfy recent 10/7 object evidence without extending 1 s.
   auto camera_gate_cfg = c;
   camera_gate_cfg.enable_ball = camera_gate_cfg.enable_hurdle = false;
   camera_gate_cfg.enable_goal = true;
@@ -484,6 +491,113 @@ int main() {
   assert(r.command.command_type == CommandType::kAction);
   assert(r.command.action_id != 0 && r.command.action_id != approach_id);
 
+  // Manual NEXT: a 10/7-acquired BALL may switch camera automatically,
+  // but previewing PICK must not increment attempts or change the real FSM.
+  auto manual_config=c;
+  manual_config.enable_ball=true;
+  manual_config.ball.stable_window=manual_config.ball.stable_min_hits=1;
+  manual_config.ball.tilt_down_window=manual_config.ball.tilt_down_min_hits=1;
+  manual_config.ball.fine_settle_duration_sec=0;
+  manual_config.ball.upper_acquire_v_norm=1.0;
+  manual_config.post_motion_observation_sec=0;
+  MissionController manual(manual_config);
+  auto mi=Frame(0);
+  mi.allow_new_body_actions=false;
+  mi.ball_target=Ball(.5,.30);
+  auto mr=manual.Step(mi);
+  assert(mr.active_mission==MissionType::kBall);
+  assert(mr.command.action_id==0);
+  mi=Frame(.1); mi.allow_new_body_actions=false;
+  mi.ball_target=Ball(.5,.85);
+  mr=manual.Step(mi);
+  assert(mr.command.camera_request==CameraRequest::kDown);
+  mi=Frame(.2); mi.allow_new_body_actions=false;
+  mi.camera_feedback={CameraMode::kDown,true};
+  mi.ball_target=Ball(.5,.7);
+  mr=manual.Step(mi);
+  mi=Frame(.3); mi.allow_new_body_actions=false;
+  mi.camera_feedback={CameraMode::kDown,true};
+  mi.ball_target=Ball(.5,.7);
+  mr=manual.Step(mi);
+  assert(mr.ball.mode==BallMode::kFineAdjustForPickup);
+  assert(mr.ball.pickup_attempt_count==0);
+  assert(mr.command.action_id==0);
+  mi.allow_new_body_actions=true;
+  MissionController speculative_manual(manual);
+  const auto preview=speculative_manual.Step(mi);
+  assert(preview.command.action==MissionAction::kPickBall);
+  mi.allow_new_body_actions=false;
+  mr=manual.Step(mi);
+  assert(mr.ball.mode==BallMode::kFineAdjustForPickup);
+  assert(mr.ball.pickup_attempt_count==0);
+  mi.allow_new_body_actions=true;
+  mr=manual.Step(mi);
+  assert(mr.command.action==MissionAction::kPickBall);
+  assert(mr.ball.pickup_attempt_count==1);
+
+  // Separate copy-preview does not consume an ID or modify real LINE FSM.
+  MissionController line_manual(c);
+  PerceptionFrameInput line_frame;
+  line_frame.image_width=640; line_frame.image_height=480;
+  line_frame.intrinsics={600,600,320,240};
+  line_frame.command_transport_enabled=true;
+  for (int i=0;i<5;++i) {
+    PerceptionDetection d;
+    d.detection.class_id=c.line_detection.class_id;
+    d.detection.confidence=1.0;
+    d.detection.box={310.0,450.0-40.0*i,20.0,20.0};
+    line_frame.detections.push_back(d);
+  }
+  const auto ephemeral=line_manual.PreviewPerception(line_frame);
+  assert(ephemeral.mission.line_decision_guide);
+  assert(ephemeral.mission.line_decision_guide->valid);
+  assert(std::abs(ephemeral.mission.line_decision_guide->offset -
+                  ephemeral.mission.line_features.guide.offset) < 1e-9);
+  assert(ephemeral.mission.command.action_id==1);
+  assert(ephemeral.mission.command.action==MissionAction::kStepForwardFive);
+  auto ref_adjust=c;
+  ref_adjust.line_features.image_center_u=250.0;
+  assert(line_manual.UpdateTuning(ref_adjust));
+  const auto shifted=line_manual.PreviewPerception(line_frame);
+  assert(shifted.mission.line_decision_guide);
+  assert(shifted.mission.line_decision_guide->offset >
+         ephemeral.mission.line_decision_guide->offset + 0.10);
+  assert(std::abs(shifted.mission.line_decision_guide->offset -
+                  shifted.mission.line_features.guide.offset) < 1e-9);
+  assert(shifted.mission.command.action==MissionAction::kStepForwardRight);
+  const auto issued=line_manual.StepPerception(line_frame);
+  assert(issued.mission.command.action_id==1);
+  assert(issued.mission.command.action==MissionAction::kStepForwardRight);
+
+  // A 1s post-camera gate must RELEASE even with fewer than seven
+  // detections. The object recovery/search FSM, not the observation gate,
+  // decides what to do with missing observations.
+  MissionController sparse_gate(camera_gate_cfg);
+  for (int i=0;i<7;++i) {
+    in=Frame(.1*i);
+    in.allow_new_line_action=false;
+    r=sparse_gate.Step(in);
+  }
+  in=Frame(1.0); in.camera_feedback={CameraMode::kTransition,false};
+  r=sparse_gate.Step(in);
+  in=Frame(1.1); in.camera_feedback={CameraMode::kGoal,true};
+  r=sparse_gate.Step(in);
+  for (int i=0;i<9;++i) {
+    in=Frame(1.2+.1*i);
+    in.camera_feedback={CameraMode::kGoal,true};
+    // Only one valid frame: previously this would block indefinitely.
+    if (i==7) in.backboard_target=Ball(.8,.3);
+    r=sparse_gate.Step(in);
+    assert(r.post_motion_observing);
+  }
+  in=Frame(2.1); in.camera_feedback={CameraMode::kGoal,true};
+  r=sparse_gate.Step(in);
+  assert(!r.post_motion_observing);
+  assert(r.active_mission==MissionType::kGoal);
+  // One accidental detection near the end cannot become a tracked mean.
+  assert(!r.goal.tracked.visible);
+  assert(r.command.action == MissionAction::kNone);
+
   // HURDLE initial stable acquisition is now recent 10 frames / 7 hits.
   const auto defaults = LoadDefaultAlgorithmConfig();
   assert(defaults.hurdle.stable_window == 10);
@@ -491,26 +605,69 @@ int main() {
   assert(defaults.post_motion_observation_sec == 1.0);
   assert(defaults.line_p2p.failure_observation_sec == 2.0);
   assert(defaults.line_p2p.recovery_observation_sec == 1.0);
+  // PREVIEW honors the original LINE failure observation duration (2 s)
+  // rather than silently truncating it to the normal stationary 1 s.
+  MissionController manual_recovery(c);
+  auto recovery_frame = Frame(0.0);
+  recovery_frame.line_centers.clear();
+  recovery_frame.manual_observation_control = true;
+  recovery_frame.allow_new_commands = false;
+  (void)manual_recovery.Step(recovery_frame);
+  assert(manual_recovery.ManualPreviewDurationSec() >=
+         c.line_p2p.failure_observation_sec);
+  // Manual tuning: camera/DONE must not spontaneously open a 1s gate.
+  // An explicit PREVIEW starts that gate and only the expiry releases it.
+  MissionController explicitly_previewed(c);
+  auto manual_input = Frame(0.0);
+  manual_input.manual_observation_control = true;
+  manual_input.allow_new_commands = false;
+  manual_input.allow_new_body_actions = false;
+  manual_input.camera_feedback = {CameraMode::kTransition, false};
+  auto manual_result = explicitly_previewed.Step(manual_input);
+  assert(!manual_result.post_motion_observing);
+  manual_input = Frame(0.1);
+  manual_input.manual_observation_control = true;
+  manual_input.allow_new_commands = false;
+  manual_input.allow_new_body_actions = false;
+  manual_input.camera_feedback = {CameraMode::kDown, true};
+  manual_result = explicitly_previewed.Step(manual_input);
+  assert(!manual_result.post_motion_observing);
+  manual_input = Frame(0.2);
+  manual_input.manual_observation_control = true;
+  manual_input.begin_manual_observation = true;
+  manual_input.allow_new_commands = false;
+  manual_input.allow_new_body_actions = false;
+  manual_input.camera_feedback = {CameraMode::kDown, true};
+  manual_result = explicitly_previewed.Step(manual_input);
+  assert(manual_result.post_motion_observing);
+  manual_input.begin_manual_observation = false;
+  manual_input.now_sec = 0.7;
+  manual_result = explicitly_previewed.Step(manual_input);
+  assert(manual_result.post_motion_observing);
+  manual_input.now_sec = 1.2;
+  manual_result = explicitly_previewed.Step(manual_input);
+  assert(!manual_result.post_motion_observing);
+
   // Global PAUSE gate must hold new LINE requests, then release with fresh
   // evidence. A RESET in the same executor session preserves action IDs.
   MissionController pausable(c);
-  auto frozen=Frame(0.0);
-  frozen.allow_new_commands=false;
-  auto paused_result=pausable.Step(frozen);
+  auto paused_frame=Frame(0.0);
+  paused_frame.allow_new_commands=false;
+  auto paused_result=pausable.Step(paused_frame);
   assert(paused_result.command.action_id==0);
   assert(paused_result.command.action==MissionAction::kNone);
-  frozen=Frame(.1);
-  frozen.allow_new_commands=true;
-  paused_result=pausable.Step(frozen);
+  paused_frame=Frame(.1);
+  paused_frame.allow_new_commands=true;
+  paused_result=pausable.Step(paused_frame);
   assert(paused_result.command.action_id==1);
   pausable.ClearObservationEvidence();
   pausable.Reset(true);
-  frozen=Frame(.2);
-  paused_result=pausable.Step(frozen);
+  paused_frame=Frame(.2);
+  paused_result=pausable.Step(paused_frame);
   assert(paused_result.command.action_id==2);
   pausable.Reset();
-  frozen=Frame(.3);
-  paused_result=pausable.Step(frozen);
+  paused_frame=Frame(.3);
+  paused_result=pausable.Step(paused_frame);
   assert(paused_result.command.action_id==1);
   return 0;
 }

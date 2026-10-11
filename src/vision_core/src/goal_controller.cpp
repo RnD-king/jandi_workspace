@@ -239,7 +239,8 @@ GoalResult GoalController::Compute(
     const std::optional<ObjectTarget> &, const std::optional<ObjectTarget> &backboard,
     const GoalPoseObservation &pose, int image_width, int image_height,
     double now_sec, bool line_reference_valid, const CameraFeedback &camera,
-    const ActionExecutionFeedback &feedback) {
+    const ActionExecutionFeedback &feedback,
+    bool allow_new_body_actions) {
   // Intermediate camera angles must not add object evidence to either tracker.
   const bool camera_switching = mode_ == GoalMode::kWaitCameraGoal ||
                                 mode_ == GoalMode::kReturnCameraToLine;
@@ -370,8 +371,11 @@ GoalResult GoalController::Compute(
     // Fine locomotion이 끝나고 settle된 뒤 현재 frame에서 새로 계산된 raw
     // RGB-D pose만 사용한다. motion 중 누적된 smoothing 이력은 다음 fine
     // action의 geometry에 섞지 않는다.
+    result.fine_decision_pose = pose;
+    result.fine_decision_pose_used = true;
     result.action = FineAction(pose);
-    if (result.action.action == MissionAction::kShoot) {
+    if (allow_new_body_actions &&
+        result.action.action == MissionAction::kShoot) {
       shoot_yaw_rad_ = ComputeShootYawRad(pose.x_m, pose.z_m, pose.yaw_rad);
       mode_ = GoalMode::kShoot;
       result.mode = mode_;

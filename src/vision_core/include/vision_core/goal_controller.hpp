@@ -83,6 +83,9 @@ struct GoalResult {
   GoalMode mode{GoalMode::kLineFollow};
   TrackedGoal tracked;
   TrackedGoalPose pose;
+  // Exact unsmoothed/averaged Pose supplied to FineAction for this step.
+  GoalPoseObservation fine_decision_pose;
+  bool fine_decision_pose_used{false};
   double shoot_yaw_rad{0.0};
   ActionRequest action;
 };
@@ -101,13 +104,16 @@ public:
                      int image_width, int image_height, double now_sec,
                      bool line_reference_valid,
                      const CameraFeedback &camera_feedback,
-                     const ActionExecutionFeedback &action_feedback);
+                     const ActionExecutionFeedback &action_feedback,
+                     bool allow_new_body_actions = true);
   static const char *ModeName(GoalMode mode);
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
   void ObserveOnly(const std::optional<ObjectTarget> &target,
                    const GoalPoseObservation &pose, int width, int height);
+  void UseNextObservationAsMean() { has_smoothed_ = false; has_pose_smoothed_ = false; }
+  void UpdateTuning(const GoalConfig &config) { config_ = config; }
   void Reset();
 
 private:

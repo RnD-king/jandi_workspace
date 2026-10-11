@@ -45,7 +45,7 @@ void CheckRegisterWrite(dynamixel::PacketHandler* packet, int result, uint8_t er
 // }
 
 
-Dxl::Dxl()
+Dxl::Dxl(const std::string& device)
 {
     uint8_t dxl_error = 0;
     int dxl_comm_result = COMM_TX_FAIL;
@@ -55,11 +55,11 @@ Dxl::Dxl()
     // portHandler = dynamixel::PortHandler::getPortHandler(device_name);
     // packetHandler = dynamixel::PacketHandler::getPacketHandler(PROTOCOL_VERSION);
 
-    portHandler = dynamixel::PortHandler::getPortHandler(DEVICE_NAME);
+    portHandler = dynamixel::PortHandler::getPortHandler(device.c_str());
     packetHandler = dynamixel::PacketHandler::getPacketHandler(PROTOCOL_VERSION);
 
     if (!portHandler->openPort())
-        throw std::runtime_error("Failed to open Dynamixel port: " + std::string(DEVICE_NAME));
+        throw std::runtime_error("Failed to open Dynamixel port: " + device);
     else 
         std::cout << "[Info] Succeeded to open the port!" << std::endl;
 

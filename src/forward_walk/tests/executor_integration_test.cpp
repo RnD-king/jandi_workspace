@@ -39,6 +39,15 @@ void Check(bool value, const char* message) {
 int Count(const Events& events, uint64_t id, uint8_t status) {
     return std::count(events.begin(),events.end(),std::make_pair(id,status));
 }
+void WriteTripleMission(const fs::path& path, const std::string& filename) {
+    std::ofstream stream(path);
+    stream << "{\"motions\":[";
+    for (int i=0; i<3; ++i) {
+        if (i) stream << ',';
+        stream << "{\"filename\":\"" << filename << "\"}";
+    }
+    stream << "]}";
+}
 void WriteMotion(const fs::path& path, bool startup=false) {
     std::ofstream stream(path);
     stream << "{\"keyframes\":[";
@@ -59,13 +68,17 @@ void WriteMotion(const fs::path& path, bool startup=false) {
 int main() {
     const auto directory=fs::temp_directory_path()/("jandi_main_test_"+std::to_string(getpid()));
     fs::create_directories(directory/"motions");
+    fs::create_directories(directory/"missions");
     const auto startup=directory/"motions/보행_왼발만앞에.json";
     const auto left=directory/"motions/보행_좌회전전진_20도_최종_초기X.json";
     const auto right=directory/"motions/보행_우회전전진_20도_최종_초기X.json";
     WriteMotion(startup,true);WriteMotion(left);WriteMotion(right);
+    WriteTripleMission(directory/"missions/직진_좌회전_3번.json", left.filename().string());
+    WriteTripleMission(directory/"missions/직진_우회전_3번.json", right.filename().string());
     const std::vector<std::string> options={"executor_integration_test","--ros-args",
         "-p","p2p_asset_directory:="+directory.string(),
         "-p","startup_pose_duration_sec:=0.04",
+        // 실제 측정한 15번 기준 대칭 팔 목표를 기본 설정으로 검증한다.
         "-p","camera_move_duration_sec:=0.04",
         "-p","camera_settle_sec:=0.02"};
     std::vector<const char*> args;for(const auto& s:options)args.push_back(s.c_str());
@@ -107,14 +120,39 @@ int main() {
         for(std::size_t i=0;i+1<Dxl::packets.size();++i)
             Check(Dxl::packets[i].at(21)==2048&&Dxl::packets[i].at(22)==2048,"camera override began before startup completed");
         Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537,"startup FORWARD goal was not transmitted");
-        for(int id:Dxl::MotorIds())if(id!=21&&id!=22)
+        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"startup missed symmetric arm targets");
+        Check(Dxl::packets.front().at(15)>1379&&Dxl::packets.front().at(15)<2048&&
+              Dxl::packets.front().at(16)>2048&&Dxl::packets.front().at(16)<2765,
+              "startup arms jumped instead of using P2P interpolation");
+        for(int id:Dxl::MotorIds())if(id!=15&&id!=16&&id!=21&&id!=22)
             Check(Dxl::current.at(id)==2048,"startup FORWARD hold changed body");
         // A normal body JSON contains different head ticks; the automatic FORWARD hold wins.
         action(9001,11);
         pump([&]{return node->action_transactions_.completed.Contains(9001);});flush();
         Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537,"ordinary P2P JSON overwrote FORWARD head pose");
+        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"LINE walking missed arm pose override");
+        Check(Dxl::current.at(13)==2048,"LINE arm override changed ID 13");
         Check(cameras.empty(),"automatic FORWARD hold emitted a camera command status");
         std::cout<<"PASS real MainNode startup FORWARD transmission/hold and ordinary P2P override\n";
+
+        for(uint16_t code:{2,3,4,5,6,7,8,9,10,11,12,13,18,19}) {
+            Check(MainNode::UsesLineArmPose(1,code),"LINE locomotion missing arm eligibility");
+            for(uint8_t mission:{2,3,4})Check(!MainNode::UsesLineArmPose(mission,code),"mission locomotion got LINE arm pose");
+        }
+        for(uint16_t code:{1,14,15,16,17,20})
+            Check(!MainNode::UsesLineArmPose(1,code),"non-locomotion action got arm override");
+        for(uint8_t mission:{2,3,4}) {
+            const uint64_t id=9100+mission;
+            action(id,11,mission);
+            pump([&]{return node->action_transactions_.completed.Contains(id);});flush();
+            Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048,"BALL/GOAL/HURDLE walking did not restore JSON arm goals");
+            Check(Count(actions,id,Status::READY)==1,"non-LINE long walk must send READY once");
+            Check(!node->queued_action_,"non-LINE READY erroneously queued another action");
+        }
+        action(9200,11);pump([&]{return node->action_transactions_.completed.Contains(9200);});flush();
+        Check(Count(actions,9200,Status::READY)==1,"LINE READY missing after non-LINE walks");
+        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"return to LINE did not reapply arm pose");
+        std::cout<<"PASS LINE-only arm scope, mission JSON restoration and return to LINE\n";
 
         action(1001,11);action(1001,11);action(1002,12);action(0,11);
         camera(1001,3);camera(1001,3);camera(2002,2);camera(0,2);camera(9000,9);
@@ -141,6 +179,7 @@ int main() {
         Check(Count(cameras,2002,Status::ACK)==0&&Count(cameras,0,Status::ACK)==0&&
               Count(cameras,9000,Status::ACK)==0,"invalid/busy camera ACKed");
         Check(Dxl::current.at(21)==2054&&Dxl::current.at(22)==966,"persistent GOAL overwritten by body");
+        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"queued LINE program lost arm targets");
         action(1001,11);camera(1001,3);flush();
         Check(Count(actions,1001,Status::DONE)==2&&Count(cameras,1001,Status::DONE)==2,"old completed IDs restarted");
         std::cout<<"PASS real MainNode A/READY/queue/B lifecycle, duplicates, rejection, prepared-file persistence\n";

@@ -38,12 +38,27 @@ int main() {
         const auto left = assets / "motions/보행_좌회전전진_20도_최종_초기X.json";
         const auto right = assets / "motions/보행_우회전전진_20도_최종_초기X.json";
         const auto five = assets / "missions/연속걷기.json";
-        for (const auto& path : {left, right, five}) {
+        const auto left_three = assets / "missions/직진_좌회전_3번.json";
+        const auto right_three = assets / "missions/직진_우회전_3번.json";
+        for (const auto& path : {left, right, five, left_three, right_three}) {
             const auto program = player.PrepareProgram(path.string(), (assets / "motions").string(), {});
             Require(player.StartPrepared(program, InitialPose(), Clock::time_point{}), player.Error());
             player.Stop();
         }
-        pass("11/12/13 actual motion/mission preparation");
+        // Real mission manifests must expand to three of the same existing motion.
+        for (const auto& spec : {
+            std::make_pair(left_three, std::string("보행_좌회전전진_20도_최종_초기X.json")),
+            std::make_pair(right_three, std::string("보행_우회전전진_20도_최종_초기X.json"))
+        }) {
+            boost::property_tree::ptree mission;
+            boost::property_tree::read_json(spec.first.string(), mission);
+            const auto& motions = mission.get_child("motions");
+            Require(motions.size()==3, "three repeated turns required");
+            for (const auto& item : motions)
+                Require(item.second.get<std::string>("filename")==spec.second,
+                        "turn-forward mission has an incorrect motion reference");
+        }
+        pass("11/12/13 real motion paths and 3x turn-forward manifests");
 
         const auto fixture = temporary / "fixture.json";
         auto write_fixture = [&](double duration, double hold) {
@@ -114,6 +129,53 @@ int main() {
         Rejects([&] { player.PrepareProgram(fixture.string(), temporary.string(), options); });
         pass("invalid JSON, motor, timing, interpolation, PD, references, offsets rejection");
 
+        LineArmConfig arm;
+        arm.Validate();
+        Require(arm.enabled && arm.Targets().size()==2 && arm.Targets().count(13)==0,
+                "measured defaults must target only arms 15/16");
+        Require(arm.Targets().at(15)==1379 && arm.Targets().at(16)==2765,
+                "15-based measured symmetric targets");
+        Require(arm.Targets().at(15)-arm.reference_15 == arm.reference_16-arm.Targets().at(16),
+                "arm displacement must be symmetric about measured baselines");
+        arm.angle_deg = 45.0;
+        arm.Validate();
+        Require(arm.Targets().at(15)==1583 && arm.Targets().at(16)==2561, "45-degree arm tick conversion");
+        arm.direction_15 = -1; arm.direction_16 = 1;
+        Require(arm.Targets().at(15)==559 && arm.Targets().at(16)==3585, "opposite arm direction conversion");
+        arm.direction_15 = 0;
+        Rejects([&] { arm.Validate(); });
+        arm.direction_15 = 1; arm.reference_15 = 4000;
+        Rejects([&] { arm.Validate(); });
+
+        write_fixture(0.5, 0);
+        P2PMotionPlayer::StartOptions arm_options;
+        arm_options.repeat_count = 2;
+        arm_options.trailing_program_paths = {fixture.string()};
+        const auto arm_baseline = player.PrepareProgram(fixture.string(), temporary.string(), arm_options);
+        arm_options.position_overrides = {{15,1379},{16,2765}};
+        const auto arm_program = player.PrepareProgram(fixture.string(), temporary.string(), arm_options);
+        P2PMotionPlayer arm_player(nullptr), baseline_player(nullptr);
+        Require(arm_player.StartPrepared(arm_program, InitialPose(), t0), arm_player.Error());
+        Require(baseline_player.StartPrepared(arm_baseline, InitialPose(), t0), baseline_player.Error());
+        for (int step=0;step<100;++step) {
+            RawPositions arm_output, original_output;
+            const auto at=t0+step*20ms;
+            const auto arm_result=arm_player.Update(&arm_output,at);
+            Require(arm_result==baseline_player.Update(&original_output,at), "arm override changed fixture replay schedule");
+            if (step==0) Require(arm_output.at(15)<2048 && arm_output.at(15)>1379, "arm jumped to target without P2P interpolation");
+            for (const auto& target:original_output) {
+                if (target.first!=15 && target.first!=16)
+                    Require(arm_output.at(target.first)==target.second,"arm override changed another motor");
+            }
+            if (step==24 || step==49 || step==74)
+                Require(arm_output.at(15)==1379 && arm_output.at(16)==2765,"arm override missed repeated/trailing motion");
+        }
+        arm_options.position_overrides={{99,2048}};
+        Rejects([&] { player.PrepareProgram(fixture.string(), temporary.string(), arm_options); });
+        arm_options.position_overrides={{15,4096}};
+        Rejects([&] { player.PrepareProgram(fixture.string(), temporary.string(), arm_options); });
+        pass("arm direction/range validation, smooth selective overrides, repeats/trailing, other motors preserved");
+
         Require(player.StartPrepared(valid, InitialPose(), t0), player.Error());
         for (int step = 0; step < 14; ++step) player.Update(&actual, t0 + step * 20ms);
         Require(player.IsNearCompletion(0.25, t0 + 260ms), "READY not based on remaining steps");
@@ -154,6 +216,21 @@ int main() {
         for (int action : {10,18,19,20}) {
             actions.Activate(200,1,action);
             Require(!actions.MarkReady(), "READY on unsupported action");
+        }
+        // Keep the Jandi cross-mission READY contract distinct from the LINE queue.
+        for (uint8_t mission : {uint8_t{1}, uint8_t{2}, uint8_t{3}, uint8_t{4}}) {
+            for (uint16_t action : {uint16_t{11}, uint16_t{12}, uint16_t{13}}) {
+                actions.Activate(300 + mission*10 + action, mission, action);
+                Require(actions.MarkReady() && !actions.MarkReady(),
+                        "READY missing or duplicated for long walk");
+                if (mission != 1)
+                    Require(actions.Evaluate(900, 1, 13)==Admission::Reject,
+                            "non-LINE READY erroneously allowed queue");
+                else
+                    Require(actions.Evaluate(900, 1, 13)==Admission::Queue,
+                            "LINE-to-LINE queue unexpectedly blocked");
+                actions.CompleteActive();
+            }
         }
         CompletedHistory history;
         for (uint64_t id=1; id<=33; ++id) history.Remember(id);

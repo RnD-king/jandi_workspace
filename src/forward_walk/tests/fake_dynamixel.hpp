@@ -7,11 +7,13 @@
 #include <chrono>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <vector>
 #define TORQUE_TO_VALUE_MX_106 183.7155
 class Dxl {
 public:
+    explicit Dxl(const std::string& = "/dev/jandi_dxl") {}
     using Positions = std::unordered_map<int,int32_t>;
     inline static constexpr std::array<uint8_t,23> ids = {
         10,8,6,4,2,0,11,9,7,5,3,1,12,13,14,15,16,17,18,19,20,21,22};

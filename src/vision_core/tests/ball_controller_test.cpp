@@ -59,8 +59,11 @@ int main() {
   CameraFeedback down{CameraMode::kDown, true};
   r = controller.Compute(Ball(0.4, 0.6), 100, 100, 0.3, down, {});
   r = controller.Compute(Ball(0.4, 0.6), 100, 100, 0.4, down, {});
-  // u와 v가 모두 틀려도 lateral을 먼저 보정한다.
+  // With identical normalized overruns, lateral is the deterministic tie-break.
   assert(r.action.action == MissionAction::kLeftSideStep);
+  // The farther OUTSIDE-axis wins; v dominates even if u is also outside.
+  r = controller.Compute(Ball(0.62, 0.40), 100, 100, 0.45, down, {});
+  assert(r.action.action == MissionAction::kStepForwardHalf);
   r = controller.Compute(Ball(0.5, 0.6), 100, 100, 0.5, down, {});
   assert(r.action.action == MissionAction::kStepForwardHalf);
   r = controller.Compute(Ball(0.5, 0.8), 100, 100, 0.6, down, {});

@@ -108,7 +108,8 @@ ActionRequest HurdleController::RecoveryAction() const {
 HurdleResult HurdleController::Compute(
     const std::optional<ObjectTarget> &target, int image_width,
     int image_height, double now_sec, const CameraFeedback &camera,
-    const ActionExecutionFeedback &feedback) {
+    const ActionExecutionFeedback &feedback,
+    bool /*allow_new_body_actions*/) {
   if (mode_ == HurdleMode::kLineFollow && now_sec < ignore_until_sec_)
     return {};
   // No tracking/near-evidence from the moving camera view.

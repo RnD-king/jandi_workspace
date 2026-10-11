@@ -1,0 +1,2 @@
+# Jandi motor adapter: keep the same device name on PC and Jetson.
+SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014", ATTRS{serial}=="FT9BTGLH", SYMLINK+="jandi_dxl", GROUP="dialout", MODE="0660"
