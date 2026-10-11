@@ -864,11 +864,13 @@ private:
     double sx=0, sy=0, sw=0, sh=0, confidence=0;
     double center_depth=0, left_depth=0, right_depth=0;
     int hits=0, center_hits=0, left_hits=0, right_hits=0;
+    double last_seen_sec = -1.0;
     int class_id=0;
     for (const auto *sample : window) {
       const auto &obj = target_of(*sample);
       if (!obj) continue;
       ++hits;
+      last_seen_sec = sample->now_sec;
       class_id = obj->class_id;
       sx += obj->box_px.x; sy += obj->box_px.y;
       sw += obj->box_px.width; sh += obj->box_px.height;
@@ -890,7 +892,8 @@ private:
         }
       }
     }
-    if (hits < 7) return std::nullopt;
+    if (hits < 7 || last_seen_sec < 0.0 ||
+        ready_sec - last_seen_sec > 0.30) return std::nullopt;
     if (mission == vision_core::MissionType::kGoal && center_hits < 7)
       return std::nullopt;
     vision_core::PerceptionDetection mean;
@@ -1783,7 +1786,10 @@ private:
         perception_input.delivery_feedback.action_id ==
             manual_committed_command_.action_id &&
         IsReadyWalk(manual_committed_command_.action);
-    const bool camera_done_edge = manual_camera_done_pending_;
+    // If camera DONE overlaps a still-running 11/12/13, keep its READY
+    // samples intact and process the final camera phase after body DONE.
+    const bool camera_done_edge = manual_camera_done_pending_ &&
+        !manual_action_active_ && outstanding_actions_.empty();
     const bool completed_with_ready_window =
         committed_done && IsReadyWalk(manual_committed_command_.action) &&
         ready_window_input_.has_value();
