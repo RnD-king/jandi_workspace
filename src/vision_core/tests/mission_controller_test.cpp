@@ -4,6 +4,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 using namespace vision_core;
