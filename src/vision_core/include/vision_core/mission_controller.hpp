@@ -173,6 +173,9 @@ public:
   // Update the 18 user-tunable decision parameters, retaining mission state.
   bool UpdateTuning(const MissionControllerConfig &candidate);
   MissionType ActiveMission() const { return active_mission_; }
+  // Explicit manual PREVIEW honors the LINE FSM's 2s failure / 1s recovery
+  // observation instead of adding an unrelated one-second shortcut.
+  double ManualPreviewDurationSec() const;
   bool HasBall() const { return has_ball_; }
   // Observed 40%-to-READY LINE guide, for manual one-slot preview only.
   std::optional<LineGuide> LastReadyLineGuide() const { return last_ready_line_guide_; }
