@@ -1865,8 +1865,11 @@ private:
                   decision_line.offset +
                 tuning_config_.line_p2p.heading_gain * decision_line.heading_rad;
             const double db = tuning_config_.line_p2p.steering_deadband;
-            const char *direction = steering < -db ? "LEFT" :
-                (steering > db ? "RIGHT" : "STRAIGHT");
+            // Recovery actions are FSM-controlled and must not be mislabeled
+            // as direct LEFT/STRAIGHT/RIGHT decisions from this guide.
+            const char *direction = mission_result.line_in_recovery
+                ? "RECOVERY_FSM" : (steering < -db ? "LEFT" :
+                  (steering > db ? "RIGHT" : "STRAIGHT"));
             std::snprintf(buf, sizeof(buf),
                           "LINE DECISION: O=%+.3f H=%+.3f score=%+.3f dir=%s",
                           decision_line.offset, decision_line.heading_rad,
