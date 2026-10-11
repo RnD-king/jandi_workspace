@@ -1491,7 +1491,7 @@ private:
 
     draw_target(ball_target, ball_confirmed, "BALL",
                 cv::Scalar(0, 165, 255));
-    draw_target(backboard_target, backboard_confirmed, "BACKBOARD APPROACH",
+    draw_target(backboard_target, backboard_confirmed, "BACKBOARD",
                 cv::Scalar(255, 128, 0));
     draw_target(hurdle_target, hurdle_confirmed, "HURDLE",
                 cv::Scalar(255, 0, 255));
@@ -2374,6 +2374,17 @@ private:
                           ball_cmd.tracked.visible ? 1 : 0);
           }
           draw_state(buf, cv::Scalar(0, 165, 255));
+          if (selected_ball &&
+              ball_cmd.mode == vision_core::BallMode::kApproachBall &&
+              ball_target && vis.rows > 1) {
+            // The DOWN-camera gate compares RAW detection v (not EMA v).
+            const double raw_gate_v =
+                ball_target->center_px.v / (vis.rows - 1);
+            std::snprintf(buf, sizeof(buf),
+                "BALL DOWN gate: raw_v=%.3f threshold=%.3f",
+                raw_gate_v, tuning_config_.ball.tilt_down_v_norm);
+            draw_state(buf, cv::Scalar(0, 165, 255));
+          }
           if (ball_confirmed) {
             DrawTargetSummary(state_panel, "BALL BBOX", ball_target, state_y,
                               cv::Scalar(0, 165, 255));
@@ -2468,6 +2479,16 @@ private:
                           hurdle_cmd.tracked.visible ? 1 : 0);
           }
           draw_state(buf, cv::Scalar(255, 0, 255));
+          if (selected_hurdle &&
+              hurdle_cmd.mode == vision_core::HurdleMode::kApproach &&
+              hurdle_target && vis.rows > 1) {
+            const double raw_gate_v =
+                hurdle_target->center_px.v / (vis.rows - 1);
+            std::snprintf(buf, sizeof(buf),
+                "HURDLE DOWN gate: raw_v=%.3f threshold=%.3f",
+                raw_gate_v, tuning_config_.hurdle.tilt_trigger_v_norm);
+            draw_state(buf, cv::Scalar(255, 0, 255));
+          }
           if (hurdle_confirmed) {
             DrawTargetSummary(state_panel, "HURDLE BBOX", hurdle_target,
                               state_y, cv::Scalar(255, 0, 255));
