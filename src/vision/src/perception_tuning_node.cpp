@@ -1739,6 +1739,12 @@ private:
       perception_input.advance_line_fsm = false;
       perception_input.allow_new_mission_entry = false;
     }
+    // The manual core's observation gate starts with its FIRST processed
+    // RGB frame, not at the ROS service arrival. Align the outer window to
+    // that same frame or it could freeze the core at 0.93s of a 1s gate.
+    if (run_state_ == RunState::kObserving &&
+        manual_observation_request_pending_)
+      observation_start_sec_ = frame_now_sec;
     const bool finishing_observation =
         run_state_ == RunState::kObserving &&
         frame_now_sec - observation_start_sec_ >= 1.0;
