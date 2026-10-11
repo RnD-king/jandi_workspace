@@ -431,6 +431,8 @@ public:
           cached_ready_guide_.reset();  // fresh PREVIEW supersedes old READY
           manual_observation_request_pending_ = true;
           manual_observation_session_ = true;
+          observation_required_sec_ =
+              std::max(1.0, mission_controller_->ManualPreviewDurationSec());
           BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
           response->message = "PREVIEW: collecting fresh 1s observation";
