@@ -161,6 +161,8 @@ ControlCommand ControlCommandCoordinator::Compute(
   return BeginAction(command, request);
 }
 
+void ControlCommandCoordinator::Reset() { Reset(false); }
+
 void ControlCommandCoordinator::Reset(bool preserve_action_ids) {
   if (!preserve_action_ids)
     next_action_id_ = config_.first_action_id == 0 ? 1 : config_.first_action_id;

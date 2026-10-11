@@ -26,7 +26,8 @@ public:
                          CameraRequest camera_request,
                          const CommandDeliveryFeedback &feedback,
                          double now_sec);
-  void Reset(bool preserve_action_ids = false);
+  void Reset(); // Original symbol retained for already-built clients.
+  void Reset(bool preserve_action_ids);
 
 private:
   ControlCommand BeginAction(ControlCommand command,

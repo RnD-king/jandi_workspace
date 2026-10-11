@@ -162,7 +162,8 @@ public:
   bool UpdateLineP2pTuning(const LineP2pConfig &line_p2p);
   // Discard stale line/object evidence without resetting mission progress.
   void ClearObservationEvidence();
-  void Reset(bool preserve_action_ids = false);
+  void Reset(); // Retain the original public ABI for existing clients.
+  void Reset(bool preserve_action_ids);
 
 private:
   enum class LineState {

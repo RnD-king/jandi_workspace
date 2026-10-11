@@ -836,6 +836,8 @@ void MissionController::ClearObservationEvidence() {
   // Keep deferred DONE and the mission phase intact for RESUME.
 }
 
+void MissionController::Reset() { Reset(false); }
+
 void MissionController::Reset(bool preserve_action_ids) {
   active_mission_ = MissionType::kLine;
   has_ball_ = config_.initial_has_ball;
