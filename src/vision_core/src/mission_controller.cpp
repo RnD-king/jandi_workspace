@@ -406,12 +406,19 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
        input.camera_feedback.actual_mode == CameraMode::kGoal);
   previous_camera_settled_ = input.camera_feedback.settled;
   previous_camera_mode_ = input.camera_feedback.actual_mode;
-  if (!decision_observation_active_ &&
-      config_.post_motion_observation_sec > 0.0 && camera_settle_edge)
-    BeginDecisionObservation(input.now_sec, active_mission_, true, {});
-  if (!decision_observation_active_ && ShouldDeferDone(input.delivery_feedback))
-    BeginDecisionObservation(input.now_sec, active_mission_, false,
-                             input.delivery_feedback);
+  if (input.manual_observation_control) {
+    // DONE is always acknowledged by the coordinator immediately. Only a
+    // deliberate PREVIEW may start the next one-second stationary window.
+    if (input.begin_manual_observation)
+      BeginDecisionObservation(input.now_sec, active_mission_, false, {});
+  } else {
+    if (!decision_observation_active_ &&
+        config_.post_motion_observation_sec > 0.0 && camera_settle_edge)
+      BeginDecisionObservation(input.now_sec, active_mission_, true, {});
+    if (!decision_observation_active_ && ShouldDeferDone(input.delivery_feedback))
+      BeginDecisionObservation(input.now_sec, active_mission_, false,
+                               input.delivery_feedback);
+  }
   // A deferred DONE remains pending at the coordinator while new, post-DONE
   // frames are collected. This makes the next action impossible before 1 s.
   bool observation_hold = decision_observation_active_;
@@ -910,6 +917,8 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   prepared.allow_new_body_actions = input.allow_new_body_actions;
   prepared.allow_new_mission_entry = input.allow_new_mission_entry;
   prepared.advance_line_fsm = input.advance_line_fsm;
+  prepared.manual_observation_control = input.manual_observation_control;
+  prepared.begin_manual_observation = input.begin_manual_observation;
   prepared.line_decision_guide_override = input.line_decision_guide_override;
   // Line robot-reference is independent from the camera optical cx.
   std::optional<double> center = config_.line_features.image_center_u;
