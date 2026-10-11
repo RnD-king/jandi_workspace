@@ -1776,7 +1776,7 @@ private:
     perception_input.begin_manual_observation =
         manual_observation_request_pending_;
     perception_input.delivery_feedback = action_delivery_feedback_;
-    // The explicit request is consumed by the NEXT successful core step.
+    // The explicit observation trigger is cleared after the first real core step.
     // Manual LINE uses the same cached 40%-to-READY measurement that the
     // existing line_p2p_tuning_node saves; never queue B in forward_walk.
     if (cached_ready_guide_ && !manual_action_active_ &&
