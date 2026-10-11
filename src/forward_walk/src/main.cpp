@@ -44,8 +44,7 @@ public:
         // 3) PrepareProgram()으로 JSON 전체를 검증한 뒤 즉시 시작하거나 대기열에 저장한다.
         // 4) 명령 접수가 성공하면 같은 ID로 ACK(접수됨)를 Vision에 보낸다.
         // 5) MotionLoop()가 몸/카메라 목표 tick을 합쳐 20 ms 간격으로 한 패킷씩 전송한다.
-        // 6) 모든 미션의 11/12/13은 종료 직전에 READY(후반 관측 완료 신호)를 보낸다.
-        //    READY 자체는 다른 미션의 선큐잉 허용을 의미하지 않는다. Queue는 LINE->LINE 전용이다.
+        // 6) 모든 미션의 11/12/13에 READY를 전송한다. 선예약은 LINE→LINE에만 허용한다.
         // 7) 마지막 이동/유지가 끝나면 DONE(재생 완료)을 보내고 대기 동작을 이어 시작한다.
         // DONE은 재생 시간표 완료를 뜻하며, encoder로 실제 도착을 재확인한 결과는 아니다.
 
@@ -72,6 +71,16 @@ public:
         // 프로그램 시작 시 WALK_MODE의 마지막 자세로 이동하는 시간(초).
         startup_pose_duration_sec_ =
             declare_parameter<double>("startup_pose_duration_sec", 3.0);
+
+        // LINE 미세보행/걷기/회전에서만 15·16번 팔을 벌린다. 15번 측정 각도를 양쪽에 대칭 적용.
+        // 기준 tick과 바깥 부호는 실제 로봇 측정값이다(15:1071→1379, 16 기준:3073).
+        line_arm_config_.enabled = declare_parameter<bool>("line_arm_override_enabled", true);
+        line_arm_config_.angle_deg = declare_parameter<double>("line_arm_outward_angle_deg", 308.0 * 360.0 / 4096.0);
+        line_arm_config_.reference_15 = declare_parameter<int>("line_arm_reference_tick_15", 1071);
+        line_arm_config_.reference_16 = declare_parameter<int>("line_arm_reference_tick_16", 3073);
+        line_arm_config_.direction_15 = declare_parameter<int>("line_arm_outward_direction_15", 1);
+        line_arm_config_.direction_16 = declare_parameter<int>("line_arm_outward_direction_16", -1);
+        line_arm_config_.Validate();
 
         // READY를 보낼 종료 전 여유 시간(초). 실제 통신 지연을 예측하는 값은 아니다.
         ready_lead_sec_ = declare_parameter<double>("ready_lead_sec", 0.25);
@@ -102,7 +111,9 @@ public:
         // 필요 없다. Dxl과 JSON player만 생성하고 첫 ActionCommand를 기다린다.
         // USB latency_timer는 프로그램 안에서 sudo를 실행하지 않고 udev 규칙으로
         // 설정해야 한다(설정 방법은 README/실행 환경에서 별도로 관리).
-        dxl_ = std::make_shared<Dxl>();
+        // 측정 도구에서도 같은 main 시작 자세를 사용한다. 기본 udev 장치 이름은 그대로 유지한다.
+        const auto device = declare_parameter<std::string>("dynamixel_device", "/dev/jandi_dxl");
+        dxl_ = std::make_shared<Dxl>(device);
         p2p_player_ = std::make_unique<P2PMotionPlayer>(dxl_.get());
 
         OpenTorqueLogFile();
@@ -159,6 +170,10 @@ private:
         P2PMotionPlayer::StartOptions options;  // 시작 자세에만 적용할 재생 옵션
         options.final_keyframe_only = true;
         options.duration_override_sec = startup_pose_duration_sec_;
+        // 시작 자세도 LINE에서 사용할 대칭 팔 목표로 이동한다. 기존 P2P 보간을 유지한다.
+        if (line_arm_config_.enabled) {
+            options.position_overrides = line_arm_config_.Targets();
+        }
         if (!p2p_player_->Start(path.string(),
                                 (asset_root / "motions").string(), options)) {
             RCLCPP_FATAL(get_logger(),
@@ -221,11 +236,17 @@ private:
         case vision::msg::ActionCommand::STEP_FORWARD_ONE:
             return "motions/보행_1걸음_초기X.json";
 
+        // case vision::msg::ActionCommand::STEP_FORWARD_LEFT:
+        //     return "motions/보행_좌회전전진_20도_최종_초기X.json";
+
+        // case vision::msg::ActionCommand::STEP_FORWARD_RIGHT:
+        //     return "motions/보행_우회전전진_20도_최종_초기X.json";
+
         case vision::msg::ActionCommand::STEP_FORWARD_LEFT:
-            return "motions/보행_좌회전전진_20도_최종_초기X.json";
+            return "missions/직진_좌회전_3번.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_RIGHT:
-            return "motions/보행_우회전전진_20도_최종_초기X.json";
+            return "missions/직진_우회전_3번.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_FIVE:
             return "missions/연속걷기.json";
@@ -268,6 +289,32 @@ private:
     {
         return action == vision::msg::ActionCommand::TURN_LEFT_AND_STEP ||
                action == vision::msg::ActionCommand::TURN_RIGHT_AND_STEP;
+    }
+
+    // 같은 걷기 action이라도 BALL/GOAL/HURDLE 미션에서는 팔 JSON 자세를 그대로 사용한다.
+    static bool UsesLineArmPose(std::uint8_t mission, std::uint16_t action)
+    {
+        using Command = vision::msg::ActionCommand;
+        if (mission != Command::MISSION_LINE) return false;
+        switch (action) {
+        case Command::DEFAULT_POSE_MODE:
+        case Command::STEP_FORWARD_HALF:
+        case Command::STEP_BACK:
+        case Command::LEFT_SIDE_STEP:
+        case Command::RIGHT_SIDE_STEP:
+        case Command::TURN_LEFT:
+        case Command::TURN_RIGHT:
+        case Command::WALK_MODE:
+        case Command::STEP_FORWARD_ONE:
+        case Command::STEP_FORWARD_LEFT:
+        case Command::STEP_FORWARD_RIGHT:
+        case Command::STEP_FORWARD_FIVE:
+        case Command::TURN_LEFT_AND_STEP:
+        case Command::TURN_RIGHT_AND_STEP:
+            return true;
+        default:
+            return false;
+        }
     }
 
     // 요청 각도를 회전 JSON 반복 횟수로 반올림하고 0~최대 반복 횟수로 제한한다.
@@ -414,6 +461,11 @@ private:
                 start_options.repeat_count);
         }
         const std::filesystem::path path = asset_root / relative_path;  // 실제로 읽을 전체 경로
+        // 접수되는 현재 명령의 mission/action으로만 선택한다. 카메라처럼 전역 유지하지 않는다.
+        // 대기 명령도 이 옵션을 포함해 미리 검증·저장하므로 자동 시작 시 같은 팔 자세를 사용한다.
+        if (line_arm_config_.enabled && UsesLineArmPose(message->mission, message->action)) {
+            start_options.position_overrides = line_arm_config_.Targets();
+        }
         try {
             // program은 검증을 마친 모션 데이터다. 준비만 할 때는 현재 모션/모터를 바꾸지 않는다.
             auto program = p2p_player_->PrepareProgram(
@@ -587,8 +639,8 @@ private:
                 return;
             }
         }
-        // READY is an observation event for 11/12/13 in ANY mission.
-        // The next-action one-slot queue is still LINE -> LINE only.
+        // 11/12/13은 미션과 무관하게 READY(관측 종료 이정표)를 보낸다.
+        // READY 이후 한 슬롯 선예약은 LINE→LINE인 경우만 허용한다.
         if (motion_in_progress_ && !action_transactions_.ready_sent &&
             p2p_player_->IsNearCompletion(ready_lead_sec_, std::chrono::steady_clock::now()) &&
             action_transactions_.MarkReady()) {
@@ -681,6 +733,7 @@ private:
     std::chrono::steady_clock::time_point last_motion_tick_at_{}; // 직전 유효 콜백 시각: 지연 경고 계산용
     std::ofstream torque_log_stream_;                 // 전류/추정 토크 CSV 출력 스트림
     std::string asset_directory_;                     // motions/와 missions/가 들어 있는 기준 폴더
+    motion_executor::LineArmConfig line_arm_config_;   // LINE에서만 적용할 15·16번 팔 목표 설정
     double turn_step_deg_{15.0};                      // 회전 JSON 1회당 계획상 회전각(도)
     int max_turn_repetitions_{12};                     // 한 회전 요청의 최대 JSON 반복 횟수
     int waist_motor_id_{12};                          // SHOOT 각도 offset을 적용할 허리 모터 ID
