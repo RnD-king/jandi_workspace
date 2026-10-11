@@ -1421,30 +1421,22 @@ private:
         continue;
       }
 
-      const int cx = clipped.x + clipped.width / 2;
-      const int cy = clipped.y + clipped.height / 2;
-
+      // YOLO debug is detection evidence only: show boxes, not raw
+      // centers which could be mistaken for control-decision centers.
       cv::Scalar box_color(160, 160, 160);
-      cv::Scalar center_color(80, 80, 80);
       if (det.class_id == line_class_id_) {
         box_color = cv::Scalar(0, 255, 0);
-        center_color = cv::Scalar(0, 0, 255);
       } else if (det.class_id == ball_class_id_) {
         box_color = cv::Scalar(0, 165, 255);
-        center_color = cv::Scalar(255, 0, 0);
       } else if (det.class_id == goal_class_id_) {
         box_color = cv::Scalar(255, 255, 0);
-        center_color = cv::Scalar(0, 255, 255);
       } else if (det.class_id == backboard_class_id_) {
         box_color = cv::Scalar(255, 128, 0);
-        center_color = cv::Scalar(0, 128, 255);
       } else if (det.class_id == hurdle_class_id_) {
         box_color = cv::Scalar(255, 0, 255);
-        center_color = cv::Scalar(255, 255, 255);
       }
 
       cv::rectangle(vis, clipped, box_color, 2);
-      cv::circle(vis, cv::Point(cx, cy), 3, center_color, -1);
 
       char buf[40];
       std::snprintf(buf, sizeof(buf), "%s %.2f", ClassLabel(det.class_id), det.confidence);
@@ -2186,22 +2178,29 @@ private:
                             cv::FONT_HERSHEY_SIMPLEX, 0.47,
                             cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
               }
-            } else if (goal_cmd.tracked.visible) {
+            } else if (goal_cmd.tracked.visible &&
+                       !goal_cmd.fine_decision_pose_used) {
               draw_decision_center(goal_cmd.tracked.u_norm,
                                    goal_cmd.tracked.v_norm,
                                    "GOAL DECISION", cv::Scalar(0, 255, 255));
             }
           }
 
-          if (selected_hurdle && hurdle_cmd.tracked.visible)
-            draw_decision_center(hurdle_cmd.tracked.u_norm,
-                                 hurdle_cmd.tracked.v_norm,
-                                 "HURDLE TRACK", cv::Scalar(255, 0, 255));
+          // HURDLE acquire/tilt transitions compare the RAW box-center
+          // v with thresholds (not the EMA tracked v). Plot that actual
+          // gate input in approach; never label EMA as its decision center.
+          if (selected_hurdle &&
+              hurdle_cmd.mode == vision_core::HurdleMode::kApproach &&
+              hurdle_target && vis.cols > 1 && vis.rows > 1) {
+            const auto &raw_center = hurdle_target->center_px;
+            draw_decision_center(raw_center.u / (vis.cols - 1),
+                                 raw_center.v / (vis.rows - 1),
+                                 "HURDLE GATE V", cv::Scalar(255, 0, 255));
+          }
 
 
-          // Pickup region is defined by the exact four parameters used by
-          // FineAction. The dot is the SAME decision center (EMA during
-          // approach, post-DONE stationary mean during fine control).
+          // The pickup region uses the same target/deadband parameters
+          // as FineAction. Its single decision-center marker is above.
           if (selected_ball &&
               (ball_cmd.mode == vision_core::BallMode::kFineAdjustForPickup ||
                ball_cmd.mode == vision_core::BallMode::kPickupBall)) {
