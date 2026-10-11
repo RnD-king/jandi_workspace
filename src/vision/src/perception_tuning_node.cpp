@@ -437,9 +437,11 @@ public:
           }
           if (manual_action_active_ || !outstanding_actions_.empty() ||
               !outstanding_cameras_.empty() || pending_camera_id_ != 0 ||
-              !feedback_empty || (simulate_decision_ &&
+              !feedback_empty || action_delivery_feedback_.action_id != 0 ||
+              (simulate_decision_ &&
                   (simulated_current_action_.id != 0 ||
-                   simulated_queued_action_.id != 0))) {
+                   simulated_queued_action_.id != 0 ||
+                   !simulated_action_feedback_queue_.empty()))) {
             response->success = false;
             response->message = "RESET rejected: action/camera/feedback active";
             return;
@@ -1424,9 +1426,8 @@ private:
     if (run_state_ == RunState::kWaitStart ||
         run_state_ == RunState::kPaused ||
         run_state_ == RunState::kResettingCamera) {
-      // Disarmed/paused/reset-camera: visualization continues, but StepPerception
-      // does not run at all. This freezes ALL mission/controller states and
-      // prevents both ActionCommand and CameraCommand from being generated.
+      // Disarmed/paused/reset-camera: freeze MissionController. RESET may
+      // retransmit only its already assigned FORWARD CameraCommand ID.
       if (show_debug_view_ || show_yolo_debug_view_) {
         try {
           if (show_yolo_debug_view_) {
