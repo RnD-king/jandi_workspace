@@ -2432,6 +2432,7 @@ private:
   bool manual_camera_done_pending_{false};
   double manual_wait_preview_started_sec_{0.0};
   double manual_wait_accumulated_sec_{0.0};
+  double observation_required_sec_{1.0};
   vision_core::ControlCommand manual_committed_command_;
   struct ReadyMotionSample {
     double now_sec{};
