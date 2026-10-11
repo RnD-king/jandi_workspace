@@ -27,6 +27,10 @@
 
 RQT 18개 튜닝 파라미터는 **WAIT_PREVIEW / WAIT_COMMIT**에서만 변경할 수 있다. OBSERVING, 몸체 실행, 카메라 이동, RESET 중에는 거부한다. 변경값은 YAML에 자동 저장되지 않는다. READY 평균은 단일 카메라 시점의 데이터만 사용하며, 정상적인 보행 중 영상 흔들림을 수치적으로 제거한다는 뜻은 아니다.
 
+**수동 대기 시계:** WAIT_PREVIEW 및 WAIT_COMMIT 동안 사용자가 버튼을 누르지 않는 시간은 복구·정착·명령 코디네이터 등 `MissionController`의 논리 시간에서 모두 제외한다. PREVIEW 재요청, 정상 COMMIT, COMMIT 검증 실패 시 각각 올바르게 대기 시계를 전환한다. 반면 1초/2초 관측, 실제 모션, 카메라 이동, 정착 대기 시간은 정상적으로 흐른다.
+
+**디버그 영상의 해석:** WAIT_COMMIT의 `Vision Confirmed Debug` RGB는 고정된 **단일 프레임**이다. 11/12/13 READY에서는 READY 수신 당시 프레임 위에 **40%-to-READY 구간 평균 BBox**를 표시한다. PREVIEW로 수행한 1초 정지 관측은 최종 프레임에서 선택한 **원시 BBox**와, 별도로 `ball_cmd.tracked`의 **평균 기반 판단 중심점(빨간 점)**을 표시한다. 즉 둘의 위치가 약간 다를 수 있다. 별도 `YOLO Detection Debug`는 활성화 시 현재 영상의 검출을 보여준다.
+
 **forward_walk 호환성(담당자 전달 사항):** 기존 실행기는 LINE(미션 1)의 11·12·13에서만 READY를 발행했다. 이 작업 브랜치에서는 `include/motion_executor_state.hpp`에 `IsReadyWalkAction(action)`을 분리하고 **LINE/BALL/GOAL/HURDLE 어느 미션이든 Action 11·12·13일 때만 READY를 1회 발행**한다. `MarkReady()`는 `active_action`만 확인하며, `src/main.cpp`의 READY 시점은 기존 `IsNearCompletion(ready_lead_sec_)` 조건을 유지한다. **큐 예약(`ActionTransactions::Evaluate`)은 여전히 LINE→LINE의 11·12·13 조합에만 허용**된다. BALL/GOAL/HURDLE의 READY가 다른 Action 선큐잉 권한을 주는 것은 아니다. 수동 튜닝 노드는 어느 미션에서도 COMMIT 전 Action을 선큐잉하지 않는다. ACK/DONE, Action/Camera ID, 토픽, 메시지 필드, JSON 매핑은 변경하지 않았다. 해당 READY/큐 분리 규칙은 `tests/executor_logic_test.cpp`에 단언문을 추가했으나, 실제 빌드·테스트 통과 여부는 별도 확인해야 한다.
 
 ## RQT 튜닝 파라미터
