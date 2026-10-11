@@ -1735,7 +1735,8 @@ private:
               cv::circle(vis, decision_px, 5, cv::Scalar(0,0,255), cv::FILLED);
             }
           }
-          if (pose_confirmed) {
+          if (pose_confirmed && backboard_target) {
+            // Decision pose can outlive the current raw detection.
             const auto &box = backboard_target->box_px;
             const int left_x = static_cast<int>(std::round(box.x));
             const int right_x =
