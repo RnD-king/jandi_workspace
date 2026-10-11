@@ -414,8 +414,8 @@ int main() {
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
   in.now_sec=.5; r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kFailed);
-  // GOAL camera DONE starts a fresh 1-second observation. The 10/7 rule
-  // applies to initial acquisition, not as a second post-DONE gate.
+  // GOAL camera DONE starts a fresh 1-second observation. Its final mean
+  // must also satisfy recent 10/7 object evidence without extending 1 s.
   auto camera_gate_cfg = c;
   camera_gate_cfg.enable_ball = camera_gate_cfg.enable_hurdle = false;
   camera_gate_cfg.enable_goal = true;
@@ -594,6 +594,9 @@ int main() {
   r=sparse_gate.Step(in);
   assert(!r.post_motion_observing);
   assert(r.active_mission==MissionType::kGoal);
+  // One accidental detection near the end cannot become a tracked mean.
+  assert(!r.goal.tracked.visible);
+  assert(r.command.action == MissionAction::kNone);
 
   // HURDLE initial stable acquisition is now recent 10 frames / 7 hits.
   const auto defaults = LoadDefaultAlgorithmConfig();
