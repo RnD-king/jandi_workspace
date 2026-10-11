@@ -64,6 +64,9 @@ struct MissionFrameInput {
   // false이면 인식/FSM과 기존 feedback 처리는 계속하지만 새 LINE action만
   // 시작하지 않는다. 튜닝 도구의 one-shot gate용이다.
   bool allow_new_line_action{true};
+  // Block NEW actions/camera requests across all missions while processing
+  // already-issued ACK/READY/DONE normally.
+  bool allow_new_commands{true};
   // false이면 특징은 계산하되 LINE 판단/recovery 상태는 동결한다.
   // 기존 action의 coordinator ACK/READY/DONE 처리는 계속 수행한다.
   bool advance_line_fsm{true};
@@ -114,6 +117,7 @@ struct PerceptionFrameInput {
   ActionExecutionFeedback action_feedback;
   CommandDeliveryFeedback delivery_feedback;
   bool allow_new_line_action{true};
+  bool allow_new_commands{true};
   bool advance_line_fsm{true};
   std::optional<LineGuide> line_decision_guide_override;
 };
@@ -153,7 +157,9 @@ public:
   // 진행 중 action/짧은 동작 후 관측이 없을 때만 LINE direct selector
   // gain/deadband를 상태 손실 없이 교체한다.
   bool UpdateLineP2pTuning(const LineP2pConfig &line_p2p);
-  void Reset();
+  // Discard stale line/object evidence without resetting mission progress.
+  void ClearObservationEvidence();
+  void Reset(bool preserve_action_ids = false);
 
 private:
   enum class LineState {

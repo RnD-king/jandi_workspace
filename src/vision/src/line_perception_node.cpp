@@ -39,6 +39,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -347,29 +348,89 @@ public:
     camera_status_sub_ = create_subscription<vision::msg::CommandStatus>(
         camera_status_topic_, command_qos,
         std::bind(&LinePerceptionNode::OnCameraStatus, this, std::placeholders::_1));
+
     start_service_ = create_service<std_srvs::srv::Trigger>(
-        "start",
-        [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
-               std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-          if (started_) {
+        "start", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          if (run_state_ != RunState::kWaitStart) {
             response->success = false;
-            response->message = "mission already started";
+            response->message = "START requires WAIT_START (RESET when PAUSED)";
             return;
           }
-          // Disarmed YOLO operation never advances mission state, and start
-          // uses the next camera frame instead of the latest buffered frame.
-          mission_controller_->Reset();
+          mission_controller_->Reset(true);  // Preserve all issued action IDs.
+          BeginFreshObservation(get_clock()->now().seconds());
+          response->success = true;
+          response->message = "START accepted; observing for 1.0 s before motion";
+          RCLCPP_INFO(get_logger(), "[CONTROL] START -> OBSERVING");
+        });
+    pause_service_ = create_service<std_srvs::srv::Trigger>(
+        "pause", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          if (run_state_ != RunState::kRunning && run_state_ != RunState::kObserving) {
+            response->success = false;
+            response->message = "PAUSE requires RUNNING or OBSERVING";
+            return;
+          }
+          // The single-threaded ROS executor serializes this with publication:
+          // every command already sent is allowed to finish; no new ID is issued.
+          pause_requested_sec_ = get_clock()->now().seconds();
+          run_state_ = RunState::kPausing;
+          response->success = true;
+          response->message = "PAUSING; awaiting all dispatched action/camera DONE";
+          RCLCPP_INFO(get_logger(), "[CONTROL] PAUSING actions=%zu cameras=%zu",
+                      outstanding_actions_.size(), outstanding_cameras_.size());
+        });
+    resume_service_ = create_service<std_srvs::srv::Trigger>(
+        "resume", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          if (run_state_ != RunState::kPaused) {
+            response->success = false;
+            response->message = "RESUME requires PAUSED";
+            return;
+          }
+          const double now = get_clock()->now().seconds();
+          // Freeze the logical mission clock from PAUSE request (including
+          // the time spent waiting for the accepted motions), not just PAUSED.
+          paused_accumulated_sec_ += std::max(0.0, now - pause_requested_sec_);
+          mission_controller_->ClearObservationEvidence();
+          BeginFreshObservation(now);
+          response->success = true;
+          response->message = "RESUME accepted; discarded old evidence, observing for 1.0 s";
+          RCLCPP_INFO(get_logger(), "[CONTROL] RESUME -> OBSERVING");
+        });
+    reset_service_ = create_service<std_srvs::srv::Trigger>(
+        "reset", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          bool feedback_empty;
+          {
+            std::lock_guard<std::mutex> lock(action_feedback_mutex_);
+            feedback_empty = action_feedback_queue_.empty();
+          }
+          if (run_state_ != RunState::kPaused || !outstanding_actions_.empty() ||
+              !outstanding_cameras_.empty() || pending_camera_id_ != 0 ||
+              !feedback_empty || (simulate_decision_ &&
+                  (simulated_current_action_.id != 0 ||
+                   simulated_queued_action_.id != 0))) {
+            response->success = false;
+            response->message = "RESET requires PAUSED with no outstanding action/camera/feedback";
+            return;
+          }
+          mission_controller_->Reset(true); // Do not reuse IDs in executor history.
+          observation_accumulator_.Reset();
+          run_state_ = RunState::kWaitStart;
+          // Preserve next_camera_id_, actual camera_feedback_ and last
+          // completion timestamps. RESET never moves motors or camera.
           {
             std::lock_guard<std::mutex> lock(image_mutex_);
             latest_image_.reset();
           }
-          started_ = true;
           response->success = true;
-          response->message = "mission armed; waiting for fresh camera frames";
-          RCLCPP_INFO(get_logger(), "[CONTROL] START accepted");
+          response->message = "RESET complete; WAIT_START (Action IDs preserved)";
+          RCLCPP_INFO(get_logger(), "[CONTROL] RESET -> WAIT_START");
         });
 
-    RCLCPP_INFO(get_logger(), "vision node initialized (DISARMED). Call /line_perception_node/start to begin motions.");
+    RCLCPP_INFO(get_logger(),
+        "vision node DISARMED. Services: /line_perception_node/{start,pause,resume,reset}");
     RCLCPP_INFO(get_logger(), "  image_topic    : %s", image_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  depth_topic    : %s", depth_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  camera_info    : %s", camera_info_topic_.c_str());
@@ -485,6 +546,46 @@ public:
   }
 
 private:
+
+  enum class RunState { kWaitStart, kObserving, kRunning, kPausing, kPaused };
+  static const char *RunStateName(RunState s) {
+    switch (s) {
+    case RunState::kWaitStart: return "WAIT_START";
+    case RunState::kObserving: return "OBSERVING";
+    case RunState::kRunning: return "RUNNING";
+    case RunState::kPausing: return "PAUSING";
+    case RunState::kPaused: return "PAUSED";
+    }
+    return "UNKNOWN";
+  }
+
+  void BeginFreshObservation(double now) {
+    ++observation_cycle_id_;
+    if (observation_cycle_id_ == 0) ++observation_cycle_id_;
+    observation_start_sec_ = now;
+    observation_accumulator_.Begin(observation_cycle_id_, now);
+    {
+      std::lock_guard<std::mutex> lock(image_mutex_);
+      latest_image_.reset();
+    }
+    run_state_ = RunState::kObserving;
+  }
+
+  void CompletePauseAfterFeedback() {
+    if (run_state_ != RunState::kPausing ||
+        !outstanding_actions_.empty() || !outstanding_cameras_.empty() ||
+        pending_camera_id_ != 0 || (simulate_decision_ &&
+            (simulated_current_action_.id != 0 || simulated_queued_action_.id != 0)))
+      return;
+    {
+      std::lock_guard<std::mutex> lock(action_feedback_mutex_);
+      if (!action_feedback_queue_.empty()) return;
+    }
+    run_state_ = RunState::kPaused;
+    RCLCPP_INFO(get_logger(),
+                "[CONTROL] PAUSED: all published motions and camera commands completed");
+  }
+
   static constexpr const char *kDebugWindowName = "Vision Confirmed Debug";
   static constexpr const char *kStateWindowName = "Vision State Debug";
   static constexpr const char *kYoloDebugWindowName = "YOLO Detection Debug";
@@ -647,6 +748,7 @@ private:
     }
     simulated_action_feedback_queue_.push_back(
         {action_id, acknowledged, done, ready});
+    if (done) outstanding_actions_.erase(action_id);
   }
 
   void RememberCompletedSimulatedAction(
@@ -724,7 +826,8 @@ private:
   }
 
   void OnActionStatus(const vision::msg::CommandStatus::SharedPtr msg) {
-    if (msg->command_id == 0 || simulate_decision_) return;
+    if (msg->command_id == 0 || simulate_decision_ ||
+        outstanding_actions_.count(msg->command_id) == 0) return;
     vision_core::CommandDeliveryFeedback feedback;
     feedback.action_id = msg->command_id;
     if (msg->status == vision::msg::CommandStatus::ACK) {
@@ -739,6 +842,7 @@ private:
       last_action_done_event_sec_ = this->get_clock()->now().seconds();
       feedback.acknowledged = true;
       feedback.done = true;
+      outstanding_actions_.erase(msg->command_id);
     } else {
       return;
     }
@@ -767,6 +871,7 @@ private:
     case vision_core::CameraRequest::kNone:
       break;
     }
+    outstanding_cameras_.erase(msg->command_id);
     pending_camera_id_ = 0;
     pending_camera_request_ = vision_core::CameraRequest::kNone;
     camera_acknowledged_ = false;
@@ -774,6 +879,13 @@ private:
 
   void PublishActionCommand(const vision_core::ControlCommand &command) {
     if (command.command_type != vision_core::CommandType::kAction) return;
+    // During PAUSING, only retransmit IDs published before PAUSE. Never
+    // create or dispatch another motion (including queued LINE actions).
+    if (run_state_ == RunState::kPausing &&
+        outstanding_actions_.count(command.action_id) == 0) return;
+    if (run_state_ != RunState::kRunning &&
+        run_state_ != RunState::kPausing) return;
+    outstanding_actions_.insert(command.action_id);
     if (simulate_decision_) {
       if (simulated_current_action_.id == command.action_id) {
         // 같은 ID 재전송은 동작 시작 시각을 건드리지 않고 ACK만 재응답한다.
@@ -808,7 +920,10 @@ private:
       }
       return;
     }
-    if (!enable_command_transport_) return;
+    if (!enable_command_transport_) {
+      outstanding_actions_.erase(command.action_id);
+      return;
+    }
 
     vision::msg::ActionCommand message;
     message.action_id = command.action_id;
@@ -820,9 +935,9 @@ private:
   }
 
   void PublishCameraCommand(vision_core::CameraRequest request) {
-    if (request == vision_core::CameraRequest::kNone) {
-      return;
-    }
+    if (request == vision_core::CameraRequest::kNone) return;
+    // The node may only originate new camera requests in RUNNING.
+    if (run_state_ != RunState::kRunning) return;
     if (simulate_camera_feedback_) {
       switch (request) {
       case vision_core::CameraRequest::kDown:
@@ -845,6 +960,7 @@ private:
     // Keep retransmitting the original request until ACK, then wait for DONE.
     if (pending_camera_id_ == 0) {
       pending_camera_id_ = next_camera_id_++;
+      outstanding_cameras_.insert(pending_camera_id_);
       pending_camera_request_ = request;
       camera_acknowledged_ = false;
       camera_feedback_.settled = false;
@@ -858,6 +974,16 @@ private:
           static_cast<unsigned int>(pending_camera_request_));
     }
     if (camera_acknowledged_) return;
+    vision::msg::CameraCommand message;
+    message.command_id = pending_camera_id_;
+    message.request = static_cast<std::uint8_t>(pending_camera_request_);
+    camera_cmd_pub_->publish(message);
+  }
+
+  void ResendPendingCameraDuringPause() {
+    if (run_state_ != RunState::kPausing || pending_camera_id_ == 0 ||
+        camera_acknowledged_ || simulate_camera_feedback_ ||
+        !enable_command_transport_) return;
     vision::msg::CameraCommand message;
     message.command_id = pending_camera_id_;
     message.request = static_cast<std::uint8_t>(pending_camera_request_);
@@ -1068,6 +1194,10 @@ private:
 
   void ProcessImage(const sensor_msgs::msg::Image::SharedPtr &msg) {
     const auto t0 = std::chrono::steady_clock::now();
+    // A queued image from before START/RESUME must never qualify as fresh
+    // stationary evidence. Other states continue to accept processed images.
+    if (run_state_ == RunState::kObserving &&
+        StampSeconds(msg->header) <= observation_start_sec_) return;
     // Transport may deliver frames taken during a P2P/camera movement only
     // after DONE is received. Those frames are not post-DONE observations.
     const double completion_sec =
@@ -1148,8 +1278,9 @@ private:
       RCLCPP_ERROR(get_logger(), "[YOLO] Infer failed -> skip remaining stages");
       return;
     }
-    if (!started_) {
-      // Disarmed: inference and visualization continue, but StepPerception
+    if (run_state_ == RunState::kWaitStart ||
+        run_state_ == RunState::kPaused) {
+      // Disarmed/paused: inference and visualization continue, but StepPerception
       // does not run at all. This freezes ALL mission/controller states and
       // prevents both ActionCommand and CameraCommand from being generated.
       if (show_debug_view_ || show_yolo_debug_view_) {
@@ -1164,13 +1295,16 @@ private:
             DrawYoloDetections(camera_view, dets);
             cv::imshow(kDebugWindowName, camera_view);
             cv::Mat state_view(360, 1100, CV_8UC3, cv::Scalar(20, 20, 20));
-            cv::putText(state_view, "DISARMED / WAIT_START",
+            cv::putText(state_view, run_state_ == RunState::kPaused
+                ? "PAUSED / WAIT_RESUME_OR_RESET" : "DISARMED / WAIT_START",
                         cv::Point(28, 70), cv::FONT_HERSHEY_SIMPLEX,
                         1.1, cv::Scalar(0, 210, 255), 2);
             cv::putText(state_view, "YOLO active. No ROS motion commands will be sent.",
                         cv::Point(28, 125), cv::FONT_HERSHEY_SIMPLEX,
                         0.65, cv::Scalar(230, 230, 230), 1);
-            cv::putText(state_view, "Call /line_perception_node/start (std_srvs/Trigger).",
+            cv::putText(state_view, run_state_ == RunState::kPaused
+                ? "Call /line_perception_node/resume or /reset."
+                : "Call /line_perception_node/start (std_srvs/Trigger).",
                         cv::Point(28, 165), cv::FONT_HERSHEY_SIMPLEX,
                         0.64, cv::Scalar(230, 230, 230), 1);
             cv::imshow(kStateWindowName, state_view);
@@ -1209,7 +1343,28 @@ private:
     perception_input.pitch_rad = pitch;
     perception_input.image_width = bgr.cols;
     perception_input.image_height = bgr.rows;
-    perception_input.now_sec = frame_now_sec;
+    // Freeze mission timers during PAUSED, including camera/object
+    // observation deadlines, without changing ROS camera timestamps.
+    perception_input.now_sec =
+        (run_state_ == RunState::kPausing ? pause_requested_sec_ : frame_now_sec)
+        - paused_accumulated_sec_;
+    // While draining already-dispatched actions, freeze LINE recovery and
+    // cruise decisions. Feedback still reaches the command coordinator.
+    if (run_state_ == RunState::kPausing)
+      perception_input.advance_line_fsm = false;
+    const bool finishing_observation =
+        run_state_ == RunState::kObserving &&
+        frame_now_sec - observation_start_sec_ >= 1.0;
+    perception_input.allow_new_commands =
+        run_state_ == RunState::kRunning || finishing_observation;
+    if (finishing_observation) {
+      // Same 1s uniform O/H average and validity threshold as tuning.
+      // NONE (invalid average) falls into normal LINE failure observation.
+      const auto averaged =
+          observation_accumulator_.FinishAll(observation_cycle_id_);
+      perception_input.line_decision_guide_override =
+          averaged ? *averaged : vision_core::LineGuide{};
+    }
     perception_input.camera_feedback = camera_feedback_;
     perception_input.command_transport_enabled =
         enable_command_transport_ || simulate_decision_;
@@ -1221,6 +1376,17 @@ private:
     const auto t5 = std::chrono::steady_clock::now();
     const auto perception_result =
         mission_controller_->StepPerception(perception_input);
+    if (run_state_ == RunState::kObserving) {
+      if (finishing_observation) {
+        run_state_ = RunState::kRunning;
+        RCLCPP_INFO(get_logger(),
+                    "[CONTROL] 1s fresh observation complete -> RUNNING");
+      } else {
+        observation_accumulator_.Add(
+            observation_cycle_id_, frame_now_sec,
+            perception_result.mission.line_features.guide);
+      }
+    }
     const auto t6 = std::chrono::steady_clock::now();
     const auto dt_rec_us = std::chrono::duration_cast<std::chrono::microseconds>(t6 - t5).count();
 
@@ -1285,7 +1451,11 @@ private:
                           : "LINE_P2P"));
     PublishActionCommand(control_command);
     PublishCameraCommand(control_command.camera_request);
+    ResendPendingCameraDuringPause();
     action_delivery_feedback_ = {};
+    // PAUSED is entered only after every sent command has a matching DONE
+    // and the ROS feedback queue has been drained through MissionController.
+    CompletePauseAfterFeedback();
 
     const auto t8 = std::chrono::steady_clock::now();
     const auto dt_feat_us = std::chrono::duration_cast<std::chrono::microseconds>(t8 - t7).count();
@@ -1353,6 +1523,10 @@ private:
 
           cv::Mat state_panel(360, 1100, CV_8UC3,
                               cv::Scalar(20, 20, 20));
+          cv::putText(state_panel,
+              std::string("CONTROL: ") + RunStateName(run_state_),
+              cv::Point(760, 335), cv::FONT_HERSHEY_SIMPLEX, 0.55,
+              cv::Scalar(0, 200, 255), 1);
           int state_y = 24;
           const auto draw_state = [&state_panel, &state_y](
                                       const char *text,
@@ -1549,7 +1723,17 @@ private:
   rclcpp::Subscription<vision::msg::CommandStatus>::SharedPtr action_status_sub_;
   rclcpp::Subscription<vision::msg::CommandStatus>::SharedPtr camera_status_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_service_;
-  bool started_{false};
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr resume_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_service_;
+  RunState run_state_{RunState::kWaitStart};
+  std::unordered_set<std::uint64_t> outstanding_actions_;
+  std::unordered_set<std::uint64_t> outstanding_cameras_;
+  std::uint64_t observation_cycle_id_{0};
+  vision_core::LineGuideAccumulator observation_accumulator_;
+  double observation_start_sec_{0.0};
+  double pause_requested_sec_{0.0};
+  double paused_accumulated_sec_{0.0};
   rclcpp::TimerBase::SharedPtr hb_timer_;
   rclcpp::TimerBase::SharedPtr inference_timer_;
 

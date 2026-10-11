@@ -26,7 +26,7 @@ public:
                          CameraRequest camera_request,
                          const CommandDeliveryFeedback &feedback,
                          double now_sec);
-  void Reset();
+  void Reset(bool preserve_action_ids = false);
 
 private:
   ControlCommand BeginAction(ControlCommand command,

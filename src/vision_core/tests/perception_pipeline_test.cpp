@@ -118,6 +118,24 @@ void TestVerificationBypassesAssociationAndFineReacquires() {
   assert(rejected.mission.ball.action.action==MissionAction::kNone);
 }
 
+void TestGlobalPauseGateForBallAndCamera() {
+  BallPipeline pipeline;
+  pipeline.input.allow_new_commands=false;
+  // Even if the BALL FSM advances into APPROACH/WAIT_CAMERA, the global
+  // pause gate must forbid both NEW action IDs and camera requests.
+  for (int i=0;i<15;++i) {
+    const auto &result=pipeline.Tick({BallDetection(.50,.80)});
+    assert(result.mission.command.action_id==0);
+    assert(result.mission.command.camera_request==CameraRequest::kNone);
+  }
+  // Resume: preserving mission phase must not permanently disable commands.
+  pipeline.input.allow_new_commands=true;
+  const auto &resumed=pipeline.Tick({BallDetection(.50,.80)});
+  assert(resumed.mission.command.camera_request!=CameraRequest::kNone ||
+         resumed.mission.command.action_id!=0 ||
+         resumed.mission.ball.mode!=BallMode::kLineFollow);
+}
+
 void TestVerificationSixHitsSucceeds() {
   BallPipeline pipeline;
   pipeline.EnterVerification();
@@ -151,5 +169,6 @@ int main() {
   TestNormalBallAssociation();
   TestVerificationBypassesAssociationAndFineReacquires();
   TestVerificationSixHitsSucceeds();
+  TestGlobalPauseGateForBallAndCamera();
   return 0;
 }

@@ -155,7 +155,7 @@ set_target_properties(line_p2p_tuning_node PROPERTIES
 )
 
 ament_target_dependencies(line_perception_node
-  rclcpp ament_index_cpp sensor_msgs geometry_msgs cv_bridge
+  rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge
 )
 ament_target_dependencies(line_p2p_tuning_node
   rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge

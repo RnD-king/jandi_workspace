@@ -632,6 +632,12 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   if (active_mission_ == MissionType::kLine &&
       !input.allow_new_line_action)
     request = {};
+  // Global start/pause gate: do not originate fresh action or camera
+  // commands. The coordinator below must still consume pending feedback.
+  if (!input.allow_new_commands) {
+    request = {};
+    camera_request = CameraRequest::kNone;
+  }
   if (observation_hold) {
     request = {};
     camera_request = CameraRequest::kNone;
@@ -793,6 +799,7 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   prepared.action_feedback = input.action_feedback;
   prepared.delivery_feedback = input.delivery_feedback;
   prepared.allow_new_line_action = input.allow_new_line_action;
+  prepared.allow_new_commands = input.allow_new_commands;
   prepared.advance_line_fsm = input.advance_line_fsm;
   prepared.line_decision_guide_override = input.line_decision_guide_override;
   std::optional<double> center;
@@ -813,7 +820,19 @@ bool MissionController::UpdateLineP2pTuning(const LineP2pConfig &line_p2p) {
   return true;
 }
 
-void MissionController::Reset() {
+void MissionController::ClearObservationEvidence() {
+  line_guide_accumulator_.Reset();
+  line_stability_history_.clear();
+  ball_association_tracker_.Reset();
+  hurdle_association_tracker_.Reset();
+  backboard_association_tracker_.Reset();
+  ball_controller_.ClearObservationHistory();
+  hurdle_controller_.ClearObservationHistory();
+  goal_controller_.ClearObservationHistory();
+  // Keep deferred DONE and the mission phase intact for RESUME.
+}
+
+void MissionController::Reset(bool preserve_action_ids) {
   active_mission_ = MissionType::kLine;
   has_ball_ = config_.initial_has_ball;
   line_state_ = LineState::kNormal;
@@ -838,7 +857,7 @@ void MissionController::Reset() {
   object_tracking_camera_moving_ = false;
   object_tracking_camera_mode_ = CameraMode::kForward;
   ball_controller_.Reset(); hurdle_controller_.Reset(); goal_controller_.Reset();
-  command_coordinator_.Reset(); ball_association_tracker_.Reset();
+  command_coordinator_.Reset(preserve_action_ids); ball_association_tracker_.Reset();
   backboard_association_tracker_.Reset(); hurdle_association_tracker_.Reset();
   ball_result_ = {}; hurdle_result_ = {}; goal_result_ = {}; last_command_ = {};
   if (has_ball_) goal_controller_.StartAfterPickup(0.0);

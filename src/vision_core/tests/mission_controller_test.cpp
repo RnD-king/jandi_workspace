@@ -491,5 +491,26 @@ int main() {
   assert(defaults.post_motion_observation_sec == 1.0);
   assert(defaults.line_p2p.failure_observation_sec == 2.0);
   assert(defaults.line_p2p.recovery_observation_sec == 1.0);
+  // Global PAUSE gate must hold new LINE requests, then release with fresh
+  // evidence. A RESET in the same executor session preserves action IDs.
+  MissionController pausable(c);
+  auto frozen=Frame(0.0);
+  frozen.allow_new_commands=false;
+  auto paused_result=pausable.Step(frozen);
+  assert(paused_result.command.action_id==0);
+  assert(paused_result.command.action==MissionAction::kNone);
+  frozen=Frame(.1);
+  frozen.allow_new_commands=true;
+  paused_result=pausable.Step(frozen);
+  assert(paused_result.command.action_id==1);
+  pausable.ClearObservationEvidence();
+  pausable.Reset(true);
+  frozen=Frame(.2);
+  paused_result=pausable.Step(frozen);
+  assert(paused_result.command.action_id==2);
+  pausable.Reset();
+  frozen=Frame(.3);
+  paused_result=pausable.Step(frozen);
+  assert(paused_result.command.action_id==1);
   return 0;
 }

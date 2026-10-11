@@ -66,5 +66,15 @@ int main() {
   out=timeout.Compute(MissionType::kLine,0,first,CameraRequest::kNone,
                       {20,true,false,false},.7);
   assert(out.control_phase==ControlPhase::kActionAckTimedOut);
+  // Operator RESET must not reuse an action ID still remembered by forward_walk.
+  ControlCommandCoordinator preserved({100,10});
+  auto p=preserved.Compute(MissionType::kLine,0,first,CameraRequest::kNone,{},0);
+  assert(p.action_id==100);
+  preserved.Reset(true);
+  p=preserved.Compute(MissionType::kLine,0,first,CameraRequest::kNone,{},.1);
+  assert(p.action_id==101);
+  preserved.Reset(); // Existing cold-reset behavior still supported.
+  p=preserved.Compute(MissionType::kLine,0,first,CameraRequest::kNone,{},.2);
+  assert(p.action_id==100);
   return 0;
 }
