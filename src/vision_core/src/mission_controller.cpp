@@ -934,6 +934,18 @@ PerceptionMissionFrameResult MissionController::PreviewPerception(
   return preview.StepPerception(proposed);
 }
 
+double MissionController::ManualPreviewDurationSec() const {
+  if (active_mission_ == MissionType::kLine) {
+    if (line_state_ == LineState::kFailureObserve)
+      return std::max(config_.post_motion_observation_sec,
+                      config_.line_p2p.failure_observation_sec);
+    if (line_state_ == LineState::kRecoveryObserve)
+      return std::max(config_.post_motion_observation_sec,
+                      config_.line_p2p.recovery_observation_sec);
+  }
+  return config_.post_motion_observation_sec;
+}
+
 bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   if (last_command_.action_id != 0) return false;
   // Parameter edits are allowed while a stationary preview is frozen.
