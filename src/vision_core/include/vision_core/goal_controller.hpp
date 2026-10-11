@@ -83,6 +83,9 @@ struct GoalResult {
   GoalMode mode{GoalMode::kLineFollow};
   TrackedGoal tracked;
   TrackedGoalPose pose;
+  // Exact unsmoothed/averaged Pose supplied to FineAction for this step.
+  GoalPoseObservation fine_decision_pose;
+  bool fine_decision_pose_used{false};
   double shoot_yaw_rad{0.0};
   ActionRequest action;
 };
