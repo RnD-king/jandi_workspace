@@ -545,6 +545,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         (feedback && input.delivery_feedback.acknowledged);
     LineGuide decision = input.line_decision_guide_override
         ? *input.line_decision_guide_override : output.line_features.guide;
+    output.line_decision_guide = decision;
     if (pending && !queued_wait && execution_started &&
         IsLongLineAction(last_command_.action)) {
       if (!line_guide_accumulator_.ActiveFor(last_command_.action_id) &&
@@ -563,10 +564,12 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         if (aggregate) {
           last_ready_line_guide_ = aggregate;
           decision = *aggregate;
+          output.line_decision_guide = decision;
           line_failure_pending_done_ = false;
         } else {
           last_ready_line_guide_.reset();
           decision.valid = false;
+          output.line_decision_guide = decision;
           line_failure_pending_done_ = input.delivery_feedback.ready && !done;
         }
         if (input.delivery_feedback.ready)
