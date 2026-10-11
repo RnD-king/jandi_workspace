@@ -605,6 +605,39 @@ int main() {
   assert(defaults.post_motion_observation_sec == 1.0);
   assert(defaults.line_p2p.failure_observation_sec == 2.0);
   assert(defaults.line_p2p.recovery_observation_sec == 1.0);
+  // Manual tuning: camera/DONE must not spontaneously open a 1s gate.
+  // An explicit PREVIEW starts that gate and only the expiry releases it.
+  MissionController explicitly_previewed(c);
+  auto manual_input = Frame(0.0);
+  manual_input.manual_observation_control = true;
+  manual_input.allow_new_commands = false;
+  manual_input.allow_new_body_actions = false;
+  manual_input.camera_feedback = {CameraMode::kTransition, false};
+  auto manual_result = explicitly_previewed.Step(manual_input);
+  assert(!manual_result.post_motion_observing);
+  manual_input = Frame(0.1);
+  manual_input.manual_observation_control = true;
+  manual_input.allow_new_commands = false;
+  manual_input.allow_new_body_actions = false;
+  manual_input.camera_feedback = {CameraMode::kDown, true};
+  manual_result = explicitly_previewed.Step(manual_input);
+  assert(!manual_result.post_motion_observing);
+  manual_input = Frame(0.2);
+  manual_input.manual_observation_control = true;
+  manual_input.begin_manual_observation = true;
+  manual_input.allow_new_commands = false;
+  manual_input.allow_new_body_actions = false;
+  manual_input.camera_feedback = {CameraMode::kDown, true};
+  manual_result = explicitly_previewed.Step(manual_input);
+  assert(manual_result.post_motion_observing);
+  manual_input.begin_manual_observation = false;
+  manual_input.now_sec = 0.7;
+  manual_result = explicitly_previewed.Step(manual_input);
+  assert(manual_result.post_motion_observing);
+  manual_input.now_sec = 1.2;
+  manual_result = explicitly_previewed.Step(manual_input);
+  assert(!manual_result.post_motion_observing);
+
   // Global PAUSE gate must hold new LINE requests, then release with fresh
   // evidence. A RESET in the same executor session preserves action IDs.
   MissionController pausable(c);
