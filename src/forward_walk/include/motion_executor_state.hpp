@@ -15,8 +15,7 @@ using RawPositions = std::unordered_map<int, int32_t>;
 using Clock = std::chrono::steady_clock;
 inline constexpr std::chrono::milliseconds kPeriod{20};
 
-// READY is an observation milestone for actions 11/12/13 in ANY mission.
-// The speculative one-slot queue remains restricted to LINE -> LINE.
+// READY is for action 11/12/13 in every mission; queued execution is LINE -> LINE only.
 inline bool IsReadyWalkAction(uint16_t action)
 {
     return action == 11 || action == 12 || action == 13;
@@ -41,6 +40,39 @@ private:
 };
 
 enum class Admission { Reject, Start, Queue, ActiveDuplicate, QueuedDuplicate, CompletedDuplicate };
+
+// 실제 측정한 초기 자세를 기준으로 양쪽 팔을 같은 각도만큼 벌린다.
+// 바깥 방향의 부호는 다리 directions 배열에서 가져오면 안 된다(팔 ID가 그 배열에 없음).
+struct LineArmConfig {
+    bool enabled{true};
+    int reference_15{1071};
+    int reference_16{3073};
+    int direction_15{1};
+    int direction_16{-1};
+    // 15번의 측정 이동량 +308 tick을 양쪽에 대칭 적용한다.
+    double angle_deg{308.0 * 360.0 / 4096.0};
+    void Validate() const {
+        if (reference_15 < 0 || reference_15 > 4095 || reference_16 < 0 || reference_16 > 4095 ||
+            !std::isfinite(angle_deg) || angle_deg < 0.0 || angle_deg > 180.0 ||
+            (direction_15 != -1 && direction_15 != 0 && direction_15 != 1) ||
+            (direction_16 != -1 && direction_16 != 0 && direction_16 != 1)) {
+            throw std::invalid_argument("invalid LINE arm pose config");
+        }
+        if (enabled && (direction_15 == 0 || direction_16 == 0)) {
+            throw std::invalid_argument("LINE arm outward directions must be configured as +1/-1");
+        }
+        if (enabled) Targets();
+    }
+    RawPositions Targets() const {
+        const auto ticks = static_cast<int32_t>(std::nearbyint(angle_deg * 4096.0 / 360.0));
+        const int32_t tick_15 = reference_15 + direction_15 * ticks;
+        const int32_t tick_16 = reference_16 + direction_16 * ticks;
+        if (tick_15 < 0 || tick_15 > 4095 || tick_16 < 0 || tick_16 > 4095) {
+            throw std::invalid_argument("LINE arm target outside 0..4095");
+        }
+        return {{15, tick_15}, {16, tick_16}};
+    }
+};
 
 // Evaluating an incoming ID never mutates state. Commit only after preparation.
 class ActionTransactions {
