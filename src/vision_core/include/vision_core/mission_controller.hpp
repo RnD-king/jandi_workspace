@@ -75,6 +75,9 @@ struct MissionFrameInput {
   // false이면 특징은 계산하되 LINE 판단/recovery 상태는 동결한다.
   // 기존 action의 coordinator ACK/READY/DONE 처리는 계속 수행한다.
   bool advance_line_fsm{true};
+  // Manual PREVIEW triggers observation; AUTO default keeps post-DONE gates.
+  bool manual_observation_control{false};
+  bool begin_manual_observation{false};
   // 단발 튜닝처럼 여러 프레임에서 집계한 guide로 이번 LINE 판단만 수행한다.
   std::optional<LineGuide> line_decision_guide_override;
 };
@@ -128,6 +131,9 @@ struct PerceptionFrameInput {
   bool allow_new_body_actions{true};
   bool allow_new_mission_entry{true};
   bool advance_line_fsm{true};
+  // Manual PREVIEW triggers observation; AUTO default keeps post-DONE gates.
+  bool manual_observation_control{false};
+  bool begin_manual_observation{false};
   std::optional<LineGuide> line_decision_guide_override;
 };
 
