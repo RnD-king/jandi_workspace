@@ -849,6 +849,7 @@ private:
     auto result = window.back()->input;
     result.delivery_feedback = {};
     result.begin_manual_observation = false;
+    result.manual_ready_mean = mission != vision_core::MissionType::kLine;
     result.line_decision_guide_override.reset();
     if (mission == vision_core::MissionType::kLine) {
       if (!cached_ready_guide_ || !cached_ready_guide_->valid)
