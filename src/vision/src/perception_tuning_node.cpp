@@ -425,6 +425,11 @@ public:
             response->message = "Command transport disabled: fake DONE prohibited";
             return;
           }
+          if (preview_command_.command_type != vision_core::CommandType::kAction) {
+            response->success = false;
+            response->message = "No executable action in preview; adjust RQT parameters first";
+            return;
+          }
           auto input = preview_input_;
           input.allow_new_commands = true;
           input.allow_new_body_actions = true;
