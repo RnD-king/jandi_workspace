@@ -516,8 +516,17 @@ int main() {
   assert(mr.ball.pickup_attempt_count==0);
   assert(mr.command.action_id==0);
   mi.allow_new_body_actions=true;
-  const auto preview=manual.Step(mi); // NOTE: direct Step would commit.
+  MissionController speculative_manual(manual);
+  const auto preview=speculative_manual.Step(mi);
   assert(preview.command.action==MissionAction::kPickBall);
+  mi.allow_new_body_actions=false;
+  mr=manual.Step(mi);
+  assert(mr.ball.mode==BallMode::kFineAdjustForPickup);
+  assert(mr.ball.pickup_attempt_count==0);
+  mi.allow_new_body_actions=true;
+  mr=manual.Step(mi);
+  assert(mr.command.action==MissionAction::kPickBall);
+  assert(mr.ball.pickup_attempt_count==1);
 
   // Separate copy-preview does not consume an ID or modify real LINE FSM.
   MissionController line_manual(c);
