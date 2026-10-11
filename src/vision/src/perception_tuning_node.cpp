@@ -436,7 +436,8 @@ public:
               std::max(1.0, mission_controller_->ManualPreviewDurationSec());
           BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
-          response->message = "PREVIEW: collecting fresh 1s observation";
+          response->message = "PREVIEW: collecting fresh " +
+              std::to_string(observation_required_sec_) + "s observation";
         });
 
     commit_service_ = create_service<std_srvs::srv::Trigger>(
@@ -467,7 +468,10 @@ public:
           const auto result = trial.StepPerception(input);
           const auto &cmd = result.mission.command;
           if (cmd.command_type != vision_core::CommandType::kAction ||
-              cmd.action_id == 0 || cmd.action != preview_command_.action ||
+              cmd.action_id == 0 ||
+              cmd.action_id != preview_command_.action_id ||
+              cmd.action_category != preview_command_.action_category ||
+              cmd.action != preview_command_.action ||
               cmd.target_yaw_deg != preview_command_.target_yaw_deg ||
               cmd.mission != preview_command_.mission) {
             response->success = false;
