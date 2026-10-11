@@ -18,7 +18,7 @@
 1. 실행 직후에는 **WAIT_START**로 대기하며 관측·Action Preview를 시작하지 않는다. 먼저 `ros2 service call /perception_tuning_node/start std_srvs/srv/Trigger "{}"`를 호출한다. **START 이후 1초간 관측**하고, 카메라 변경이 필요하면 기존 CameraCommand를 자동으로 발행한다.
 2. 화면에 다음 몸체 Action이 표시되면 `WAIT_NEXT`이다. 이 시점에만 RQT로 18개 튜닝 파라미터를 변경할 수 있다. **저장된 동일 관측에 새 파라미터**를 적용해 Action 및 디버그 수치를 재계산한다. 디버그 RGB 역시 Preview 당시 저장한 프레임을 표시하며 LINE 기준 중심은 실선으로 표시한다. FSM/Action ID/모터는 변하지 않는다.
 3. `ros2 service call /perception_tuning_node/next std_srvs/srv/Trigger "{}"`로 현재 표시된 Action을 확정·전송한다. ACK/DONE까지 NEXT는 거부한다.
-4. DONE 후 일반 물체 접근·미세 이동은 1초간 유효 관측을 평균해 다음 행동을 판단한다. 최초 객체 검출 진입 조건인 **최근 10프레임 중 7프레임**은 계속 유지한다. DONE 후 별도의 10/7 게이트를 반복하지 않으며, 관측 실패 시 기존 객체 복구/탐색 FSM으로 보낸다.
+4. DONE 후 일반 물체 접근·미세 이동은 1초간 관측한다. 마지막 **10프레임 중 7프레임 이상 검출** 및 마지막 검출 0.3초 이내를 만족할 때만 해당 1초 위치 평균을 유효 목표로 사용한다. GOAL fine pose도 최근 10프레임 중 7회 이상의 유효 RGB-D pose를 요구한다. 유효성이 부족해도 1초 관측은 예정대로 끝나고 기존 복구/탐색 FSM이 이어받는다. 최초 객체 진입의 10/7 조건과는 별개이며, HURDLE 고정 시퀀스의 관측 종료 조건은 유지한다.
 5. LINE 11·12·13 보행은 40%-to-READY 보행 관측을 내부에 보관하지만, **다음 Action을 forward_walk에 큐잉하지 않는다**.
 6. 진행 중인 몸체 Action·카메라 명령·피드백이 없을 때 `ros2 service call /perception_tuning_node/reset std_srvs/srv/Trigger "{}"`를 호출하면 기존 CameraCommand(FORWARD)를 자동 송신한다. 카메라 **DONE 이후 WAIT_START**로 돌아가며, **RESET 자체로는 1초 관측·Preview·몸체 Action을 시작하지 않는다. 반드시 `/perception_tuning_node/start`를 다시 호출해야** 새로운 1초 관측을 시작한다. 카메라 시뮬레이션 모드에서도 RESET 후 WAIT_START이다. Action ID는 보존한다. 카메라 전송을 끈 경우(카메라 시뮬레이션 제외) RESET은 거부한다.
 
@@ -37,7 +37,9 @@
 
 총 18개. 객체 인식 안정화 10/7, EMA alpha, 슛 림 기하학 상수는 이번 튜닝 대상에서 제외한다.
 
-LINE 기준 `line_reference_u_px`는 영상상의 원하는 라인 위치이고 **RGB-D 내부 파라미터 cx가 아니다**. BALL 픽업 허용 사각형은 (fine target u/v ± fine deadband u/v)로 정의하며, 영상 안의 판단용 중심점(1초 평균)을 표시한다. 두 축 모두 허용 영역 안이면 PICK_BALL; 그 밖에서는 각 Deadband로 정규화한 **사각형 초과량이 큰 방향**부터 이동한다.
+LINE 기준 `line_reference_u_px`는 영상상의 원하는 라인 위치이고 **RGB-D 내부 파라미터 cx가 아니다**. WAIT_NEXT에서 기준 중심을 바꾸면 저장된 1초/READY 평균 Offset을 이미지 반폭으로 정규화하여 새 기준 중심으로 환산하고 Preview를 재계산한다. Heading은 변하지 않는다. BALL 픽업 허용 사각형은 (fine target u/v ± fine deadband u/v)로 정의하며, 영상 안의 판단용 중심점(1초 평균)을 표시한다. 두 축 모두 허용 영역 안이면 PICK_BALL; 그 밖에서는 각 Deadband로 정규화한 **사각형 초과량이 큰 방향**부터 이동한다.
+
+GOAL 디버그의 `GOAL FINE INPUT`은 `FineAction`에 실제 전달한 좌표·거리·Yaw를 표시하며, 평활화된 추적기 위치는 별도로 `GOAL TRACKED POSE`라 명시한다. WAIT_NEXT에서 파라미터 변경으로 HOLD/NONE이 나오더라도 추가 변경은 계속 가능하지만 NEXT는 실행하지 않는다.
 
 ## Depth
 
