@@ -1889,6 +1889,15 @@ private:
         if (committed_ready) {
           ready_window_input_ = BuildReadyWindowInput(
               mission_controller_->ActiveMission(), perception_input.now_sec);
+          // An otherwise valid LINE guide with only one/two READY samples
+          // is not strong enough to bypass explicit fresh PREVIEW.
+          if (mission_controller_->ActiveMission() ==
+                  vision_core::MissionType::kLine &&
+              (!perception_result.mission.line_window_stats ||
+               perception_result.mission.line_window_stats->used_frames <
+                   static_cast<std::size_t>(std::max(
+                       1, tuning_config_.line_p2p.failure_min_valid_samples))))
+            ready_window_input_.reset();
           if (ready_window_input_) {
             ready_window_image_ = bgr.clone();
             RCLCPP_INFO(get_logger(),
