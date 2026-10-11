@@ -383,6 +383,33 @@ public:
         std::bind(&PerceptionTuningNode::OnCameraStatus, this, std::placeholders::_1));
 
 
+    // Like AUTO, manual tuning starts disarmed. Neither launch nor RESET may
+    // start the 1-second observation; only an explicit START can do that.
+    start_service_ = create_service<std_srvs::srv::Trigger>(
+        "start", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          if (run_state_ != RunState::kWaitStart || pending_camera_id_ != 0 ||
+              !outstanding_actions_.empty() || !outstanding_cameras_.empty() ||
+              manual_action_active_ || preview_ready_ ||
+              !camera_feedback_.settled ||
+              camera_feedback_.actual_mode != vision_core::CameraMode::kForward) {
+            response->success = false;
+            response->message = "START requires WAIT_START and settled FORWARD camera";
+            return;
+          }
+          mission_controller_->Reset(true); // Preserve issued action IDs.
+          observation_accumulator_.Reset();
+          cached_ready_guide_.reset();
+          preview_input_ = {};
+          preview_result_ = {};
+          preview_command_ = {};
+          preview_image_.release();
+          BeginFreshObservation(get_clock()->now().seconds());
+          response->success = true;
+          response->message = "START accepted; observing for 1.0 s";
+          RCLCPP_INFO(get_logger(), "[CONTROL] START -> OBSERVING");
+        });
+
     next_service_ = create_service<std_srvs::srv::Trigger>(
         "next", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
@@ -447,9 +474,10 @@ public:
             return;
           }
           if (run_state_ != RunState::kRunning &&
-              run_state_ != RunState::kObserving) {
+              run_state_ != RunState::kObserving &&
+              run_state_ != RunState::kWaitStart) {
             response->success = false;
-            response->message = "RESET requires RUNNING or OBSERVING";
+            response->message = "RESET requires RUNNING, OBSERVING, or WAIT_START";
             return;
           }
           if (!enable_command_transport_ && !simulate_camera_feedback_) {
@@ -458,27 +486,39 @@ public:
             return;
           }
           mission_controller_->Reset(true);
+          observation_accumulator_.Reset();
           preview_ready_ = false;
           preview_image_.release();
+          preview_input_ = {};
+          preview_result_ = {};
+          preview_command_ = {};
           cached_ready_guide_.reset();
           manual_action_id_ = 0;
           action_delivery_feedback_ = {};
-          // Do not gather stationary evidence before FORWARD camera DONE.
+          {
+            std::lock_guard<std::mutex> lock(image_mutex_);
+            latest_image_.reset();
+          }
+          // RESET is an explicit disarm. Camera goes FORWARD automatically,
+          // but observing/previewing requires a NEW, separate START request.
           run_state_ = RunState::kResettingCamera;
           PublishCameraCommand(vision_core::CameraRequest::kForward);
-          if (simulate_camera_feedback_)
-            BeginFreshObservation(get_clock()->now().seconds());
+          if (simulate_camera_feedback_) {
+            run_state_ = RunState::kWaitStart;
+            RCLCPP_INFO(get_logger(), "[RESET] Simulated FORWARD -> WAIT_START");
+          }
           response->success = true;
           response->message = simulate_camera_feedback_
-              ? "RESET: simulated FORWARD; 1s observation"
-              : "RESET: camera FORWARD sent; waiting for DONE";
+              ? "RESET complete; WAIT_START (call /start)"
+              : "RESET: camera FORWARD sent; WAIT_START after DONE (call /start)";
         });
     tuning_callback_ = add_on_set_parameters_callback(
         std::bind(&PerceptionTuningNode::OnTuningParameters, this,
                   std::placeholders::_1));
-    BeginFreshObservation(get_clock()->now().seconds());
+    // The constructor must not start perception decision timers.
+    run_state_ = RunState::kWaitStart;
     RCLCPP_INFO(get_logger(),
-        "[TUNING] All missions, automatic camera, manual NEXT/RESET");
+        "[TUNING] WAIT_START; call /perception_tuning_node/start. NEXT/RESET available afterward");
     RCLCPP_INFO(get_logger(), "  image_topic    : %s", image_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  depth_topic    : %s", depth_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  camera_info    : %s", camera_info_topic_.c_str());
@@ -1004,8 +1044,14 @@ private:
     pending_camera_request_ = vision_core::CameraRequest::kNone;
     camera_acknowledged_ = false;
     if (run_state_ == RunState::kResettingCamera) {
-      BeginFreshObservation(this->get_clock()->now().seconds());
-      RCLCPP_INFO(get_logger(), "[RESET] Camera FORWARD DONE -> 1s observation");
+      // Camera is ready, but RESET never starts a new observation on its own.
+      observation_accumulator_.Reset();
+      {
+        std::lock_guard<std::mutex> lock(image_mutex_);
+        latest_image_.reset();
+      }
+      run_state_ = RunState::kWaitStart;
+      RCLCPP_INFO(get_logger(), "[RESET] Camera FORWARD DONE -> WAIT_START; call /start");
     }
   }
 
@@ -1455,7 +1501,7 @@ private:
                 ? "Fresh 1s observation starts after camera DONE."
                 : (run_state_ == RunState::kPaused
                 ? "Paused; body motion disabled."
-                : "Waiting for initial observation."),
+                : "Call /perception_tuning_node/start (std_srvs/Trigger)."),
                         cv::Point(28, 165), cv::FONT_HERSHEY_SIMPLEX,
                         0.64, cv::Scalar(230, 230, 230), 1);
             cv::imshow(kStateWindowName, state_view);
@@ -2047,6 +2093,7 @@ private:
   rclcpp::Publisher<vision::msg::CameraCommand>::SharedPtr camera_cmd_pub_;
   rclcpp::Subscription<vision::msg::CommandStatus>::SharedPtr action_status_sub_;
   rclcpp::Subscription<vision::msg::CommandStatus>::SharedPtr camera_status_sub_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr next_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_service_;
   bool preview_ready_{false};
