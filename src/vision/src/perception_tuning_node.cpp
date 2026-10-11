@@ -687,22 +687,36 @@ private:
     }
     try {
       vision_core::ValidateAlgorithmConfig(candidate);
-      if (!mission_controller_->UpdateTuning(candidate)) {
+      // Update the trial FIRST. A preview failure must not leave the live
+      // controller partially retuned after ROS rejects a parameter change.
+      auto trial_controller = *mission_controller_;
+      if (!trial_controller.UpdateTuning(candidate)) {
         response.successful = false;
         response.reason = "Core still has an active command";
         return response;
       }
-      tuning_config_ = candidate;
-      if (preview_ready_) {
-        const auto updated = mission_controller_->PreviewPerception(preview_input_);
-        if (updated.mission.command.command_type ==
-            vision_core::CommandType::kAction) {
-          preview_result_ = updated;
-          preview_command_ = updated.mission.command;
-        } else {
-          preview_ready_ = false;
-        }
+      auto trial_input = preview_input_;
+      auto trial_ready_guide = cached_ready_guide_;
+      const double old_reference = tuning_config_.line_features.image_center_u;
+      const double new_reference = candidate.line_features.image_center_u;
+      if (trial_input.image_width > 1 && old_reference != new_reference) {
+        const double delta = (old_reference - new_reference) /
+            (0.5 * static_cast<double>(trial_input.image_width));
+        if (trial_input.line_decision_guide_override &&
+            trial_input.line_decision_guide_override->valid)
+          trial_input.line_decision_guide_override->offset += delta;
+        if (trial_ready_guide && trial_ready_guide->valid)
+          trial_ready_guide->offset += delta;
       }
+      const auto updated = trial_controller.PreviewPerception(trial_input);
+      // A parameter edit may legitimately produce HOLD/NONE. Keep WAIT_NEXT
+      // open for further edits, while NEXT itself rejects non-ACTION results.
+      *mission_controller_ = std::move(trial_controller);
+      tuning_config_ = candidate;
+      preview_input_ = std::move(trial_input);
+      cached_ready_guide_ = std::move(trial_ready_guide);
+      preview_result_ = updated;
+      preview_command_ = updated.mission.command;
     } catch (const std::exception &e) {
       response.successful = false;
       response.reason = e.what();
@@ -1498,7 +1512,7 @@ private:
                         cv::Point(28, 125), cv::FONT_HERSHEY_SIMPLEX,
                         0.65, cv::Scalar(230, 230, 230), 1);
             cv::putText(state_view, run_state_ == RunState::kResettingCamera
-                ? "Fresh 1s observation starts after camera DONE."
+                ? "Camera DONE -> WAIT_START. Call START to observe."
                 : (run_state_ == RunState::kPaused
                 ? "Paused; body motion disabled."
                 : "Call /perception_tuning_node/start (std_srvs/Trigger)."),
@@ -1956,15 +1970,23 @@ private:
           }
           if (ball_confirmed) state_y += 28;
 
-          if (pose_confirmed) {
-            std::snprintf(
-                buf, sizeof(buf),
-                "GOAL POSE: valid=1 x=%+.3fm z=%.3fm backboard_yaw=%+.1fdeg",
+          if (selected_goal && goal_cmd.fine_decision_pose_used) {
+            const auto &p = goal_cmd.fine_decision_pose;
+            if (p.valid) {
+              std::snprintf(buf, sizeof(buf),
+                  "GOAL FINE INPUT: x=%+.3fm z=%.3fm yaw=%+.1fdeg",
+                  p.x_m, p.z_m, p.yaw_rad * 180.0 / M_PI);
+            } else {
+              std::snprintf(buf, sizeof(buf),
+                  "GOAL FINE INPUT: INVALID (no fine movement)");
+            }
+          } else if (pose_confirmed) {
+            std::snprintf(buf, sizeof(buf),
+                "GOAL TRACKED POSE (not fine input): x=%+.3fm z=%.3fm yaw=%+.1fdeg",
                 goal_cmd.pose.x_m, goal_cmd.pose.z_m,
                 goal_cmd.pose.yaw_rad * 180.0 / M_PI);
           } else {
-            std::snprintf(buf, sizeof(buf),
-                          "GOAL POSE: valid=0 x=-- z=-- backboard_yaw=--");
+            std::snprintf(buf, sizeof(buf), "GOAL POSE: unavailable");
           }
           draw_state(buf, cv::Scalar(0, 255, 255));
 
