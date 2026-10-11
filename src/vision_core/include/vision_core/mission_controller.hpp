@@ -134,6 +134,8 @@ struct PerceptionFrameInput {
   // Manual PREVIEW triggers observation; AUTO default keeps post-DONE gates.
   bool manual_observation_control{false};
   bool begin_manual_observation{false};
+  // PerceptionFrameInput only: one synthetic 40%-to-READY object mean.
+  bool manual_ready_mean{false};
   std::optional<LineGuide> line_decision_guide_override;
 };
 
