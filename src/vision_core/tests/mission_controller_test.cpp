@@ -605,6 +605,16 @@ int main() {
   assert(defaults.post_motion_observation_sec == 1.0);
   assert(defaults.line_p2p.failure_observation_sec == 2.0);
   assert(defaults.line_p2p.recovery_observation_sec == 1.0);
+  // PREVIEW honors the original LINE failure observation duration (2 s)
+  // rather than silently truncating it to the normal stationary 1 s.
+  MissionController manual_recovery(c);
+  auto recovery_frame = Frame(0.0);
+  recovery_frame.line_centers.clear();
+  recovery_frame.manual_observation_control = true;
+  recovery_frame.allow_new_commands = false;
+  (void)manual_recovery.Step(recovery_frame);
+  assert(manual_recovery.ManualPreviewDurationSec() >=
+         c.line_p2p.failure_observation_sec);
   // Manual tuning: camera/DONE must not spontaneously open a 1s gate.
   // An explicit PREVIEW starts that gate and only the expiry releases it.
   MissionController explicitly_previewed(c);
