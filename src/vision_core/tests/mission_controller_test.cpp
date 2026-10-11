@@ -407,8 +407,8 @@ int main() {
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
   in.now_sec=.5; r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kFailed);
-  // GOAL camera DONE starts a fresh 1-second 10-frame / 7-hit observation.
-  // Pre-DONE observations, and early 7-hit streaks, cannot start a motion.
+  // GOAL camera DONE starts a fresh 1-second observation. The 10/7 rule
+  // applies to initial acquisition, not as a second post-DONE gate.
   auto camera_gate_cfg = c;
   camera_gate_cfg.enable_ball = camera_gate_cfg.enable_hurdle = false;
   camera_gate_cfg.enable_goal = true;
@@ -483,6 +483,92 @@ int main() {
   assert(!r.post_motion_observing);
   assert(r.command.command_type == CommandType::kAction);
   assert(r.command.action_id != 0 && r.command.action_id != approach_id);
+
+  // Manual NEXT: a 10/7-acquired BALL may switch camera automatically,
+  // but previewing PICK must not increment attempts or change the real FSM.
+  auto manual_config=c;
+  manual_config.enable_ball=true;
+  manual_config.ball.stable_window=manual_config.ball.stable_min_hits=1;
+  manual_config.ball.tilt_down_window=manual_config.ball.tilt_down_min_hits=1;
+  manual_config.ball.fine_settle_duration_sec=0;
+  manual_config.ball.upper_acquire_v_norm=1.0;
+  manual_config.post_motion_observation_sec=0;
+  MissionController manual(manual_config);
+  auto mi=Frame(0);
+  mi.allow_new_body_actions=false;
+  mi.ball_target=Ball(.5,.30);
+  auto mr=manual.Step(mi);
+  assert(mr.active_mission==MissionType::kBall);
+  assert(mr.command.action_id==0);
+  mi=Frame(.1); mi.allow_new_body_actions=false;
+  mi.ball_target=Ball(.5,.85);
+  mr=manual.Step(mi);
+  assert(mr.command.camera_request==CameraRequest::kDown);
+  mi=Frame(.2); mi.allow_new_body_actions=false;
+  mi.camera_feedback={CameraMode::kDown,true};
+  mi.ball_target=Ball(.5,.7);
+  mr=manual.Step(mi);
+  mi=Frame(.3); mi.allow_new_body_actions=false;
+  mi.camera_feedback={CameraMode::kDown,true};
+  mi.ball_target=Ball(.5,.7);
+  mr=manual.Step(mi);
+  assert(mr.ball.mode==BallMode::kFineAdjustForPickup);
+  assert(mr.ball.pickup_attempt_count==0);
+  assert(mr.command.action_id==0);
+  mi.allow_new_body_actions=true;
+  const auto preview=manual.Step(mi); // NOTE: direct Step would commit.
+  assert(preview.command.action==MissionAction::kPickBall);
+
+  // Separate copy-preview does not consume an ID or modify real LINE FSM.
+  MissionController line_manual(c);
+  PerceptionFrameInput line_frame;
+  line_frame.image_width=640; line_frame.image_height=480;
+  line_frame.intrinsics={600,600,320,240};
+  line_frame.command_transport_enabled=true;
+  for (int i=0;i<5;++i) {
+    PerceptionDetection d;
+    d.detection.class_id=c.line_detection.class_id;
+    d.detection.confidence=1.0;
+    d.detection.box={310.0,450.0-40.0*i,20.0,20.0};
+    line_frame.detections.push_back(d);
+  }
+  const auto ephemeral=line_manual.PreviewPerception(line_frame);
+  assert(ephemeral.mission.command.action_id==1);
+  assert(ephemeral.mission.command.action==MissionAction::kStepForwardFive);
+  auto ref_adjust=c;
+  ref_adjust.line_features.image_center_u=250.0;
+  assert(line_manual.UpdateTuning(ref_adjust));
+  const auto shifted=line_manual.PreviewPerception(line_frame);
+  assert(shifted.mission.command.action==MissionAction::kStepForwardRight);
+  const auto issued=line_manual.StepPerception(line_frame);
+  assert(issued.mission.command.action_id==1);
+  assert(issued.mission.command.action==MissionAction::kStepForwardRight);
+
+  // A 1s post-camera gate must RELEASE even with fewer than seven
+  // detections. The object recovery/search FSM, not the observation gate,
+  // decides what to do with missing observations.
+  MissionController sparse_gate(camera_gate_cfg);
+  for (int i=0;i<7;++i) {
+    in=Frame(.1*i);
+    in.allow_new_line_action=false;
+    r=sparse_gate.Step(in);
+  }
+  in=Frame(1.0); in.camera_feedback={CameraMode::kTransition,false};
+  r=sparse_gate.Step(in);
+  in=Frame(1.1); in.camera_feedback={CameraMode::kGoal,true};
+  r=sparse_gate.Step(in);
+  for (int i=0;i<9;++i) {
+    in=Frame(1.2+.1*i);
+    in.camera_feedback={CameraMode::kGoal,true};
+    // Only one valid frame: previously this would block indefinitely.
+    if (i==7) in.backboard_target=Ball(.8,.3);
+    r=sparse_gate.Step(in);
+    assert(r.post_motion_observing);
+  }
+  in=Frame(2.1); in.camera_feedback={CameraMode::kGoal,true};
+  r=sparse_gate.Step(in);
+  assert(!r.post_motion_observing);
+  assert(r.active_mission==MissionType::kGoal);
 
   // HURDLE initial stable acquisition is now recent 10 frames / 7 hits.
   const auto defaults = LoadDefaultAlgorithmConfig();

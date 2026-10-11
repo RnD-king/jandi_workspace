@@ -131,6 +131,9 @@ add_executable(line_perception_node
 add_executable(line_p2p_tuning_node
   src/line_p2p_tuning_node.cpp
 )
+add_executable(perception_tuning_node
+  src/perception_tuning_node.cpp
+)
 
 target_link_libraries(line_perception_node
   vision_core
@@ -139,6 +142,10 @@ rosidl_get_typesupport_target(vision_typesupport_target
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
 target_link_libraries(line_perception_node "${vision_typesupport_target}")
 target_link_libraries(line_p2p_tuning_node
+  vision_core
+  "${vision_typesupport_target}"
+)
+target_link_libraries(perception_tuning_node
   vision_core
   "${vision_typesupport_target}"
 )
@@ -153,6 +160,10 @@ set_target_properties(line_p2p_tuning_node PROPERTIES
   BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
   INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib"
 )
+set_target_properties(perception_tuning_node PROPERTIES
+  BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib"
+)
 
 ament_target_dependencies(line_perception_node
   rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge
@@ -160,11 +171,15 @@ ament_target_dependencies(line_perception_node
 ament_target_dependencies(line_p2p_tuning_node
   rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge
 )
+ament_target_dependencies(perception_tuning_node
+  rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge
+)
 
 install(TARGETS
   vision_core
   line_perception_node
   line_p2p_tuning_node
+  perception_tuning_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

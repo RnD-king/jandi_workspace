@@ -252,7 +252,9 @@ public:
 
     vision_core::FeatureConfig line_feature_cfg = algorithm_defaults.line_features;
     line_feature_cfg.max_centers = static_cast<int>(get_parameter("max_centers").as_int());
-    line_feature_cfg.image_center_u = cx;
+    // Robot LINE alignment is a user-calibrated image reference, not the
+    // optical principal point used by RGB-D projection.
+    line_feature_cfg.image_center_u = algorithm_defaults.line_features.image_center_u;
 
     if (engine_path_.empty()) {
       throw std::runtime_error("YOLO TensorRT engine 경로(engine_path)가 비어 있습니다.");
@@ -1229,27 +1231,6 @@ private:
       return;
     }
 
-    // 최신 aligned depth를 같은 색상 프레임에 대응시킨다. 단독 시험용
-    // latest-value 결합이며, 시간 차가 크거나 해상도가 다르면 자세 계산에 쓰지 않는다.
-    sensor_msgs::msg::Image::SharedPtr depth_msg;
-    {
-      std::lock_guard<std::mutex> lock(image_mutex_);
-      depth_msg = latest_depth_;
-    }
-    cv_bridge::CvImageConstPtr depth_cv_ptr;
-    cv::Mat aligned_depth;
-    if (depth_msg &&
-        std::abs(StampSeconds(msg->header) - StampSeconds(depth_msg->header)) <= std::max(0.0, max_depth_age_sec_)) {
-      try {
-        depth_cv_ptr = cv_bridge::toCvShare(depth_msg);
-        if (depth_cv_ptr->image.cols == bgr.cols && depth_cv_ptr->image.rows == bgr.rows) {
-          aligned_depth = depth_cv_ptr->image;
-        }
-      } catch (const cv_bridge::Exception &e) {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "[DEPTH] cv_bridge exception: %s", e.what());
-      }
-    }
-
     // 2) IMU 최신값 스냅샷
     double roll = 0.0;
     double pitch = 0.0;
@@ -1278,6 +1259,36 @@ private:
       RCLCPP_ERROR(get_logger(), "[YOLO] Infer failed -> skip remaining stages");
       return;
     }
+    // YOLO first: subscribe to depth continuously but convert/read it only
+    // when an actual BACKBOARD candidate exists. Keep RGB/Depth timestamp
+    // and image-size gates identical in AUTO and MANUAL executables.
+    cv::Mat aligned_depth;
+    const bool need_board_depth = std::any_of(
+        dets.begin(), dets.end(), [this](const Detection &d) {
+          return d.class_id == backboard_class_id_;
+        });
+    if (need_board_depth && run_state_ != RunState::kWaitStart &&
+        run_state_ != RunState::kPaused) {
+      sensor_msgs::msg::Image::SharedPtr depth_msg;
+      {
+        std::lock_guard<std::mutex> lock(image_mutex_);
+        depth_msg = latest_depth_;
+      }
+      if (depth_msg &&
+          std::abs(StampSeconds(msg->header) - StampSeconds(depth_msg->header)) <=
+              std::max(0.0, max_depth_age_sec_)) {
+        try {
+          const auto depth_cv_ptr = cv_bridge::toCvShare(depth_msg);
+          if (depth_cv_ptr->image.cols == bgr.cols &&
+              depth_cv_ptr->image.rows == bgr.rows)
+            aligned_depth = depth_cv_ptr->image;
+        } catch (const cv_bridge::Exception &e) {
+          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                              "[DEPTH] cv_bridge exception: %s", e.what());
+        }
+      }
+    }
+
     if (run_state_ == RunState::kWaitStart ||
         run_state_ == RunState::kPaused) {
       // Disarmed/paused: inference and visualization continue, but StepPerception
