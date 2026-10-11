@@ -276,6 +276,7 @@ void MissionController::BeginDecisionObservation(
   decision_observation_start_sec_ = now_sec;
   deferred_done_ = done;
   decision_object_hits_.clear();
+  decision_goal_pose_hits_.clear();
   decision_observation_total_frames_ = 0;
   decision_last_target_.reset();
   decision_target_u_sum_ = decision_target_v_sum_ = 0.0;
@@ -315,6 +316,15 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
     const bool detected = target && target->has_value();
     decision_object_hits_.push_back(detected);
     while (decision_object_hits_.size() > 10) decision_object_hits_.pop_front();
+    if (decision_observation_mission_ == MissionType::kGoal) {
+      const bool pose_valid = detected && input.goal_pose.valid &&
+          std::isfinite(input.goal_pose.x_m) &&
+          std::isfinite(input.goal_pose.z_m) &&
+          std::isfinite(input.goal_pose.yaw_rad);
+      decision_goal_pose_hits_.push_back(pose_valid);
+      while (decision_goal_pose_hits_.size() > 10)
+        decision_goal_pose_hits_.pop_front();
+    }
     if (detected) {
       const ObjectTarget &t = target->value();
       decision_last_target_ = t;
@@ -386,6 +396,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     std::optional<double> line_image_center_u) {
   MissionFrameInput input = source;
   MissionFrameResult output;
+  if (input.image_width > 1) last_line_image_width_ = input.image_width;
   // Observe the camera transition edge even if no ActionCommand is pending.
   const bool camera_settle_edge =
       (!previous_camera_settled_ ||
@@ -413,11 +424,16 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       // Object acquisition 10/7 applies only on entry. After DONE one
       // second of stationary samples defines the next measurement.
       if (decision_observation_mission_ != MissionType::kLine) {
+        const int stable_hits = static_cast<int>(std::count(
+            decision_object_hits_.begin(), decision_object_hits_.end(), true));
+        const bool stable_object = decision_object_hits_.size() == 10 &&
+            stable_hits >= 7;
         const bool recently_seen = decision_last_target_ &&
             decision_target_count_ > 0 &&
             input.now_sec - decision_last_seen_sec_ <= 0.30;
+        // A single last-minute false detection is NOT a stationary mean.
         std::optional<ObjectTarget> mean;
-        if (recently_seen) {
+        if (stable_object && recently_seen) {
           mean = *decision_last_target_;
           const double count = static_cast<double>(decision_target_count_);
           mean->center_px = {decision_target_u_sum_ / count,
@@ -436,7 +452,10 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
           input.backboard_target = mean;
           input.goal_pose = {};
           if (mean) goal_controller_.UseNextObservationAsMean();
-          if (mean && decision_pose_count_ > 0 &&
+          const int stable_pose_hits = static_cast<int>(std::count(
+              decision_goal_pose_hits_.begin(), decision_goal_pose_hits_.end(), true));
+          if (mean && decision_goal_pose_hits_.size() == 10 &&
+              stable_pose_hits >= 7 && decision_pose_count_ > 0 &&
               input.now_sec - decision_pose_last_seen_sec_ <= 0.30) {
             const double count = static_cast<double>(decision_pose_count_);
             input.goal_pose.valid = true;
@@ -927,6 +946,19 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.hurdle.acquire_min_v_norm = candidate.hurdle.acquire_min_v_norm;
   updated.hurdle.tilt_trigger_v_norm = candidate.hurdle.tilt_trigger_v_norm;
   ValidateAlgorithmConfig(updated);
+  // All existing offset accumulators were measured relative to the OLD
+  // reference. Rebase in normalized coordinates without altering heading.
+  if (last_line_image_width_ > 1) {
+    const double delta = (config_.line_features.image_center_u -
+        updated.line_features.image_center_u) /
+        (0.5 * static_cast<double>(last_line_image_width_));
+    if (delta != 0.0) {
+      observation_offset_sum_ += delta * observation_valid_count_;
+      decision_line_offset_sum_ += delta * decision_line_valid_count_;
+      if (last_ready_line_guide_ && last_ready_line_guide_->valid)
+        last_ready_line_guide_->offset += delta;
+    }
+  }
   config_ = updated;
   line_p2p_controller_ = LineP2pController(config_.line_p2p);
   ball_controller_.UpdateTuning(config_.ball);
@@ -976,6 +1008,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   decision_observation_first_frame_ = false;
   deferred_done_ = {};
   decision_object_hits_.clear();
+  decision_goal_pose_hits_.clear();
   decision_observation_total_frames_ = 0;
   decision_last_target_.reset();
   decision_target_u_sum_ = decision_target_v_sum_ = 0.0;
