@@ -404,20 +404,43 @@ public:
           preview_result_ = {};
           preview_command_ = {};
           preview_image_.release();
+          manual_wait_preview_ = false;
+          manual_observation_request_pending_ = false;
+          manual_wait_accumulated_sec_ = 0.0;
           BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
           response->message = "START accepted; observing for 1.0 s";
           RCLCPP_INFO(get_logger(), "[CONTROL] START -> OBSERVING");
         });
+    preview_service_ = create_service<std_srvs::srv::Trigger>(
+        "preview", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                           std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          if (run_state_ != RunState::kRunning ||
+              (!manual_wait_preview_ && !preview_ready_) ||
+              manual_action_active_ || !outstanding_actions_.empty() ||
+              !outstanding_cameras_.empty() || pending_camera_id_ != 0) {
+            response->success = false;
+            response->message = "PREVIEW requires WAIT_PREVIEW/WAIT_COMMIT and idle camera/body";
+            return;
+          }
+          LeaveWaitPreview(get_clock()->now().seconds());
+          preview_ready_ = false;
+          preview_image_.release();
+          preview_command_ = {};
+          manual_observation_request_pending_ = true;
+          BeginFreshObservation(get_clock()->now().seconds());
+          response->success = true;
+          response->message = "PREVIEW: collecting fresh 1s observation";
+        });
 
-    next_service_ = create_service<std_srvs::srv::Trigger>(
-        "next", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+    commit_service_ = create_service<std_srvs::srv::Trigger>(
+        "commit", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
           if (!preview_ready_ || manual_action_active_ ||
               !outstanding_actions_.empty() || !outstanding_cameras_.empty() ||
               pending_camera_id_ != 0 || run_state_ != RunState::kRunning) {
             response->success = false;
-            response->message = "NEXT requires preview and no active action/camera";
+            response->message = "COMMIT requires WAIT_COMMIT and idle camera/body";
             return;
           }
           if (!enable_command_transport_ && !simulate_decision_) {
@@ -427,7 +450,7 @@ public:
           }
           if (preview_command_.command_type != vision_core::CommandType::kAction) {
             response->success = false;
-            response->message = "No executable action in preview; adjust RQT parameters first";
+            response->message = "No executable action; adjust RQT or press PREVIEW";
             return;
           }
           auto input = preview_input_;
@@ -442,7 +465,7 @@ public:
               cmd.target_yaw_deg != preview_command_.target_yaw_deg ||
               cmd.mission != preview_command_.mission) {
             response->success = false;
-            response->message = "Candidate changed; wait for a fresh preview";
+            response->message = "Candidate changed; press PREVIEW to refresh";
             preview_ready_ = false;
             return;
           }
@@ -451,11 +474,15 @@ public:
           preview_image_.release();
           cached_ready_guide_.reset();
           manual_action_active_ = true;
+          manual_committed_command_ = cmd;
+          LeaveWaitPreview(get_clock()->now().seconds());
+          ready_window_input_.reset();
+          ready_motion_samples_.clear();
           manual_action_id_ = cmd.action_id;
           PublishActionCommand(cmd);
           response->success = true;
-          response->message = "NEXT executed id=" + std::to_string(cmd.action_id);
-          RCLCPP_INFO(get_logger(), "[TUNING] NEXT id=%llu action=%u",
+          response->message = "COMMIT executed id=" + std::to_string(cmd.action_id);
+          RCLCPP_INFO(get_logger(), "[TUNING] COMMIT id=%llu action=%u",
                       static_cast<unsigned long long>(cmd.action_id),
                       static_cast<unsigned>(cmd.action));
         });
@@ -493,6 +520,13 @@ public:
           mission_controller_->Reset(true);
           observation_accumulator_.Reset();
           preview_ready_ = false;
+          manual_wait_preview_ = false;
+          manual_observation_request_pending_ = false;
+          manual_camera_done_pending_ = false;
+          manual_wait_accumulated_sec_ = 0.0;
+          ready_window_input_.reset();
+          ready_motion_samples_.clear();
+          ready_window_image_.release();
           preview_image_.release();
           preview_input_ = {};
           preview_result_ = {};
@@ -740,6 +774,32 @@ private:
     case RunState::kPaused: return "PAUSED";
     }
     return "UNKNOWN";
+  }
+
+  static bool IsReadyWalk(vision_core::MissionAction action) {
+    return action == vision_core::MissionAction::kStepForwardLeft ||
+           action == vision_core::MissionAction::kStepForwardFive ||
+           action == vision_core::MissionAction::kStepForwardRight;
+  }
+  static bool IsFixedSuccessor(vision_core::MissionType mission,
+                              vision_core::MissionAction action) {
+    using vision_core::MissionAction;
+    using vision_core::MissionType;
+    return action == MissionAction::kPickBall ||
+        action == MissionAction::kDefaultPosition ||
+        (mission == MissionType::kHurdle &&
+         action == MissionAction::kStepForwardOne);
+  }
+  void EnterWaitPreview(double now) {
+    if (manual_wait_preview_) return;
+    manual_wait_preview_ = true;
+    manual_wait_preview_started_sec_ = now;
+  }
+  void LeaveWaitPreview(double now) {
+    if (!manual_wait_preview_) return;
+    manual_wait_accumulated_sec_ += std::max(0.0, now -
+        manual_wait_preview_started_sec_);
+    manual_wait_preview_ = false;
   }
 
   void BeginFreshObservation(double now) {
@@ -1062,6 +1122,8 @@ private:
     pending_camera_id_ = 0;
     pending_camera_request_ = vision_core::CameraRequest::kNone;
     camera_acknowledged_ = false;
+    if (run_state_ == RunState::kRunning)
+      manual_camera_done_pending_ = true;
     if (run_state_ == RunState::kResettingCamera) {
       // Camera is ready, but RESET never starts a new observation on its own.
       observation_accumulator_.Reset();
@@ -1563,7 +1625,9 @@ private:
     // observation deadlines, without changing ROS camera timestamps.
     perception_input.now_sec =
         (run_state_ == RunState::kPausing ? pause_requested_sec_ : frame_now_sec)
-        - paused_accumulated_sec_;
+        - paused_accumulated_sec_ - manual_wait_accumulated_sec_ -
+        (manual_wait_preview_ ? std::max(0.0, frame_now_sec -
+            manual_wait_preview_started_sec_) : 0.0);
     // While draining already-dispatched actions, freeze LINE recovery and
     // cruise decisions. Feedback still reaches the command coordinator.
     if (run_state_ == RunState::kPausing) {
@@ -1587,7 +1651,11 @@ private:
     perception_input.camera_feedback = camera_feedback_;
     perception_input.command_transport_enabled =
         enable_command_transport_ || simulate_decision_;
+    perception_input.manual_observation_control = true;
+    perception_input.begin_manual_observation =
+        manual_observation_request_pending_;
     perception_input.delivery_feedback = action_delivery_feedback_;
+    // The explicit request is consumed by the NEXT successful core step.
     // Manual LINE uses the same cached 40%-to-READY measurement that the
     // existing line_p2p_tuning_node saves; never queue B in forward_walk.
     if (cached_ready_guide_ && !manual_action_active_ &&
@@ -2121,9 +2189,24 @@ private:
   rclcpp::Subscription<vision::msg::CommandStatus>::SharedPtr action_status_sub_;
   rclcpp::Subscription<vision::msg::CommandStatus>::SharedPtr camera_status_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr start_service_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr next_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr preview_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr commit_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_service_;
   bool preview_ready_{false};
+  bool manual_wait_preview_{false};
+  bool manual_observation_request_pending_{false};
+  bool manual_camera_done_pending_{false};
+  double manual_wait_preview_started_sec_{0.0};
+  double manual_wait_accumulated_sec_{0.0};
+  vision_core::ControlCommand manual_committed_command_;
+  struct ReadyMotionSample {
+    double now_sec{};
+    vision_core::PerceptionFrameInput input;
+    vision_core::PreparedPerceptionFrame prepared;
+  };
+  std::deque<ReadyMotionSample> ready_motion_samples_;
+  std::optional<vision_core::PerceptionFrameInput> ready_window_input_;
+  cv::Mat ready_window_image_;
   cv::Mat preview_image_;  // frozen RGB decision evidence for WAIT_NEXT
   bool manual_action_active_{false};
   std::uint64_t manual_action_id_{0};
