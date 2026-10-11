@@ -7,7 +7,7 @@
 
 - `line_perception_node`: 기존 AUTO, READY one-slot queue 유지.
 - `line_p2p_tuning_node`: 기존 LINE 전용 수동 시험 유지.
-- `perception_tuning_node`: 신규. 동일 YOLO TensorRT, RGB-D, MissionController를 사용하지만 **몸체 Action은 NEXT 승인 후 하나씩** 실행. 카메라 DOWN/FORWARD/GOAL은 자동 실행.
+- `perception_tuning_node`: 신규. 동일 YOLO TensorRT, RGB-D, MissionController를 사용하지만 **몸체 Action은 COMMIT 승인 후 하나씩** 실행. 카메라 DOWN/FORWARD/GOAL은 자동 실행.
 
 반드시 **한 번에 하나의 Vision 노드만** `/jandi_vision/action_cmd`에 발행해야 한다. 튜닝 중 실전 노드를 동시에 실행하지 말 것.
 
