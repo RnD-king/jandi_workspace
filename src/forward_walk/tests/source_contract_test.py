@@ -1,5 +1,6 @@
 """Check preserved source contracts; runtime behavior is tested in C++."""
 from pathlib import Path
+import json
 import re
 import xml.etree.ElementTree as ET
 
@@ -37,13 +38,36 @@ checks = {
     "failure IDs logged before reset": main.index('action_id=%llu queued_id=%llu camera_id=%llu') < main.index('action_transactions_.Abort();'),
 }
 for action, filename in {
-    'STEP_FORWARD_LEFT': 'motions/보행_좌회전전진_20도_최종_초기X.json',
-    'STEP_FORWARD_RIGHT': 'motions/보행_우회전전진_20도_최종_초기X.json',
+    'STEP_FORWARD_LEFT': 'missions/직진_좌회전_3번.json',
+    'STEP_FORWARD_RIGHT': 'missions/직진_우회전_3번.json',
     'STEP_FORWARD_FIVE': 'missions/연속걷기.json',
     'DEFAULT_POSITION': 'motions/초기자세_다소곳_.json',
 }.items():
     match = re.search(r'case vision::msg::ActionCommand::'+action+r':\s*return "([^"]+)";', main)
     checks[action+' mapping'] = match is not None and match.group(1)==filename and (root / filename).is_file()
+# Validate both 2x and 3x turn-forward manifests and real motion references.
+for side, motion in {
+    '좌': '보행_좌회전전진_20도_최종_초기X.json',
+    '우': '보행_우회전전진_20도_최종_초기X.json',
+}.items():
+    for count in (2, 3):
+        manifest = root / f'missions/직진_{side}회전_{count}번.json'
+        entries = json.loads(manifest.read_text()).get('motions', [])
+        checks[f'{side}회전 {count}x references'] = (
+            len(entries) == count
+            and all(entry.get('filename') == motion for entry in entries)
+            and (root / 'motions' / motion).is_file()
+        )
+state = (root / 'include/motion_executor_state.hpp').read_text()
+checks['all-mission READY'] = 'IsReadyWalkAction(active_action)' in state
+checks['LINE-only queue'] = 'IsLongLineAction(active_mission, active_action)' in state
+checks['preserved camera calibration'] = all(
+    needle in main for needle in (
+        '"camera_forward_yaw_tick", 2077', '"camera_forward_pitch_tick", 1537',
+        '"camera_down_yaw_tick", 2036', '"camera_down_pitch_tick", 2013',
+        '"camera_goal_yaw_tick", 2054', '"camera_goal_pitch_tick", 966'
+    )
+)
 for label, passed in checks.items():
     print(('PASS ' if passed else 'FAIL ')+label)
 if not all(checks.values()):
