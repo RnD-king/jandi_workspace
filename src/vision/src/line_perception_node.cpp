@@ -1423,7 +1423,7 @@ private:
     const auto &control_command = mission_result.command;
     if (mission_result.post_motion_observing) {
       RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
-          "[OBS] HOLD after DONE: mission=%u elapsed=%.2fs frames=%zu valid=%d/%zu (object window requires 7/10)",
+          "[OBS] HOLD after DONE: mission=%u elapsed=%.2fs frames=%zu valid=%d/%zu (object observation minimum 1s)",
           static_cast<unsigned>(mission_result.active_mission),
           mission_result.post_motion_elapsed_sec,
           mission_result.post_motion_frames,
@@ -1790,7 +1790,7 @@ private:
   vision_core::CameraFeedback camera_feedback_{};
   // ROS-clock timestamps of the latest completion events. Image header
   // stamps are compared before YOLO/FSM processing, so stale frames cannot
-  // satisfy the post-DONE 10/7 evidence gate.
+  // satisfy the post-DONE observation window.
   double last_action_done_event_sec_{0.0};
   double last_camera_done_event_sec_{0.0};
   std::uint64_t next_camera_id_{1};

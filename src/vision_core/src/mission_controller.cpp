@@ -285,6 +285,7 @@ void MissionController::BeginDecisionObservation(
   decision_pose_x_sum_ = decision_pose_z_sum_ = 0.0;
   decision_pose_sin_sum_ = decision_pose_cos_sum_ = 0.0;
   decision_pose_count_ = 0;
+  decision_pose_last_seen_sec_ = 0.0;
   decision_line_valid_count_ = 0;
   decision_line_offset_sum_ = decision_line_heading_sum_ = 0.0;
   decision_line_confidence_sum_ = 0.0;
@@ -334,6 +335,7 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
       decision_pose_sin_sum_ += std::sin(input.goal_pose.yaw_rad);
       decision_pose_cos_sum_ += std::cos(input.goal_pose.yaw_rad);
       ++decision_pose_count_;
+      decision_pose_last_seen_sec_ = input.now_sec;
     }
     return;
   }
@@ -434,7 +436,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
           input.backboard_target = mean;
           input.goal_pose = {};
           if (mean) goal_controller_.UseNextObservationAsMean();
-          if (mean && decision_pose_count_ > 0) {
+          if (mean && decision_pose_count_ > 0 &&
+              input.now_sec - decision_pose_last_seen_sec_ <= 0.30) {
             const double count = static_cast<double>(decision_pose_count_);
             input.goal_pose.valid = true;
             input.goal_pose.x_m = decision_pose_x_sum_ / count;
@@ -979,6 +982,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   decision_pose_x_sum_ = decision_pose_z_sum_ = 0.0;
   decision_pose_sin_sum_ = decision_pose_cos_sum_ = 0.0;
   decision_pose_count_ = 0;
+  decision_pose_last_seen_sec_ = 0.0;
   decision_line_valid_count_ = 0;
   decision_line_offset_sum_ = decision_line_heading_sum_ = 0.0;
   decision_line_confidence_sum_ = 0.0;

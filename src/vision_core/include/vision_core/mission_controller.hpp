@@ -248,6 +248,7 @@ private:
   double decision_pose_x_sum_{0.0}, decision_pose_z_sum_{0.0};
   double decision_pose_sin_sum_{0.0}, decision_pose_cos_sum_{0.0};
   int decision_pose_count_{0};
+  double decision_pose_last_seen_sec_{0.0};
   int decision_line_valid_count_{0};
   double decision_line_offset_sum_{0.0};
   double decision_line_heading_sum_{0.0};
