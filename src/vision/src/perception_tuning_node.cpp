@@ -1767,55 +1767,168 @@ private:
     const auto t4 = std::chrono::steady_clock::now();
     const auto dt_pts_us = std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3).count();
 
-    // 5) 전처리, 선택적 IMU 보정, 상태 전이, 최종 명령은 core에서 수행한다.
+    // 5) PREVIEW is speculative, COMMIT is the sole body-motion admission.
+    // DONE updates the real coordinator immediately, but NEVER starts its
+    // next stationary observation without a new explicit PREVIEW.
     const auto t5 = std::chrono::steady_clock::now();
+    const bool committed_done =
+        perception_input.delivery_feedback.done &&
+        manual_committed_command_.action_id != 0 &&
+        perception_input.delivery_feedback.action_id ==
+            manual_committed_command_.action_id;
+    const bool committed_ready =
+        perception_input.delivery_feedback.ready &&
+        manual_committed_command_.action_id != 0 &&
+        perception_input.delivery_feedback.action_id ==
+            manual_committed_command_.action_id &&
+        IsReadyWalk(manual_committed_command_.action);
+    const bool camera_done_edge = manual_camera_done_pending_;
+    const bool completed_with_ready_window =
+        committed_done && IsReadyWalk(manual_committed_command_.action) &&
+        ready_window_input_.has_value();
+    if (completed_with_ready_window) {
+      // Apply the already acquired moving-window average at the DONE edge.
+      // New detections seen while waiting for the user are not substituted.
+      auto average = *ready_window_input_;
+      average.now_sec = perception_input.now_sec;
+      average.delivery_feedback = perception_input.delivery_feedback;
+      average.camera_feedback = perception_input.camera_feedback;
+      average.allow_new_body_actions = false;
+      average.allow_new_commands = perception_input.allow_new_commands;
+      average.manual_observation_control = true;
+      average.begin_manual_observation = false;
+      perception_input = std::move(average);
+    }
+
+    const auto capture_preview = [&](const vision_core::PerceptionFrameInput &input,
+                                     const cv::Mat &image) {
+      const auto proposed = mission_controller_->PreviewPerception(input);
+      const auto &candidate = proposed.mission.command;
+      if (candidate.command_type != vision_core::CommandType::kAction ||
+          candidate.action_id == 0 ||
+          candidate.camera_request != vision_core::CameraRequest::kNone)
+        return false;
+      preview_input_ = input;
+      preview_input_.delivery_feedback = {};
+      preview_input_.begin_manual_observation = false;
+      preview_result_ = proposed;
+      preview_command_ = candidate;
+      preview_image_ = image.clone();
+      preview_ready_ = true;
+      LeaveWaitPreview(frame_now_sec);
+      RCLCPP_INFO(get_logger(),
+          "[TUNING] WAIT_COMMIT mission=%u action=%u id=%llu",
+          static_cast<unsigned>(candidate.mission),
+          static_cast<unsigned>(candidate.action),
+          static_cast<unsigned long long>(candidate.action_id));
+      return true;
+    };
+
     vision_core::PerceptionMissionFrameResult perception_result;
+    bool stepped_real_core = false;
     if (preview_ready_) {
       perception_result = preview_result_;
+    } else if (manual_wait_preview_ &&
+               !committed_done && !camera_done_edge &&
+               !manual_action_active_ && pending_camera_id_ == 0 &&
+               run_state_ == RunState::kRunning) {
+      // Keep YOLO/debug alive while freezing the *real* FSM, tracking
+      // history, command coordinator and mission deadlines.
+      auto view_only = perception_input;
+      view_only.allow_new_commands = false;
+      view_only.allow_new_body_actions = false;
+      perception_result = mission_controller_->PreviewPerception(view_only);
     } else {
-      bool captured = false;
-      if ((run_state_ == RunState::kRunning || finishing_observation) && !manual_action_active_ &&
-          outstanding_actions_.empty() && pending_camera_id_ == 0 &&
-          perception_input.delivery_feedback.action_id == 0) {
-        auto speculative = mission_controller_->PreviewPerception(perception_input);
-        const auto &candidate = speculative.mission.command;
-        if (candidate.command_type == vision_core::CommandType::kAction &&
-            candidate.action_id != 0 &&
-            candidate.camera_request == vision_core::CameraRequest::kNone) {
-          preview_input_ = perception_input;
-          if (speculative.mission.command.command_type ==
-              vision_core::CommandType::kAction) {
-            preview_command_ = speculative.mission.command;
-            preview_result_ = speculative;
-            preview_image_ = bgr.clone();
-            preview_ready_ = captured = true;
-            RCLCPP_INFO(get_logger(),
-                "[TUNING] WAIT_NEXT mission=%u action=%u",
-                static_cast<unsigned>(preview_command_.mission),
-                static_cast<unsigned>(preview_command_.action));
-          }
-        }
-      }
-      if (captured) {
-        // Do not commit any body-action FSM changes before NEXT.
+      const bool can_capture_fresh =
+          finishing_observation &&
+          !manual_action_active_ && outstanding_actions_.empty() &&
+          pending_camera_id_ == 0 &&
+          perception_input.delivery_feedback.action_id == 0;
+      if (can_capture_fresh &&
+          capture_preview(perception_input, bgr)) {
+        // Real controller remains poised before its final observation frame;
+        // COMMIT will replay precisely this input on a copied controller.
         perception_result = preview_result_;
       } else {
         perception_result = mission_controller_->StepPerception(perception_input);
+        stepped_real_core = true;
+        if (manual_observation_request_pending_)
+          manual_observation_request_pending_ = false;
         if (perception_result.mission.line_window_stats)
           cached_ready_guide_ = mission_controller_->LastReadyLineGuide();
+
+        if (manual_action_active_ &&
+            IsReadyWalk(manual_committed_command_.action))
+          AddReadyMotionSample(perception_input, perception_result.perception);
+        if (committed_ready) {
+          ready_window_input_ = BuildReadyWindowInput(
+              manual_committed_command_.mission, perception_input.now_sec);
+          if (ready_window_input_) {
+            ready_window_image_ = bgr.clone();
+            RCLCPP_INFO(get_logger(),
+                "[TUNING] READY: moving-window evidence stored for mission=%u",
+                static_cast<unsigned>(manual_committed_command_.mission));
+          } else {
+            RCLCPP_WARN(get_logger(),
+                "[TUNING] READY: insufficient moving-window evidence; use PREVIEW after DONE");
+          }
+        }
+
+        if (committed_done || camera_done_edge) {
+          manual_camera_done_pending_ = false;
+          const bool fixed_successor =
+              committed_done &&
+              IsFixedSuccessor(manual_committed_command_.mission,
+                               manual_committed_command_.action);
+          // HURDLE DOWN -> STEP_FORWARD_ONE is a fixed sequence.
+          const bool hurdle_camera_successor = camera_done_edge &&
+              mission_controller_->ActiveMission() ==
+                  vision_core::MissionType::kHurdle;
+          const bool ready_successor = completed_with_ready_window;
+          const bool may_auto_preview = fixed_successor ||
+              hurdle_camera_successor || ready_successor;
+          bool captured = false;
+          if (may_auto_preview &&
+              pending_camera_id_ == 0 &&
+              perception_result.mission.command.camera_request ==
+                  vision_core::CameraRequest::kNone) {
+            auto next_input = perception_input;
+            next_input.delivery_feedback = {};
+            next_input.begin_manual_observation = false;
+            next_input.allow_new_commands = true;
+            next_input.allow_new_body_actions = false;
+            captured = capture_preview(next_input,
+                ready_successor && !ready_window_image_.empty()
+                    ? ready_window_image_ : bgr);
+          }
+          if (!captured &&
+              pending_camera_id_ == 0 &&
+              perception_result.mission.command.camera_request ==
+                  vision_core::CameraRequest::kNone)
+            EnterWaitPreview(frame_now_sec);
+          ready_window_input_.reset();
+          ready_motion_samples_.clear();
+          ready_window_image_.release();
+        }
       }
     }
     if (run_state_ == RunState::kObserving) {
       if (finishing_observation) {
         run_state_ = RunState::kRunning;
+        if (!preview_ready_ && pending_camera_id_ == 0 &&
+            perception_result.mission.command.camera_request ==
+                vision_core::CameraRequest::kNone)
+          EnterWaitPreview(frame_now_sec);
         RCLCPP_INFO(get_logger(),
-                    "[CONTROL] 1s fresh observation complete -> RUNNING");
+                    "[CONTROL] fresh 1s observation finished: %s",
+                    preview_ready_ ? "WAIT_COMMIT" : "WAIT_PREVIEW or camera");
       } else {
         observation_accumulator_.Add(
             observation_cycle_id_, frame_now_sec,
             perception_result.mission.line_features.guide);
       }
     }
+    (void)stepped_real_core;
     const auto t6 = std::chrono::steady_clock::now();
     const auto dt_rec_us = std::chrono::duration_cast<std::chrono::microseconds>(t6 - t5).count();
 
