@@ -1,7 +1,7 @@
 # Perception 통합 수동 튜닝 (시험용)
 
 > 코드 상태: 소스 수정 및 정적 검토 대상. ROS 2/CUDA/TensorRT 빌드와 실기 검증은 **별도** 필요.
-> 기존 `line_p2p_tuning_node`, `forward_walk`, 친구 `2026_motion`은 수정하지 않는다.
+> 기존 `line_p2p_tuning_node`, 친구의 원본 `2026_motion` 저장소는 수정하지 않는다. **이 통합 작업 브랜치의 `src/forward_walk`는 READY 조건을 최소 변경했다.** 자세한 내용은 아래 forward_walk 호환성 항목을 참고한다.
 
 ## 실행 파일
 
@@ -27,7 +27,7 @@
 
 RQT 18개 튜닝 파라미터는 **WAIT_PREVIEW / WAIT_COMMIT**에서만 변경할 수 있다. OBSERVING, 몸체 실행, 카메라 이동, RESET 중에는 거부한다. 변경값은 YAML에 자동 저장되지 않는다. READY 평균은 단일 카메라 시점의 데이터만 사용하며, 정상적인 보행 중 영상 흔들림을 수치적으로 제거한다는 뜻은 아니다.
 
-**forward_walk 호환성:** 기존 실행기는 LINE(미션 1)의 11·12·13에서만 READY를 발행했다. 이 브랜치에서는 **모든 미션의 Action 11·12·13에서 READY를 한 번 발행**하도록 `motion_executor_state.hpp`의 READY 조건을 변경했다. **one-slot queue 입장은 기존 LINE→LINE만** 허용하며, 수동 튜닝 노드는 READY가 와도 다음 Action을 선큐잉하지 않는다. ACK/DONE, Action ID, 토픽, JSON 맵핑은 변경하지 않았다.
+**forward_walk 호환성(담당자 전달 사항):** 기존 실행기는 LINE(미션 1)의 11·12·13에서만 READY를 발행했다. 이 작업 브랜치에서는 `include/motion_executor_state.hpp`에 `IsReadyWalkAction(action)`을 분리하고 **LINE/BALL/GOAL/HURDLE 어느 미션이든 Action 11·12·13일 때만 READY를 1회 발행**한다. `MarkReady()`는 `active_action`만 확인하며, `src/main.cpp`의 READY 시점은 기존 `IsNearCompletion(ready_lead_sec_)` 조건을 유지한다. **큐 예약(`ActionTransactions::Evaluate`)은 여전히 LINE→LINE의 11·12·13 조합에만 허용**된다. BALL/GOAL/HURDLE의 READY가 다른 Action 선큐잉 권한을 주는 것은 아니다. 수동 튜닝 노드는 어느 미션에서도 COMMIT 전 Action을 선큐잉하지 않는다. ACK/DONE, Action/Camera ID, 토픽, 메시지 필드, JSON 매핑은 변경하지 않았다. 해당 READY/큐 분리 규칙은 `tests/executor_logic_test.cpp`에 단언문을 추가했으나, 실제 빌드·테스트 통과 여부는 별도 확인해야 한다.
 
 ## RQT 튜닝 파라미터
 
