@@ -405,6 +405,7 @@ public:
           preview_command_ = {};
           preview_image_.release();
           manual_wait_preview_ = false;
+          manual_wait_commit_ = false;
           manual_observation_request_pending_ = false;
           manual_observation_session_ = false;
           observation_required_sec_ = 1.0;
@@ -425,6 +426,9 @@ public:
             response->message = "PREVIEW requires WAIT_PREVIEW/WAIT_COMMIT and idle camera/body";
             return;
           }
+          // Discarding a frozen candidate must also close WAIT_COMMIT
+          // without letting its wall-clock duration advance mission timers.
+          LeaveWaitCommit(get_clock()->now().seconds());
           LeaveWaitPreview(get_clock()->now().seconds());
           preview_ready_ = false;
           preview_image_.release();
@@ -476,10 +480,14 @@ public:
               cmd.mission != preview_command_.mission) {
             response->success = false;
             response->message = "Candidate changed; press PREVIEW to refresh";
+            LeaveWaitCommit(get_clock()->now().seconds());
             preview_ready_ = false;
+            preview_image_.release();
+            EnterWaitPreview(get_clock()->now().seconds());
             return;
           }
           *mission_controller_ = std::move(trial);
+          LeaveWaitCommit(get_clock()->now().seconds());
           preview_ready_ = false;
           preview_image_.release();
           cached_ready_guide_.reset();
@@ -531,6 +539,7 @@ public:
           observation_accumulator_.Reset();
           preview_ready_ = false;
           manual_wait_preview_ = false;
+          manual_wait_commit_ = false;
           manual_observation_request_pending_ = false;
           manual_observation_session_ = false;
           manual_camera_done_pending_ = false;
@@ -817,7 +826,17 @@ private:
         manual_wait_preview_started_sec_);
     manual_wait_preview_ = false;
   }
-
+  void EnterWaitCommit(double now) {
+    if (manual_wait_commit_) return;
+    manual_wait_commit_ = true;
+    manual_wait_commit_started_sec_ = now;
+  }
+  void LeaveWaitCommit(double now) {
+    if (!manual_wait_commit_) return;
+    manual_wait_accumulated_sec_ += std::max(0.0, now -
+        manual_wait_commit_started_sec_);
+    manual_wait_commit_ = false;
+  }
 
   // Samples come from the current committed motion only. The motion's
   // first processed ACK-era image approximates motion start; READY is
@@ -1741,11 +1760,18 @@ private:
     perception_input.image_height = bgr.rows;
     // Freeze mission timers during PAUSED, including camera/object
     // observation deadlines, without changing ROS camera timestamps.
+    // Manual WAIT_PREVIEW and WAIT_COMMIT are human-controlled pauses:
+    // exclude BOTH from mission/recovery/ACK timeouts. Actual body motion,
+    // camera movement and commanded observation time still advance.
+    const double manual_wait_in_progress_sec =
+        manual_wait_preview_ ? std::max(0.0, frame_now_sec -
+            manual_wait_preview_started_sec_) :
+        manual_wait_commit_ ? std::max(0.0, frame_now_sec -
+            manual_wait_commit_started_sec_) : 0.0;
     perception_input.now_sec =
         (run_state_ == RunState::kPausing ? pause_requested_sec_ : frame_now_sec)
         - paused_accumulated_sec_ - manual_wait_accumulated_sec_ -
-        (manual_wait_preview_ ? std::max(0.0, frame_now_sec -
-            manual_wait_preview_started_sec_) : 0.0);
+        manual_wait_in_progress_sec;
     // While draining already-dispatched actions, freeze LINE recovery and
     // cruise decisions. Feedback still reaches the command coordinator.
     if (run_state_ == RunState::kPausing) {
@@ -1842,6 +1868,7 @@ private:
       preview_image_ = image.clone();
       preview_ready_ = true;
       LeaveWaitPreview(frame_now_sec);
+      EnterWaitCommit(frame_now_sec);
       RCLCPP_INFO(get_logger(),
           "[TUNING] WAIT_COMMIT mission=%u action=%u id=%llu",
           static_cast<unsigned>(candidate.mission),
@@ -2446,10 +2473,13 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_service_;
   bool preview_ready_{false};
   bool manual_wait_preview_{false};
+  bool manual_wait_commit_{false};
   bool manual_observation_request_pending_{false};
   bool manual_observation_session_{false};
   bool manual_camera_done_pending_{false};
   double manual_wait_preview_started_sec_{0.0};
+  double manual_wait_commit_started_sec_{0.0};
+  // Completed manual waits (PREVIEW + COMMIT), both excluded from FSM time.
   double manual_wait_accumulated_sec_{0.0};
   double observation_required_sec_{1.0};
   vision_core::ControlCommand manual_committed_command_;
