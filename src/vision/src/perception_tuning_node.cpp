@@ -407,6 +407,7 @@ public:
           manual_wait_preview_ = false;
           manual_observation_request_pending_ = false;
           manual_observation_session_ = false;
+          observation_required_sec_ = 1.0;
           manual_wait_accumulated_sec_ = 0.0;
           BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
