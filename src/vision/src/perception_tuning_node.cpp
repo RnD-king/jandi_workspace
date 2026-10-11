@@ -406,6 +406,7 @@ public:
           preview_image_.release();
           manual_wait_preview_ = false;
           manual_observation_request_pending_ = false;
+          manual_observation_session_ = false;
           manual_wait_accumulated_sec_ = 0.0;
           BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
@@ -429,6 +430,7 @@ public:
           preview_command_ = {};
           cached_ready_guide_.reset();  // fresh PREVIEW supersedes old READY
           manual_observation_request_pending_ = true;
+          manual_observation_session_ = true;
           BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
           response->message = "PREVIEW: collecting fresh 1s observation";
@@ -523,6 +525,7 @@ public:
           preview_ready_ = false;
           manual_wait_preview_ = false;
           manual_observation_request_pending_ = false;
+          manual_observation_session_ = false;
           manual_camera_done_pending_ = false;
           manual_wait_accumulated_sec_ = 0.0;
           ready_window_input_.reset();
@@ -1073,11 +1076,7 @@ private:
   };
 
   bool IsSimulatedLongWalk(vision_core::MissionAction action) const {
-    return action == vision_core::MissionAction::kStepForwardFive ||
-           action == vision_core::MissionAction::kStepForwardLeft ||
-           action == vision_core::MissionAction::kStepForwardRight ||
-           action == vision_core::MissionAction::kTurnLeftAndStep ||
-           action == vision_core::MissionAction::kTurnRightAndStep;
+    return IsReadyWalk(action);
   }
 
   void QueueSimulatedActionFeedback(std::uint64_t action_id,
@@ -1315,6 +1314,7 @@ private:
       case vision_core::CameraRequest::kNone:
         break;
       }
+      manual_camera_done_pending_ = true;
       return;
     }
     if (!enable_command_transport_) return;
@@ -1742,8 +1742,9 @@ private:
     perception_input.allow_new_commands =
         run_state_ == RunState::kRunning || finishing_observation;
     perception_input.allow_new_body_actions = false;
-    if (finishing_observation) {
-      // Same 1s uniform O/H average and validity threshold as tuning.
+    if (finishing_observation && !manual_observation_session_) {
+      // START uses this uniform LINE mean. Explicit manual PREVIEW
+      // uses MissionController's own 1s object/LINE observation.
       // NONE (invalid average) falls into normal LINE failure observation.
       const auto averaged =
           observation_accumulator_.FinishAll(observation_cycle_id_);
@@ -1862,7 +1863,7 @@ private:
           AddReadyMotionSample(perception_input, perception_result.perception);
         if (committed_ready) {
           ready_window_input_ = BuildReadyWindowInput(
-              manual_committed_command_.mission, perception_input.now_sec);
+              mission_controller_->ActiveMission(), perception_input.now_sec);
           if (ready_window_input_) {
             ready_window_image_ = bgr.clone();
             RCLCPP_INFO(get_logger(),
@@ -1915,6 +1916,7 @@ private:
     if (run_state_ == RunState::kObserving) {
       if (finishing_observation) {
         run_state_ = RunState::kRunning;
+        manual_observation_session_ = false;
         if (!preview_ready_ && pending_camera_id_ == 0 &&
             perception_result.mission.command.camera_request ==
                 vision_core::CameraRequest::kNone)
@@ -2116,9 +2118,10 @@ private:
           cv::Mat state_panel(570, 1700, CV_8UC3,
                               cv::Scalar(20, 20, 20));
           cv::putText(state_panel,
-              preview_ready_ ? "TUNING: WAIT_NEXT" :
+              preview_ready_ ? "TUNING: WAIT_COMMIT" :
               (manual_action_active_ ? "TUNING: WAIT_DONE" :
-              std::string("TUNING: ") + RunStateName(run_state_)),
+              (manual_wait_preview_ ? "TUNING: WAIT_PREVIEW" :
+              std::string("TUNING: ") + RunStateName(run_state_))),
               cv::Point(1120, 33), cv::FONT_HERSHEY_SIMPLEX, 0.62,
               cv::Scalar(0, 200, 255), 2);
           const auto tune_line = [&](int y, const std::string &line) {
@@ -2182,8 +2185,8 @@ private:
               tuning_config_.hurdle.acquire_min_v_norm,
               tuning_config_.hurdle.tilt_trigger_v_norm);
           tune_line(342,tune_buf);
-          tune_line(398, "Parameters: rqt dynamic change while WAIT_NEXT");
-          tune_line(436, "NEXT service: commit exactly displayed body action");
+          tune_line(398, "RQT: WAIT_PREVIEW/WAIT_COMMIT only");
+          tune_line(436, "PREVIEW: collect 1s; COMMIT: execute shown action");
           tune_line(474, "Camera DOWN / GOAL / FORWARD: automatic");
           int state_y = 24;
           const auto draw_state = [&state_panel, &state_y](
@@ -2410,6 +2413,7 @@ private:
   bool preview_ready_{false};
   bool manual_wait_preview_{false};
   bool manual_observation_request_pending_{false};
+  bool manual_observation_session_{false};
   bool manual_camera_done_pending_{false};
   double manual_wait_preview_started_sec_{0.0};
   double manual_wait_accumulated_sec_{0.0};
