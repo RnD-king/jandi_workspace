@@ -15,9 +15,15 @@ using RawPositions = std::unordered_map<int, int32_t>;
 using Clock = std::chrono::steady_clock;
 inline constexpr std::chrono::milliseconds kPeriod{20};
 
+// READY is an observation milestone for actions 11/12/13 in ANY mission.
+// The speculative one-slot queue remains restricted to LINE -> LINE.
+inline bool IsReadyWalkAction(uint16_t action)
+{
+    return action == 11 || action == 12 || action == 13;
+}
 inline bool IsLongLineAction(uint8_t mission, uint16_t action)
 {
-    return mission == 1 && (action == 11 || action == 12 || action == 13);
+    return mission == 1 && IsReadyWalkAction(action);
 }
 
 class CompletedHistory {
@@ -57,7 +63,7 @@ public:
         queued_id = 0;
     }
     bool MarkReady() {
-        if (active_id == 0 || ready_sent || !IsLongLineAction(active_mission, active_action)) return false;
+        if (active_id == 0 || ready_sent || !IsReadyWalkAction(active_action)) return false;
         ready_sent = true;
         return true;
     }
