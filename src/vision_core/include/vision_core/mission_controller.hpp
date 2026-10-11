@@ -67,6 +67,9 @@ struct MissionFrameInput {
   // Block NEW actions/camera requests across all missions while processing
   // already-issued ACK/READY/DONE normally.
   bool allow_new_commands{true};
+  // In manual tuning, camera requests and DONE processing continue while
+  // new body actions wait for explicit NEXT authorization.
+  bool allow_new_body_actions{true};
   // During PAUSING do not discover a NEW object mission from moving images.
   bool allow_new_mission_entry{true};
   // false이면 특징은 계산하되 LINE 판단/recovery 상태는 동결한다.
@@ -120,6 +123,7 @@ struct PerceptionFrameInput {
   CommandDeliveryFeedback delivery_feedback;
   bool allow_new_line_action{true};
   bool allow_new_commands{true};
+  bool allow_new_body_actions{true};
   bool allow_new_mission_entry{true};
   bool advance_line_fsm{true};
   std::optional<LineGuide> line_decision_guide_override;
@@ -155,8 +159,15 @@ public:
   MissionFrameResult Step(const MissionFrameInput &input);
   PerceptionMissionFrameResult StepPerception(
       const PerceptionFrameInput &input);
+  // Speculative preview never changes the real FSM or allocates a real ID.
+  PerceptionMissionFrameResult PreviewPerception(
+      const PerceptionFrameInput &input) const;
+  // Update the 18 user-tunable decision parameters, retaining mission state.
+  bool UpdateTuning(const MissionControllerConfig &candidate);
   MissionType ActiveMission() const { return active_mission_; }
   bool HasBall() const { return has_ball_; }
+  // Observed 40%-to-READY LINE guide, for manual one-slot preview only.
+  std::optional<LineGuide> LastReadyLineGuide() const { return last_ready_line_guide_; }
   // 진행 중 action/짧은 동작 후 관측이 없을 때만 LINE direct selector
   // gain/deadband를 상태 손실 없이 교체한다.
   bool UpdateLineP2pTuning(const LineP2pConfig &line_p2p);
@@ -201,6 +212,7 @@ private:
   MissionControllerConfig config_;
   LineP2pController line_p2p_controller_;
   LineGuideAccumulator line_guide_accumulator_;
+  std::optional<LineGuide> last_ready_line_guide_;
   std::uint64_t ready_line_action_id_{0};
   bool line_failure_pending_done_{false};
   LineState line_state_{LineState::kNormal};
@@ -225,6 +237,17 @@ private:
   double decision_observation_start_sec_{0.0};
   std::deque<bool> decision_object_hits_;
   std::size_t decision_observation_total_frames_{0};
+  // Raw (already associated) object samples for the 1s stationary mean.
+  // EMA remains active during approach; one mean replaces EMA for the
+  // immediate post-DONE near-range decision only.
+  std::optional<ObjectTarget> decision_last_target_;
+  double decision_target_u_sum_{0.0}, decision_target_v_sum_{0.0};
+  double decision_rect_u_sum_{0.0}, decision_rect_v_sum_{0.0};
+  int decision_target_count_{0};
+  double decision_last_seen_sec_{0.0};
+  double decision_pose_x_sum_{0.0}, decision_pose_z_sum_{0.0};
+  double decision_pose_sin_sum_{0.0}, decision_pose_cos_sum_{0.0};
+  int decision_pose_count_{0};
   int decision_line_valid_count_{0};
   double decision_line_offset_sum_{0.0};
   double decision_line_heading_sum_{0.0};

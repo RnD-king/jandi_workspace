@@ -77,7 +77,8 @@ public:
   BallResult Compute(const std::optional<ObjectTarget> &ball_target,
                      int image_width, int image_height, double now_sec,
                      const CameraFeedback &camera_feedback,
-                     const ActionExecutionFeedback &action_feedback);
+                     const ActionExecutionFeedback &action_feedback,
+                     bool allow_new_body_actions = true);
   static const char *ModeName(BallMode mode);
   bool HasBall() const { return has_ball_; }
   void SetHasBall(bool has_ball) { has_ball_ = has_ball; }
@@ -87,6 +88,8 @@ public:
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
+  void UseNextObservationAsMean() { has_smoothed_ = false; }
+  void UpdateTuning(const BallConfig &config) { config_ = config; }
   void Reset();
 
 private:
