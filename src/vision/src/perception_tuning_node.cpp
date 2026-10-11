@@ -1750,7 +1750,7 @@ private:
       observation_start_sec_ = frame_now_sec;
     const bool finishing_observation =
         run_state_ == RunState::kObserving &&
-        frame_now_sec - observation_start_sec_ >= 1.0;
+        frame_now_sec - observation_start_sec_ >= observation_required_sec_;
     perception_input.allow_new_commands =
         run_state_ == RunState::kRunning || finishing_observation;
     perception_input.allow_new_body_actions = false;
