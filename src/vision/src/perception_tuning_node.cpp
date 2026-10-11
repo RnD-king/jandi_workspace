@@ -416,6 +416,7 @@ public:
           }
           *mission_controller_ = std::move(trial);
           preview_ready_ = false;
+          preview_image_.release();
           cached_ready_guide_.reset();
           manual_action_active_ = true;
           manual_action_id_ = cmd.action_id;
@@ -443,13 +444,32 @@ public:
             response->message = "RESET rejected: action/camera/feedback active";
             return;
           }
+          if (run_state_ != RunState::kRunning &&
+              run_state_ != RunState::kObserving) {
+            response->success = false;
+            response->message = "RESET requires RUNNING or OBSERVING";
+            return;
+          }
+          if (!enable_command_transport_ && !simulate_camera_feedback_) {
+            response->success = false;
+            response->message = "RESET requires camera transport or simulated camera feedback";
+            return;
+          }
           mission_controller_->Reset(true);
           preview_ready_ = false;
+          preview_image_.release();
           cached_ready_guide_.reset();
           manual_action_id_ = 0;
-          BeginFreshObservation(get_clock()->now().seconds());
+          action_delivery_feedback_ = {};
+          // Do not gather stationary evidence before FORWARD camera DONE.
+          run_state_ = RunState::kResettingCamera;
+          PublishCameraCommand(vision_core::CameraRequest::kForward);
+          if (simulate_camera_feedback_)
+            BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
-          response->message = "RESET: 1s stationary observation";
+          response->message = simulate_camera_feedback_
+              ? "RESET: simulated FORWARD; 1s observation"
+              : "RESET: camera FORWARD sent; waiting for DONE";
         });
     tuning_callback_ = add_on_set_parameters_callback(
         std::bind(&PerceptionTuningNode::OnTuningParameters, this,
@@ -616,10 +636,11 @@ private:
       response.reason = "line_reference_u_px must be finite and in [0,640)";
       return response;
     }
-    if (manual_action_active_ || !outstanding_actions_.empty() ||
-        pending_camera_id_ != 0) {
+    if (run_state_ != RunState::kRunning || !preview_ready_ ||
+        manual_action_active_ || !outstanding_actions_.empty() ||
+        !outstanding_cameras_.empty() || pending_camera_id_ != 0) {
       response.successful = false;
-      response.reason = "Tuning parameters are locked while action/camera is active";
+      response.reason = "Tuning parameters can change only in WAIT_NEXT";
       return response;
     }
     try {
@@ -647,12 +668,13 @@ private:
     return response;
   }
 
-  enum class RunState { kWaitStart, kObserving, kRunning, kPausing, kPaused };
+  enum class RunState { kWaitStart, kObserving, kRunning, kResettingCamera, kPausing, kPaused };
   static const char *RunStateName(RunState s) {
     switch (s) {
     case RunState::kWaitStart: return "WAIT_START";
     case RunState::kObserving: return "OBSERVING";
     case RunState::kRunning: return "RUNNING";
+    case RunState::kResettingCamera: return "RESET_CAMERA";
     case RunState::kPausing: return "PAUSING";
     case RunState::kPaused: return "PAUSED";
     }
@@ -979,6 +1001,10 @@ private:
     pending_camera_id_ = 0;
     pending_camera_request_ = vision_core::CameraRequest::kNone;
     camera_acknowledged_ = false;
+    if (run_state_ == RunState::kResettingCamera) {
+      BeginFreshObservation(this->get_clock()->now().seconds());
+      RCLCPP_INFO(get_logger(), "[RESET] Camera FORWARD DONE -> 1s observation");
+    }
   }
 
   void PublishActionCommand(const vision_core::ControlCommand &command) {
@@ -1041,7 +1067,9 @@ private:
   void PublishCameraCommand(vision_core::CameraRequest request) {
     if (request == vision_core::CameraRequest::kNone) return;
     // The node may only originate new camera requests in RUNNING.
-    if (run_state_ != RunState::kRunning) return;
+    if (run_state_ != RunState::kRunning &&
+        !(run_state_ == RunState::kResettingCamera &&
+          request == vision_core::CameraRequest::kForward)) return;
     if (simulate_camera_feedback_) {
       switch (request) {
       case vision_core::CameraRequest::kDown:
@@ -1391,9 +1419,12 @@ private:
       }
     }
 
+    if (run_state_ == RunState::kResettingCamera)
+      PublishCameraCommand(vision_core::CameraRequest::kForward);
     if (run_state_ == RunState::kWaitStart ||
-        run_state_ == RunState::kPaused) {
-      // Disarmed/paused: inference and visualization continue, but StepPerception
+        run_state_ == RunState::kPaused ||
+        run_state_ == RunState::kResettingCamera) {
+      // Disarmed/paused/reset-camera: visualization continues, but StepPerception
       // does not run at all. This freezes ALL mission/controller states and
       // prevents both ActionCommand and CameraCommand from being generated.
       if (show_debug_view_ || show_yolo_debug_view_) {
@@ -1408,16 +1439,22 @@ private:
             DrawYoloDetections(camera_view, dets);
             cv::imshow(kDebugWindowName, camera_view);
             cv::Mat state_view(360, 1100, CV_8UC3, cv::Scalar(20, 20, 20));
-            cv::putText(state_view, run_state_ == RunState::kPaused
-                ? "PAUSED / WAIT_RESUME_OR_RESET" : "DISARMED / WAIT_START",
+            cv::putText(state_view, run_state_ == RunState::kResettingCamera
+                ? "RESET: CAMERA FORWARD / WAIT_DONE" :
+                (run_state_ == RunState::kPaused
+                ? "PAUSED / WAIT_RESUME_OR_RESET" : "DISARMED / WAIT_START"),
                         cv::Point(28, 70), cv::FONT_HERSHEY_SIMPLEX,
                         1.1, cv::Scalar(0, 210, 255), 2);
-            cv::putText(state_view, "YOLO active. No ROS motion commands will be sent.",
+            cv::putText(state_view, run_state_ == RunState::kResettingCamera
+                ? "Body action disabled; CameraCommand FORWARD awaiting ACK/DONE."
+                : "YOLO active. No ROS motion commands will be sent.",
                         cv::Point(28, 125), cv::FONT_HERSHEY_SIMPLEX,
                         0.65, cv::Scalar(230, 230, 230), 1);
-            cv::putText(state_view, run_state_ == RunState::kPaused
-                ? "Call /line_perception_node/resume or /reset."
-                : "Call /line_perception_node/start (std_srvs/Trigger).",
+            cv::putText(state_view, run_state_ == RunState::kResettingCamera
+                ? "Fresh 1s observation starts after camera DONE."
+                : (run_state_ == RunState::kPaused
+                ? "Paused; body motion disabled."
+                : "Waiting for initial observation."),
                         cv::Point(28, 165), cv::FONT_HERSHEY_SIMPLEX,
                         0.64, cv::Scalar(230, 230, 230), 1);
             cv::imshow(kStateWindowName, state_view);
@@ -1514,6 +1551,7 @@ private:
               vision_core::CommandType::kAction) {
             preview_command_ = speculative.mission.command;
             preview_result_ = speculative;
+            preview_image_ = bgr.clone();
             preview_ready_ = captured = true;
             RCLCPP_INFO(get_logger(),
                 "[TUNING] WAIT_NEXT mission=%u action=%u",
@@ -1639,11 +1677,30 @@ private:
           const bool hurdle_confirmed =
               hurdle_target && hurdle_cmd.tracked.stable &&
               hurdle_cmd.tracked.visible;
+          // Controller pose may be post-DONE averaged, not raw current RGB-D.
           const bool pose_confirmed =
-              backboard_confirmed && goal_cmd.pose.stable &&
-              goal_cmd.pose.visible && goal_pose.valid;
+              selected_goal && goal_cmd.pose.stable && goal_cmd.pose.visible;
 
-          cv::Mat vis = bgr.clone();
+          // Render the exact RGB observation used by Preview. Recomputing
+          // preview_result_ after RQT edits updates the overlays on this frame.
+          cv::Mat vis = preview_ready_ && !preview_image_.empty()
+              ? preview_image_.clone() : bgr.clone();
+          const int ref_u = static_cast<int>(std::lround(
+              tuning_config_.line_features.image_center_u));
+          if (ref_u >= 0 && ref_u < vis.cols) {
+            cv::line(vis, cv::Point(ref_u, 0), cv::Point(ref_u, vis.rows - 1),
+                     cv::Scalar(255, 255, 0), 2, cv::LINE_AA);
+            char ref_label[80];
+            std::snprintf(ref_label, sizeof(ref_label),
+                          "LINE REF: %.1fpx", tuning_config_.line_features.image_center_u);
+            cv::putText(vis, ref_label,
+                        cv::Point(std::max(5, std::min(ref_u + 7, vis.cols - 185)), 95),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.54,
+                        cv::Scalar(255, 255, 0), 2, cv::LINE_AA);
+          }
+          cv::putText(vis, preview_ready_ ? "FROZEN DECISION FRAME" : "LIVE RGB",
+                      cv::Point(10, 72), cv::FONT_HERSHEY_SIMPLEX, 0.52,
+                      cv::Scalar(255, 255, 0), 2, cv::LINE_AA);
           DrawConfirmedDetections(
               vis, prepared.line_centers, line_confirmed, ball_target,
               ball_confirmed, backboard_target, backboard_confirmed,
@@ -1799,18 +1856,30 @@ private:
           }
           draw_state(buf, cv::Scalar(255, 255, 255));
 
-          if (line_confirmed) {
+          const auto &decision_line = mission_result.line_decision_guide
+              ? *mission_result.line_decision_guide : feats.guide;
+          if (mission_result.line_computed && decision_line.valid) {
+            const double steering = tuning_config_.line_p2p.offset_gain *
+                  decision_line.offset +
+                tuning_config_.line_p2p.heading_gain * decision_line.heading_rad;
+            const double db = tuning_config_.line_p2p.steering_deadband;
+            const char *direction = steering < -db ? "LEFT" :
+                (steering > db ? "RIGHT" : "STRAIGHT");
             std::snprintf(buf, sizeof(buf),
-                          "LINE STATE: active=%d confirmed=1 dots=%.0f offset=%+.3f heading=%+.3f",
-                          selected_ball || selected_hurdle || selected_goal ? 0 : 1,
-                          feats.n_visible, feats.guide.offset,
-                          feats.guide.heading_rad);
+                          "LINE DECISION: O=%+.3f H=%+.3f score=%+.3f dir=%s",
+                          decision_line.offset, decision_line.heading_rad,
+                          steering, direction);
           } else {
             std::snprintf(buf, sizeof(buf),
-                          "LINE STATE: active=%d confirmed=0 dots=-- u_err=-- slope=--",
-                          selected_ball || selected_hurdle || selected_goal ? 0 : 1);
+                          "LINE DECISION: invalid (NONE/recovery)");
           }
           draw_state(buf, cv::Scalar(0, 255, 0));
+          if (mission_result.line_computed && feats.guide.valid) {
+            std::snprintf(buf, sizeof(buf),
+                          "LINE RAW: dots=%.0f O=%+.3f H=%+.3f",
+                          feats.n_visible, feats.guide.offset, feats.guide.heading_rad);
+            draw_state(buf, cv::Scalar(0, 190, 0));
+          }
 
           if (ball_confirmed) {
             std::snprintf(buf, sizeof(buf),
@@ -1976,6 +2045,7 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr next_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_service_;
   bool preview_ready_{false};
+  cv::Mat preview_image_;  // frozen RGB decision evidence for WAIT_NEXT
   bool manual_action_active_{false};
   std::uint64_t manual_action_id_{0};
   std::optional<vision_core::LineGuide> cached_ready_guide_;
