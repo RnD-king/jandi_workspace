@@ -564,7 +564,7 @@ public:
     // The constructor must not start perception decision timers.
     run_state_ = RunState::kWaitStart;
     RCLCPP_INFO(get_logger(),
-        "[TUNING] WAIT_START; call /perception_tuning_node/start. NEXT/RESET available afterward");
+        "[TUNING] WAIT_START; use /start, /preview, /commit, /reset");
     RCLCPP_INFO(get_logger(), "  image_topic    : %s", image_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  depth_topic    : %s", depth_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  camera_info    : %s", camera_info_topic_.c_str());
