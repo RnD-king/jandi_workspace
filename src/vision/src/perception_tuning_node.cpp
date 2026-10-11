@@ -802,6 +802,102 @@ private:
     manual_wait_preview_ = false;
   }
 
+
+  // Samples come from the current committed motion only. The motion's
+  // first processed ACK-era image approximates motion start; READY is
+  // approximately ready_lead_sec before actual completion.
+  void AddReadyMotionSample(const vision_core::PerceptionFrameInput &input,
+                            const vision_core::PreparedPerceptionFrame &prepared) {
+    if (!manual_action_active_ || !IsReadyWalk(manual_committed_command_.action) ||
+        !input.camera_feedback.settled) return;
+    ready_motion_samples_.push_back({input.now_sec, input, prepared});
+    constexpr std::size_t kMaxMotionSamples = 450;
+    if (ready_motion_samples_.size() > kMaxMotionSamples)
+      ready_motion_samples_.pop_front();
+  }
+
+  std::optional<vision_core::PerceptionFrameInput>
+  BuildReadyWindowInput(vision_core::MissionType mission, double ready_sec) const {
+    if (ready_motion_samples_.empty()) return std::nullopt;
+    const double started = ready_motion_samples_.front().now_sec;
+    const double total = std::max(0.0, ready_sec - started) +
+        std::max(0.0, tuning_config_.line_p2p.ready_lead_sec);
+    const double cutoff = started + 0.40 * total;
+    std::vector<const ReadyMotionSample *> window;
+    for (const auto &sample : ready_motion_samples_) {
+      if (sample.now_sec >= cutoff && sample.now_sec <= ready_sec)
+        window.push_back(&sample);
+    }
+    if (window.empty()) return std::nullopt;
+    auto result = window.back()->input;
+    result.delivery_feedback = {};
+    result.begin_manual_observation = false;
+    result.line_decision_guide_override.reset();
+    if (mission == vision_core::MissionType::kLine) {
+      if (!cached_ready_guide_ || !cached_ready_guide_->valid)
+        return std::nullopt;
+      result.line_decision_guide_override = cached_ready_guide_;
+      return result;
+    }
+    if (window.size() < 10) return std::nullopt;
+    const auto target_of = [mission](const ReadyMotionSample &sample)
+        -> const std::optional<vision_core::ObjectTarget> & {
+      if (mission == vision_core::MissionType::kBall)
+        return sample.prepared.targets.ball;
+      if (mission == vision_core::MissionType::kGoal)
+        return sample.prepared.targets.backboard;
+      return sample.prepared.targets.hurdle;
+    };
+    int last_ten_hits = 0;
+    for (std::size_t j = window.size() - 10; j < window.size(); ++j)
+      if (target_of(*window[j])) ++last_ten_hits;
+    if (last_ten_hits < 7) return std::nullopt;
+    double sx=0, sy=0, sw=0, sh=0, confidence=0;
+    double center_depth=0, left_depth=0, right_depth=0;
+    int hits=0, center_hits=0, left_hits=0, right_hits=0;
+    int class_id=0;
+    for (const auto *sample : window) {
+      const auto &obj = target_of(*sample);
+      if (!obj) continue;
+      ++hits;
+      class_id = obj->class_id;
+      sx += obj->box_px.x; sy += obj->box_px.y;
+      sw += obj->box_px.width; sh += obj->box_px.height;
+      confidence += obj->confidence;
+      if (mission == vision_core::MissionType::kGoal) {
+        const auto &prepared = sample->prepared;
+        if (prepared.backboard_center_depth_m &&
+            std::isfinite(*prepared.backboard_center_depth_m)) {
+          center_depth += *prepared.backboard_center_depth_m;
+          ++center_hits;
+        }
+        if (prepared.backboard_left_depth_m &&
+            std::isfinite(*prepared.backboard_left_depth_m)) {
+          left_depth += *prepared.backboard_left_depth_m; ++left_hits;
+        }
+        if (prepared.backboard_right_depth_m &&
+            std::isfinite(*prepared.backboard_right_depth_m)) {
+          right_depth += *prepared.backboard_right_depth_m; ++right_hits;
+        }
+      }
+    }
+    if (hits < 7) return std::nullopt;
+    if (mission == vision_core::MissionType::kGoal && center_hits < 7)
+      return std::nullopt;
+    vision_core::PerceptionDetection mean;
+    mean.detection.class_id = class_id;
+    mean.detection.confidence = confidence / hits;
+    mean.detection.box = {sx / hits, sy / hits, sw / hits, sh / hits};
+    if (center_hits >= 7) mean.center_depth_m = center_depth / center_hits;
+    if (left_hits >= 7) mean.left_depth_m = left_depth / left_hits;
+    if (right_hits >= 7) mean.right_depth_m = right_depth / right_hits;
+    // Only the tracked object corresponding to the committed mission may
+    // generate the next object Action; no competing old RGB detections.
+    result.detections.clear();
+    result.detections.push_back(mean);
+    return result;
+  }
+
   void BeginFreshObservation(double now) {
     ++observation_cycle_id_;
     if (observation_cycle_id_ == 0) ++observation_cycle_id_;
