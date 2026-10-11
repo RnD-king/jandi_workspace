@@ -836,8 +836,13 @@ private:
         std::max(0.0, tuning_config_.line_p2p.ready_lead_sec);
     const double cutoff = started + 0.40 * total;
     std::vector<const ReadyMotionSample *> window;
+    const auto final_camera_mode =
+        ready_motion_samples_.back().input.camera_feedback.actual_mode;
     for (const auto &sample : ready_motion_samples_) {
-      if (sample.now_sec >= cutoff && sample.now_sec <= ready_sec)
+      // Never mix FORWARD/DOWN/GOAL pixel coordinates in one mean.
+      if (sample.now_sec >= cutoff && sample.now_sec <= ready_sec &&
+          sample.input.camera_feedback.settled &&
+          sample.input.camera_feedback.actual_mode == final_camera_mode)
         window.push_back(&sample);
     }
     if (window.empty()) return std::nullopt;
