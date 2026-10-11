@@ -64,6 +64,12 @@ int main() {
   assert(r.command.action==MissionAction::kStepForwardFive);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
   assert(r.line_window_stats && r.line_window_stats->used_frames >= 2);
+  // Debug telemetry must report the SAME READY average used to select B.
+  const auto ready_decision_guide = controller.LastReadyLineGuide();
+  assert(ready_decision_guide && r.line_decision_guide);
+  assert(std::abs(r.line_decision_guide->offset - ready_decision_guide->offset) < 1e-9);
+  assert(std::abs(r.line_decision_guide->heading_rad -
+                  ready_decision_guide->heading_rad) < 1e-9);
 
   // ACK 전 정지 관측은 long-action 후반 accumulator에 포함하지 않는다.
   // ACK 뒤 관측은 모두 straight이므로 READY 예약도 straight여야 한다.
@@ -542,12 +548,21 @@ int main() {
     line_frame.detections.push_back(d);
   }
   const auto ephemeral=line_manual.PreviewPerception(line_frame);
+  assert(ephemeral.mission.line_decision_guide);
+  assert(ephemeral.mission.line_decision_guide->valid);
+  assert(std::abs(ephemeral.mission.line_decision_guide->offset -
+                  ephemeral.mission.line_features.guide.offset) < 1e-9);
   assert(ephemeral.mission.command.action_id==1);
   assert(ephemeral.mission.command.action==MissionAction::kStepForwardFive);
   auto ref_adjust=c;
   ref_adjust.line_features.image_center_u=250.0;
   assert(line_manual.UpdateTuning(ref_adjust));
   const auto shifted=line_manual.PreviewPerception(line_frame);
+  assert(shifted.mission.line_decision_guide);
+  assert(shifted.mission.line_decision_guide->offset >
+         ephemeral.mission.line_decision_guide->offset + 0.10);
+  assert(std::abs(shifted.mission.line_decision_guide->offset -
+                  shifted.mission.line_features.guide.offset) < 1e-9);
   assert(shifted.mission.command.action==MissionAction::kStepForwardRight);
   const auto issued=line_manual.StepPerception(line_frame);
   assert(issued.mission.command.action_id==1);
