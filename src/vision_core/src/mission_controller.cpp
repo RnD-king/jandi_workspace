@@ -529,6 +529,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     // FINAL HOLD는 명시적 Reset 전까지 완전한 terminal 상태다. 라인 action뿐
     // 아니라 새로운 object mission 진입도 허용하지 않는다.
     if (line_state_ == LineState::kFinalHold) break;
+    // PAUSE cannot let incidental moving-frame detections switch missions.
+    // Existing BALL/GOAL/HURDLE missions are still stepped to process DONE.
+    if (!input.allow_new_mission_entry) break;
     if (has_ball_) {
       if (config_.enable_goal) {
         BallResult carrying; carrying.has_ball = true;
@@ -800,6 +803,7 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   prepared.delivery_feedback = input.delivery_feedback;
   prepared.allow_new_line_action = input.allow_new_line_action;
   prepared.allow_new_commands = input.allow_new_commands;
+  prepared.allow_new_mission_entry = input.allow_new_mission_entry;
   prepared.advance_line_fsm = input.advance_line_fsm;
   prepared.line_decision_guide_override = input.line_decision_guide_override;
   std::optional<double> center;

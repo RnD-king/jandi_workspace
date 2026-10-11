@@ -118,6 +118,31 @@ void TestVerificationBypassesAssociationAndFineReacquires() {
   assert(rejected.mission.ball.action.action==MissionAction::kNone);
 }
 
+void TestPauseDoesNotAcquireNewMission() {
+  auto config=BallPipelineConfig();
+  config.ball.stable_window=1;
+  config.ball.stable_min_hits=1;
+  config.line.line_stable_window=1;
+  config.line.line_stable_min_hits=1;
+  MissionController controller(config);
+  PerceptionFrameInput input;
+  input.image_width=640;
+  input.image_height=480;
+  input.command_transport_enabled=true;
+  input.allow_new_commands=false;
+  input.allow_new_mission_entry=false;
+  input.detections={BallDetection(.50,.30)};
+  input.now_sec=0.1;
+  const auto frozen=controller.StepPerception(input);
+  assert(frozen.mission.active_mission==MissionType::kLine);
+  assert(frozen.mission.command.action_id==0);
+  input.now_sec=0.2;
+  input.allow_new_commands=true;
+  input.allow_new_mission_entry=true;
+  const auto active=controller.StepPerception(input);
+  assert(active.mission.active_mission==MissionType::kBall);
+}
+
 void TestGlobalPauseGateForBallAndCamera() {
   BallPipeline pipeline;
   pipeline.input.allow_new_commands=false;
@@ -170,5 +195,6 @@ int main() {
   TestVerificationBypassesAssociationAndFineReacquires();
   TestVerificationSixHitsSucceeds();
   TestGlobalPauseGateForBallAndCamera();
+  TestPauseDoesNotAcquireNewMission();
   return 0;
 }

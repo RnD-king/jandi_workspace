@@ -67,6 +67,8 @@ struct MissionFrameInput {
   // Block NEW actions/camera requests across all missions while processing
   // already-issued ACK/READY/DONE normally.
   bool allow_new_commands{true};
+  // During PAUSING do not discover a NEW object mission from moving images.
+  bool allow_new_mission_entry{true};
   // false이면 특징은 계산하되 LINE 판단/recovery 상태는 동결한다.
   // 기존 action의 coordinator ACK/READY/DONE 처리는 계속 수행한다.
   bool advance_line_fsm{true};
@@ -118,6 +120,7 @@ struct PerceptionFrameInput {
   CommandDeliveryFeedback delivery_feedback;
   bool allow_new_line_action{true};
   bool allow_new_commands{true};
+  bool allow_new_mission_entry{true};
   bool advance_line_fsm{true};
   std::optional<LineGuide> line_decision_guide_override;
 };

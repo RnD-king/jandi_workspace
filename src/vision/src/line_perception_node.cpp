@@ -1350,8 +1350,10 @@ private:
         - paused_accumulated_sec_;
     // While draining already-dispatched actions, freeze LINE recovery and
     // cruise decisions. Feedback still reaches the command coordinator.
-    if (run_state_ == RunState::kPausing)
+    if (run_state_ == RunState::kPausing) {
       perception_input.advance_line_fsm = false;
+      perception_input.allow_new_mission_entry = false;
+    }
     const bool finishing_observation =
         run_state_ == RunState::kObserving &&
         frame_now_sec - observation_start_sec_ >= 1.0;
