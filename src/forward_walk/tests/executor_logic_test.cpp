@@ -155,6 +155,19 @@ int main() {
             actions.Activate(200,1,action);
             Require(!actions.MarkReady(), "READY on unsupported action");
         }
+        // READY is mission-independent for walk 11/12/13, but admitting the
+        // next queued action must remain LINE -> LINE.
+        for (uint8_t mission : {uint8_t{1}, uint8_t{2}, uint8_t{3}, uint8_t{4}}) {
+            for (uint16_t action : {uint16_t{11}, uint16_t{12}, uint16_t{13}}) {
+                actions.Activate(300 + mission*10 + action, mission, action);
+                Require(actions.MarkReady() && !actions.MarkReady(),
+                        "READY missing or repeated for 11/12/13");
+                if (mission != 1)
+                    Require(actions.Evaluate(900, 1, 13) == Admission::Reject,
+                            "non-LINE action opened LINE queue");
+                actions.CompleteActive();
+            }
+        }
         CompletedHistory history;
         for (uint64_t id=1; id<=33; ++id) history.Remember(id);
         Require(!history.Contains(1) && history.Contains(2) && history.Contains(33), "history is not bounded at 32");
