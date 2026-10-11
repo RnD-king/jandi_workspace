@@ -1,0 +1,27 @@
+{
+  "name": "직진_좌회전_3번",
+  "motions": [
+    {
+      "filename": "보행_좌회전전진_20도_최종_초기X.json",
+      "keyframe_count": 8,
+      "name": "보행_좌회전전진_20도_최종_초기X",
+      "nominal_sec": 1.02,
+      "saved_at": "2026-10-11T21:28:59"
+    },
+    {
+      "filename": "보행_좌회전전진_20도_최종_초기X.json",
+      "keyframe_count": 8,
+      "name": "보행_좌회전전진_20도_최종_초기X",
+      "nominal_sec": 1.02,
+      "saved_at": "2026-10-11T21:28:59"
+    },
+    {
+      "filename": "보행_좌회전전진_20도_최종_초기X.json",
+      "keyframe_count": 8,
+      "name": "보행_좌회전전진_20도_최종_초기X",
+      "nominal_sec": 1.02,
+      "saved_at": "2026-10-11T21:28:59"
+    }
+  ],
+  "saved_at": "2026-10-11T21:29:22"
+}
