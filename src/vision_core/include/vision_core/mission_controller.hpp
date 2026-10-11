@@ -212,6 +212,8 @@ private:
   void FinishMission();
 
   MissionControllerConfig config_;
+  // Width for renormalizing cached LINE offsets after optical reference edits.
+  int last_line_image_width_{0};
   LineP2pController line_p2p_controller_;
   LineGuideAccumulator line_guide_accumulator_;
   std::optional<LineGuide> last_ready_line_guide_;
@@ -238,6 +240,7 @@ private:
   CommandDeliveryFeedback deferred_done_;
   double decision_observation_start_sec_{0.0};
   std::deque<bool> decision_object_hits_;
+  std::deque<bool> decision_goal_pose_hits_;
   std::size_t decision_observation_total_frames_{0};
   // Raw (already associated) object samples for the 1s stationary mean.
   // EMA remains active during approach; one mean replaces EMA for the
