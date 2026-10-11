@@ -950,7 +950,13 @@ PerceptionMissionFrameResult MissionController::PreviewPerception(
 }
 
 double MissionController::ManualPreviewDurationSec() const {
-  if (active_mission_ == MissionType::kLine) {
+  const bool uses_line_recovery =
+      active_mission_ == MissionType::kLine ||
+      (active_mission_ == MissionType::kBall &&
+       ball_result_.mode == BallMode::kPostPickupLineRecovery) ||
+      (active_mission_ == MissionType::kGoal &&
+       goal_result_.mode == GoalMode::kHeadingRecovery);
+  if (uses_line_recovery) {
     if (line_state_ == LineState::kFailureObserve)
       return std::max(config_.post_motion_observation_sec,
                       config_.line_p2p.failure_observation_sec);
