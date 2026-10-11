@@ -793,6 +793,21 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   output.perception.raw_line_centers =
       ExtractLineCenters(detections, config_.line_detection);
   output.perception.line_centers = output.perception.raw_line_centers;
+  // A valid READY window is already associated and 10/7-filtered by
+  // the manual adapter. Reacquire its averaged single detection instead of
+  // associating it to a raw mid-walk position.
+  if (input.manual_observation_control && input.manual_ready_mean) {
+    if (active_mission_ == MissionType::kBall) {
+      ball_association_tracker_.Reset();
+      ball_controller_.UseNextObservationAsMean();
+    } else if (active_mission_ == MissionType::kGoal) {
+      backboard_association_tracker_.Reset();
+      goal_controller_.UseNextObservationAsMean();
+    } else if (active_mission_ == MissionType::kHurdle) {
+      hurdle_association_tracker_.Reset();
+      hurdle_controller_.UseNextObservationAsMean();
+    }
+  }
   // Never carry an association identity across a camera movement.
   const bool camera_moving = !input.camera_feedback.settled ||
       input.camera_feedback.actual_mode == CameraMode::kTransition;
