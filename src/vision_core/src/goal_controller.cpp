@@ -371,6 +371,8 @@ GoalResult GoalController::Compute(
     // Fine locomotion이 끝나고 settle된 뒤 현재 frame에서 새로 계산된 raw
     // RGB-D pose만 사용한다. motion 중 누적된 smoothing 이력은 다음 fine
     // action의 geometry에 섞지 않는다.
+    result.fine_decision_pose = pose;
+    result.fine_decision_pose_used = true;
     result.action = FineAction(pose);
     if (allow_new_body_actions &&
         result.action.action == MissionAction::kShoot) {
