@@ -1490,13 +1490,8 @@ private:
       const cv::Rect clipped = raw_box & cv::Rect(0, 0, vis.cols, vis.rows);
       if (clipped.width <= 0 || clipped.height <= 0) return;
       cv::rectangle(vis, clipped, color, 2);
-      const auto center = target->center_rectified
-                              ? target->rectified_center_px
-                              : target->center_px;
-      cv::circle(vis,
-                 cv::Point(static_cast<int>(std::round(center.u)),
-                           static_cast<int>(std::round(center.v))),
-                 4, color, cv::FILLED);
+      // The bounding box is recognition evidence only. Raw centers must
+      // never be drawn as if they were the controller's decision coordinates.
       const int text_y = clipped.y >= 14 ? clipped.y - 4 : clipped.y + 14;
       cv::putText(vis, label, cv::Point(clipped.x, text_y),
                   cv::FONT_HERSHEY_SIMPLEX, 0.60, color, 2);
@@ -1516,10 +1511,12 @@ private:
       return;
     }
 
-    const auto p = target->center_rectified ? target->rectified_center_px : target->center_px;
-    char buf[160];
-    std::snprintf(buf, sizeof(buf), "%s: conf=%.2f u=%.1f v=%.1f h=%.0f area=%.0f", name, target->confidence, p.u, p.v,
-                  target->height_px, target->area_px);
+    const auto &box = target->box_px;
+    char buf[180];
+    std::snprintf(buf, sizeof(buf),
+                  "%s: conf=%.2f box=[%.0f,%.0f,%.0f,%.0f]",
+                  name, target->confidence, box.x, box.y,
+                  box.width, box.height);
     cv::putText(vis, buf, cv::Point(10, y), cv::FONT_HERSHEY_SIMPLEX,
                 0.52, color, 1);
   }
@@ -2080,15 +2077,13 @@ private:
           const bool line_confirmed =
               mission_result.line_computed && feats.guide.valid &&
               !mission_result.line_in_recovery;
+          // Controller state (not single-frame detection validity).
           const bool ball_confirmed =
-              ball_target && ball_cmd.tracked.stable &&
-              ball_cmd.tracked.visible;
+              ball_cmd.tracked.stable && ball_cmd.tracked.visible;
           const bool backboard_confirmed =
-              backboard_target && goal_cmd.tracked.stable &&
-              goal_cmd.tracked.visible;
+              goal_cmd.tracked.stable && goal_cmd.tracked.visible;
           const bool hurdle_confirmed =
-              hurdle_target && hurdle_cmd.tracked.stable &&
-              hurdle_cmd.tracked.visible;
+              hurdle_cmd.tracked.stable && hurdle_cmd.tracked.visible;
           // Controller pose may be post-DONE averaged, not raw current RGB-D.
           const bool pose_confirmed =
               selected_goal && goal_cmd.pose.stable && goal_cmd.pose.visible;
@@ -2113,10 +2108,95 @@ private:
           cv::putText(vis, preview_ready_ ? "FROZEN DECISION FRAME" : "LIVE RGB",
                       cv::Point(10, 72), cv::FONT_HERSHEY_SIMPLEX, 0.52,
                       cv::Scalar(255, 255, 0), 2, cv::LINE_AA);
+          // Only the selected detector box is drawn above. The control
+          // decision marker below comes from the exact controller result.
           DrawConfirmedDetections(
               vis, prepared.line_centers, line_confirmed, ball_target,
-              ball_confirmed, backboard_target, backboard_confirmed,
-              hurdle_target, hurdle_confirmed);
+              ball_target.has_value(), backboard_target,
+              backboard_target.has_value(), hurdle_target,
+              hurdle_target.has_value());
+
+          const auto draw_decision_center = [&vis](
+              double u_norm, double v_norm, const char *label,
+              const cv::Scalar &color) {
+            if (vis.cols <= 1 || vis.rows <= 1 ||
+                !std::isfinite(u_norm) || !std::isfinite(v_norm) ||
+                u_norm < 0.0 || u_norm > 1.0 ||
+                v_norm < 0.0 || v_norm > 1.0) return;
+            // Trackers normalize by width-1 / height-1, never W or H.
+            const cv::Point center(
+                static_cast<int>(std::lround(u_norm * (vis.cols - 1))),
+                static_cast<int>(std::lround(v_norm * (vis.rows - 1))));
+            cv::circle(vis, center, 7, color, 2, cv::LINE_AA);
+            cv::drawMarker(vis, center, color,
+                           cv::MARKER_CROSS, 14, 2, cv::LINE_AA);
+            cv::putText(vis, label,
+                        cv::Point(std::max(3, std::min(center.x + 9, vis.cols - 165)),
+                                  std::max(16, center.y - 12)),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.48,
+                        color, 1, cv::LINE_AA);
+          };
+
+          // LINE uses an O/H guide: it has a horizontal decision reference,
+          // but no unique 2D object center. Do not invent a vertical point.
+          if (mission_result.active_mission ==
+                  vision_core::MissionType::kLine &&
+              !mission_result.line_in_recovery) {
+            const auto &guide = mission_result.line_decision_guide
+                ? *mission_result.line_decision_guide : feats.guide;
+            if (guide.valid && std::isfinite(guide.offset) && vis.cols > 1) {
+              const double u = tuning_config_.line_features.image_center_u +
+                  0.5 * static_cast<double>(vis.cols) * guide.offset;
+              if (std::isfinite(u) && u >= 0.0 && u < vis.cols) {
+                const int x = static_cast<int>(std::lround(u));
+                cv::line(vis, cv::Point(x, 0), cv::Point(x, vis.rows - 1),
+                         cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                cv::putText(vis, "LINE DECISION U",
+                            cv::Point(std::max(3, std::min(x + 7, vis.cols - 165)),
+                                      std::max(16, vis.rows - 20)),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.47,
+                            cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+              }
+            }
+          }
+
+          if (selected_ball && ball_cmd.tracked.visible)
+            draw_decision_center(ball_cmd.tracked.u_norm,
+                                 ball_cmd.tracked.v_norm,
+                                 "BALL DECISION", cv::Scalar(0, 0, 255));
+
+          if (selected_goal) {
+            const auto &fine = goal_cmd.fine_decision_pose;
+            if (goal_cmd.fine_decision_pose_used && fine.valid &&
+                std::isfinite(fine.x_m) && std::isfinite(fine.z_m) &&
+                fine.z_m > 0.0 && std::isfinite(camera_intrinsics_.fx) &&
+                std::isfinite(camera_intrinsics_.cx) && vis.cols > 1) {
+              // FineAction consumes (x,z,yaw) in 3D, not normalized (u,v).
+              // Projection gives the exact horizontal bearing of that
+              // decision; the unused vertical coordinate is not fabricated.
+              const double u = camera_intrinsics_.fx *
+                  fine.x_m / fine.z_m + camera_intrinsics_.cx;
+              if (std::isfinite(u) && u >= 0.0 && u < vis.cols) {
+                const int x = static_cast<int>(std::lround(u));
+                cv::line(vis, cv::Point(x, 0), cv::Point(x, vis.rows - 1),
+                         cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+                cv::putText(vis, "GOAL FINE X/Z",
+                            cv::Point(std::max(3, std::min(x + 7, vis.cols - 155)),
+                                      std::max(16, vis.rows - 20)),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.47,
+                            cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+              }
+            } else if (goal_cmd.tracked.visible) {
+              draw_decision_center(goal_cmd.tracked.u_norm,
+                                   goal_cmd.tracked.v_norm,
+                                   "GOAL DECISION", cv::Scalar(0, 255, 255));
+            }
+          }
+
+          if (selected_hurdle && hurdle_cmd.tracked.visible)
+            draw_decision_center(hurdle_cmd.tracked.u_norm,
+                                 hurdle_cmd.tracked.v_norm,
+                                 "HURDLE TRACK", cv::Scalar(255, 0, 255));
 
 
           // Pickup region is defined by the exact four parameters used by
@@ -2139,28 +2219,9 @@ private:
                 std::max(1, right - left), std::max(1, bottom - top)) & image_bounds;
             if (!box.empty())
               cv::rectangle(vis, box, cv::Scalar(0,255,255), 2);
-            if (ball_cmd.tracked.visible) {
-              const cv::Point decision_px(
-                  static_cast<int>(std::lround(ball_cmd.tracked.u_norm * vis.cols)),
-                  static_cast<int>(std::lround(ball_cmd.tracked.v_norm * vis.rows)));
-              cv::circle(vis, decision_px, 5, cv::Scalar(0,0,255), cv::FILLED);
-            }
           }
-          if (pose_confirmed && backboard_target) {
-            // Decision pose can outlive the current raw detection.
-            const auto &box = backboard_target->box_px;
-            const int left_x = static_cast<int>(std::round(box.x));
-            const int right_x =
-                static_cast<int>(std::round(box.x + box.width - 1.0));
-            const int y =
-                static_cast<int>(std::round(box.y + 0.5 * box.height));
-            const cv::Rect image_rect(0, 0, vis.cols, vis.rows);
-            cv::rectangle(vis, cv::Rect(left_x - 1, y - 1, 3, 3) & image_rect,
-                          cv::Scalar(0, 0, 255), cv::FILLED);
-            cv::rectangle(vis,
-                          cv::Rect(right_x - 1, y - 1, 3, 3) & image_rect,
-                          cv::Scalar(0, 0, 255), cv::FILLED);
-          }
+          // Raw depth-edge points are estimator inputs, not the GOAL
+          // fine-control decision coordinate; suppress them here.
 
           cv::putText(vis, perf_text_, cv::Point(10, 24),
                       cv::FONT_HERSHEY_SIMPLEX, 0.70,
