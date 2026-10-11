@@ -7,6 +7,7 @@
 #include <chrono>
 #include <unordered_map>
 #include <array>
+#include <string>
 #include "dynamixel_sdk/dynamixel_sdk.h"
 
 // #include <unordered_map> //자료구조 중 더 빠른 map탐색 key:value
@@ -186,7 +187,7 @@ class Dxl
 
     // Member Function
     public:
-        Dxl(); //생성자
+        explicit Dxl(const std::string& device = DEVICE_NAME); // 기본 장치는 유지하고 실행 시 지정 가능
         ~Dxl(); //소멸자
 
 // ************************************ GETTERS ***************************************** //
