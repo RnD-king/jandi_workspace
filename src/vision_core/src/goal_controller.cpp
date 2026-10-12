@@ -2,6 +2,7 @@
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/cruise_selector.hpp"
+#include "vision_core/object_observation_window.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -85,6 +86,8 @@ const char *GoalController::ModeName(GoalMode mode) {
   case GoalMode::kHeadingRecovery: return "GOAL_LINE_RECOVERY";
   case GoalMode::kFailed: return "GOAL_FAILED";
   case GoalMode::kRecoverySearch: return "GOAL_RECOVERY_SEARCH";
+  case GoalMode::kForwardApproach: return "GOAL_FORWARD_APPROACH";
+  case GoalMode::kPostShootBackAway: return "GOAL_BACK_AWAY";
   }
   return "UNKNOWN";
 }
@@ -96,6 +99,10 @@ double GoalController::Clamp(double value, double low, double high) {
 void GoalController::StartAfterPickup(double) {
   SetHasBall(true);
   goal_entry_armed_ = true;
+}
+
+void GoalController::StartForwardTrial() {
+  SetHasBall(true); goal_entry_armed_=true; mode_=GoalMode::kForwardApproach; ClearTracking();
 }
 
 void GoalController::SetHasBall(bool has_ball) {
@@ -220,8 +227,11 @@ ActionRequest GoalController::FineAction(
   const double rim_z = pose.z_m -
       config_.hoop_radius_m * std::cos(pose.yaw_rad);
   const double error = std::hypot(rim_x, rim_z) - config_.throwing_range_m;
-  if (error > config_.position_tolerance_m)
+  if (error > config_.position_tolerance_m) {
+    if (error>=config_.fine_two_step_range_error_m) return Locomotion(MissionAction::kStepForwardTwo);
+    if (error>=config_.fine_one_step_range_error_m) return Locomotion(MissionAction::kStepForwardOne);
     return Locomotion(MissionAction::kStepForwardHalf);
+  }
   if (error < -config_.position_tolerance_m)
     return Locomotion(MissionAction::kStepBack);
   const double yaw_deg =
@@ -240,7 +250,8 @@ GoalResult GoalController::Compute(
     const GoalPoseObservation &pose, int image_width, int image_height,
     double now_sec, bool line_reference_valid, const CameraFeedback &camera,
     const ActionExecutionFeedback &feedback,
-    bool allow_new_body_actions) {
+    bool allow_new_body_actions, std::optional<double> center_depth_m,
+    double post_pickup_walk_sec) {
   // Intermediate camera angles must not add object evidence to either tracker.
   const bool camera_switching = mode_ == GoalMode::kWaitCameraGoal ||
                                 mode_ == GoalMode::kReturnCameraToLine;
@@ -249,23 +260,11 @@ GoalResult GoalController::Compute(
     UpdatePoseTracker(backboard, pose);
   }
 
-  if (mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_) {
-    if (!line_reference_valid) {
-      post_pickup_line_wait_active_ = false;
-    } else {
-      if (!post_pickup_line_wait_active_) {
-        post_pickup_line_wait_active_ = true;
-        post_pickup_line_wait_start_sec_ = now_sec;
-      }
-      camera_trigger_latched_ = camera_trigger_latched_ ||
-          now_sec - post_pickup_line_wait_start_sec_ >=
-              config_.post_pickup_wait_sec;
-      if (camera_trigger_latched_ &&
-          (!feedback.action_active || feedback.action_done)) {
-        mode_ = GoalMode::kWaitCameraGoal;
-        state_enter_sec_ = now_sec;
-      }
-    }
+  if (mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_ &&
+      post_pickup_walk_sec + kEpsilon >= config_.post_pickup_wait_sec) {
+    // Lock GOAL now to stop new LINE reservations; drain accepted walks first.
+    mode_ = GoalMode::kWaitCameraGoal;
+    camera_request_started_ = false;
   }
 
   GoalResult result;
@@ -282,7 +281,26 @@ GoalResult GoalController::Compute(
   switch (mode_) {
   case GoalMode::kLineFollow:
     return result;
+  case GoalMode::kForwardApproach: {
+    const double distance=center_depth_m.value_or(pose.valid ? pose.z_m : 0.0);
+    const bool current_valid=tracked_.visible && tracked_.stable && std::isfinite(distance) && distance>0.0;
+    camera_trigger_latched_=camera_trigger_latched_ || (current_valid && distance<=config_.camera_goal_start_z_m);
+    if (camera_trigger_latched_) {
+      if (feedback.action_active && !feedback.action_done) return result;
+      mode_=GoalMode::kWaitCameraGoal; state_enter_sec_=now_sec;
+      result.mode=mode_; result.camera_request=CameraRequest::kGoal; return result;
+    }
+    if (!current_valid) return result;
+    const auto d=SelectCruiseDecision(true,true,tracked_.u_norm-config_.target_u_norm,config_.approach_u_deadband);
+    result.action=Locomotion(ApproachAction(d.direction,distance<=config_.approach_short_z_m));
+    return result;
+  }
   case GoalMode::kWaitCameraGoal:
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (!camera_request_started_) {
+      camera_request_started_ = true;
+      state_enter_sec_ = now_sec;
+    }
     result.camera_request = CameraRequest::kGoal;
     if (camera.actual_mode == CameraMode::kGoal && camera.settled) {
       mode_ = GoalMode::kSearch;
@@ -323,7 +341,9 @@ GoalResult GoalController::Compute(
       const auto decision = SelectCruiseDecision(
           true, true, tracked_.u_norm - config_.target_u_norm,
           config_.approach_u_deadband);
-      result.action = Locomotion(CruiseAction(decision.direction));
+      result.action = Locomotion(ApproachAction(decision.direction,
+          center_depth_m.value_or(tracked_pose_.z_m)>0 &&
+          center_depth_m.value_or(tracked_pose_.z_m)<=config_.approach_short_z_m));
     }
     return result;
   case GoalMode::kApproach: {
@@ -352,7 +372,9 @@ GoalResult GoalController::Compute(
     const auto decision = SelectCruiseDecision(
         true, tracked_.visible, tracked_.u_norm - config_.target_u_norm,
         config_.approach_u_deadband);
-    result.action = Locomotion(CruiseAction(decision.direction));
+    result.action = Locomotion(ApproachAction(decision.direction,
+          center_depth_m.value_or(tracked_pose_.z_m)>0 &&
+          center_depth_m.value_or(tracked_pose_.z_m)<=config_.approach_short_z_m));
     return result;
   }
   case GoalMode::kFineAdjust:
@@ -390,11 +412,21 @@ GoalResult GoalController::Compute(
     if (feedback.action_done) {
       has_ball_ = false;
       ball_consumed_ = true;
-      mode_ = GoalMode::kReturnCameraToLine;
-      result.mode = mode_;
-      result.action = {};
-      result.camera_request = CameraRequest::kForward;
+      mode_ = GoalMode::kPostShootBackAway;
+      completed_back_steps_=0; back_away_issued_=false;
+      result.mode=mode_; result.action={};
     }
+    return result;
+  case GoalMode::kPostShootBackAway:
+    if (feedback.action_done && back_away_issued_) {
+      ++completed_back_steps_; back_away_issued_=false;
+    }
+    if (completed_back_steps_>=config_.post_shoot_back_steps) {
+      mode_=GoalMode::kReturnCameraToLine; result.mode=mode_;
+      result.action={}; result.camera_request=CameraRequest::kForward; return result;
+    }
+    result.action=Locomotion(MissionAction::kStepBack);
+    if (allow_new_body_actions) back_away_issued_=true;
     return result;
   case GoalMode::kReturnCameraToLine:
     result.camera_request = CameraRequest::kForward;
@@ -478,6 +510,7 @@ void GoalController::ClearTracking() {
 }
 
 void GoalController::Reset() {
+  completed_back_steps_=0; back_away_issued_=false;
   mode_ = GoalMode::kLineFollow;
   state_enter_sec_ = 0.0;
   settle_until_sec_ = 0.0;
@@ -487,6 +520,7 @@ void GoalController::Reset() {
   goal_entry_armed_ = false;
   post_pickup_line_wait_active_ = false;
   camera_trigger_latched_ = false;
+  camera_request_started_ = false;
   fine_trigger_latched_ = false;
   last_seen_u_norm_ = config_.target_u_norm;
   seen_after_camera_goal_ = false;

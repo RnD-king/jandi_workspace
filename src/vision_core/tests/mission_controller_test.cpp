@@ -31,6 +31,8 @@ static ObjectTarget Ball(double u_norm, double v_norm) {
 }
 int main() {
   auto c=LoadDefaultAlgorithmConfig();
+  c.line_features.image_center_u=320;
+  c.line_p2p.offset_gain=c.line_p2p.heading_gain=1.0;
   c.enable_ball=c.enable_hurdle=c.enable_goal=false;
   MissionController two_point_controller(c);
   auto two_point_input=Frame(0);
@@ -56,7 +58,7 @@ int main() {
   const auto id=r.command.action_id;
   in=Frame(.1); in.delivery_feedback={id,true,false,false};
   r=controller.Step(in); assert(r.command.command_type==CommandType::kHold);
-  for (double time : {0.8, 1.4, 2.2}) {
+  for (double time : {0.8, 1.4, 1.6, 1.8, 2.0, 2.2}) {
     in=Frame(time); r=controller.Step(in);
   }
   in=Frame(2.55); in.delivery_feedback={id,true,false,true};
@@ -64,7 +66,7 @@ int main() {
   assert(r.command.action_id!=0 && r.command.action_id!=id);
   assert(r.command.action==MissionAction::kStepForwardFive);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
-  assert(r.line_window_stats && r.line_window_stats->used_frames >= 2);
+  assert(r.line_window_stats && r.line_window_stats->used_frames >= 5);
   // Debug telemetry must report the SAME READY average used to select B.
   const auto ready_decision_guide = controller.LastReadyLineGuide();
   assert(ready_decision_guide && r.line_decision_guide);
@@ -81,14 +83,14 @@ int main() {
   in=Frame(.7); ShiftLine(in, 500); r=controller.Step(in);
   in=Frame(.8); in.delivery_feedback={delayed_ack_id,true,false,false};
   r=controller.Step(in);
-  for (double time : {1.3, 1.8, 2.3}) {
+  for (double time : {1.3, 1.7, 1.8, 2.0, 2.1, 2.3}) {
     in=Frame(time); r=controller.Step(in);
   }
   in=Frame(2.55); in.delivery_feedback={delayed_ack_id,true,false,true};
   r=controller.Step(in);
   assert(r.command.action==MissionAction::kStepForwardFive);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
-  assert(r.line_window_stats && r.line_window_stats->used_frames >= 2);
+  assert(r.line_window_stats && r.line_window_stats->used_frames >= 5);
 
   // READY 집계가 invalid여도 moving action 중에 2초 관측 timer를 시작하지
   // 않는다. stationary failure observation은 current DONE 뒤 시작한다.
@@ -142,6 +144,9 @@ int main() {
   const auto right_id=r.command.action_id;
   in=Frame(.1); in.delivery_feedback={right_id,true,false,false};
   r=controller.Step(in);
+  for (double time : {.6, .7, .8, .9}) {
+    in=Frame(time); r=controller.Step(in);
+  }
   in=Frame(1.0); in.delivery_feedback={right_id,true,false,true};
   r=controller.Step(in);
   const auto straight_id=r.command.action_id;
@@ -234,7 +239,7 @@ int main() {
   r=queued.Step(in);
   // Simulate a 2.8s long LINE action: READY occurs ~0.25s before DONE.
   // The estimated 40%-to-READY window must actually contain valid frames.
-  for (double time : {0.8, 1.4, 2.2}) {
+  for (double time : {0.8, 1.4, 1.6, 1.8, 2.0, 2.2}) {
     in=Frame(time); r=queued.Step(in);
   }
   in=Frame(2.55); in.delivery_feedback={current_id,true,false,true};
@@ -242,8 +247,8 @@ int main() {
   const auto queued_id=r.command.action_id;
   assert(queued_id!=0 && queued_id!=current_id);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
-  assert(r.line_window_stats && r.line_window_stats->window_frames >= 2);
-  assert(r.line_window_stats->used_frames >= 2);
+  assert(r.line_window_stats && r.line_window_stats->window_frames >= 5);
+  assert(r.line_window_stats->used_frames >= 5);
   in=Frame(2.6); in.allow_new_line_action=false;
   in.delivery_feedback={queued_id,true,false,false};
   r=queued.Step(in);
@@ -407,8 +412,10 @@ int main() {
   camera_config.initial_has_ball=true;
   camera_config.goal.post_pickup_wait_sec=0;
   camera_config.line.line_stable_window=camera_config.line.line_stable_min_hits=1;
+  camera_config.goal.stable_window=camera_config.goal.stable_min_hits=1;
   MissionController goal_timeout(camera_config);
-  in=Frame(0); r=goal_timeout.Step(in);
+  in=Frame(0); in.backboard_target=Ball(.5,.3); in.backboard_center_depth_m=.7;
+  r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
   in.now_sec=.4; r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
@@ -428,6 +435,7 @@ int main() {
   for (int i = 0; i < 7; ++i) {
     in = Frame(.1 * i);
     in.allow_new_line_action = false;
+    in.backboard_target=Ball(.5,.3); in.backboard_center_depth_m=.7;
     r = camera_gate.Step(in);
   }
   assert(r.active_mission == MissionType::kGoal);
@@ -456,7 +464,7 @@ int main() {
   in.backboard_target = Ball(.8, .3);
   r = camera_gate.Step(in);
   assert(r.active_mission == MissionType::kGoal);
-  assert(r.command.action == MissionAction::kStepForwardRight);
+  assert(r.command.action == MissionAction::kStepForwardRightTwo);
   assert(r.command.action_id != 0);
   // The next OBJECT action must use 10 NEW frames after this actual Action DONE.
   // Its camera remained GOAL throughout, so only the Action event resets evidence.

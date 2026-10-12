@@ -1,4 +1,5 @@
 #include "vision_core/goal_controller.hpp"
+#include "vision_core/config_loader.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -16,8 +17,9 @@ int main() {
   Intrinsics k{100,100,50,50};
   const auto p = EstimateGoalPoseFromBackboardDepths(50,1,40,1.1,60,.9,k);
   assert(p.valid && std::abs(p.x_m) < 1e-12);
-  GoalConfig c{}; c.stable_window=c.stable_min_hits=1; c.lost_frames=2;
+  GoalConfig c=LoadDefaultAlgorithmConfig().goal; c.stable_window=c.stable_min_hits=1; c.lost_frames=2;
   c.smooth_alpha=0; c.post_pickup_wait_sec=0;
+  c.fine_one_step_range_error_m=c.fine_two_step_range_error_m=1.0; // Isolate near fine geometry.
   c.target_u_norm=.5; c.approach_u_deadband=.05; c.fine_adjust_start_z_m=.8;
   c.hoop_radius_m=.1; c.throwing_range_m=.5; c.position_tolerance_m=.05;
   c.fine_settle_duration_sec=0; c.shoot_yaw_limit_deg=30;
@@ -27,9 +29,9 @@ int main() {
   BallResult carrying; carrying.has_ball=true; carrying.mode=BallMode::kLineFollow;
   controller.UpdateBallState(carrying);
   ActionExecutionFeedback active; active.action_active=true;
-  auto r=controller.Compute({}, {}, {},100,100,0,true,{},active);
+  auto r=controller.Compute({}, Board(), Pose(0,.7),100,100,0,true,{},active);
   assert(r.camera_request==CameraRequest::kNone);
-  r=controller.Compute({}, {}, {},100,100,.1,true,{},{});
+  r=controller.Compute({}, Board(), Pose(0,.7),100,100,.1,true,{},{});
   assert(r.camera_request==CameraRequest::kGoal);
   r=controller.Compute({}, {}, {},100,100,.2,true,{CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kSearch);
@@ -56,7 +58,7 @@ int main() {
   GoalController timeout_controller(c, 3.0);
   timeout_controller.StartAfterPickup(0);
   timeout_controller.UpdateBallState(carrying);
-  r=timeout_controller.Compute({}, {}, {},100,100,0,true,{},{});
+  r=timeout_controller.Compute({}, Board(), Pose(0,.7),100,100,0,true,{},{});
   assert(r.mode==GoalMode::kWaitCameraGoal);
   r=timeout_controller.Compute({}, {}, {},100,100,3.1,true,{},{});
   assert(r.mode==GoalMode::kFailed);
@@ -65,7 +67,7 @@ int main() {
   // No GOAL-camera observation yet: stay still despite intermediate detections.
   GoalController unseen(c, 3.0);
   unseen.StartAfterPickup(0); unseen.UpdateBallState(carrying);
-  unseen.Compute({}, {}, {},100,100,0,true,{},{});
+  unseen.Compute({}, Board(), Pose(0,.7),100,100,0,true,{},{});
   r=unseen.Compute({},Board(.9),Pose(0,1.2),100,100,.05,true,
                    {CameraMode::kTransition,false},{});
   assert(r.mode==GoalMode::kWaitCameraGoal);
@@ -77,7 +79,7 @@ int main() {
   // A previously centered target remains stationary when lost.
   GoalController centered(c, 3.0);
   centered.StartAfterPickup(0); centered.UpdateBallState(carrying);
-  centered.Compute({}, {}, {},100,100,0,true,{},{});
+  centered.Compute({}, Board(), Pose(0,.7),100,100,0,true,{},{});
   centered.Compute({}, {}, {},100,100,.1,true,{CameraMode::kGoal,true},{});
   r=centered.Compute({},Board(.52),Pose(0,1.2),100,100,.2,true,
                      {CameraMode::kGoal,true},{});
@@ -91,7 +93,7 @@ int main() {
   // Left loss -> 15-degree left turn, hold while active, then settle and reacquire.
   GoalController left(c, 3.0);
   left.StartAfterPickup(0); left.UpdateBallState(carrying);
-  left.Compute({}, {}, {},100,100,0,true,{},{});
+  left.Compute({}, Board(), Pose(0,.7),100,100,0,true,{},{});
   left.Compute({}, {}, {},100,100,.1,true,{CameraMode::kGoal,true},{});
   r=left.Compute({},Board(.2),Pose(0,1.2),100,100,.2,true,
                  {CameraMode::kGoal,true},{});
@@ -123,7 +125,7 @@ int main() {
 
   GoalController right(c, 3.0);
   right.StartAfterPickup(0); right.UpdateBallState(carrying);
-  right.Compute({}, {}, {},100,100,0,true,{},{});
+  right.Compute({}, Board(), Pose(0,.7),100,100,0,true,{},{});
   right.Compute({}, {}, {},100,100,.1,true,{CameraMode::kGoal,true},{});
   right.Compute({},Board(.8),Pose(0,1.2),100,100,.2,true,
                 {CameraMode::kGoal,true},{});

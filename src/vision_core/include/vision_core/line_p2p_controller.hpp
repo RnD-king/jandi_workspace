@@ -48,6 +48,8 @@ struct LineWindowStats {
 };
 class LineGuideAccumulator {
 public:
+  LineGuideAccumulator();
+  explicit LineGuideAccumulator(int minimum_valid_samples);
   void Begin(std::uint64_t action_id, double now_sec);
   void Add(std::uint64_t action_id, double now_sec, const LineGuide &guide);
   std::optional<LineGuide> Finish(std::uint64_t action_id, double now_sec,
@@ -69,6 +71,7 @@ private:
   std::vector<Sample> samples_;
   std::vector<double> frame_times_;
   std::optional<LineWindowStats> last_stats_;
+  int minimum_valid_samples_;
 };
 
 } // namespace vision_core

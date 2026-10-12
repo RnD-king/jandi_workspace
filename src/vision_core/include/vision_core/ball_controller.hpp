@@ -4,6 +4,8 @@
 #include <optional>
 
 #include "vision_core/types.hpp"
+#include "vision_core/object_observation_window.hpp"
+#include "vision_core/stationary_object_recovery.hpp"
 
 namespace vision_core {
 
@@ -22,13 +24,22 @@ enum class BallMode {
   kBallRecoveryForward,
   kBallRecoveryDown,
   kFailed,
+  kDownSearch,
 };
 
 struct BallConfig {
+  double approach_short_v_norm{};
+  double down_search_timeout_sec{};
+  double recovery_observation_sec{};
+  int recovery_max_observations{};
+  double fine_one_step_v_error_norm{};
+  double fine_two_step_v_error_norm{};
+  int post_pickup_back_steps{};
+
   int stable_window{};
   int stable_min_hits{};
   int lost_frames{};
-  double smooth_alpha{};
+  double smooth_alpha{}; // Legacy config key; position uses the bounded 1->3 window.
   double far_u_des_norm{};
   double approach_u_deadband{};
   double upper_acquire_v_norm{};
@@ -64,6 +75,9 @@ struct BallResult {
   bool has_ball{false};
   bool pickup_failed{false};
   int pickup_attempt_count{0};
+  int recovery_observations_completed{0};
+  double recovery_observation_elapsed_sec{0.0};
+  double down_search_remaining_sec{0.0};
   CameraRequest camera_request{CameraRequest::kNone};
   BallMode mode{BallMode::kLineFollow};
   TrackedBall tracked;
@@ -88,9 +102,15 @@ public:
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
-  void UseNextObservationAsMean() { has_smoothed_ = false; }
+  void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
   void UpdateTuning(const BallConfig &config) { config_ = config; }
   void Reset();
+  int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
+  double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
+  double DownSearchRemaining(double now) const {
+    return std::max(0.0, config_.down_search_timeout_sec -
+        (down_search_started_ ? now - state_enter_sec_ : 0.0));
+  }
 
 private:
   static double Clamp(double value, double low, double high);
@@ -111,6 +131,12 @@ private:
   int lost_count_{0};
   int recovery_visible_count_{0};
   bool has_smoothed_{false};
+  ObjectObservationWindow observation_window_;
+  bool down_search_started_{false};
+  bool down_search_found_{false};
+  StationaryObjectRecovery stationary_recovery_;
+  int completed_back_steps_{0};
+  int completed_contact_steps_{0};
   TrackedBall tracked_;
   double last_seen_u_norm_{0.5};
   double state_enter_sec_{0.0};

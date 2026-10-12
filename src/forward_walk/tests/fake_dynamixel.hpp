@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include "motor_health.hpp"
 #include <unordered_map>
 #include <vector>
 #define TORQUE_TO_VALUE_MX_106 183.7155
@@ -25,6 +26,12 @@ public:
     inline static std::vector<std::chrono::steady_clock::time_point> packet_times;
     inline static int reads{0};
     inline static bool fail_read{false}, fail_write{false};
+    inline static std::unordered_map<int,MotorHealth> health;
+    MotorHealth ReadMotorHealth(int id, double) {
+        if(health.count(id)) return health.at(id);
+        uint8_t data[83]={0}; data[0]=1; data[80]=120; data[82]=30;
+        return MotorHealth::Decode(id,data,0);
+    }
     Positions GetRawPositions() {
         ++reads;
         if (fail_read) throw std::runtime_error("injected read failure");

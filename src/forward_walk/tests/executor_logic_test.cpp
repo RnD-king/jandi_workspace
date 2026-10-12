@@ -45,7 +45,14 @@ int main() {
             Require(player.StartPrepared(program, InitialPose(), Clock::time_point{}), player.Error());
             player.Stop();
         }
-        // Real mission manifests must expand to three of the same existing motion.
+        for (const std::string file : {"직진_2걸음.json","직진_3걸음.json","직진_4걸음.json",
+                                      "직진_좌회전_2번.json","직진_우회전_2번.json","직진_우회전_1번.json"}) {
+            const auto program=player.PrepareProgram((assets/"missions"/file).string(),(assets/"motions").string(),{});
+            Require(player.StartPrepared(program,InitialPose(),Clock::time_point{}),player.Error());
+            player.Stop();
+        }
+        pass("new action 21..26 real mission JSON preparation");
+        // 좌회전은 회전만 반복하고, 우회전은 회전→직진을 반복하는 의도된 구성을 검증한다.
         for (const auto& spec : {
             std::make_pair(left_three, std::string("보행_좌회전전진_20도_최종_초기X.json")),
             std::make_pair(right_three, std::string("보행_우회전전진_20도_최종_초기X.json"))
@@ -53,10 +60,15 @@ int main() {
             boost::property_tree::ptree mission;
             boost::property_tree::read_json(spec.first.string(), mission);
             const auto& motions = mission.get_child("motions");
-            Require(motions.size()==3, "three repeated turns required");
-            for (const auto& item : motions)
-                Require(item.second.get<std::string>("filename")==spec.second,
+            const bool right_sequence=spec.first==right_three;
+            Require(motions.size()==(right_sequence ? 6 : 3), "wrong three-turn sequence length");
+            std::size_t item_index=0;
+            for (const auto& item : motions) {
+                const auto expected=right_sequence && item_index%2 ? "보행_1걸음_초기X.json" : spec.second;
+                Require(item.second.get<std::string>("filename")==expected,
                         "turn-forward mission has an incorrect motion reference");
+                ++item_index;
+            }
         }
         pass("11/12/13 real motion paths and 3x turn-forward manifests");
 
@@ -129,6 +141,22 @@ int main() {
         Rejects([&] { player.PrepareProgram(fixture.string(), temporary.string(), options); });
         pass("invalid JSON, motor, timing, interpolation, PD, references, offsets rejection");
 
+        uint8_t health_data[83]={0};
+        health_data[0]=0; health_data[6]=0x25; health_data[80]=118; health_data[82]=82;
+        const auto health=MotorHealth::Decode(15,health_data,0x80);
+        Require(health.valid && health.voltage_raw==118 && health.temperature==82,
+                "health alert packet must retain valid voltage and temperature");
+        Require(health.Reason().find("토크 OFF")!=std::string::npos &&
+                health.Reason().find("과열")!=std::string::npos &&
+                health.Reason().find("과부하")!=std::string::npos &&
+                health.Reason().find("전압")!=std::string::npos,"hardware bits not decoded together");
+        Require(!MotorHealth::Decode(15,health_data,4).valid,"packet access error treated as valid data");
+        MotorHealth missing; missing.communication_error="timeout";
+        Require(missing.Reason().find("원인 미확정")!=std::string::npos,"missing reply must not claim power failure");
+        health_data[0]=1; health_data[6]=0;
+        Require(MotorHealth::Decode(15,health_data,0).Reason().empty(),"healthy motor reported fault");
+        pass("motor health bit decoding, Alert data, unknown cause and normal status");
+
         LineArmConfig arm;
         arm.Validate();
         Require(arm.enabled && arm.Targets().size()==2 && arm.Targets().count(13)==0,
@@ -193,6 +221,40 @@ int main() {
         Require(player.StartPrepared(multiple, InitialPose(), t0), player.Error());
         Require(!player.IsNearCompletion(100, t0), "READY allowed before final motion");
         pass("READY remaining steps/hold and final-program-only condition");
+
+        for(uint16_t code=21;code<=26;++code) {
+            for(uint8_t mission:{1,2,3,4}) {
+                ActionTransactions fresh;
+                fresh.Activate(6000,mission,code);
+                Require(fresh.MarkReady() && !fresh.MarkReady(),"new walk action READY not exactly once");
+                Require(fresh.Evaluate(6001,1,21)==(mission==1 ? Admission::Queue : Admission::Reject),
+                        "new walk action LINE-only queue policy mismatch");
+            }
+            ActionTransactions old_to_new;old_to_new.Activate(7000,1,11);old_to_new.MarkReady();
+            Require(old_to_new.Evaluate(7001,1,code)==Admission::Queue,"old walk could not queue new action");
+        }
+        Require(!IsReadyWalkAction(20)&&!IsReadyWalkAction(27),"READY extended outside valid new action range");
+        pass("new action READY across missions and old/new LINE queue compatibility");
+        const auto held=InitialPose();
+        auto transition_start=held;transition_start.at(15)=1379;transition_start.at(16)=2765;
+        const auto transition=P2PMotionPlayer::PreparePoseTransition(held,{{15,1071},{16,3073}},1.0);
+        P2PMotionPlayer arm_transition(nullptr);
+        Require(arm_transition.StartPrepared(transition,transition_start,t0),arm_transition.Error());
+        RawPositions transition_output;
+        for(int step=0;step<50;++step) {
+            arm_transition.Update(&transition_output,t0+step*20ms);
+            Require(transition_output.at(15)<=transition_start.at(15)&&transition_output.at(15)>=1071,
+                    "arm restoration was not monotonic");
+            for(const auto& value:held) if(value.first!=15&&value.first!=16)
+                Require(transition_output.at(value.first)==value.second,"arm transition changed held body");
+            if(step==0) Require(transition_output.at(15)>1071,"arm restore jumped without interpolation");
+            transition_start=transition_output;
+        }
+        Require(transition_output.at(15)==1071&&transition_output.at(16)==3073,"arm transition missed restore targets");
+        Rejects([&]{P2PMotionPlayer::PreparePoseTransition(held,{{15,4096}},1.0);});
+        Rejects([&]{P2PMotionPlayer::PreparePoseTransition(held,{{99,2048}},1.0);});
+        Rejects([&]{P2PMotionPlayer::PreparePoseTransition(held,{},0);});
+        pass("arm transition P2P interpolation, held body and target validation");
 
         ActionTransactions actions;
         Require(actions.Evaluate(0,1,11) == Admission::Reject, "zero action ID accepted");

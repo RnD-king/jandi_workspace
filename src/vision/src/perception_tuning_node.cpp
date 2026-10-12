@@ -128,7 +128,13 @@ vision_core::MissionControllerConfig LoadSharedAlgorithmDefaults() {
 
 class PerceptionTuningNode final : public rclcpp::Node {
 public:
-  PerceptionTuningNode() : rclcpp::Node("perception_tuning_node") {
+  PerceptionTuningNode() : rclcpp::Node(
+#ifdef VISION_GOAL_TUNING_NODE
+      "goal_tuning_node"
+#else
+      "perception_tuning_node"
+#endif
+  ) {
     const vision_core::MissionControllerConfig algorithm_defaults =
         LoadSharedAlgorithmDefaults();
     declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw"); // 입력 이미지 토픽
@@ -170,6 +176,23 @@ public:
     declare_parameter<double>("line_p2p_offset_gain", algorithm_defaults.line_p2p.offset_gain);
     declare_parameter<double>("line_p2p_heading_gain", algorithm_defaults.line_p2p.heading_gain);
     declare_parameter<double>("line_p2p_steering_deadband", algorithm_defaults.line_p2p.steering_deadband);
+    declare_parameter<double>("ball_approach_short_v_norm", algorithm_defaults.ball.approach_short_v_norm);
+    declare_parameter<double>("ball_fine_one_step_v_error_norm", algorithm_defaults.ball.fine_one_step_v_error_norm);
+    declare_parameter<double>("ball_fine_two_step_v_error_norm", algorithm_defaults.ball.fine_two_step_v_error_norm);
+    declare_parameter<double>("hurdle_approach_short_v_norm", algorithm_defaults.hurdle.approach_short_v_norm);
+    declare_parameter<double>("hurdle_target_u_norm", algorithm_defaults.hurdle.target_u_norm);
+    declare_parameter<double>("hurdle_u_deadband", algorithm_defaults.hurdle.u_deadband);
+    declare_parameter<double>("hurdle_fine_target_v_norm", algorithm_defaults.hurdle.fine_target_v_norm);
+    declare_parameter<double>("hurdle_fine_one_step_v_error_norm", algorithm_defaults.hurdle.fine_one_step_v_error_norm);
+    declare_parameter<double>("hurdle_fine_two_step_v_error_norm", algorithm_defaults.hurdle.fine_two_step_v_error_norm);
+    declare_parameter<double>("hurdle_contact_v_norm", algorithm_defaults.hurdle.contact_v_norm);
+    declare_parameter<double>("goal_fine_one_step_range_error_m",algorithm_defaults.goal.fine_one_step_range_error_m);
+    declare_parameter<double>("goal_fine_two_step_range_error_m",algorithm_defaults.goal.fine_two_step_range_error_m);
+    declare_parameter<double>("goal_approach_short_z_m", algorithm_defaults.goal.approach_short_z_m);
+    declare_parameter<double>("goal_camera_goal_start_z_m", algorithm_defaults.goal.camera_goal_start_z_m);
+    declare_parameter<int>("hurdle_contact_steps",algorithm_defaults.hurdle.contact_steps);
+    declare_parameter<int>("test_ball_mission_index",algorithm_defaults.test_ball_mission_index);
+    declare_parameter<int>("test_goal_mission_index",algorithm_defaults.test_goal_mission_index);
     declare_parameter<double>("ball_far_u_des_norm", algorithm_defaults.ball.far_u_des_norm);
     declare_parameter<double>("ball_approach_u_deadband", algorithm_defaults.ball.approach_u_deadband);
     declare_parameter<double>("ball_tilt_down_v_norm", algorithm_defaults.ball.tilt_down_v_norm);
@@ -186,7 +209,13 @@ public:
     declare_parameter<bool>("enable_hurdle_controller", algorithm_defaults.enable_hurdle);
     declare_parameter<bool>("enable_goal_controller", algorithm_defaults.enable_goal);
     // all은 위 enable_* 값을 따르고, 나머지는 지정한 알고리즘 하나만 실행한다.
-    declare_parameter<std::string>("algorithm_mode", "all");
+    declare_parameter<std::string>("algorithm_mode",
+#ifdef VISION_GOAL_TUNING_NODE
+        "goal"
+#else
+        "all"
+#endif
+    );
     // 실제 카메라 대신 endpoint 도달 feedback을 모사하는 시험 옵션이다.
     declare_parameter<bool>("simulate_camera_feedback", false);
     // 실제 executor 없이 ACK/READY/DONE lifecycle을 시험하는 명시적
@@ -260,6 +289,9 @@ public:
         algorithm_mode_ != "hurdle" && algorithm_mode_ != "goal") {
       throw std::invalid_argument("algorithm_mode must be one of: all, line, ball, hurdle, goal");
     }
+#ifdef VISION_GOAL_TUNING_NODE
+    if (algorithm_mode_!="goal") throw std::invalid_argument("goal_tuning_node requires algorithm_mode=goal");
+#endif
     vision_core::BallConfig ball_cmd_cfg = algorithm_defaults.ball;
 
     const double fx = get_parameter("fx").as_double();
@@ -339,6 +371,25 @@ public:
     // Goal 단독 실행만 공 집기 과정을 생략한다. 통합 모드는 반드시 Ball
     // 성공 결과를 통해서만 has_ball이 켜진다.
     mission_config.initial_has_ball = algorithm_mode_ == "goal";
+    mission_config.goal_trial_start_forward=algorithm_mode_=="goal";
+    mission_config.hurdle.contact_steps=static_cast<int>(get_parameter("hurdle_contact_steps").as_int());
+    mission_config.test_ball_mission_index=static_cast<int>(get_parameter("test_ball_mission_index").as_int());
+    mission_config.test_goal_mission_index=static_cast<int>(get_parameter("test_goal_mission_index").as_int());
+    mission_config.ball.approach_short_v_norm=get_parameter("ball_approach_short_v_norm").as_double();
+    mission_config.ball.fine_one_step_v_error_norm=get_parameter("ball_fine_one_step_v_error_norm").as_double();
+    mission_config.ball.fine_two_step_v_error_norm=get_parameter("ball_fine_two_step_v_error_norm").as_double();
+    mission_config.hurdle.approach_short_v_norm=get_parameter("hurdle_approach_short_v_norm").as_double();
+    mission_config.hurdle.target_u_norm=get_parameter("hurdle_target_u_norm").as_double();
+    mission_config.hurdle.u_deadband=get_parameter("hurdle_u_deadband").as_double();
+    mission_config.hurdle.fine_target_v_norm=get_parameter("hurdle_fine_target_v_norm").as_double();
+    mission_config.hurdle.fine_one_step_v_error_norm=get_parameter("hurdle_fine_one_step_v_error_norm").as_double();
+    mission_config.hurdle.fine_two_step_v_error_norm=get_parameter("hurdle_fine_two_step_v_error_norm").as_double();
+    mission_config.hurdle.contact_v_norm=get_parameter("hurdle_contact_v_norm").as_double();
+    mission_config.goal.fine_one_step_range_error_m=get_parameter("goal_fine_one_step_range_error_m").as_double();
+    mission_config.goal.fine_two_step_range_error_m=get_parameter("goal_fine_two_step_range_error_m").as_double();
+    mission_config.goal.approach_short_z_m=get_parameter("goal_approach_short_z_m").as_double();
+    mission_config.goal.camera_goal_start_z_m=get_parameter("goal_camera_goal_start_z_m").as_double();
+
     // ROS override가 shared YAML validation을 우회하지 못하게 하고, 무거운
     // TensorRT engine을 만들기 전에 fail-fast한다.
     vision_core::ValidateAlgorithmConfig(mission_config);
@@ -397,6 +448,7 @@ public:
             response->message = "START requires WAIT_START and settled FORWARD camera";
             return;
           }
+          authorized_repeat_scope_=0;
           mission_controller_->Reset(true); // Preserve issued action IDs.
           observation_accumulator_.Reset();
           cached_ready_guide_.reset();
@@ -477,7 +529,9 @@ public:
               cmd.action_category != preview_command_.action_category ||
               cmd.action != preview_command_.action ||
               cmd.target_yaw_deg != preview_command_.target_yaw_deg ||
-              cmd.mission != preview_command_.mission) {
+              cmd.mission != preview_command_.mission ||
+              cmd.mission_phase != preview_command_.mission_phase ||
+              result.mission.repeat_scope != preview_result_.mission.repeat_scope) {
             response->success = false;
             response->message = "Candidate changed; press PREVIEW to refresh";
             LeaveWaitCommit(get_clock()->now().seconds());
@@ -487,6 +541,7 @@ public:
             return;
           }
           *mission_controller_ = std::move(trial);
+          authorized_repeat_scope_=result.mission.repeat_scope;
           LeaveWaitCommit(get_clock()->now().seconds());
           preview_ready_ = false;
           preview_image_.release();
@@ -499,10 +554,19 @@ public:
           manual_action_id_ = cmd.action_id;
           PublishActionCommand(cmd);
           response->success = true;
-          response->message = "COMMIT executed id=" + std::to_string(cmd.action_id);
+          response->message = "COMMIT executed id=" + std::to_string(cmd.action_id)+" / "+RepeatLabel(authorized_repeat_scope_);
           RCLCPP_INFO(get_logger(), "[TUNING] COMMIT id=%llu action=%u",
                       static_cast<unsigned long long>(cmd.action_id),
                       static_cast<unsigned>(cmd.action));
+        });
+    stop_repeat_service_=create_service<std_srvs::srv::Trigger>(
+        "stop_repeat",[this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+                             std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          authorized_repeat_scope_=0;
+          response->success=true;
+          response->message="Repeat permission revoked; accepted motion finishes normally";
+          if (!manual_action_active_ && outstanding_actions_.empty() && pending_camera_id_==0)
+            EnterWaitPreview(get_clock()->now().seconds());
         });
     reset_service_ = create_service<std_srvs::srv::Trigger>(
         "reset", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
@@ -535,6 +599,7 @@ public:
             response->message = "RESET requires camera transport or simulated camera feedback";
             return;
           }
+          authorized_repeat_scope_=0;
           mission_controller_->Reset(true);
           observation_accumulator_.Reset();
           preview_ready_ = false;
@@ -697,12 +762,52 @@ private:
       const std::vector<rclcpp::Parameter> &parameters) {
     rcl_interfaces::msg::SetParametersResult response;
     response.successful = true;
+    const bool edits_index=std::any_of(parameters.begin(),parameters.end(),[](const auto& p) {
+      return p.get_name()=="test_ball_mission_index" || p.get_name()=="test_goal_mission_index";
+    });
+    if (edits_index) {
+      int ball=tuning_config_.test_ball_mission_index, goal=tuning_config_.test_goal_mission_index;
+      for (const auto& p:parameters) {
+        if ((p.get_name()!="test_ball_mission_index" && p.get_name()!="test_goal_mission_index") ||
+            p.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || p.as_int()<1 || p.as_int()>1000000) {
+          response.successful=false; response.reason="Set test indices separately, as integers in [1,1000000]"; return response;
+        }
+        if (p.get_name()=="test_ball_mission_index") ball=static_cast<int>(p.as_int());
+        else goal=static_cast<int>(p.as_int());
+      }
+      if (run_state_!=RunState::kWaitStart || !outstanding_actions_.empty() || pending_camera_id_!=0 ||
+          !mission_controller_->SetTestMissionIndices(ball,goal)) {
+        response.successful=false; response.reason="Test indices may change in WAIT_START only"; return response;
+      }
+      tuning_config_.test_ball_mission_index=ball; tuning_config_.test_goal_mission_index=goal;
+      return response;
+    }
     auto candidate = tuning_config_;
     bool touched = false;
     for (const auto &parameter : parameters) {
       double *target = nullptr;
       const std::string &name = parameter.get_name();
-      if (name == "line_reference_u_px") target = &candidate.line_features.image_center_u;
+      if (name=="hurdle_contact_steps") {
+        if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || parameter.as_int()<1 || parameter.as_int()>100) {
+          response.successful=false; response.reason="hurdle_contact_steps must be an integer in [1,100]"; return response;
+        }
+        candidate.hurdle.contact_steps=static_cast<int>(parameter.as_int()); touched=true; continue;
+      }
+      if (name == "goal_fine_one_step_range_error_m") target=&candidate.goal.fine_one_step_range_error_m;
+      else if (name == "goal_fine_two_step_range_error_m") target=&candidate.goal.fine_two_step_range_error_m;
+      else if (name == "ball_approach_short_v_norm") target = &candidate.ball.approach_short_v_norm;
+      else if (name == "ball_fine_one_step_v_error_norm") target = &candidate.ball.fine_one_step_v_error_norm;
+      else if (name == "ball_fine_two_step_v_error_norm") target = &candidate.ball.fine_two_step_v_error_norm;
+      else if (name == "hurdle_approach_short_v_norm") target = &candidate.hurdle.approach_short_v_norm;
+      else if (name == "hurdle_target_u_norm") target = &candidate.hurdle.target_u_norm;
+      else if (name == "hurdle_u_deadband") target = &candidate.hurdle.u_deadband;
+      else if (name == "hurdle_fine_target_v_norm") target = &candidate.hurdle.fine_target_v_norm;
+      else if (name == "hurdle_fine_one_step_v_error_norm") target = &candidate.hurdle.fine_one_step_v_error_norm;
+      else if (name == "hurdle_fine_two_step_v_error_norm") target = &candidate.hurdle.fine_two_step_v_error_norm;
+      else if (name == "hurdle_contact_v_norm") target = &candidate.hurdle.contact_v_norm;
+      else if (name == "goal_approach_short_z_m") target = &candidate.goal.approach_short_z_m;
+      else if (name == "goal_camera_goal_start_z_m") target = &candidate.goal.camera_goal_start_z_m;
+      else if (name == "line_reference_u_px") target = &candidate.line_features.image_center_u;
       else if (name == "line_p2p_offset_gain") target = &candidate.line_p2p.offset_gain;
       else if (name == "line_p2p_heading_gain") target = &candidate.line_p2p.heading_gain;
       else if (name == "line_p2p_steering_deadband") target = &candidate.line_p2p.steering_deadband;
@@ -739,7 +844,7 @@ private:
     }
     if (run_state_ != RunState::kRunning ||
         (!preview_ready_ && !manual_wait_preview_) ||
-        manual_action_active_ || !outstanding_actions_.empty() ||
+        authorized_repeat_scope_!=0 || manual_action_active_ || !outstanding_actions_.empty() ||
         !outstanding_cameras_.empty() || pending_camera_id_ != 0) {
       response.successful = false;
       response.reason = "Tuning parameters may change in WAIT_PREVIEW/WAIT_COMMIT only";
@@ -801,19 +906,29 @@ private:
     return "UNKNOWN";
   }
 
+  std::string RepeatLabel(int scope) const {
+    using vision_core::BallMode; using vision_core::GoalMode; using vision_core::HurdleMode;
+    if (scope==200+static_cast<int>(BallMode::kDownSearch) ||
+        scope==400+static_cast<int>(HurdleMode::kDownSearch)) return "SEARCH <=10s";
+    if (scope==200+static_cast<int>(BallMode::kPostPickupBackAway)) return "BACK x3";
+    if (scope==300+static_cast<int>(GoalMode::kPostShootBackAway)) return "BACK x2";
+    if (scope==200+static_cast<int>(BallMode::kPostPickupLineRecovery) ||
+        scope==300+static_cast<int>(GoalMode::kHeadingRecovery)) return "LINE SEARCH <=5 turns";
+    if (scope==400+static_cast<int>(HurdleMode::kContactWalk)) return "CONTACT x"+std::to_string(tuning_config_.hurdle.contact_steps);
+    return "ONE ACTION";
+  }
   static bool IsReadyWalk(vision_core::MissionAction action) {
     return action == vision_core::MissionAction::kStepForwardLeft ||
            action == vision_core::MissionAction::kStepForwardFive ||
-           action == vision_core::MissionAction::kStepForwardRight;
+           action == vision_core::MissionAction::kStepForwardRight ||
+           (static_cast<int>(action)>=21 && static_cast<int>(action)<=26);
   }
   static bool IsFixedSuccessor(vision_core::MissionType mission,
                               vision_core::MissionAction action) {
     using vision_core::MissionAction;
     using vision_core::MissionType;
     return action == MissionAction::kPickBall ||
-        action == MissionAction::kDefaultPosition ||
-        (mission == MissionType::kHurdle &&
-         action == MissionAction::kStepForwardOne);
+        action == MissionAction::kDefaultPosition;
   }
   void EnterWaitPreview(double now) {
     if (manual_wait_preview_) return;
@@ -896,6 +1011,7 @@ private:
     double sx=0, sy=0, sw=0, sh=0, confidence=0;
     double center_depth=0, left_depth=0, right_depth=0;
     int hits=0, center_hits=0, left_hits=0, right_hits=0;
+    double object_weight=0.0;
     double last_seen_sec = -1.0;
     int class_id=0;
     for (const auto *sample : window) {
@@ -904,9 +1020,12 @@ private:
       ++hits;
       last_seen_sec = sample->now_sec;
       class_id = obj->class_id;
-      sx += obj->box_px.x; sy += obj->box_px.y;
-      sw += obj->box_px.width; sh += obj->box_px.height;
-      confidence += obj->confidence;
+      const double weight=mission==vision_core::MissionType::kGoal ? 1.0 :
+          1.0+2.0*std::clamp((sample->now_sec-cutoff)/std::max(1e-9,ready_sec-cutoff),0.0,1.0);
+      object_weight+=weight;
+      sx += weight*obj->box_px.x; sy += weight*obj->box_px.y;
+      sw += weight*obj->box_px.width; sh += weight*obj->box_px.height;
+      confidence += weight*obj->confidence;
       if (mission == vision_core::MissionType::kGoal) {
         const auto &prepared = sample->prepared;
         if (prepared.backboard_center_depth_m &&
@@ -930,8 +1049,8 @@ private:
       return std::nullopt;
     vision_core::PerceptionDetection mean;
     mean.detection.class_id = class_id;
-    mean.detection.confidence = confidence / hits;
-    mean.detection.box = {sx / hits, sy / hits, sw / hits, sh / hits};
+    mean.detection.confidence = confidence / object_weight;
+    mean.detection.box = {sx / object_weight, sy / object_weight, sw / object_weight, sh / object_weight};
     if (center_hits >= 7) mean.center_depth_m = center_depth / center_hits;
     if (left_hits >= 7) mean.left_depth_m = left_depth / left_hits;
     if (right_hits >= 7) mean.right_depth_m = right_depth / right_hits;
@@ -1009,9 +1128,15 @@ private:
     case MissionAction::kTurnRight: return "TURN_RIGHT";
     case MissionAction::kWalkMode: return "WALK_MODE";
     case MissionAction::kStepForwardOne: return "STEP_FORWARD_ONE";
-    case MissionAction::kStepForwardLeft: return "STEP_FORWARD_LEFT";
-    case MissionAction::kStepForwardRight: return "STEP_FORWARD_RIGHT";
+    case MissionAction::kStepForwardLeft: return "STEP_FORWARD_LEFT_THREE";
+    case MissionAction::kStepForwardRight: return "STEP_FORWARD_RIGHT_THREE";
     case MissionAction::kStepForwardFive: return "STEP_FORWARD_FIVE";
+    case MissionAction::kStepForwardTwo: return "STEP_FORWARD_TWO";
+    case MissionAction::kStepForwardThree: return "STEP_FORWARD_THREE";
+    case MissionAction::kStepForwardFour: return "STEP_FORWARD_FOUR";
+    case MissionAction::kStepForwardLeftTwo: return "STEP_FORWARD_LEFT_TWO";
+    case MissionAction::kStepForwardRightTwo: return "STEP_FORWARD_RIGHT_TWO";
+    case MissionAction::kStepForwardRightOne: return "STEP_FORWARD_RIGHT_ONE";
     case MissionAction::kPickBall: return "PICK_BALL";
     case MissionAction::kRecatch: return "RECATCH";
     case MissionAction::kHurdle: return "HUDDLE";
@@ -1187,6 +1312,12 @@ private:
   double SimulatedActionDurationSec(
       vision_core::MissionAction action) const {
     switch (action) {
+    case vision_core::MissionAction::kStepForwardTwo: return 2.0*simulate_step_forward_one_duration_sec_;
+    case vision_core::MissionAction::kStepForwardThree: return 3.0*simulate_step_forward_one_duration_sec_;
+    case vision_core::MissionAction::kStepForwardFour: return 4.0*simulate_step_forward_one_duration_sec_;
+    case vision_core::MissionAction::kStepForwardLeftTwo:
+    case vision_core::MissionAction::kStepForwardRightTwo: return 2.0*simulate_curve_step_duration_sec_/3.0;
+    case vision_core::MissionAction::kStepForwardRightOne: return simulate_curve_step_duration_sec_/3.0;
     case vision_core::MissionAction::kStepForwardFive:
     case vision_core::MissionAction::kTurnLeftAndStep:
     case vision_core::MissionAction::kTurnRightAndStep:
@@ -1465,13 +1596,13 @@ private:
         cv::circle(vis,
                    cv::Point(static_cast<int>(std::round(point.u)),
                              static_cast<int>(std::round(point.v))),
-                   5, cv::Scalar(0, 255, 0), 2);
+                   5, cv::Scalar(0, 255, 0), 1);
       }
     }
 
     const auto draw_target = [&vis](
                                  const std::optional<vision_core::ObjectTarget> &target,
-                                 bool confirmed, const char *label,
+                                 bool confirmed,
                                  const cv::Scalar &color) {
       if (!confirmed || !target) return;
       const auto &box = target->box_px;
@@ -1484,33 +1615,14 @@ private:
       cv::rectangle(vis, clipped, color, 2);
       // The bounding box is recognition evidence only. Raw centers must
       // never be drawn as if they were the controller's decision coordinates.
-      const int text_y = clipped.y >= 14 ? clipped.y - 4 : clipped.y + 14;
-      cv::putText(vis, label, cv::Point(clipped.x, text_y),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.60, color, 2);
     };
 
-    draw_target(ball_target, ball_confirmed, "BALL",
+    draw_target(ball_target, ball_confirmed,
                 cv::Scalar(0, 165, 255));
-    draw_target(backboard_target, backboard_confirmed, "BACKBOARD",
+    draw_target(backboard_target, backboard_confirmed,
                 cv::Scalar(255, 128, 0));
-    draw_target(hurdle_target, hurdle_confirmed, "HURDLE",
+    draw_target(hurdle_target, hurdle_confirmed,
                 cv::Scalar(255, 0, 255));
-  }
-
-  void DrawTargetSummary(cv::Mat &vis, const char *name, const std::optional<vision_core::ObjectTarget> &target, int y,
-                         const cv::Scalar &color) {
-    if (!target) {
-      return;
-    }
-
-    const auto &box = target->box_px;
-    char buf[180];
-    std::snprintf(buf, sizeof(buf),
-                  "%s: conf=%.2f box=[%.0f,%.0f,%.0f,%.0f]",
-                  name, target->confidence, box.x, box.y,
-                  box.width, box.height);
-    cv::putText(vis, buf, cv::Point(10, y), cv::FONT_HERSHEY_SIMPLEX,
-                0.52, color, 1);
   }
 
   // PERF: 1초에 1번만 문자열 갱신 (로그로는 절대 안 찍음)
@@ -1691,14 +1803,19 @@ private:
           if (show_debug_view_) {
             cv::Mat camera_view = bgr.clone();
             DrawYoloDetections(camera_view, dets);
-            cv::imshow(kDebugWindowName, camera_view);
-            cv::Mat state_view(360, 1100, CV_8UC3, cv::Scalar(20, 20, 20));
+            const std::string indices="BALL #"+std::to_string(tuning_config_.test_ball_mission_index)+
+              (tuning_config_.test_ball_mission_index%2 ? " RIGHT" : " LEFT")+" | GOAL #"+
+              std::to_string(tuning_config_.test_goal_mission_index)+
+              (tuning_config_.test_goal_mission_index%2 ? " RIGHT" : " LEFT");
+          cv::imshow(kDebugWindowName, camera_view);
+            cv::Mat state_view(730, 1000, CV_8UC3, cv::Scalar(20, 20, 20));
+            cv::putText(state_view,indices,{28,210},cv::FONT_HERSHEY_SIMPLEX,0.65,{230,230,230},1);
             cv::putText(state_view, run_state_ == RunState::kResettingCamera
                 ? "RESET: CAMERA FORWARD / WAIT_DONE" :
                 (run_state_ == RunState::kPaused
                 ? "PAUSED / WAIT_RESUME_OR_RESET" : "DISARMED / WAIT_START"),
                         cv::Point(28, 70), cv::FONT_HERSHEY_SIMPLEX,
-                        1.1, cv::Scalar(0, 210, 255), 2);
+                        0.75, cv::Scalar(0, 210, 255), 2);
             cv::putText(state_view, run_state_ == RunState::kResettingCamera
                 ? "Body action disabled; CameraCommand FORWARD awaiting ACK/DONE."
                 : "YOLO active. No ROS motion commands will be sent.",
@@ -1778,7 +1895,9 @@ private:
         frame_now_sec - observation_start_sec_ >= observation_required_sec_;
     perception_input.allow_new_commands =
         run_state_ == RunState::kRunning || finishing_observation;
-    perception_input.allow_new_body_actions = false;
+    const bool continuing_repeat=authorized_repeat_scope_!=0 &&
+        mission_controller_->RepeatScope()==authorized_repeat_scope_ && run_state_==RunState::kRunning;
+    perception_input.allow_new_body_actions = continuing_repeat;
     if (finishing_observation && !manual_observation_session_) {
       // START uses this uniform LINE mean. Explicit manual PREVIEW
       // uses MissionController's own 1s object/LINE observation.
@@ -1827,7 +1946,7 @@ private:
     const bool completed_with_ready_window =
         committed_done && IsReadyWalk(manual_committed_command_.action) &&
         ready_window_input_.has_value();
-    if (completed_with_ready_window) {
+    if (completed_with_ready_window && !continuing_repeat) {
       // Apply the already acquired moving-window average at the DONE edge.
       // New detections seen while waiting for the user are not substituted.
       auto average = *ready_window_input_;
@@ -1867,10 +1986,12 @@ private:
     };
 
     vision_core::PerceptionMissionFrameResult perception_result;
+    const bool was_stationary_observing = mission_controller_->NeedsStationaryObservation();
     bool stepped_real_core = false;
     if (preview_ready_) {
       perception_result = preview_result_;
     } else if (manual_wait_preview_ &&
+               !mission_controller_->NeedsStationaryObservation() &&
                !committed_done && !camera_done_edge &&
                !manual_action_active_ && pending_camera_id_ == 0 &&
                run_state_ == RunState::kRunning) {
@@ -1925,19 +2046,18 @@ private:
           }
         }
 
-        if (committed_done || camera_done_edge) {
+        const bool repeat_finished = authorized_repeat_scope_!=0 &&
+            perception_result.mission.repeat_scope!=authorized_repeat_scope_;
+        if (repeat_finished)
+          authorized_repeat_scope_=0;
+        if ((committed_done || camera_done_edge || repeat_finished) && authorized_repeat_scope_==0) {
           manual_camera_done_pending_ = false;
           const bool fixed_successor =
               committed_done &&
               IsFixedSuccessor(manual_committed_command_.mission,
                                manual_committed_command_.action);
-          // HURDLE DOWN -> STEP_FORWARD_ONE is a fixed sequence.
-          const bool hurdle_camera_successor = camera_done_edge &&
-              mission_controller_->ActiveMission() ==
-                  vision_core::MissionType::kHurdle;
           const bool ready_successor = completed_with_ready_window;
-          const bool may_auto_preview = fixed_successor ||
-              hurdle_camera_successor || ready_successor;
+          const bool may_auto_preview = fixed_successor || ready_successor;
           bool captured = false;
           if (may_auto_preview &&
               pending_camera_id_ == 0 &&
@@ -1980,6 +2100,15 @@ private:
             perception_result.mission.line_features.guide);
       }
     }
+    if (mission_controller_->NeedsStationaryObservation()) {
+      // Stationary recovery is automatic observation, not a human wait.
+      LeaveWaitPreview(frame_now_sec);
+    } else if (was_stationary_observing && !preview_ready_ && !manual_action_active_ &&
+               outstanding_actions_.empty() && pending_camera_id_ == 0 &&
+               perception_result.mission.command.camera_request == vision_core::CameraRequest::kNone &&
+               !perception_result.mission.trial_complete) {
+      EnterWaitPreview(frame_now_sec);
+    }
     (void)stepped_real_core;
     const auto t6 = std::chrono::steady_clock::now();
     const auto dt_rec_us = std::chrono::duration_cast<std::chrono::microseconds>(t6 - t5).count();
@@ -1991,12 +2120,6 @@ private:
     const auto &backboard_target = object_targets.backboard;
     const auto &hurdle_target = object_targets.hurdle;
     const auto &goal_pose = prepared.goal_pose;
-    const auto &backboard_center_depth_m =
-        prepared.backboard_center_depth_m;
-    const auto &backboard_left_depth_m =
-        prepared.backboard_left_depth_m;
-    const auto &backboard_right_depth_m =
-        prepared.backboard_right_depth_m;
 
     // 6) core가 반환한 최종 명령을 ROS 토픽 형식으로 전달한다.
     const auto t7 = std::chrono::steady_clock::now();
@@ -2043,6 +2166,21 @@ private:
                    : (selected_goal
                           ? vision_core::GoalController::ModeName(goal_cmd.mode)
                           : "LINE_P2P"));
+    if (authorized_repeat_scope_!=0 &&
+        control_command.command_type==vision_core::CommandType::kAction &&
+        control_command.action_id!=manual_action_id_) {
+      manual_action_id_=control_command.action_id;
+      manual_committed_command_=control_command;
+      manual_action_active_=true;
+      ready_motion_samples_.clear(); ready_window_input_.reset();
+    }
+    if (mission_result.trial_complete && !manual_action_active_ && outstanding_actions_.empty()) {
+      authorized_repeat_scope_=0; preview_ready_=false;
+      LeaveWaitPreview(frame_now_sec); LeaveWaitCommit(frame_now_sec);
+      run_state_=RunState::kWaitStart;
+      if (algorithm_mode_=="goal" && mission_result.goal_mission_index<1000000)
+        set_parameter(rclcpp::Parameter("test_goal_mission_index",mission_result.goal_mission_index+1));
+    }
     if (!preview_ready_ && manual_action_active_)
       PublishActionCommand(control_command);
     if (!preview_ready_)
@@ -2069,39 +2207,19 @@ private:
           const bool line_confirmed =
               mission_result.line_computed && feats.guide.valid &&
               !mission_result.line_in_recovery;
-          // Controller state (not single-frame detection validity).
-          const bool ball_confirmed =
-              ball_cmd.tracked.stable && ball_cmd.tracked.visible;
-          const bool backboard_confirmed =
-              goal_cmd.tracked.stable && goal_cmd.tracked.visible;
-          const bool hurdle_confirmed =
-              hurdle_cmd.tracked.stable && hurdle_cmd.tracked.visible;
-          // Controller pose may be post-DONE averaged, not raw current RGB-D.
-          const bool pose_confirmed =
-              selected_goal && goal_cmd.pose.stable && goal_cmd.pose.visible;
-
-          // Render the exact RGB observation used by Preview. Recomputing
-          // preview_result_ after RQT edits updates the overlays on this frame.
-          cv::Mat vis = preview_ready_ && !preview_image_.empty()
-              ? preview_image_.clone() : bgr.clone();
+          // Keep RGB and raw YOLO boxes live, including during WAIT_COMMIT.
+          // The decision overlays below still use the retained preview_result_,
+          // so live detections never replace the evidence approved by COMMIT.
+          cv::Mat vis = bgr.clone();
+          DrawYoloDetections(vis, dets);
           const int ref_u = static_cast<int>(std::lround(
               tuning_config_.line_features.image_center_u));
           if (ref_u >= 0 && ref_u < vis.cols) {
             cv::line(vis, cv::Point(ref_u, 0), cv::Point(ref_u, vis.rows - 1),
-                     cv::Scalar(255, 255, 0), 2, cv::LINE_AA);
-            char ref_label[80];
-            std::snprintf(ref_label, sizeof(ref_label),
-                          "LINE REF: %.1fpx", tuning_config_.line_features.image_center_u);
-            cv::putText(vis, ref_label,
-                        cv::Point(std::max(5, std::min(ref_u + 7, vis.cols - 185)), 95),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.54,
-                        cv::Scalar(255, 255, 0), 2, cv::LINE_AA);
+                     cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
           }
-          cv::putText(vis, preview_ready_ ? "FROZEN DECISION FRAME" : "LIVE RGB",
-                      cv::Point(10, 72), cv::FONT_HERSHEY_SIMPLEX, 0.52,
-                      cv::Scalar(255, 255, 0), 2, cv::LINE_AA);
-          // Only the selected detector box is drawn above. The control
-          // decision marker below comes from the exact controller result.
+          // Overlay the retained decision boxes/centers on the live detections.
+          // READY object boxes may be moving-window averages.
           DrawConfirmedDetections(
               vis, prepared.line_centers, line_confirmed, ball_target,
               ball_target.has_value(), backboard_target,
@@ -2109,24 +2227,19 @@ private:
               hurdle_target.has_value());
 
           const auto draw_decision_center = [&vis](
-              double u_norm, double v_norm, const char *label,
+              double u_norm, double v_norm,
               const cv::Scalar &color) {
             if (vis.cols <= 1 || vis.rows <= 1 ||
                 !std::isfinite(u_norm) || !std::isfinite(v_norm) ||
                 u_norm < 0.0 || u_norm > 1.0 ||
                 v_norm < 0.0 || v_norm > 1.0) return;
-            // Trackers normalize by width-1 / height-1, never W or H.
+            // Tracker coordinates use the same W/H normalization as the core.
             const cv::Point center(
-                static_cast<int>(std::lround(u_norm * (vis.cols - 1))),
-                static_cast<int>(std::lround(v_norm * (vis.rows - 1))));
+                std::clamp(static_cast<int>(std::lround(u_norm * vis.cols)),0,vis.cols-1),
+                std::clamp(static_cast<int>(std::lround(v_norm * vis.rows)),0,vis.rows-1));
             cv::circle(vis, center, 7, color, 2, cv::LINE_AA);
             cv::drawMarker(vis, center, color,
                            cv::MARKER_CROSS, 14, 2, cv::LINE_AA);
-            cv::putText(vis, label,
-                        cv::Point(std::max(3, std::min(center.x + 9, vis.cols - 165)),
-                                  std::max(16, center.y - 12)),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.48,
-                        color, 1, cv::LINE_AA);
           };
 
           // LINE uses an O/H guide: it has a horizontal decision reference,
@@ -2143,11 +2256,6 @@ private:
                 const int x = static_cast<int>(std::lround(u));
                 cv::line(vis, cv::Point(x, 0), cv::Point(x, vis.rows - 1),
                          cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-                cv::putText(vis, "LINE DECISION U",
-                            cv::Point(std::max(3, std::min(x + 7, vis.cols - 165)),
-                                      std::max(16, vis.rows - 20)),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.47,
-                            cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
               }
             }
           }
@@ -2155,7 +2263,7 @@ private:
           if (selected_ball && ball_cmd.tracked.visible)
             draw_decision_center(ball_cmd.tracked.u_norm,
                                  ball_cmd.tracked.v_norm,
-                                 "BALL DECISION", cv::Scalar(0, 0, 255));
+                                 cv::Scalar(0, 0, 255));
 
           if (selected_goal) {
             const auto &fine = goal_cmd.fine_decision_pose;
@@ -2171,33 +2279,48 @@ private:
               if (std::isfinite(u) && u >= 0.0 && u < vis.cols) {
                 const int x = static_cast<int>(std::lround(u));
                 cv::line(vis, cv::Point(x, 0), cv::Point(x, vis.rows - 1),
-                         cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
-                cv::putText(vis, "GOAL FINE X/Z",
-                            cv::Point(std::max(3, std::min(x + 7, vis.cols - 155)),
-                                      std::max(16, vis.rows - 20)),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.47,
-                            cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+                         cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
               }
             } else if (goal_cmd.tracked.visible &&
                        !goal_cmd.fine_decision_pose_used) {
               draw_decision_center(goal_cmd.tracked.u_norm,
                                    goal_cmd.tracked.v_norm,
-                                   "GOAL DECISION", cv::Scalar(0, 255, 255));
+                                   cv::Scalar(0, 255, 255));
             }
           }
 
-          // HURDLE acquire/tilt transitions compare the RAW box-center
-          // v with thresholds (not the EMA tracked v). Plot that actual
-          // gate input in approach; never label EMA as its decision center.
-          if (selected_hurdle &&
-              hurdle_cmd.mode == vision_core::HurdleMode::kApproach &&
-              hurdle_target && vis.cols > 1 && vis.rows > 1) {
-            const auto &raw_center = hurdle_target->center_px;
-            draw_decision_center(raw_center.u / (vis.cols - 1),
-                                 raw_center.v / (vis.rows - 1),
-                                 "HURDLE GATE V", cv::Scalar(255, 0, 255));
-          }
+          // The marker is the recent weighted coordinate used for step size
+          // and fine distance. Raw DOWN trigger values are shown in the panel.
+          if (selected_hurdle && hurdle_cmd.tracked.visible)
+            draw_decision_center(hurdle_cmd.tracked.u_norm,
+                                 hurdle_cmd.tracked.v_norm, cv::Scalar(255, 0, 255));
 
+
+          const auto draw_v_line=[&](double v,const cv::Scalar& color) {
+            const int y=std::clamp(static_cast<int>(std::lround(v*vis.rows)),0,vis.rows-1);
+            cv::line(vis,{0,y},{vis.cols-1,y},color,1,cv::LINE_AA);
+          };
+          if (selected_ball) {
+            const auto& c=tuning_config_.ball;
+            if (camera_feedback_.actual_mode==vision_core::CameraMode::kForward) {
+              draw_v_line(c.approach_short_v_norm,cv::Scalar(0,200,255));
+              draw_v_line(c.tilt_down_v_norm,cv::Scalar(0,100,255));
+            } else if (camera_feedback_.actual_mode==vision_core::CameraMode::kDown) {
+              draw_v_line(c.fine_target_v_norm-c.fine_two_step_v_error_norm,cv::Scalar(0,200,255));
+              draw_v_line(c.fine_target_v_norm-c.fine_one_step_v_error_norm,cv::Scalar(0,100,255));
+            }
+          }
+          if (selected_hurdle) {
+            const auto& c=tuning_config_.hurdle;
+            if (camera_feedback_.actual_mode==vision_core::CameraMode::kForward) {
+              draw_v_line(c.approach_short_v_norm,cv::Scalar(255,120,255));
+              draw_v_line(c.tilt_trigger_v_norm,cv::Scalar(200,0,200));
+            } else if (camera_feedback_.actual_mode==vision_core::CameraMode::kDown) {
+              draw_v_line(c.fine_target_v_norm-c.fine_two_step_v_error_norm,cv::Scalar(255,120,255));
+              draw_v_line(c.fine_target_v_norm-c.fine_one_step_v_error_norm,cv::Scalar(200,0,200));
+              draw_v_line(c.contact_v_norm,cv::Scalar(0,0,255));
+            }
+          }
 
           // The pickup region uses the same target/deadband parameters
           // as FineAction. Its single decision-center marker is above.
@@ -2222,280 +2345,239 @@ private:
           // Raw depth-edge points are estimator inputs, not the GOAL
           // fine-control decision coordinate; suppress them here.
 
-          cv::putText(vis, perf_text_, cv::Point(10, 24),
-                      cv::FONT_HERSHEY_SIMPLEX, 0.70,
-                      cv::Scalar(0, 255, 0), 2);
-          char overlay[256];
-          const bool show_p2p_action = true;
-          std::snprintf(overlay, sizeof(overlay),
-                        "MODE: %s | ACTION: %u %s", selected_mode,
-                        static_cast<unsigned int>(control_command.action),
-                        ActionName(control_command.action));
-          cv::putText(vis, overlay, cv::Point(10, 48),
-                      cv::FONT_HERSHEY_SIMPLEX,
-                      show_p2p_action ? 0.55 : 0.70,
-                      cv::Scalar(0, 200, 255), 2);
-
-          cv::Mat state_panel(570, 1700, CV_8UC3,
-                              cv::Scalar(20, 20, 20));
-          cv::putText(state_panel,
-              preview_ready_ ? "TUNING: WAIT_COMMIT" :
-              (manual_action_active_ ? "TUNING: WAIT_DONE" :
-              (manual_wait_preview_ ? "TUNING: WAIT_PREVIEW" :
-              std::string("TUNING: ") + RunStateName(run_state_))),
-              cv::Point(1120, 33), cv::FONT_HERSHEY_SIMPLEX, 0.62,
-              cv::Scalar(0, 200, 255), 2);
-          const auto tune_line = [&](int y, const std::string &line) {
-            cv::putText(state_panel, line, cv::Point(1120,y),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.47,
-                        cv::Scalar(235,235,235), 1, cv::LINE_AA);
+          // One compact tuning panel. Values come from the retained
+          // controller result used for COMMIT, never from the live YOLO view.
+          cv::Mat state_panel(960, 1100, CV_8UC3, cv::Scalar(20, 20, 20));
+          const cv::Scalar text_color(235, 235, 235);
+          const cv::Scalar muted(150, 150, 150);
+          const cv::Scalar line_color(0, 230, 0);
+          const cv::Scalar ball_color(0, 165, 255);
+          const cv::Scalar goal_color(0, 230, 230);
+          const cv::Scalar hurdle_color(230, 100, 230);
+          const auto tune_line = [&](int y, const std::string &text,
+                                     const cv::Scalar &color) {
+            cv::putText(state_panel, text, cv::Point(24, y),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.54, color, 1, cv::LINE_AA);
           };
-          char tune_buf[230];
-          std::snprintf(tune_buf, sizeof(tune_buf),
-              "COMMIT: %s (mission=%u)",
+          const std::string tuning_state = preview_ready_ ? "WAIT_COMMIT" :
+              (manual_action_active_ ? "WAIT_DONE" :
+              (manual_wait_preview_ ? "WAIT_PREVIEW" : RunStateName(run_state_)));
+          tune_line(32, "TUNING: " + tuning_state + "  |  RGB: LIVE", ball_color);
+          char buf[256];
+          std::snprintf(buf, sizeof(buf), "COMMIT: %s  |  mission=%u",
               preview_ready_ ? ActionName(preview_command_.action) : "--",
               static_cast<unsigned>(preview_ready_ ?
                   preview_command_.mission : mission_result.active_mission));
-          tune_line(76, tune_buf);
-          std::snprintf(tune_buf, sizeof(tune_buf),
-              "LINE center=%.1f Ko=%.2f Kh=%.2f db=%.3f",
+          tune_line(62, std::string(buf)+" | "+RepeatLabel(preview_ready_ ? preview_result_.mission.repeat_scope : authorized_repeat_scope_), text_color);
+          std::snprintf(buf,sizeof(buf),"BALL #%d %s | GOAL #%d %s | turns=%d/5 | %s",
+              mission_result.ball_mission_index,mission_result.ball_mission_index%2 ? "RIGHT" : "LEFT",
+              mission_result.goal_mission_index,mission_result.goal_mission_index%2 ? "RIGHT" : "LEFT",
+              mission_result.recovery_turns_completed,RepeatLabel(authorized_repeat_scope_).c_str());
+          tune_line(84,buf,text_color);
+
+          const auto &lc = tuning_config_.line_p2p;
+          tune_line(102, "LINE", line_color);
+          std::snprintf(buf, sizeof(buf),
+              "reference=%.1fpx  Ko=%.3f  Kh=%.3f  deadband=%.4f",
               tuning_config_.line_features.image_center_u,
-              tuning_config_.line_p2p.offset_gain,
-              tuning_config_.line_p2p.heading_gain,
-              tuning_config_.line_p2p.steering_deadband);
-          tune_line(114, tune_buf);
-          std::snprintf(tune_buf, sizeof(tune_buf),
-              "BALL far u=%.3f db=%.3f tilt v=%.3f",
-              tuning_config_.ball.far_u_des_norm,
-              tuning_config_.ball.approach_u_deadband,
-              tuning_config_.ball.tilt_down_v_norm);
-          tune_line(152, tune_buf);
-          const auto &bc = tuning_config_.ball;
-          std::snprintf(tune_buf, sizeof(tune_buf),
-              "PICK center=(%.3f,%.3f) band=(%.3f,%.3f)",
-              bc.fine_target_u_norm, bc.fine_target_v_norm,
-              bc.fine_u_deadband, bc.fine_v_deadband);
-          tune_line(190, tune_buf);
-          if (selected_ball && ball_cmd.tracked.visible) {
-            const double du = ball_cmd.tracked.u_norm - bc.fine_target_u_norm;
-            const double dv = ball_cmd.tracked.v_norm - bc.fine_target_v_norm;
-            const double ru = bc.fine_u_deadband > 0.0
-                ? std::max(0.0, std::abs(du) - bc.fine_u_deadband) /
-                     bc.fine_u_deadband : std::abs(du);
-            const double rv = bc.fine_v_deadband > 0.0
-                ? std::max(0.0, std::abs(dv) - bc.fine_v_deadband) /
-                     bc.fine_v_deadband : std::abs(dv);
-            std::snprintf(tune_buf, sizeof(tune_buf),
-                "BALL decision u=%.3f v=%.3f ru=%.2f rv=%.2f",
-                ball_cmd.tracked.u_norm,ball_cmd.tracked.v_norm,ru,rv);
-            tune_line(228,tune_buf);
-          }
-          std::snprintf(tune_buf,sizeof(tune_buf),
-              "GOAL u=%.3f db=%.3f fine=%.2fm",
-              tuning_config_.goal.target_u_norm,
-              tuning_config_.goal.approach_u_deadband,
-              tuning_config_.goal.fine_adjust_start_z_m);
-          tune_line(266,tune_buf);
-          std::snprintf(tune_buf,sizeof(tune_buf),
-              "SHOOT range=%.2fm tol=%.2fm",
-              tuning_config_.goal.throwing_range_m,
-              tuning_config_.goal.position_tolerance_m);
-          tune_line(304,tune_buf);
-          std::snprintf(tune_buf,sizeof(tune_buf),
-              "HURDLE acquire=%.3f tilt=%.3f",
-              tuning_config_.hurdle.acquire_min_v_norm,
-              tuning_config_.hurdle.tilt_trigger_v_norm);
-          tune_line(342,tune_buf);
-          tune_line(398, "RQT: WAIT_PREVIEW/WAIT_COMMIT only");
-          tune_line(436, "PREVIEW: collect 1s; COMMIT: execute shown action");
-          tune_line(474, "Camera DOWN / GOAL / FORWARD: automatic");
-          int state_y = 24;
-          const auto draw_state = [&state_panel, &state_y](
-                                      const char *text,
-                                      const cv::Scalar &color) {
-            cv::putText(state_panel, text, cv::Point(10, state_y),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.52, color, 1);
-            state_y += 28;
-          };
-
-          char buf[256];
-          if (!use_imu_rectification_) {
-            std::snprintf(buf, sizeof(buf), "IMU: DISABLED");
-          } else if (imu_ready_snapshot) {
-            std::snprintf(buf, sizeof(buf),
-                          "IMU: roll=%+.1fdeg pitch=%+.1fdeg",
-                          roll * 180.0 / M_PI, pitch * 180.0 / M_PI);
-          } else {
-            std::snprintf(buf, sizeof(buf), "IMU: NOT READY");
-          }
-          draw_state(buf, cv::Scalar(255, 255, 255));
-
+              lc.offset_gain, lc.heading_gain, lc.steering_deadband);
+          tune_line(130, buf, text_color);
           const auto &decision_line = mission_result.line_decision_guide
               ? *mission_result.line_decision_guide : feats.guide;
-          if (mission_result.line_computed && decision_line.valid) {
-            const double steering = tuning_config_.line_p2p.offset_gain *
-                  decision_line.offset +
-                tuning_config_.line_p2p.heading_gain * decision_line.heading_rad;
-            const double db = tuning_config_.line_p2p.steering_deadband;
-            // Recovery actions are FSM-controlled and must not be mislabeled
-            // as direct LEFT/STRAIGHT/RIGHT decisions from this guide.
+          if (mission_result.line_computed && decision_line.valid &&
+              std::isfinite(decision_line.offset) &&
+              std::isfinite(decision_line.heading_rad)) {
+            const double offset_term = lc.offset_gain * decision_line.offset;
+            const double heading_term = lc.heading_gain * decision_line.heading_rad;
+            const double score = offset_term + heading_term;
+            std::snprintf(buf, sizeof(buf), "O=%+.4f  x  Ko=%.3f  =  %+.4f",
+                decision_line.offset, lc.offset_gain, offset_term);
+            tune_line(158, buf, text_color);
+            std::snprintf(buf, sizeof(buf), "H=%+.4frad  x  Kh=%.3f  =  %+.4f",
+                decision_line.heading_rad, lc.heading_gain, heading_term);
+            tune_line(186, buf, text_color);
+            // Recovery is selected by the FSM, not by this steering score.
             const char *direction = mission_result.line_in_recovery
-                ? "RECOVERY_FSM" : (steering < -db ? "LEFT" :
-                  (steering > db ? "RIGHT" : "STRAIGHT"));
+                ? "RECOVERY_FSM" : (score < -lc.steering_deadband ? "LEFT" :
+                    (score > lc.steering_deadband ? "RIGHT" : "STRAIGHT"));
             std::snprintf(buf, sizeof(buf),
-                          "LINE DECISION: O=%+.3f H=%+.3f score=%+.3f dir=%s",
-                          decision_line.offset, decision_line.heading_rad,
-                          steering, direction);
+                "SCORE=%+.4f  |  band=[%+.4f,%+.4f]  |  %s",
+                score, -lc.steering_deadband, lc.steering_deadband, direction);
+            const bool inside_band = std::abs(score) <= lc.steering_deadband;
+            tune_line(214, buf, mission_result.line_in_recovery ? muted :
+                (inside_band ? line_color : ball_color));
           } else {
-            std::snprintf(buf, sizeof(buf),
-                          "LINE DECISION: invalid (NONE/recovery)");
-          }
-          draw_state(buf, cv::Scalar(0, 255, 0));
-          if (mission_result.line_computed && feats.guide.valid) {
-            std::snprintf(buf, sizeof(buf),
-                          "LINE RAW: dots=%.0f O=%+.3f H=%+.3f",
-                          feats.n_visible, feats.guide.offset, feats.guide.heading_rad);
-            draw_state(buf, cv::Scalar(0, 190, 0));
+            tune_line(158, "O x Ko = --", muted);
+            tune_line(186, "H x Kh = --", muted);
+            tune_line(214, "SCORE: -- (no valid LINE decision)", muted);
           }
 
-          if (ball_confirmed) {
+          const auto &bc = tuning_config_.ball;
+          tune_line(254, std::string("BALL  |  ") +
+              vision_core::BallController::ModeName(ball_cmd.mode), ball_color);
+          std::snprintf(buf, sizeof(buf), "far target u=%.3f  deadband=%.3f  DOWN v>=%.3f",
+              bc.far_u_des_norm, bc.approach_u_deadband, bc.tilt_down_v_norm);
+          tune_line(282, buf, text_color);
+          if (selected_ball && ball_cmd.mode == vision_core::BallMode::kApproachBall &&
+              ball_cmd.tracked.visible) {
             std::snprintf(buf, sizeof(buf),
-                          "BALL STATE: active=%d mode=%s stable=1 visible=1 u=%.2f v=%.2f h=%.2f",
-                          selected_ball ? 1 : 0,
-                          vision_core::BallController::ModeName(ball_cmd.mode),
-                          ball_cmd.tracked.u_norm, ball_cmd.tracked.v_norm,
-                          ball_cmd.tracked.h_norm);
+                "far u=%.4f  |  u-target=%+.4f  |  band=[%+.4f,%+.4f]",
+                ball_cmd.tracked.u_norm, ball_cmd.tracked.u_norm - bc.far_u_des_norm,
+                -bc.approach_u_deadband, bc.approach_u_deadband);
+            tune_line(310, buf, ball_color);
           } else {
-            std::snprintf(buf, sizeof(buf),
-                          "BALL STATE: active=%d mode=%s stable=%d visible=%d u=-- v=-- h=--",
-                          selected_ball ? 1 : 0,
-                          vision_core::BallController::ModeName(ball_cmd.mode),
-                          ball_cmd.tracked.stable ? 1 : 0,
-                          ball_cmd.tracked.visible ? 1 : 0);
+            tune_line(310, "far u-target: --", muted);
           }
-          draw_state(buf, cv::Scalar(0, 165, 255));
-          if (selected_ball &&
-              ball_cmd.mode == vision_core::BallMode::kApproachBall &&
+          std::snprintf(buf, sizeof(buf), "PICK target=(%.3f,%.3f)  deadband=(%.3f,%.3f)",
+              bc.fine_target_u_norm, bc.fine_target_v_norm,
+              bc.fine_u_deadband, bc.fine_v_deadband);
+          tune_line(338, buf, text_color);
+          const bool ball_fine = selected_ball && ball_cmd.tracked.visible &&
+              (ball_cmd.mode == vision_core::BallMode::kFineAdjustForPickup ||
+               ball_cmd.mode == vision_core::BallMode::kPickupBall);
+          if (ball_fine) {
+            const double du = ball_cmd.tracked.u_norm - bc.fine_target_u_norm;
+            const double dv = ball_cmd.tracked.v_norm - bc.fine_target_v_norm;
+            // Same normalized excess beyond the pickup rectangle as FineAction.
+            const double ru = bc.fine_u_deadband > 0.0
+                ? std::max(0.0, std::abs(du) - bc.fine_u_deadband) /
+                    bc.fine_u_deadband : std::abs(du);
+            const double rv = bc.fine_v_deadband > 0.0
+                ? std::max(0.0, std::abs(dv) - bc.fine_v_deadband) /
+                    bc.fine_v_deadband : std::abs(dv);
+            std::snprintf(buf, sizeof(buf),
+                "PICK du=%+.4f  dv=%+.4f  |  excess: ru=%.3f  rv=%.3f",
+                du, dv, ru, rv);
+            tune_line(366, buf, ball_color);
+          } else {
+            tune_line(366, "PICK du/dv, ru/rv: --", muted);
+          }
+          if (selected_ball && ball_cmd.mode == vision_core::BallMode::kApproachBall &&
               ball_target && vis.rows > 1) {
-            // The DOWN-camera gate compares RAW detection v (not EMA v).
-            const double raw_gate_v =
-                ball_target->center_px.v / (vis.rows - 1);
-            std::snprintf(buf, sizeof(buf),
-                "BALL DOWN gate: raw_v=%.3f threshold=%.3f",
-                raw_gate_v, tuning_config_.ball.tilt_down_v_norm);
-            draw_state(buf, cv::Scalar(0, 165, 255));
-          }
-          if (ball_confirmed) {
-            DrawTargetSummary(state_panel, "BALL BBOX", ball_target, state_y,
-                              cv::Scalar(0, 165, 255));
+            // The core normalizes the raw gate input by image height.
+            const double raw_v = ball_target->center_px.v / vis.rows;
+            std::snprintf(buf, sizeof(buf), "DOWN raw v=%.4f  |  v-threshold=%+.4f",
+                raw_v, raw_v - bc.tilt_down_v_norm);
+            tune_line(394, buf, ball_color);
           } else {
-            draw_state("BALL BBOX: --", cv::Scalar(0, 165, 255));
+            tune_line(394, "DOWN raw v-threshold: --", muted);
           }
-          if (ball_confirmed) state_y += 28;
 
-          if (selected_goal && goal_cmd.fine_decision_pose_used) {
-            const auto &p = goal_cmd.fine_decision_pose;
-            if (p.valid) {
-              std::snprintf(buf, sizeof(buf),
-                  "GOAL FINE INPUT: x=%+.3fm z=%.3fm yaw=%+.1fdeg",
-                  p.x_m, p.z_m, p.yaw_rad * 180.0 / M_PI);
+          const auto &gc = tuning_config_.goal;
+          tune_line(434, std::string("GOAL  |  ") +
+              vision_core::GoalController::ModeName(goal_cmd.mode), goal_color);
+          std::snprintf(buf, sizeof(buf), "far target u=%.3f  deadband=%.3f  fine z<=%.3fm",
+              gc.target_u_norm, gc.approach_u_deadband, gc.fine_adjust_start_z_m);
+          tune_line(462, buf, text_color);
+          if (selected_goal && (goal_cmd.mode == vision_core::GoalMode::kApproach ||
+              goal_cmd.mode == vision_core::GoalMode::kForwardApproach) &&
+              goal_cmd.tracked.visible) {
+            std::snprintf(buf, sizeof(buf),
+                "far u=%.4f  |  u-target=%+.4f  |  band=[%+.4f,%+.4f]",
+                goal_cmd.tracked.u_norm, goal_cmd.tracked.u_norm - gc.target_u_norm,
+                -gc.approach_u_deadband, gc.approach_u_deadband);
+            tune_line(490, buf, goal_color);
+          } else {
+            tune_line(490, "far u-target: --", muted);
+          }
+          std::snprintf(buf, sizeof(buf), "SHOOT range=%.3fm  tolerance=%.3fm  yaw limit=%.1fdeg",
+              gc.throwing_range_m, gc.position_tolerance_m, gc.shoot_yaw_limit_deg);
+          tune_line(518, buf, text_color);
+          const auto &fine = goal_cmd.fine_decision_pose;
+          if (selected_goal && goal_cmd.fine_decision_pose_used && fine.valid &&
+              std::isfinite(fine.x_m) && std::isfinite(fine.z_m) &&
+              fine.z_m > 0.0 && std::isfinite(fine.yaw_rad)) {
+            // Diagnostic geometry matches GoalController::FineAction's input;
+            // this display never selects or publishes an action.
+            const double rim_x = fine.x_m + gc.hoop_radius_m * std::sin(fine.yaw_rad);
+            const double rim_z = fine.z_m - gc.hoop_radius_m * std::cos(fine.yaw_rad);
+            const double distance = std::hypot(rim_x, rim_z);
+            const double error = distance - gc.throwing_range_m;
+            const double shoot_yaw_deg = distance > 1e-9
+                ? -std::atan2(rim_x, rim_z) * 180.0 / M_PI : 0.0;
+            std::snprintf(buf, sizeof(buf), "fine input x=%+.4fm  z=%.4fm  yaw=%+.2fdeg",
+                fine.x_m, fine.z_m, fine.yaw_rad * 180.0 / M_PI);
+            tune_line(546, buf, goal_color);
+            std::snprintf(buf, sizeof(buf),
+                "rim distance=%.4fm  |  error=%+.4fm  |  band=[%+.4f,%+.4f]m",
+                distance, error, -gc.position_tolerance_m, gc.position_tolerance_m);
+            tune_line(574, buf, std::abs(error) <= gc.position_tolerance_m
+                ? line_color : ball_color);
+            std::snprintf(buf, sizeof(buf), "shoot yaw=%+.2fdeg  |  band=[%+.1f,%+.1f]deg",
+                shoot_yaw_deg, -gc.shoot_yaw_limit_deg, gc.shoot_yaw_limit_deg);
+            tune_line(602, buf, goal_color);
+          } else {
+            if (selected_goal && prepared.backboard_center_depth_m &&
+                std::isfinite(*prepared.backboard_center_depth_m)) {
+              std::snprintf(buf, sizeof(buf), "backboard center depth=%.4fm  |  fine z<=%.3fm",
+                  *prepared.backboard_center_depth_m, gc.fine_adjust_start_z_m);
+              tune_line(546, buf, goal_color);
             } else {
-              std::snprintf(buf, sizeof(buf),
-                  "GOAL FINE INPUT: INVALID (no fine movement)");
+              tune_line(546, "fine input x/z/yaw: --", muted);
             }
-          } else if (pose_confirmed) {
-            std::snprintf(buf, sizeof(buf),
-                "GOAL TRACKED POSE (not fine input): x=%+.3fm z=%.3fm yaw=%+.1fdeg",
-                goal_cmd.pose.x_m, goal_cmd.pose.z_m,
-                goal_cmd.pose.yaw_rad * 180.0 / M_PI);
-          } else {
-            std::snprintf(buf, sizeof(buf), "GOAL POSE: unavailable");
+            tune_line(574, "rim distance / range error: --", muted);
+            tune_line(602, "shoot yaw: --", muted);
           }
-          draw_state(buf, cv::Scalar(0, 255, 255));
 
-          const bool shoot_yaw_valid =
-              pose_confirmed ||
-              (selected_goal && goal_cmd.mode == vision_core::GoalMode::kShoot);
-          if (shoot_yaw_valid) {
-            std::snprintf(buf, sizeof(buf),
-                          "SHOOT ROTATION YAW: %+.1fdeg",
-                          goal_cmd.shoot_yaw_rad * 180.0 / M_PI);
-          } else {
-            std::snprintf(buf, sizeof(buf), "SHOOT ROTATION YAW: --");
-          }
-          draw_state(buf, cv::Scalar(0, 200, 255));
-
-          if (backboard_confirmed) {
-            std::snprintf(
-                buf, sizeof(buf),
-                "BACKBOARD APPROACH: active=%d mode=%s stable=1 visible=1 u=%.2f v=%.2f",
-                selected_goal ? 1 : 0,
-                vision_core::GoalController::ModeName(goal_cmd.mode),
-                goal_cmd.tracked.u_norm, goal_cmd.tracked.v_norm);
-          } else {
-            std::snprintf(
-                buf, sizeof(buf),
-                "BACKBOARD APPROACH: active=%d mode=%s stable=%d visible=%d u=-- v=--",
-                selected_goal ? 1 : 0,
-                vision_core::GoalController::ModeName(goal_cmd.mode),
-                goal_cmd.tracked.stable ? 1 : 0,
-                goal_cmd.tracked.visible ? 1 : 0);
-          }
-          draw_state(buf, cv::Scalar(255, 128, 0));
-
-          const auto depth_text = [](const std::optional<double> &depth) {
-            if (!depth || !std::isfinite(*depth)) return std::string("--");
-            char value[32];
-            std::snprintf(value, sizeof(value), "%.3fm", *depth);
-            return std::string(value);
-          };
-          const std::string center_depth =
-              backboard_confirmed
-                  ? depth_text(backboard_center_depth_m)
-                  : "--";
-          const std::string left_depth =
-              backboard_confirmed ? depth_text(backboard_left_depth_m) : "--";
-          const std::string right_depth =
-              backboard_confirmed ? depth_text(backboard_right_depth_m) : "--";
-          std::snprintf(buf, sizeof(buf),
-                        "BACKBOARD DEPTH: center=%s left=%s right=%s",
-                        center_depth.c_str(), left_depth.c_str(),
-                        right_depth.c_str());
-          draw_state(buf, cv::Scalar(255, 128, 0));
-
-          if (hurdle_confirmed) {
-            std::snprintf(buf, sizeof(buf),
-                          "HURDLE STATE: active=%d mode=%s stable=1 visible=1",
-                          selected_hurdle ? 1 : 0,
-                          vision_core::HurdleController::ModeName(
-                              hurdle_cmd.mode));
-          } else {
-            std::snprintf(buf, sizeof(buf),
-                          "HURDLE STATE: active=%d mode=%s stable=%d visible=%d",
-                          selected_hurdle ? 1 : 0,
-                          vision_core::HurdleController::ModeName(
-                              hurdle_cmd.mode),
-                          hurdle_cmd.tracked.stable ? 1 : 0,
-                          hurdle_cmd.tracked.visible ? 1 : 0);
-          }
-          draw_state(buf, cv::Scalar(255, 0, 255));
-          if (selected_hurdle &&
-              hurdle_cmd.mode == vision_core::HurdleMode::kApproach &&
+          const auto &hc = tuning_config_.hurdle;
+          tune_line(642, std::string("HURDLE  |  ") +
+              vision_core::HurdleController::ModeName(hurdle_cmd.mode), hurdle_color);
+          std::snprintf(buf, sizeof(buf), "acquire v>=%.3f  DOWN v>=%.3f",
+              hc.acquire_min_v_norm, hc.tilt_trigger_v_norm);
+          tune_line(670, buf, text_color);
+          if (selected_hurdle && hurdle_cmd.mode == vision_core::HurdleMode::kApproach &&
               hurdle_target && vis.rows > 1) {
-            const double raw_gate_v =
-                hurdle_target->center_px.v / (vis.rows - 1);
+            const double raw_v = hurdle_target->center_px.v / vis.rows;
             std::snprintf(buf, sizeof(buf),
-                "HURDLE DOWN gate: raw_v=%.3f threshold=%.3f",
-                raw_gate_v, tuning_config_.hurdle.tilt_trigger_v_norm);
-            draw_state(buf, cv::Scalar(255, 0, 255));
-          }
-          if (hurdle_confirmed) {
-            DrawTargetSummary(state_panel, "HURDLE BBOX", hurdle_target,
-                              state_y, cv::Scalar(255, 0, 255));
+                "raw v=%.4f  |  v-acquire=%+.4f  |  v-DOWN=%+.4f",
+                raw_v, raw_v - hc.acquire_min_v_norm, raw_v - hc.tilt_trigger_v_norm);
+            tune_line(698, buf, hurdle_color);
           } else {
-            draw_state("HURDLE BBOX: --", cv::Scalar(255, 0, 255));
+            tune_line(698, "raw v / threshold errors: --", muted);
           }
 
+          std::snprintf(buf,sizeof(buf),"BALL v lines: short=%.0fpx DOWN=%.0fpx | fine 2/1=%.0f/%.0fpx",
+              bc.approach_short_v_norm*vis.rows,bc.tilt_down_v_norm*vis.rows,
+              (bc.fine_target_v_norm-bc.fine_two_step_v_error_norm)*vis.rows,
+              (bc.fine_target_v_norm-bc.fine_one_step_v_error_norm)*vis.rows);
+          tune_line(738,buf,ball_color);
+          std::snprintf(buf,sizeof(buf),"HURDLE v lines: short=%.0fpx DOWN=%.0fpx | fine 2/1=%.0f/%.0fpx contact=%.0fpx",
+              hc.approach_short_v_norm*vis.rows,hc.tilt_trigger_v_norm*vis.rows,
+              (hc.fine_target_v_norm-hc.fine_two_step_v_error_norm)*vis.rows,
+              (hc.fine_target_v_norm-hc.fine_one_step_v_error_norm)*vis.rows,hc.contact_v_norm*vis.rows);
+          tune_line(766,buf,hurdle_color);
+          tune_line(794,mission_result.recovery_failed ? "LINE SEARCH LIMIT: HOLD / RESET" :
+              std::string("Approved: ")+RepeatLabel(authorized_repeat_scope_),text_color);
+          if (mission_result.goal_walk_gate_active) {
+            std::snprintf(buf, sizeof(buf), "GOAL walk %.2f / %.2fs | remaining %.2fs | %s",
+                mission_result.goal_walk_elapsed_sec, gc.post_pickup_wait_sec,
+                mission_result.goal_walk_remaining_sec,
+                mission_result.goal_walk_remaining_sec <= 0.0 ? "DRAIN / CAMERA" : "WALKING TIME ONLY");
+            tune_line(822, buf, goal_color);
+          }
+          if (ball_cmd.mode == vision_core::BallMode::kDownSearch ||
+              hurdle_cmd.mode == vision_core::HurdleMode::kDownSearch) {
+            std::snprintf(buf, sizeof(buf), "INITIAL DOWN SEARCH | remaining %.2fs",
+                selected_ball ? ball_cmd.down_search_remaining_sec : hurdle_cmd.down_search_remaining_sec);
+            tune_line(850, buf, text_color);
+          }
+          if (ball_cmd.mode == vision_core::BallMode::kBallRecoveryDown ||
+              hurdle_cmd.mode == vision_core::HurdleMode::kRecoveryDown ||
+              (selected_ball && ball_cmd.mode == vision_core::BallMode::kFailed && ball_cmd.recovery_observations_completed > 0) ||
+              (selected_hurdle && hurdle_cmd.mode == vision_core::HurdleMode::kFailed && hurdle_cmd.recovery_observations_completed > 0)) {
+            const int completed = selected_ball ? ball_cmd.recovery_observations_completed : hurdle_cmd.recovery_observations_completed;
+            const int limit = selected_ball ? bc.recovery_max_observations : hc.recovery_max_observations;
+            const double elapsed = selected_ball ? ball_cmd.recovery_observation_elapsed_sec : hurdle_cmd.recovery_observation_elapsed_sec;
+            std::snprintf(buf, sizeof(buf), "STATIONARY RECOVERY %d / %d | %.2fs | HOLD", std::min(completed+1, limit), limit, elapsed);
+            tune_line(878, buf, text_color);
+          }
+          if (mission_result.recovery_verifying) tune_line(906, "LINE: confirming after rotation | HOLD", line_color);
+          if (selected_hurdle && hurdle_cmd.tracked.visible) {
+            std::snprintf(buf, sizeof(buf), "HURDLE weighted v=%.3f | forward error=%+.3f | contact margin=%+.3f | u alignment OFF",
+                hurdle_cmd.tracked.v_norm, hc.fine_target_v_norm-hurdle_cmd.tracked.v_norm,
+                hurdle_cmd.tracked.v_norm-hc.contact_v_norm);
+            tune_line(934, buf, hurdle_color);
+          }
           cv::imshow(kDebugWindowName, vis);
           cv::imshow(kStateWindowName, state_panel);
         }
@@ -2573,6 +2655,8 @@ private:
   std::optional<vision_core::PerceptionFrameInput> ready_window_input_;
   cv::Mat ready_window_image_;
   cv::Mat preview_image_;  // frozen RGB decision evidence for WAIT_COMMIT
+  int authorized_repeat_scope_{0};
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr stop_repeat_service_;
   bool manual_action_active_{false};
   std::uint64_t manual_action_id_{0};
   std::optional<vision_core::LineGuide> cached_ready_guide_;

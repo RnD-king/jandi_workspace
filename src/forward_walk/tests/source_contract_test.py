@@ -38,8 +38,14 @@ checks = {
     "failure IDs logged before reset": main.index('action_id=%llu queued_id=%llu camera_id=%llu') < main.index('action_transactions_.Abort();'),
 }
 for action, filename in {
-    'STEP_FORWARD_LEFT': 'missions/직진_좌회전_3번.json',
-    'STEP_FORWARD_RIGHT': 'missions/직진_우회전_3번.json',
+    'STEP_FORWARD_LEFT_THREE': 'missions/직진_좌회전_3번.json',
+    'STEP_FORWARD_RIGHT_THREE': 'missions/직진_우회전_3번.json',
+    'STEP_FORWARD_TWO': 'missions/직진_2걸음.json',
+    'STEP_FORWARD_THREE': 'missions/직진_3걸음.json',
+    'STEP_FORWARD_FOUR': 'missions/직진_4걸음.json',
+    'STEP_FORWARD_LEFT_TWO': 'missions/직진_좌회전_2번.json',
+    'STEP_FORWARD_RIGHT_TWO': 'missions/직진_우회전_2번.json',
+    'STEP_FORWARD_RIGHT_ONE': 'missions/직진_우회전_1번.json',
     'STEP_FORWARD_FIVE': 'missions/연속걷기.json',
     'DEFAULT_POSITION': 'motions/초기자세_다소곳_.json',
 }.items():
@@ -50,13 +56,13 @@ for side, motion in {
     '좌': '보행_좌회전전진_20도_최종_초기X.json',
     '우': '보행_우회전전진_20도_최종_초기X.json',
 }.items():
-    for count in (2, 3):
+    for count in ((2,3) if side=='좌' else (1,2,3)):
         manifest = root / f'missions/직진_{side}회전_{count}번.json'
         entries = json.loads(manifest.read_text()).get('motions', [])
+        expected = [motion]*count if side=='좌' else [motion,'보행_1걸음_초기X.json']*count
         checks[f'{side}회전 {count}x references'] = (
-            len(entries) == count
-            and all(entry.get('filename') == motion for entry in entries)
-            and (root / 'motions' / motion).is_file()
+            [entry.get('filename') for entry in entries] == expected
+            and all((root / 'motions' / file).is_file() for file in expected)
         )
 state = (root / 'include/motion_executor_state.hpp').read_text()
 checks['all-mission READY'] = 'IsReadyWalkAction(active_action)' in state

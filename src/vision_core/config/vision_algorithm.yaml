@@ -2,7 +2,7 @@ vision_algorithm:
   line_features:
     max_centers: 8
     guide_min_points: 3
-    image_center_u: 320.0
+    image_center_u: 420.0
     curve_min_points: 5
     curve_min_v_span_px: 80.0
     curve_local_fit_points: 4
@@ -13,8 +13,8 @@ vision_algorithm:
     line_stable_min_hits: 7
 
   line_p2p:
-    offset_gain: 1.0
-    heading_gain: 1.0
+    offset_gain: 0.3
+    heading_gain: 0.3
     steering_deadband: 0.10
     ready_lead_sec: 0.25  # Match forward_walk; estimate the 40% sampling point
     failure_observation_sec: 2.0
@@ -25,6 +25,13 @@ vision_algorithm:
     recovery_turn_yaw_deg: 15
 
   ball:
+    approach_short_v_norm: 0.60
+    down_search_timeout_sec: 10.0
+    recovery_observation_sec: 1.0
+    recovery_max_observations: 5
+    fine_one_step_v_error_norm: 0.12
+    fine_two_step_v_error_norm: 0.25
+    post_pickup_back_steps: 3
     stable_window: 10
     stable_min_hits: 7
     lost_frames: 5
@@ -35,7 +42,7 @@ vision_algorithm:
     tilt_down_v_norm: 0.75
     tilt_down_window: 10
     tilt_down_min_hits: 7
-    pickup_max_attempts: 3
+    pickup_max_attempts: 10
     ball_ignore_duration_sec: 5.0
     fine_target_u_norm: 0.50
     fine_target_v_norm: 0.70
@@ -48,6 +55,17 @@ vision_algorithm:
     recovery_settle_duration_sec: 0.60
 
   hurdle:
+    approach_short_v_norm: 0.65
+    down_search_timeout_sec: 10.0
+    recovery_observation_sec: 1.0
+    recovery_max_observations: 5
+    fine_one_step_v_error_norm: 0.12
+    fine_two_step_v_error_norm: 0.25
+    target_u_norm: 0.50
+    u_deadband: 0.06
+    fine_target_v_norm: 0.85
+    contact_v_norm: 0.85
+    contact_steps: 3
     stable_window: 10
     stable_min_hits: 7
     lost_frames: 5
@@ -63,11 +81,16 @@ vision_algorithm:
     recovery_settle_duration_sec: 0.60
 
   goal:
+    approach_short_z_m: 1.20
+    fine_one_step_range_error_m: 0.12
+    fine_two_step_range_error_m: 0.25
+    camera_goal_start_z_m: 0.80
+    post_shoot_back_steps: 2
     stable_window: 10
     stable_min_hits: 7
     lost_frames: 5
     smooth_alpha: 0.45
-    post_pickup_wait_sec: 3.0
+    post_pickup_wait_sec: 5.0  # Active LINE walking, including executor arm transition
     target_u_norm: 0.50
     approach_u_deadband: 0.025
     fine_adjust_start_z_m: 0.80
@@ -112,6 +135,11 @@ vision_algorithm:
     action_ack_timeout_sec: 10.0
 
   mission:
+    goal_trial_start_forward: false
+    test_ball_mission_index: 1
+    test_goal_mission_index: 1
+    mission_recovery_max_turns: 5
+    mission_recovery_yaw_deg: 15
     camera_motion_timeout_sec: 3.0
     post_motion_observation_sec: 1.0
     backboard_min_depth_m: 0.20

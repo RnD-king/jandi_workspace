@@ -1,6 +1,7 @@
 #include "vision_core/hurdle_controller.hpp"
 
 #include "vision_core/config_loader.hpp"
+#include "vision_core/cruise_selector.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -36,6 +37,9 @@ const char *HurdleController::ModeName(HurdleMode mode) {
   case HurdleMode::kReturnCameraToLine: return "HURDLE_CAMERA_FORWARD";
   case HurdleMode::kRecoveryForward: return "HURDLE_RECOVERY_FORWARD";
   case HurdleMode::kFailed: return "HURDLE_FAILED";
+  case HurdleMode::kDownSearch: return "HURDLE_DOWN_SEARCH";
+  case HurdleMode::kFineAdjust: return "HURDLE_FINE";
+  case HurdleMode::kRecoveryDown: return "HURDLE_RECOVERY_DOWN";
   }
   return "UNKNOWN";
 }
@@ -54,35 +58,21 @@ void HurdleController::UpdateTracker(const std::optional<ObjectTarget> &target,
   bool close = false;
   if (detected) {
     lost_count_ = 0;
-    const Point2 center = target->center_rectified
-                              ? target->rectified_center_px
-                              : target->center_px;
-    TrackedHurdle observed;
-    observed.visible = true;
-    observed.u_norm = Clamp(center.u / Denom(image_width), 0.0, 1.0);
-    observed.v_norm = Clamp(center.v / Denom(image_height), 0.0, 1.0);
-    observed.h_norm = Clamp(target->height_px / Denom(image_height), 0.0, 1.0);
-    observed.bottom_norm = Clamp((target->box_px.y + target->box_px.height) /
-                                     Denom(image_height),
-                                 0.0, 1.0);
-    observed.confidence = target->confidence;
-    const double raw_v = target->center_px.v / Denom(image_height);
+    observation_window_.Add(target, config_.stable_window);
+    const auto mean = observation_window_.Mean().value();
+    const Point2 center = mean.center_rectified ? mean.rectified_center_px : mean.center_px;
+    tracked_.visible = true;
+    tracked_.u_norm = Clamp(center.u/Denom(image_width),0.0,1.0);
+    tracked_.v_norm = Clamp(center.v/Denom(image_height),0.0,1.0);
+    tracked_.h_norm = Clamp(mean.height_px/Denom(image_height),0.0,1.0);
+    tracked_.bottom_norm = Clamp((mean.box_px.y+mean.box_px.height)/Denom(image_height),0.0,1.0);
+    tracked_.confidence = mean.confidence;
+    const double raw_v = target->center_px.v/Denom(image_height);
     acquire = raw_v >= config_.acquire_min_v_norm;
     close = raw_v >= config_.tilt_trigger_v_norm;
-    last_seen_u_norm_ = observed.u_norm;
-    const double alpha = Clamp(config_.smooth_alpha, 0.0, 1.0);
-    if (!has_smoothed_) {
-      tracked_ = observed;
-      has_smoothed_ = true;
-    } else {
-      tracked_.visible = true;
-      tracked_.u_norm = (1.0 - alpha) * tracked_.u_norm + alpha * observed.u_norm;
-      tracked_.v_norm = (1.0 - alpha) * tracked_.v_norm + alpha * observed.v_norm;
-      tracked_.h_norm = observed.h_norm;
-      tracked_.bottom_norm = observed.bottom_norm;
-      tracked_.confidence = observed.confidence;
-    }
+    last_seen_u_norm_ = tracked_.u_norm;
   } else {
+    observation_window_.Add(std::nullopt, config_.stable_window);
     ++lost_count_;
     tracked_.visible = false;
   }
@@ -98,18 +88,14 @@ void HurdleController::UpdateTracker(const std::optional<ObjectTarget> &target,
 }
 
 ActionRequest HurdleController::RecoveryAction() const {
-  const double error = last_seen_u_norm_ - 0.5;
-  if (std::abs(error) <= config_.recovery_center_tolerance_norm) return {};
-  return Locomotion(error < 0.0 ? MissionAction::kTurnLeft
-                                : MissionAction::kTurnRight,
-                    15);
+  return {}; // HURDLE horizontal alignment is deferred to LINE observations.
 }
 
 HurdleResult HurdleController::Compute(
     const std::optional<ObjectTarget> &target, int image_width,
     int image_height, double now_sec, const CameraFeedback &camera,
     const ActionExecutionFeedback &feedback,
-    bool /*allow_new_body_actions*/) {
+    bool allow_new_body_actions) {
   if (mode_ == HurdleMode::kLineFollow && now_sec < ignore_until_sec_)
     return {};
   // No tracking/near-evidence from the moving camera view.
@@ -134,13 +120,6 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kLineFollow:
     return result;
   case HurdleMode::kApproach: {
-    if (lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = HurdleMode::kRecoveryForward;
-      state_enter_sec_ = now_sec;
-      recovery_visible_count_ = 0;
-      result.mode = mode_;
-      return result;
-    }
     const int close_hits = static_cast<int>(
         std::count(tilt_history_.begin(), tilt_history_.end(), true));
     close_trigger_latched_ = close_trigger_latched_ ||
@@ -153,7 +132,16 @@ HurdleResult HurdleController::Compute(
       result.camera_request = CameraRequest::kDown;
       return result;
     }
-    result.action = Locomotion(MissionAction::kStepForwardFive);
+    if (lost_count_ >= std::max(1, config_.lost_frames)) {
+      mode_ = HurdleMode::kRecoveryForward;
+      state_enter_sec_ = now_sec;
+      recovery_visible_count_ = 0;
+      result.mode = mode_;
+      return result;
+    }
+    if (tracked_.visible)
+      result.action = Locomotion(ApproachAction(CruiseDirection::kStraight,
+          tracked_.v_norm >= config_.approach_short_v_norm));
     return result;
   }
   case HurdleMode::kWaitCameraDown:
@@ -161,25 +149,64 @@ HurdleResult HurdleController::Compute(
     if (camera.actual_mode == CameraMode::kDown && camera.settled) {
       ClearTracking();  // Intermediate camera observations are discarded.
       last_seen_u_norm_ = 0.5;
-      mode_ = HurdleMode::kContactWalk;
+      mode_ = HurdleMode::kDownSearch;
+      down_search_started_ = down_search_found_ = false;
       result.mode = mode_;
       result.tracked = {};
       result.camera_request = CameraRequest::kNone;
-      // CONTACT_WALK(20)은 protocol에만 예약한다. executor mapping 전까지 10.
-      result.action = Locomotion(MissionAction::kStepForwardOne);
+      result.action = {};
     } else if (now_sec - state_enter_sec_ >= camera_motion_timeout_sec_) {
       mode_ = HurdleMode::kFailed;
       result.mode = mode_;
       result.camera_request = CameraRequest::kNone;
     }
     return result;
-  case HurdleMode::kContactWalk:
-    result.action = Locomotion(MissionAction::kStepForwardOne);
-    if (feedback.action_done) {
-      mode_ = HurdleMode::kCross;
-      result.mode = mode_;
-      result.action = Mission(MissionAction::kHurdle);
+  case HurdleMode::kDownSearch: {
+    down_search_found_=down_search_found_ || (tracked_.visible && tracked_.stable);
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (down_search_found_) {
+      mode_=HurdleMode::kFineAdjust; ClearTracking();
+      settle_until_sec_=now_sec+config_.recovery_settle_duration_sec;
+      result.mode=mode_; result.action={}; return result;
     }
+    if (!down_search_started_) {
+      result.action=Locomotion(MissionAction::kStepForwardOne);
+      if (!allow_new_body_actions) return result;
+      down_search_started_=true; state_enter_sec_=now_sec;
+    }
+    if (now_sec-state_enter_sec_ >= config_.down_search_timeout_sec) {
+      mode_=HurdleMode::kFailed; result.mode=mode_; result.action={}; return result;
+    }
+    result.action=Locomotion(MissionAction::kStepForwardOne); return result;
+  }
+  case HurdleMode::kFineAdjust: {
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (now_sec < settle_until_sec_) return result;
+    if (!tracked_.visible) {
+      if (lost_count_>=config_.lost_frames) {
+        mode_=HurdleMode::kRecoveryDown;
+        ClearTracking(); stationary_recovery_.Begin(now_sec); result.mode=mode_;
+      }
+      return result;
+    }
+    if (tracked_.v_norm>=config_.contact_v_norm) {
+      if (allow_new_body_actions) { mode_=HurdleMode::kContactWalk; completed_contact_steps_=0; }
+      result.mode=mode_;
+      result.action=Locomotion(MissionAction::kStepForwardHalf);
+    } else {
+      const double error=config_.fine_target_v_norm-tracked_.v_norm;
+      result.action=Locomotion(error>=config_.fine_two_step_v_error_norm ? MissionAction::kStepForwardTwo :
+          error>=config_.fine_one_step_v_error_norm ? MissionAction::kStepForwardOne : MissionAction::kStepForwardHalf);
+    }
+    return result;
+  }
+  case HurdleMode::kContactWalk:
+    if (feedback.action_done) ++completed_contact_steps_;
+    if (completed_contact_steps_>=config_.contact_steps) {
+      mode_=HurdleMode::kCross; result.mode=mode_;
+      result.action=Mission(MissionAction::kHurdle); return result;
+    }
+    result.action=Locomotion(MissionAction::kStepForwardHalf);
     return result;
   case HurdleMode::kCross:
     result.action = Mission(MissionAction::kHurdle);
@@ -223,6 +250,18 @@ HurdleResult HurdleController::Compute(
     return result;
   case HurdleMode::kFailed:
     return result;
+  case HurdleMode::kRecoveryDown: {
+    if (feedback.action_active && !feedback.action_done) return result;
+    const auto status = stationary_recovery_.Observe(target.has_value(), now_sec,
+        config_.stable_window, config_.stable_min_hits,
+        config_.recovery_observation_sec, config_.recovery_max_observations);
+    if (status == StationaryObjectRecovery::Result::kFound) {
+      mode_ = HurdleMode::kFineAdjust;
+      settle_until_sec_ = now_sec + config_.recovery_settle_duration_sec;
+    } else if (status == StationaryObjectRecovery::Result::kFailed) mode_ = HurdleMode::kFailed;
+    else if (status == StationaryObjectRecovery::Result::kRetry) ClearTracking();
+    result.mode = mode_; result.tracked = tracked_; return result;
+  }
   }
   return result;
 }
@@ -239,6 +278,7 @@ void HurdleController::ClearObservationHistory() {
 }
 
 void HurdleController::ClearTracking() {
+  observation_window_.Clear();
   hit_history_.clear();
   acquire_history_.clear();
   tilt_history_.clear();
@@ -250,6 +290,9 @@ void HurdleController::ClearTracking() {
 
 void HurdleController::ResetToLine(bool clear_ignore) {
   mode_ = HurdleMode::kLineFollow;
+  down_search_started_=down_search_found_=false;
+  stationary_recovery_.Begin(0.0);
+  completed_contact_steps_=0;
   ClearTracking();
   last_seen_u_norm_ = 0.5;
   state_enter_sec_ = 0.0;

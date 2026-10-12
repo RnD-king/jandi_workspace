@@ -20,7 +20,7 @@ PerceptionDetection BallDetection(double u, double v, double confidence=1.0,
 MissionControllerConfig BallPipelineConfig() {
   auto c=LoadDefaultAlgorithmConfig();
   c.enable_hurdle=c.enable_goal=false;
-  c.ball.smooth_alpha=1.0;
+  c.ball.smooth_alpha=1.0; c.post_motion_observation_sec=0; c.ball.fine_settle_duration_sec=.6;
   c.ball.upper_acquire_v_norm=1.0;
   c.object_association.max_center_distance_norm=.1;
   return c;
@@ -52,16 +52,15 @@ struct BallPipeline {
     assert(result.mission.ball.mode==BallMode::kWaitCameraDown);
     input.camera_feedback={CameraMode::kDown,true};
     Tick({BallDetection(.5,.7)});
-    assert(result.mission.ball.mode==BallMode::kFineAdjustForPickup);
-    for (int i=0;i<7;++i) {
-      Tick({BallDetection(.5,.7)});
+    assert(result.mission.ball.mode==BallMode::kDownSearch);
+    for (int i=0;i<20;++i) {
+      Tick({BallDetection(.5,.7)},true);
       if (result.mission.ball.mode==BallMode::kPickupBall) break;
     }
     assert(result.mission.command.action==MissionAction::kPickBall);
     assert(result.mission.ball.pickup_attempt_count==1);
     Tick({BallDetection(.5,.7)},true);
-    assert(result.mission.command.action==MissionAction::kRecatch);
-    Tick({BallDetection(.5,.7)},true);
+    assert(result.mission.command.action==MissionAction::kNone);
     assert(result.mission.ball.mode==BallMode::kVerifyPickupObservation);
     assert(result.mission.command.action_id==0);
   }
@@ -170,7 +169,8 @@ void TestVerificationSixHitsSucceeds() {
   pipeline.Tick({});
   assert(pipeline.result.mission.ball.has_ball);
   assert(!pipeline.result.mission.ball.pickup_failed);
-  assert(pipeline.result.mission.ball.mode==BallMode::kStandUpAfterPickup);
+  assert(pipeline.result.mission.ball.mode==BallMode::kVerifyPickup);
+  assert(pipeline.result.mission.command.action==MissionAction::kRecatch);
 }
 } // namespace
 

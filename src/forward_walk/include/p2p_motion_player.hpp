@@ -51,6 +51,9 @@ public:
     PreparedProgram PrepareProgram(const std::string& json_path,
                                    const std::string& motion_directory,
                                    const StartOptions& options) const;
+    // 현재 전체 목표를 유지하며 지정 관절만 전환하는 메모리 내 P2P 모션을 준비한다.
+    static PreparedProgram PreparePoseTransition(const RawPositions& held_pose,
+                                                const RawPositions& targets, double duration_sec);
     bool StartPrepared(const PreparedProgram& program);
     // Explicit initial pose/clock permits hardware-free verification of fixed steps.
     bool StartPrepared(const PreparedProgram& program, const RawPositions& initial_pose,

@@ -60,6 +60,42 @@ void HitsWithinWindow(int hits, int window, const char *hits_key,
 } // namespace
 
 void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
+  Unit(c.ball.approach_short_v_norm, "ball.approach_short_v_norm");
+  Positive(c.ball.down_search_timeout_sec, "ball.down_search_timeout_sec");
+  Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
+  PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
+  Unit(c.ball.fine_one_step_v_error_norm, "ball.fine_one_step_v_error_norm");
+  Unit(c.ball.fine_two_step_v_error_norm, "ball.fine_two_step_v_error_norm");
+  PositiveInt(c.ball.post_pickup_back_steps, "ball.post_pickup_back_steps");
+  Unit(c.hurdle.approach_short_v_norm, "hurdle.approach_short_v_norm");
+  Positive(c.hurdle.down_search_timeout_sec, "hurdle.down_search_timeout_sec");
+  Positive(c.hurdle.recovery_observation_sec, "hurdle.recovery_observation_sec");
+  PositiveInt(c.hurdle.recovery_max_observations, "hurdle.recovery_max_observations");
+  Unit(c.hurdle.fine_one_step_v_error_norm, "hurdle.fine_one_step_v_error_norm");
+  Unit(c.hurdle.fine_two_step_v_error_norm, "hurdle.fine_two_step_v_error_norm");
+  Unit(c.hurdle.target_u_norm, "hurdle.target_u_norm");
+  Unit(c.hurdle.u_deadband, "hurdle.u_deadband");
+  Unit(c.hurdle.fine_target_v_norm, "hurdle.fine_target_v_norm");
+  Unit(c.hurdle.contact_v_norm, "hurdle.contact_v_norm");
+  PositiveInt(c.hurdle.contact_steps, "hurdle.contact_steps");
+  Nonnegative(c.goal.fine_one_step_range_error_m,"goal.fine_one_step_range_error_m");
+  Nonnegative(c.goal.fine_two_step_range_error_m,"goal.fine_two_step_range_error_m");
+  Positive(c.goal.approach_short_z_m, "goal.approach_short_z_m");
+  Positive(c.goal.camera_goal_start_z_m, "goal.camera_goal_start_z_m");
+  PositiveInt(c.goal.post_shoot_back_steps, "goal.post_shoot_back_steps");
+  if (c.ball.approach_short_v_norm > c.ball.tilt_down_v_norm ||
+      c.hurdle.approach_short_v_norm > c.hurdle.tilt_trigger_v_norm ||
+      c.ball.fine_one_step_v_error_norm > c.ball.fine_two_step_v_error_norm ||
+      c.hurdle.fine_one_step_v_error_norm > c.hurdle.fine_two_step_v_error_norm ||
+      c.goal.camera_goal_start_z_m > c.goal.approach_short_z_m ||
+      c.goal.fine_one_step_range_error_m > c.goal.fine_two_step_range_error_m)
+    throw std::runtime_error("approach/fine transition thresholds must be ordered");
+  PositiveInt(c.test_ball_mission_index,"mission.test_ball_mission_index");
+  PositiveInt(c.test_goal_mission_index,"mission.test_goal_mission_index");
+  PositiveInt(c.mission_recovery_max_turns,"mission.mission_recovery_max_turns");
+  PositiveInt(c.mission_recovery_yaw_deg,"mission.mission_recovery_yaw_deg");
+  if (c.mission_recovery_yaw_deg>180) throw std::runtime_error("recovery yaw exceeds 180 degrees");
+
   PositiveInt(c.line_features.max_centers, "line_features.max_centers");
   if (c.line_features.guide_min_points < 3 ||
       c.line_features.guide_min_points > c.line_features.max_centers)
@@ -278,6 +314,14 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(lp, "recovery_turn_yaw_deg", c.line_p2p.recovery_turn_yaw_deg);
 
   const auto b = a["ball"];
+  Assign(b, "approach_short_v_norm", c.ball.approach_short_v_norm);
+  Assign(b, "down_search_timeout_sec", c.ball.down_search_timeout_sec);
+  Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
+  Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
+  Assign(b, "fine_one_step_v_error_norm", c.ball.fine_one_step_v_error_norm);
+  Assign(b, "fine_two_step_v_error_norm", c.ball.fine_two_step_v_error_norm);
+  Assign(b, "post_pickup_back_steps", c.ball.post_pickup_back_steps);
+
   Assign(b, "stable_window", c.ball.stable_window);
   Assign(b, "stable_min_hits", c.ball.stable_min_hits);
   Assign(b, "lost_frames", c.ball.lost_frames);
@@ -301,6 +345,18 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "recovery_settle_duration_sec", c.ball.recovery_settle_duration_sec);
 
   const auto h = a["hurdle"];
+  Assign(h, "approach_short_v_norm", c.hurdle.approach_short_v_norm);
+  Assign(h, "down_search_timeout_sec", c.hurdle.down_search_timeout_sec);
+  Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
+  Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);
+  Assign(h, "fine_one_step_v_error_norm", c.hurdle.fine_one_step_v_error_norm);
+  Assign(h, "fine_two_step_v_error_norm", c.hurdle.fine_two_step_v_error_norm);
+  Assign(h, "target_u_norm", c.hurdle.target_u_norm);
+  Assign(h, "u_deadband", c.hurdle.u_deadband);
+  Assign(h, "fine_target_v_norm", c.hurdle.fine_target_v_norm);
+  Assign(h, "contact_v_norm", c.hurdle.contact_v_norm);
+  Assign(h, "contact_steps", c.hurdle.contact_steps);
+
   Assign(h, "stable_window", c.hurdle.stable_window);
   Assign(h, "stable_min_hits", c.hurdle.stable_min_hits);
   Assign(h, "lost_frames", c.hurdle.lost_frames);
@@ -316,6 +372,12 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "recovery_settle_duration_sec", c.hurdle.recovery_settle_duration_sec);
 
   const auto g = a["goal"];
+  Assign(g,"fine_one_step_range_error_m",c.goal.fine_one_step_range_error_m);
+  Assign(g,"fine_two_step_range_error_m",c.goal.fine_two_step_range_error_m);
+  Assign(g, "approach_short_z_m", c.goal.approach_short_z_m);
+  Assign(g, "camera_goal_start_z_m", c.goal.camera_goal_start_z_m);
+  Assign(g, "post_shoot_back_steps", c.goal.post_shoot_back_steps);
+
   Assign(g, "stable_window", c.goal.stable_window);
   Assign(g, "stable_min_hits", c.goal.stable_min_hits);
   Assign(g, "lost_frames", c.goal.lost_frames);
@@ -360,6 +422,12 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(cmd, "first_action_id", c.command.first_action_id);
   Assign(cmd, "action_ack_timeout_sec", c.command.action_ack_timeout_sec);
   const auto m = a["mission"];
+  Assign(m, "goal_trial_start_forward", c.goal_trial_start_forward);
+  Assign(m, "test_ball_mission_index", c.test_ball_mission_index);
+  Assign(m, "test_goal_mission_index", c.test_goal_mission_index);
+  Assign(m, "mission_recovery_max_turns", c.mission_recovery_max_turns);
+  Assign(m, "mission_recovery_yaw_deg", c.mission_recovery_yaw_deg);
+
   Assign(m, "camera_motion_timeout_sec", c.camera_motion_timeout_sec);
   Assign(m, "post_motion_observation_sec", c.post_motion_observation_sec);
   Assign(m, "backboard_min_depth_m", c.backboard_min_depth_m);
