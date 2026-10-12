@@ -164,6 +164,15 @@ void TestAlternatingBoundedRecovery() {
   assert(found_on_fifth.out.command.action_id!=0);
   found_on_fifth.Tick(true);
   assert(!found_on_fifth.out.recovery_failed);
+  assert(found_on_fifth.out.recovery_verifying);
+  assert(found_on_fifth.out.active_mission==MissionType::kBall);
+  auto lost_after_rotation = found_on_fifth;
+  lost_after_rotation.in.line_centers.clear();
+  for (int i=0;i<11;++i) lost_after_rotation.Tick();
+  assert(lost_after_rotation.out.recovery_failed);
+  assert(lost_after_rotation.out.recovery_turns_completed==5);
+  assert(lost_after_rotation.out.command.action_id==0);
+  for (int i=0;i<11;++i) found_on_fifth.Tick();
   assert(found_on_fifth.out.active_mission==MissionType::kLine);
   assert(found_on_fifth.out.command.action_id==0 && found_on_fifth.permit==0);
 }
@@ -192,6 +201,8 @@ void TestGoalForwardTrial() {
   t.Commit(); assert(t.out.command.action==MissionAction::kTurnLeft);
   t.in.line_centers={{420,450},{420,350},{420,250}};
   for(int i=0;i<7;++i)t.Tick(); t.Tick(true);
+  assert(t.out.recovery_verifying && !t.out.trial_complete);
+  for(int i=0;i<11;++i)t.Tick();
   assert(t.out.trial_complete && t.out.command.action_id==0);
   t.Tick(); assert(t.out.trial_complete && t.out.command.action_id==0);
   assert(t.core.SetTestMissionIndices(1,3));

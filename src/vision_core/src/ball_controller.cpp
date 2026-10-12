@@ -256,8 +256,9 @@ BallResult BallController::Compute(
     }
     if (now_sec + kEpsilon < settle_until_sec_) return result;
     if (lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = BallMode::kDownSearch;
-      down_search_started_ = down_search_found_ = false;
+      mode_ = BallMode::kBallRecoveryDown;
+      ClearTracking();
+      stationary_recovery_.Begin(now_sec);
       result.mode = mode_;
       return result;
     }
@@ -356,8 +357,22 @@ BallResult BallController::Compute(
   case BallMode::kPostPickupLineRecovery:
     result.active = false;
     return result;
-  case BallMode::kBallRecoveryForward:
   case BallMode::kBallRecoveryDown: {
+    if (feedback.action_active && !feedback.action_done) return result;
+    const auto status = stationary_recovery_.Observe(target.has_value(), now_sec,
+        config_.stable_window, config_.stable_min_hits,
+        config_.recovery_observation_sec, config_.recovery_max_observations);
+    if (status == StationaryObjectRecovery::Result::kFound) {
+      mode_ = BallMode::kFineAdjustForPickup;
+      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
+    } else if (status == StationaryObjectRecovery::Result::kFailed) {
+      mode_ = BallMode::kFailed;
+    } else if (status == StationaryObjectRecovery::Result::kRetry) ClearTracking();
+    result.mode = mode_; result.tracked = tracked_;
+    return result;
+  }
+  case BallMode::kBallRecoveryForward:
+  {
     if (feedback.action_active && !feedback.action_done) return result;
     if (feedback.action_done) {
       settle_until_sec_ = now_sec + config_.recovery_settle_duration_sec;
@@ -419,6 +434,7 @@ void BallController::ResetToLine(bool clear_ignore) {
   back_away_issued_ = false;
   completed_back_steps_ = 0;
   down_search_started_ = down_search_found_ = false;
+  stationary_recovery_.Begin(0.0);
   if (clear_ignore) ignore_ball_until_sec_ = 0.0;
   ClearTracking();
 }

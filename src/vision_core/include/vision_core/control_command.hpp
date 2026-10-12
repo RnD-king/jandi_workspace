@@ -28,6 +28,9 @@ public:
                          double now_sec);
   void Reset(); // Original symbol retained for already-built clients.
   void Reset(bool preserve_action_ids);
+  // Execution clock includes arm transitions; queued ACK does not start it.
+  void ObserveExecutionTime(const CommandDeliveryFeedback &feedback, double now_sec);
+  double LineExecutionSeconds() const { return line_execution_sec_; }
 
 private:
   ControlCommand BeginAction(ControlCommand command,
@@ -51,6 +54,8 @@ private:
   bool action_ack_timed_out_{false};
   MissionAction suppressed_mission_action_{MissionAction::kNone};
   double now_sec_{0.0};
+  double line_execution_sec_{0.0}, execution_observed_sec_{0.0};
+  std::uint64_t execution_pending_id_{0}, execution_finished_id_{0};
 };
 
 } // namespace vision_core

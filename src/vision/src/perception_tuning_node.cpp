@@ -794,6 +794,7 @@ private:
         candidate.hurdle.contact_steps=static_cast<int>(parameter.as_int()); touched=true; continue;
       }
       if (name == "goal_fine_one_step_range_error_m") target=&candidate.goal.fine_one_step_range_error_m;
+      else if (name == "goal_fine_two_step_range_error_m") target=&candidate.goal.fine_two_step_range_error_m;
       else if (name == "ball_approach_short_v_norm") target = &candidate.ball.approach_short_v_norm;
       else if (name == "ball_fine_one_step_v_error_norm") target = &candidate.ball.fine_one_step_v_error_norm;
       else if (name == "ball_fine_two_step_v_error_norm") target = &candidate.ball.fine_two_step_v_error_norm;
@@ -1985,10 +1986,12 @@ private:
     };
 
     vision_core::PerceptionMissionFrameResult perception_result;
+    const bool was_stationary_observing = mission_controller_->NeedsStationaryObservation();
     bool stepped_real_core = false;
     if (preview_ready_) {
       perception_result = preview_result_;
     } else if (manual_wait_preview_ &&
+               !mission_controller_->NeedsStationaryObservation() &&
                !committed_done && !camera_done_edge &&
                !manual_action_active_ && pending_camera_id_ == 0 &&
                run_state_ == RunState::kRunning) {
@@ -2043,10 +2046,11 @@ private:
           }
         }
 
-        if (authorized_repeat_scope_!=0 &&
-            perception_result.mission.repeat_scope!=authorized_repeat_scope_)
+        const bool repeat_finished = authorized_repeat_scope_!=0 &&
+            perception_result.mission.repeat_scope!=authorized_repeat_scope_;
+        if (repeat_finished)
           authorized_repeat_scope_=0;
-        if ((committed_done || camera_done_edge) && authorized_repeat_scope_==0) {
+        if ((committed_done || camera_done_edge || repeat_finished) && authorized_repeat_scope_==0) {
           manual_camera_done_pending_ = false;
           const bool fixed_successor =
               committed_done &&
@@ -2095,6 +2099,15 @@ private:
             observation_cycle_id_, frame_now_sec,
             perception_result.mission.line_features.guide);
       }
+    }
+    if (mission_controller_->NeedsStationaryObservation()) {
+      // Stationary recovery is automatic observation, not a human wait.
+      LeaveWaitPreview(frame_now_sec);
+    } else if (was_stationary_observing && !preview_ready_ && !manual_action_active_ &&
+               outstanding_actions_.empty() && pending_camera_id_ == 0 &&
+               perception_result.mission.command.camera_request == vision_core::CameraRequest::kNone &&
+               !perception_result.mission.trial_complete) {
+      EnterWaitPreview(frame_now_sec);
     }
     (void)stepped_real_core;
     const auto t6 = std::chrono::steady_clock::now();
@@ -2276,17 +2289,11 @@ private:
             }
           }
 
-          // HURDLE acquire/tilt transitions compare the RAW box-center
-          // v with thresholds (not the EMA tracked v). Plot that actual
-          // gate input in approach; never label EMA as its decision center.
-          if (selected_hurdle &&
-              hurdle_cmd.mode == vision_core::HurdleMode::kApproach &&
-              hurdle_target && vis.cols > 1 && vis.rows > 1) {
-            const auto &raw_center = hurdle_target->center_px;
-            draw_decision_center(raw_center.u / (vis.cols - 1),
-                                 raw_center.v / (vis.rows - 1),
-                                 cv::Scalar(255, 0, 255));
-          }
+          // The marker is the recent weighted coordinate used for step size
+          // and fine distance. Raw DOWN trigger values are shown in the panel.
+          if (selected_hurdle && hurdle_cmd.tracked.visible)
+            draw_decision_center(hurdle_cmd.tracked.u_norm,
+                                 hurdle_cmd.tracked.v_norm, cv::Scalar(255, 0, 255));
 
 
           const auto draw_v_line=[&](double v,const cv::Scalar& color) {
@@ -2340,7 +2347,7 @@ private:
 
           // One compact tuning panel. Values come from the retained
           // controller result used for COMMIT, never from the live YOLO view.
-          cv::Mat state_panel(850, 1000, CV_8UC3, cv::Scalar(20, 20, 20));
+          cv::Mat state_panel(960, 1100, CV_8UC3, cv::Scalar(20, 20, 20));
           const cv::Scalar text_color(235, 235, 235);
           const cv::Scalar muted(150, 150, 150);
           const cv::Scalar line_color(0, 230, 0);
@@ -2462,7 +2469,8 @@ private:
           std::snprintf(buf, sizeof(buf), "far target u=%.3f  deadband=%.3f  fine z<=%.3fm",
               gc.target_u_norm, gc.approach_u_deadband, gc.fine_adjust_start_z_m);
           tune_line(462, buf, text_color);
-          if (selected_goal && goal_cmd.mode == vision_core::GoalMode::kApproach &&
+          if (selected_goal && (goal_cmd.mode == vision_core::GoalMode::kApproach ||
+              goal_cmd.mode == vision_core::GoalMode::kForwardApproach) &&
               goal_cmd.tracked.visible) {
             std::snprintf(buf, sizeof(buf),
                 "far u=%.4f  |  u-target=%+.4f  |  band=[%+.4f,%+.4f]",
@@ -2540,6 +2548,36 @@ private:
           tune_line(766,buf,hurdle_color);
           tune_line(794,mission_result.recovery_failed ? "LINE SEARCH LIMIT: HOLD / RESET" :
               std::string("Approved: ")+RepeatLabel(authorized_repeat_scope_),text_color);
+          if (mission_result.goal_walk_gate_active) {
+            std::snprintf(buf, sizeof(buf), "GOAL walk %.2f / %.2fs | remaining %.2fs | %s",
+                mission_result.goal_walk_elapsed_sec, gc.post_pickup_wait_sec,
+                mission_result.goal_walk_remaining_sec,
+                mission_result.goal_walk_remaining_sec <= 0.0 ? "DRAIN / CAMERA" : "WALKING TIME ONLY");
+            tune_line(822, buf, goal_color);
+          }
+          if (ball_cmd.mode == vision_core::BallMode::kDownSearch ||
+              hurdle_cmd.mode == vision_core::HurdleMode::kDownSearch) {
+            std::snprintf(buf, sizeof(buf), "INITIAL DOWN SEARCH | remaining %.2fs",
+                selected_ball ? ball_cmd.down_search_remaining_sec : hurdle_cmd.down_search_remaining_sec);
+            tune_line(850, buf, text_color);
+          }
+          if (ball_cmd.mode == vision_core::BallMode::kBallRecoveryDown ||
+              hurdle_cmd.mode == vision_core::HurdleMode::kRecoveryDown ||
+              (selected_ball && ball_cmd.mode == vision_core::BallMode::kFailed && ball_cmd.recovery_observations_completed > 0) ||
+              (selected_hurdle && hurdle_cmd.mode == vision_core::HurdleMode::kFailed && hurdle_cmd.recovery_observations_completed > 0)) {
+            const int completed = selected_ball ? ball_cmd.recovery_observations_completed : hurdle_cmd.recovery_observations_completed;
+            const int limit = selected_ball ? bc.recovery_max_observations : hc.recovery_max_observations;
+            const double elapsed = selected_ball ? ball_cmd.recovery_observation_elapsed_sec : hurdle_cmd.recovery_observation_elapsed_sec;
+            std::snprintf(buf, sizeof(buf), "STATIONARY RECOVERY %d / %d | %.2fs | HOLD", std::min(completed+1, limit), limit, elapsed);
+            tune_line(878, buf, text_color);
+          }
+          if (mission_result.recovery_verifying) tune_line(906, "LINE: confirming after rotation | HOLD", line_color);
+          if (selected_hurdle && hurdle_cmd.tracked.visible) {
+            std::snprintf(buf, sizeof(buf), "HURDLE weighted v=%.3f | forward error=%+.3f | contact margin=%+.3f | u alignment OFF",
+                hurdle_cmd.tracked.v_norm, hc.fine_target_v_norm-hurdle_cmd.tracked.v_norm,
+                hurdle_cmd.tracked.v_norm-hc.contact_v_norm);
+            tune_line(934, buf, hurdle_color);
+          }
           cv::imshow(kDebugWindowName, vis);
           cv::imshow(kStateWindowName, state_panel);
         }

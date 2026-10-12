@@ -46,7 +46,7 @@ RESET은 idle 상태에서 시험을 초기화하고 카메라를 FORWARD로 복
 ## 보행과 관측
 
 LINE은 11/12/13을 유지한다. 기본 기준 u=420px, O/H gain은 각각 0.3이다.
-공·허들 접근은 v에 따라 직진 23→22로 줄이고, 좌우 오차가 크면 24/25를
+공 접근은 v에 따라 직진 23→22로 줄이고, 좌우 오차가 크면 24/25를
 사용한다. GOAL 접근은 중심 depth로 23/22를 고른다. 가까운 미세조정에서는
 기존 미세 보행을 유지하고, 전진 오차가 큰 경우에는 21/10을 사용한다.
 
@@ -73,9 +73,28 @@ HURDLE: FORWARD 접근 → v 조건으로 DOWN → action 10 검색 → 새 위�
 관측/미세조정 → contact_v 조건 → action 3 접촉 반복 → 별도 COMMIT으로
 HUDDLE → FORWARD/기존 라인 재관측. action 20은 실행기 미구현이므로 발행하지 않는다.
 
-GOAL: FORWARD 접근 → 중심 depth 조건으로 GOAL 카메라 → 접근/미세조정
-→ SHOOT → 후진 2회 → FORWARD → 라인 탐색. 통합 모드의 공 보유/라인 복귀
-후 3초 진입 조건은 유지한다. 단독 시험은 그 사전 조건을 생략한다.
+GOAL 통합 모드: 공 보유/라인 복귀 → LINE 보행 실행시간 누적 5초 →
+새 LINE 예약 차단 → 이미 수락된 보행 DONE → GOAL 카메라 → 접근/미세조정
+→ SHOOT → 후진 2회 → FORWARD → 라인 탐색. 팔 전환은 보행 실행시간에
+포함하고 사람의 COMMIT 대기, 정지 관측, 후진, 회전은 제외한다. 예약 ACK는
+저장 완료일 뿐이므로 현재 보행 DONE 뒤 실제 실행부터 누적한다.
+고개를 올린 뒤 골대가 안 보이면 HOLD한다. 단독 시험은 FORWARD 접근부터
+시작하고 중심 depth 조건으로 고개를 올리는 기존 시험 시퀀스를 유지한다.
+
+공·허들의 초기 DOWN 검색은 최대 10초 전진이다. 일단 발견하여 미세조정에
+들어간 뒤 객체를 놓치면 초기 검색으로 돌아가지 않고 별도 정지 재관측을
+실행한다. 매회 새로운 1초 관측/10프레임 중 7회 검출을 사용하며 총 5회까지만
+시도한다. 재발견하면 미세조정으로 돌아가고 5회 실패하면 HOLD/RESET이다.
+몸 동작을 발행하거나 DONE을 모사하지 않으며, 사람의 새 PREVIEW 없이 관측을
+계속한다. 재발견 이후의 몸 동작에는 다시 COMMIT이 필요하다.
+
+허들은 현재 v 기준 앞뒤 접근만 사용한다. 허들 bbox 중심을 이용한 회전 전진,
+옆걸음, 놓친 객체의 방향 회전은 비활성화했다. 좌우/방향 정렬은 나중에 라인을
+기준으로 구현한다. hurdle_target_u_norm/hurdle_u_deadband는 현재 사용하지 않는다.
+
+공·골대 라인 복귀는 회전 도중 10/7 발견 후 현재 회전을 완료하고, 별도 1초
+정지 관측/10프레임 중 7회로 재확인한다. 확인에 실패하면 사용한 회전 횟수를
+유지하고 남은 회전만 시도한다. 다섯 번째 회전 후 재확인 실패는 HOLD다.
 
 ## 골대 전체 시퀀스 단독 시험
 
@@ -108,7 +127,7 @@ TensorRT engine 경로는 yolo26_runtime.yaml의 PC/Jetson 설정 또는 engine_
 |---|---|
 | BALL 접근 | ball_approach_short_v_norm |
 | BALL 큰 미세 전진 | ball_fine_one_step_v_error_norm, ball_fine_two_step_v_error_norm |
-| HURDLE 접근 | hurdle_approach_short_v_norm, hurdle_target_u_norm, hurdle_u_deadband |
+| HURDLE 접근 | hurdle_approach_short_v_norm (u 정렬 파라미터는 현재 비활성) |
 | HURDLE DOWN 접근 | hurdle_fine_target_v_norm, hurdle_fine_one_step_v_error_norm, hurdle_fine_two_step_v_error_norm |
 | HURDLE 접촉 | hurdle_contact_v_norm, hurdle_contact_steps |
 | GOAL 접근 | goal_approach_short_z_m, goal_camera_goal_start_z_m |
@@ -121,7 +140,11 @@ v는 [0,1] 값이며 패널에는 현재 이미지 높이에 곱한 픽셀 기�
 영상 배경과 raw YOLO bbox/labels는 LIVE다. 최근 판단 중심·박스는 retained
 preview에 따라 표시한다. BALL/HURDLE의 보행 전환선과 카메라 전환선은 1px이다.
 픽업 허용 영역은 기존 노란 사각형이다. 상태 패널에 승인 범위, 회차와 회전 방향,
-회전 완료 횟수, 전환선 픽셀값을 표시한다.
+회전 완료 횟수, 전환선 픽셀값을 표시한다. 골대 전환까지의 누적 보행시간과
+잔여시간, 초기 DOWN 검색 잔여시간, 정지 복구 관측 회차와 라인 정지 재확인
+상태도 표시한다. 허들 마커/패널은 보행 길이와 앞뒤 미세조정에 사용하는 후반
+가중 v를 표시한다. LINE 정지/READY 집계는 모든 실행 노드에서 공통 최소 유효
+표본 수(line_p2p.failure_min_valid_samples, 기본 5)를 요구한다.
 
 ## 검증 범위
 

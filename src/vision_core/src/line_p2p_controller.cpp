@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include "vision_core/config_loader.hpp"
 
 namespace vision_core {
 namespace {
@@ -21,6 +23,14 @@ CruiseDecision LineP2pController::Compute(const LineGuide &guide) const {
                        config_.heading_gain * guide.heading_rad;
   return SelectCruiseDecision(true, valid, score,
                               config_.steering_deadband);
+}
+
+LineGuideAccumulator::LineGuideAccumulator()
+    : LineGuideAccumulator(LoadDefaultAlgorithmConfig().line_p2p.failure_min_valid_samples) {}
+
+LineGuideAccumulator::LineGuideAccumulator(int minimum_valid_samples)
+    : minimum_valid_samples_(minimum_valid_samples) {
+  if (minimum_valid_samples < 1) throw std::invalid_argument("minimum LINE samples must be positive");
 }
 
 void LineGuideAccumulator::Begin(std::uint64_t action_id, double now_sec) {
@@ -81,7 +91,7 @@ LineGuideAccumulator::Finish(std::uint64_t action_id, double now_sec,
     total_weight += weight;
   }
   LineGuide result;
-  if (total_weight > 0) {
+  if (stats.used_frames >= static_cast<std::size_t>(minimum_valid_samples_) && total_weight > 0) {
     result.offset = offset_sum / total_weight;
     result.heading_rad = heading_sum / total_weight;
     if (curvature_weight > 0) {
@@ -98,7 +108,7 @@ LineGuideAccumulator::Finish(std::uint64_t action_id, double now_sec,
 
 std::optional<LineGuide>
 LineGuideAccumulator::FinishAll(std::uint64_t action_id) {
-  if (!ActiveFor(action_id) || samples_.empty()) {
+  if (!ActiveFor(action_id) || samples_.size() < static_cast<std::size_t>(minimum_valid_samples_)) {
     Reset();
     return std::nullopt;
   }

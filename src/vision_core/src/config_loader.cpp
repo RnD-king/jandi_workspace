@@ -62,11 +62,15 @@ void HitsWithinWindow(int hits, int window, const char *hits_key,
 void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Unit(c.ball.approach_short_v_norm, "ball.approach_short_v_norm");
   Positive(c.ball.down_search_timeout_sec, "ball.down_search_timeout_sec");
+  Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
+  PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
   Unit(c.ball.fine_one_step_v_error_norm, "ball.fine_one_step_v_error_norm");
   Unit(c.ball.fine_two_step_v_error_norm, "ball.fine_two_step_v_error_norm");
   PositiveInt(c.ball.post_pickup_back_steps, "ball.post_pickup_back_steps");
   Unit(c.hurdle.approach_short_v_norm, "hurdle.approach_short_v_norm");
   Positive(c.hurdle.down_search_timeout_sec, "hurdle.down_search_timeout_sec");
+  Positive(c.hurdle.recovery_observation_sec, "hurdle.recovery_observation_sec");
+  PositiveInt(c.hurdle.recovery_max_observations, "hurdle.recovery_max_observations");
   Unit(c.hurdle.fine_one_step_v_error_norm, "hurdle.fine_one_step_v_error_norm");
   Unit(c.hurdle.fine_two_step_v_error_norm, "hurdle.fine_two_step_v_error_norm");
   Unit(c.hurdle.target_u_norm, "hurdle.target_u_norm");
@@ -312,6 +316,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   const auto b = a["ball"];
   Assign(b, "approach_short_v_norm", c.ball.approach_short_v_norm);
   Assign(b, "down_search_timeout_sec", c.ball.down_search_timeout_sec);
+  Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
+  Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
   Assign(b, "fine_one_step_v_error_norm", c.ball.fine_one_step_v_error_norm);
   Assign(b, "fine_two_step_v_error_norm", c.ball.fine_two_step_v_error_norm);
   Assign(b, "post_pickup_back_steps", c.ball.post_pickup_back_steps);
@@ -341,6 +347,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   const auto h = a["hurdle"];
   Assign(h, "approach_short_v_norm", c.hurdle.approach_short_v_norm);
   Assign(h, "down_search_timeout_sec", c.hurdle.down_search_timeout_sec);
+  Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
+  Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);
   Assign(h, "fine_one_step_v_error_norm", c.hurdle.fine_one_step_v_error_norm);
   Assign(h, "fine_two_step_v_error_norm", c.hurdle.fine_two_step_v_error_norm);
   Assign(h, "target_u_norm", c.hurdle.target_u_norm);

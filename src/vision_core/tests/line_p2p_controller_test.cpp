@@ -67,7 +67,7 @@ int main() {
   assert(boundary.Compute(Guide(0.10, 0.0, 0.0)).direction ==
          CruiseDirection::kStraight);
 
-  LineGuideAccumulator accumulator;
+  LineGuideAccumulator accumulator(1); // Isolate weighting from sample-count admission.
   accumulator.Begin(7, 0.0);
   accumulator.Add(7, 0.0, Guide(-1.0, -1.0, -1.0));
   accumulator.Add(7, 1.0, Guide(-0.8, -0.8, -0.8));

@@ -250,7 +250,8 @@ GoalResult GoalController::Compute(
     const GoalPoseObservation &pose, int image_width, int image_height,
     double now_sec, bool line_reference_valid, const CameraFeedback &camera,
     const ActionExecutionFeedback &feedback,
-    bool allow_new_body_actions, std::optional<double> center_depth_m) {
+    bool allow_new_body_actions, std::optional<double> center_depth_m,
+    double post_pickup_walk_sec) {
   // Intermediate camera angles must not add object evidence to either tracker.
   const bool camera_switching = mode_ == GoalMode::kWaitCameraGoal ||
                                 mode_ == GoalMode::kReturnCameraToLine;
@@ -259,24 +260,11 @@ GoalResult GoalController::Compute(
     UpdatePoseTracker(backboard, pose);
   }
 
-  if (mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_) {
-    if (!line_reference_valid) {
-      post_pickup_line_wait_active_ = false;
-    } else {
-      if (!post_pickup_line_wait_active_) {
-        post_pickup_line_wait_active_ = true;
-        post_pickup_line_wait_start_sec_ = now_sec;
-      }
-      camera_trigger_latched_ = camera_trigger_latched_ ||
-          now_sec - post_pickup_line_wait_start_sec_ >=
-              config_.post_pickup_wait_sec;
-      if (camera_trigger_latched_ &&
-          (!feedback.action_active || feedback.action_done)) {
-        mode_ = GoalMode::kForwardApproach;
-        camera_trigger_latched_=false;
-        state_enter_sec_ = now_sec;
-      }
-    }
+  if (mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_ &&
+      post_pickup_walk_sec + kEpsilon >= config_.post_pickup_wait_sec) {
+    // Lock GOAL now to stop new LINE reservations; drain accepted walks first.
+    mode_ = GoalMode::kWaitCameraGoal;
+    camera_request_started_ = false;
   }
 
   GoalResult result;
@@ -308,6 +296,11 @@ GoalResult GoalController::Compute(
     return result;
   }
   case GoalMode::kWaitCameraGoal:
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (!camera_request_started_) {
+      camera_request_started_ = true;
+      state_enter_sec_ = now_sec;
+    }
     result.camera_request = CameraRequest::kGoal;
     if (camera.actual_mode == CameraMode::kGoal && camera.settled) {
       mode_ = GoalMode::kSearch;
@@ -527,6 +520,7 @@ void GoalController::Reset() {
   goal_entry_armed_ = false;
   post_pickup_line_wait_active_ = false;
   camera_trigger_latched_ = false;
+  camera_request_started_ = false;
   fine_trigger_latched_ = false;
   last_seen_u_norm_ = config_.target_u_norm;
   seen_after_camera_goal_ = false;

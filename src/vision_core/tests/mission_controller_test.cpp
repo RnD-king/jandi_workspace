@@ -58,7 +58,7 @@ int main() {
   const auto id=r.command.action_id;
   in=Frame(.1); in.delivery_feedback={id,true,false,false};
   r=controller.Step(in); assert(r.command.command_type==CommandType::kHold);
-  for (double time : {0.8, 1.4, 2.2}) {
+  for (double time : {0.8, 1.4, 1.6, 1.8, 2.0, 2.2}) {
     in=Frame(time); r=controller.Step(in);
   }
   in=Frame(2.55); in.delivery_feedback={id,true,false,true};
@@ -66,7 +66,7 @@ int main() {
   assert(r.command.action_id!=0 && r.command.action_id!=id);
   assert(r.command.action==MissionAction::kStepForwardFive);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
-  assert(r.line_window_stats && r.line_window_stats->used_frames >= 2);
+  assert(r.line_window_stats && r.line_window_stats->used_frames >= 5);
   // Debug telemetry must report the SAME READY average used to select B.
   const auto ready_decision_guide = controller.LastReadyLineGuide();
   assert(ready_decision_guide && r.line_decision_guide);
@@ -83,14 +83,14 @@ int main() {
   in=Frame(.7); ShiftLine(in, 500); r=controller.Step(in);
   in=Frame(.8); in.delivery_feedback={delayed_ack_id,true,false,false};
   r=controller.Step(in);
-  for (double time : {1.3, 1.8, 2.3}) {
+  for (double time : {1.3, 1.7, 1.8, 2.0, 2.1, 2.3}) {
     in=Frame(time); r=controller.Step(in);
   }
   in=Frame(2.55); in.delivery_feedback={delayed_ack_id,true,false,true};
   r=controller.Step(in);
   assert(r.command.action==MissionAction::kStepForwardFive);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
-  assert(r.line_window_stats && r.line_window_stats->used_frames >= 2);
+  assert(r.line_window_stats && r.line_window_stats->used_frames >= 5);
 
   // READY 집계가 invalid여도 moving action 중에 2초 관측 timer를 시작하지
   // 않는다. stationary failure observation은 current DONE 뒤 시작한다.
@@ -144,6 +144,9 @@ int main() {
   const auto right_id=r.command.action_id;
   in=Frame(.1); in.delivery_feedback={right_id,true,false,false};
   r=controller.Step(in);
+  for (double time : {.6, .7, .8, .9}) {
+    in=Frame(time); r=controller.Step(in);
+  }
   in=Frame(1.0); in.delivery_feedback={right_id,true,false,true};
   r=controller.Step(in);
   const auto straight_id=r.command.action_id;
@@ -236,7 +239,7 @@ int main() {
   r=queued.Step(in);
   // Simulate a 2.8s long LINE action: READY occurs ~0.25s before DONE.
   // The estimated 40%-to-READY window must actually contain valid frames.
-  for (double time : {0.8, 1.4, 2.2}) {
+  for (double time : {0.8, 1.4, 1.6, 1.8, 2.0, 2.2}) {
     in=Frame(time); r=queued.Step(in);
   }
   in=Frame(2.55); in.delivery_feedback={current_id,true,false,true};
@@ -244,8 +247,8 @@ int main() {
   const auto queued_id=r.command.action_id;
   assert(queued_id!=0 && queued_id!=current_id);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
-  assert(r.line_window_stats && r.line_window_stats->window_frames >= 2);
-  assert(r.line_window_stats->used_frames >= 2);
+  assert(r.line_window_stats && r.line_window_stats->window_frames >= 5);
+  assert(r.line_window_stats->used_frames >= 5);
   in=Frame(2.6); in.allow_new_line_action=false;
   in.delivery_feedback={queued_id,true,false,false};
   r=queued.Step(in);

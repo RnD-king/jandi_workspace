@@ -110,6 +110,9 @@ struct MissionFrameResult {
   int ball_mission_index{1}, goal_mission_index{1};
   int recovery_turns_completed{0};
   bool recovery_failed{false};
+  bool recovery_verifying{false};
+  double goal_walk_elapsed_sec{0.0}, goal_walk_remaining_sec{0.0};
+  bool goal_walk_gate_active{false};
   BallResult ball;
   HurdleResult hurdle;
   GoalResult goal;
@@ -191,6 +194,7 @@ public:
   // observation instead of adding an unrelated one-second shortcut.
   double ManualPreviewDurationSec() const;
   int RepeatScope() const;
+  bool NeedsStationaryObservation() const;
   bool SetTestMissionIndices(int ball_index, int goal_index);
   bool HasBall() const { return has_ball_; }
   // Observed 40%-to-READY LINE guide, for manual one-slot preview only.
@@ -237,6 +241,7 @@ private:
   std::optional<LineGuide> DecisionLineGuide() const;
   void EnterMission(MissionType mission);
   void FinishMission();
+  void PopulateDiagnostics(MissionFrameResult &output, double now_sec) const;
 
   MissionControllerConfig config_;
   bool goal_trial_complete_{false};
@@ -245,6 +250,9 @@ private:
   bool mission_recovery_issued_{false};
   bool mission_recovery_failed_{false};
   bool mission_recovery_found_{false};
+  bool mission_recovery_verifying_{false};
+  double mission_recovery_verify_start_sec_{0.0};
+  double goal_walk_baseline_sec_{0.0};
   std::deque<bool> mission_recovery_hits_;
   double decision_object_weight_{0.0};
   // Width for renormalizing cached LINE offsets after optical reference edits.

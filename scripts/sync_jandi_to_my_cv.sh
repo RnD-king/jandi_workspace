@@ -131,7 +131,7 @@ for i in 0 1 2; do
             > "$BACKUP/${NAME}_git_status_before.txt" || true
     fi
 
-    rsync -anic "${EXCLUDES[@]}" "$SRC/" "$DST/" \
+    rsync -anic --delete "${EXCLUDES[@]}" "$SRC/" "$DST/" \
         > "$BACKUP/${NAME}_changes.txt"
 
     sed -n '1,60p' "$BACKUP/${NAME}_changes.txt"
@@ -161,7 +161,7 @@ for i in 0 1 2; do
         "$DST/" "$BACKUP/$NAME/"
 
     # 최신 코드 복사 (.git 및 빌드 파일 제외)
-    rsync -a --checksum "${EXCLUDES[@]}" \
+    rsync -a --checksum --delete-delay "${EXCLUDES[@]}" \
         "$SRC/" "$DST/"
 done
 

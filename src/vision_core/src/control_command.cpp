@@ -3,6 +3,7 @@
 #include "vision_core/config_loader.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace vision_core {
 namespace {
@@ -84,11 +85,28 @@ ControlCommand ControlCommandCoordinator::PendingCommand(
   return command;
 }
 
+void ControlCommandCoordinator::ObserveExecutionTime(
+    const CommandDeliveryFeedback &feedback, double now_sec) {
+  if (!std::isfinite(now_sec)) return;
+  if (execution_pending_id_ != pending_action_id_) {
+    execution_pending_id_ = pending_action_id_;
+    execution_observed_sec_ = now_sec;
+  }
+  if (pending_action_id_ != 0 && pending_action_id_ != execution_finished_id_ &&
+      pending_acknowledged_ && pending_mission_ == MissionType::kLine &&
+      IsLongLineAction(pending_request_.action))
+    line_execution_sec_ += std::max(0.0, now_sec - execution_observed_sec_);
+  execution_observed_sec_ = now_sec;
+  if (feedback.done && feedback.action_id == pending_action_id_)
+    execution_finished_id_ = pending_action_id_;
+}
+
 ControlCommand ControlCommandCoordinator::Compute(
     MissionType mission, int mission_phase, const ActionRequest &request,
     CameraRequest camera_request, const CommandDeliveryFeedback &feedback,
     double now_sec) {
   now_sec_ = now_sec;
+  ObserveExecutionTime(feedback, now_sec);
   if (!action_ack_timed_out_ && queued_action_id_ != 0 &&
       feedback.action_id == queued_action_id_) {
     queued_acknowledged_ = queued_acknowledged_ || feedback.acknowledged;
@@ -111,6 +129,7 @@ ControlCommand ControlCommandCoordinator::Compute(
         queued_request_ = {};
         queued_issued_sec_ = 0.0;
         queued_acknowledged_ = false;
+        ObserveExecutionTime({}, now_sec); // Queued execution begins at current DONE.
       } else {
         pending_action_id_ = 0;
         pending_request_ = {};
@@ -178,6 +197,8 @@ void ControlCommandCoordinator::Reset(bool preserve_action_ids) {
   queued_acknowledged_ = false;
   action_ack_timed_out_ = false;
   suppressed_mission_action_ = MissionAction::kNone;
+  line_execution_sec_ = execution_observed_sec_ = 0.0;
+  execution_pending_id_ = execution_finished_id_ = 0;
 }
 
 } // namespace vision_core

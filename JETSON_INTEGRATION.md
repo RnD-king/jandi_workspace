@@ -34,7 +34,7 @@ The build script starts no camera or motor node. Executor integration tests use 
 
 ## PC
 
-`~/sync_jandi_to_my_cv.sh` and the checked-in copy `scripts/sync_jandi_to_my_cv.sh` now default to the deployment branch above. The script requires a clean source checkout and copies all three packages, builds the core first and then the ROS packages.
+`~/sync_jandi_to_my_cv.sh` and the checked-in copy `scripts/sync_jandi_to_my_cv.sh` now default to the deployment branch above. The script requires a clean source checkout, backs up all three source trees and mirrors additions, modifications and deletions. Nested .git, build, install and log directories remain excluded. It builds the core first and then the ROS packages.
 
 To build already synchronized PC sources:
 

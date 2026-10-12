@@ -73,7 +73,8 @@ int main() {
   assert(r.mode==BallMode::kVerifyPickupObservation);
   assert(r.action.action == MissionAction::kNone);
 
-  // DOWN fine recovery는 이미 내려간 카메라를 다시 요청하지 않고 TURN만 한다.
+  // Losing an already acquired DOWN target starts stationary recovery,
+  // never the initial blind-forward search or a new camera movement.
   BallController recovery(c, 3.0);
   r = recovery.Compute(Ball(0.3, 0.3), 100, 100, 0, {}, {});
   r = recovery.Compute(Ball(0.3, 0.8), 100, 100, .1, {}, done);
@@ -83,9 +84,9 @@ int main() {
   r = recovery.Compute(Ball(0.3, 0.6), 100, 100, .25, down, {});
   r = recovery.Compute(std::nullopt, 100, 100, .3, down, {});
   r = recovery.Compute(std::nullopt, 100, 100, .4, down, {});
-  assert(r.mode == BallMode::kDownSearch);
+  assert(r.mode == BallMode::kBallRecoveryDown);
   r = recovery.Compute(std::nullopt, 100, 100, .5, down, {});
-  assert(r.action.action == MissionAction::kStepForwardOne);
+  assert(r.action.action == MissionAction::kNone);
   assert(r.camera_request == CameraRequest::kNone);
 
   // pickup 성공 뒤 STEP_BACK 완료 시 즉시 camera-forward 단계로 넘어가며

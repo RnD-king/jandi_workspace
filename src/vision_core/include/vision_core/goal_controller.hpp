@@ -114,7 +114,8 @@ public:
                      const CameraFeedback &camera_feedback,
                      const ActionExecutionFeedback &action_feedback,
                      bool allow_new_body_actions = true,
-                     std::optional<double> center_depth_m = std::nullopt);
+                     std::optional<double> center_depth_m = std::nullopt,
+                     double post_pickup_walk_sec = 0.0);
   static const char *ModeName(GoalMode mode);
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
@@ -158,6 +159,7 @@ private:
   bool post_pickup_line_wait_active_{false};
   double post_pickup_line_wait_start_sec_{0.0};
   bool camera_trigger_latched_{false};
+  bool camera_request_started_{false};
   bool fine_trigger_latched_{false};
   double last_seen_u_norm_{0.5};
   bool seen_after_camera_goal_{false};
