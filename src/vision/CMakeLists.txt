@@ -50,7 +50,7 @@ message(STATUS "OpenCV_LIBS=${OpenCV_LIBS}")
 find_package(CUDAToolkit REQUIRED)
 
 # /home/noh/vision_core에 별도로 설치한 ROS 비의존 공통 계산 라이브러리.
-set(_SHARED_VISION_CORE_DEFAULT "/home/noh/vision_core/install")
+set(_SHARED_VISION_CORE_DEFAULT "$ENV{HOME}/vision_core/install")
 if(DEFINED ENV{VISION_CORE_ROOT} AND NOT "$ENV{VISION_CORE_ROOT}" STREQUAL "")
   set(_SHARED_VISION_CORE_DEFAULT "$ENV{VISION_CORE_ROOT}")
 endif()
@@ -135,6 +135,9 @@ add_executable(perception_tuning_node
   src/perception_tuning_node.cpp
 )
 
+add_executable(goal_tuning_node src/perception_tuning_node.cpp)
+target_compile_definitions(goal_tuning_node PRIVATE VISION_GOAL_TUNING_NODE=1)
+
 target_link_libraries(line_perception_node
   vision_core
 )
@@ -175,11 +178,19 @@ ament_target_dependencies(perception_tuning_node
   rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge
 )
 
+target_link_libraries(goal_tuning_node vision_core "${vision_typesupport_target}")
+set_target_properties(goal_tuning_node PROPERTIES
+  BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
+ament_target_dependencies(goal_tuning_node
+  rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge)
+
 install(TARGETS
   vision_core
   line_perception_node
   line_p2p_tuning_node
   perception_tuning_node
+  goal_tuning_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

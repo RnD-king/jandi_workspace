@@ -1,12 +1,26 @@
-# 라인 주행 전용 팔 자세
+# LINE 미션의 팔 자세와 미션 전환
 
-라인의 미세보행·걷기·회전에서만 ID 15와 16의 목표 tick을 변경한다.
-`mission == MISSION_LINE`이며 action 2~13 또는 18/19일 때 적용한다.
-DEFAULT_POSITION, 공 줍기/재그립/던지기, 허들 동작에는 적용하지 않는다.
-BALL/GOAL/HURDLE에서 같은 걷기 action을 사용해도 해당 JSON의 팔 자세를 사용한다.
-프로그램 시작 시 WALK_MODE 마지막 키프레임에도 같은 팔 목표를 적용한다.
-초기 자세 이동도 기존 P2P 보간과 기본 3초 이동 설정을 사용한다.
-`line_arm_override_enabled=false`로 실행하면 시작 자세와 LINE 명령 모두 이 기능을 끈다.
+팔 목표는 action 번호와 관계없이 **mission == MISSION_LINE(1)**에서만 덮어쓴다.
+LINE에서는 모든 action에 ID15=1379, ID16=2765를 적용한다.
+BALL/GOAL/HURDLE에서는 보행 action도 원래 JSON의 팔 자세를 사용한다.
+프로그램 시작 초기 자세는 기존대로 벌린 팔 자세로 시작한다.
+
+## 미션 전환 순서
+
+- LINE → 다른 미션: ID15=1071, ID16=3073으로 복원한 뒤 요청 action 실행.
+- 다른 미션 → LINE: ID15=1379, ID16=2765로 벌린 뒤 요청 action 실행.
+- 같은 팔 상태의 미션끼리 전환(BALL → GOAL 등): 추가 전환 없이 요청 JSON 실행.
+
+팔 전환은 현재 encoder에서 시작하는 독립 P2P 단계다.
+다른 몸 관절의 직전 목표를 유지하며, 카메라는 기존 머리 보간/유지를 동시에 수행한다.
+기본 시간은 1초(`mission_arm_transition_duration_sec`)이고 기존 50Hz smoothstep을 사용한다.
+60°/s 최대 속도 규칙에 따라 이동량이 크면 시간이 늘어날 수 있다.
+실행할 JSON을 먼저 검증·저장하고 ACK하며, 팔 전환 자체에서는 READY/DONE을 보내지 않는다.
+받은 action까지 끝나야 해당 action_id의 DONE을 보낸다. 0도 회전도 전환 단계는 수행한다.
+전환 실패 시 요청 action을 실행하거나 DONE을 보내지 않고 오류를 기록한다.
+팔 상태가 불확실하면 다음 명령에서도 다시 전환한다.
+기존 LINE→LINE 한 칸 대기열과 중복 ID 처리는 유지한다. 다른 미션은 이전 action DONE 후 접수한다.
+`line_arm_override_enabled=false`이면 시작 자세/LINE 덮어쓰기/미션 팔 전환을 모두 끈다.
 
 2026-10-11 실제 로봇 측정 결과(`/tmp/arm_ticks.json`):
 
@@ -24,7 +38,7 @@ BALL/GOAL/HURDLE에서 같은 걷기 action을 사용해도 해당 JSON의 팔 �
 
 | ROS 파라미터 | 기본값 | 의미 |
 |---|---:|---|
-| `line_arm_override_enabled` | true | LINE 전용 팔 목표 적용 여부 |
+| `line_arm_override_enabled` | true | LINE 팔 목표와 미션 전환 활성화 여부 |
 | `line_arm_outward_angle_deg` | 27.0703125 | 양팔에 공통 적용할 바깥 각도 |
 | `line_arm_reference_tick_15` | 1071 | ID 15 측정 기준 자세 |
 | `line_arm_reference_tick_16` | 3073 | ID 16 측정 기준 자세 |
@@ -38,6 +52,6 @@ BALL/GOAL/HURDLE에서 같은 걷기 action을 사용해도 해당 JSON의 팔 �
 팔도 기존 P2P 보간과 최대 속도 규칙을 따라 현재 encoder 위치에서 이동한다.
 팔 이동량에 따라 기존 최대 속도 제한으로 이동 시간이 늘 수 있다.
 반복 모션과 회전 후 붙는 걷기에도 적용되며 대기열에 준비 데이터를 저장한다.
-다른 미션으로 전환하면 원래 JSON 팔 목표로 보간 이동한다.
+다른 미션에서는 복원 전환 후 JSON 팔 목표로 보간 이동한다.
 별도 팔 ACK/DONE, 상태 ID, 통신 패킷이나 타이머는 추가하지 않는다.
 JSON 원본과 `main (copy).cpp`는 수정하지 않는다.

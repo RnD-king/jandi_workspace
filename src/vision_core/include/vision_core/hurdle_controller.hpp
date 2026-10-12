@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "vision_core/types.hpp"
+#include "vision_core/object_observation_window.hpp"
 
 namespace vision_core {
 
@@ -16,13 +17,25 @@ enum class HurdleMode {
   kReturnCameraToLine,
   kRecoveryForward,
   kFailed = 8,
+  kDownSearch,
+  kFineAdjust,
 };
 
 struct HurdleConfig {
+  double approach_short_v_norm{};
+  double down_search_timeout_sec{};
+  double fine_one_step_v_error_norm{};
+  double fine_two_step_v_error_norm{};
+  double target_u_norm{};
+  double u_deadband{};
+  double fine_target_v_norm{};
+  double contact_v_norm{};
+  int contact_steps{};
+
   int stable_window{};
   int stable_min_hits{};
   int lost_frames{};
-  double smooth_alpha{};
+  double smooth_alpha{}; // Legacy config key; position uses the bounded 1->3 window.
   double acquire_min_v_norm{};
   double tilt_trigger_v_norm{};
   int tilt_trigger_window{};
@@ -66,7 +79,7 @@ public:
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
-  void UseNextObservationAsMean() { has_smoothed_ = false; }
+  void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
   void UpdateTuning(const HurdleConfig &config) { config_ = config; }
   void Reset();
 
@@ -87,6 +100,11 @@ private:
   int lost_count_{0};
   int recovery_visible_count_{0};
   bool has_smoothed_{false};
+  ObjectObservationWindow observation_window_;
+  bool down_search_started_{false};
+  bool down_search_found_{false};
+  int completed_back_steps_{0};
+  int completed_contact_steps_{0};
   TrackedHurdle tracked_;
   double last_seen_u_norm_{0.5};
   double state_enter_sec_{0.0};

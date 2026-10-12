@@ -1,3 +1,5 @@
+> 2026-10-12: 반복 단계 승인, 미션 시퀀스와 회차 설정은 [통합 튜닝 안내](UNIFIED_MISSION_TUNING.md)를 기준으로 한다. 아래 기존 안내의 동작별 COMMIT/허들 고정 시퀀스 설명은 새 안내로 대체한다.
+
 # LINE P2P tuning / Perception start (workspace-only)
 
 This document describes the local implementation in `src/vision`. The independent

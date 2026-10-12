@@ -134,6 +134,7 @@ def start_main(device, log_path):
     try:
         child = subprocess.Popen([
             str(executable), '--ros-args', '-p', f'dynamixel_device:={device}',
+            '-p', 'motor_health_monitor_enabled:=false',
             '-r', '__node:=arm_capture_pose_holder',
             '-r', '/jandi_vision/action_cmd:=/arm_tick_capture/disabled_action_cmd',
             '-r', '/jandi_vision/camera_cmd:=/arm_tick_capture/disabled_camera_cmd',
@@ -188,6 +189,8 @@ def main():
             if not all(argument in command for argument in required):
                 raise RuntimeError('지정한 PID는 비전 명령을 차단한 측정 전용 main이 아닙니다.')
             ready_log = Path('/tmp/arm_capture_main.log').read_text(errors='replace')
+            if 'Motor health monitor:' in ready_log:
+                raise RuntimeError('기존 main에서 진단 읽기가 실행 중입니다. 토크 캡처와 동시에 포트를 사용하지 않습니다.')
             if 'Startup WALK_MODE pose reached and held; ready for command topics' not in ready_log:
                 raise RuntimeError('기존 main의 초기 자세 완료 기록이 없습니다.')
         ensure_bus_free(args.port, args.existing_main_pid)

@@ -1,0 +1,20 @@
+{
+  "name": "후진_2걸음",
+  "motions": [
+    {
+      "filename": "후진_4_최종_초기x.json",
+      "keyframe_count": 4,
+      "name": "후진_4_최종_초기x",
+      "nominal_sec": 1.4,
+      "saved_at": "2026-09-18T22:08:23"
+    },
+    {
+      "filename": "후진_4_최종_초기x.json",
+      "keyframe_count": 4,
+      "name": "후진_4_최종_초기x",
+      "nominal_sec": 1.4,
+      "saved_at": "2026-09-18T22:08:23"
+    }
+  ],
+  "saved_at": "2026-10-12T01:28:34"
+}

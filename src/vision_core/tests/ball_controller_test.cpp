@@ -1,4 +1,5 @@
 #include "vision_core/ball_controller.hpp"
+#include "vision_core/config_loader.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -23,21 +24,17 @@ static BallResult EnterPickupVerification(BallController &controller,
                               start_sec + 0.7, {}, done);
   assert(result.camera_request == CameraRequest::kDown);
   const CameraFeedback down{CameraMode::kDown, true};
-  result = controller.Compute(Ball(0.5, 0.7), 100, 100,
-                              start_sec + 0.8, down, {});
-  result = controller.Compute(Ball(0.5, 0.7), 100, 100,
-                              start_sec + 0.9, down, {});
-  assert(result.action.action == MissionAction::kPickBall);
-  result = controller.Compute(Ball(0.5, 0.7), 100, 100,
-                              start_sec + 1.0, down, done);
-  assert(result.action.action == MissionAction::kRecatch);
-  result = controller.Compute(Ball(0.5, 0.7), 100, 100,
-                              start_sec + 1.1, down, done);
-  assert(result.mode == BallMode::kVerifyPickupObservation);
+  for (int i=0;i<8;++i)
+    result=controller.Compute(Ball(.5,.7),100,100,start_sec+.8+.1*i,down,{});
+  result=controller.Compute(Ball(.5,.7),100,100,start_sec+1.6,down,{});
+  assert(result.action.action==MissionAction::kPickBall);
+  result=controller.Compute(Ball(.5,.7),100,100,start_sec+1.7,down,done);
+  assert(result.mode==BallMode::kVerifyPickupObservation);
+  assert(result.action.action==MissionAction::kNone);
   return result;
 }
 int main() {
-  BallConfig c{}; c.stable_window = c.stable_min_hits = 1;
+  BallConfig c=LoadDefaultAlgorithmConfig().ball; c.fine_settle_duration_sec=0; c.recovery_settle_duration_sec=0; c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2; c.smooth_alpha = 1.0; c.far_u_des_norm = 0.5;
   c.approach_u_deadband = 0.05; c.upper_acquire_v_norm = 1.0;
   c.tilt_down_v_norm = 0.7; c.tilt_down_window = c.tilt_down_min_hits = 1;
@@ -49,7 +46,7 @@ int main() {
   BallController controller(c, 3.0);
   auto r = controller.Compute(Ball(0.3, 0.3), 100, 100, 0, {}, {});
   assert(r.mode == BallMode::kApproachBall);
-  assert(r.action.action == MissionAction::kStepForwardLeft);
+  assert(r.action.action == MissionAction::kStepForwardLeftTwo);
   ActionExecutionFeedback active; active.action_active = true;
   r = controller.Compute(Ball(0.5, 0.8), 100, 100, 0.1, {}, active);
   assert(r.camera_request == CameraRequest::kNone);
@@ -59,11 +56,12 @@ int main() {
   CameraFeedback down{CameraMode::kDown, true};
   r = controller.Compute(Ball(0.4, 0.6), 100, 100, 0.3, down, {});
   r = controller.Compute(Ball(0.4, 0.6), 100, 100, 0.4, down, {});
+  r = controller.Compute(Ball(.4,.6),100,100,.401,down,{});
   // With identical normalized overruns, lateral is the deterministic tie-break.
   assert(r.action.action == MissionAction::kLeftSideStep);
   // The farther OUTSIDE-axis wins; v dominates even if u is also outside.
   r = controller.Compute(Ball(0.62, 0.40), 100, 100, 0.45, down, {});
-  assert(r.action.action == MissionAction::kStepForwardHalf);
+  assert(r.action.action == MissionAction::kStepForwardTwo);
   r = controller.Compute(Ball(0.5, 0.6), 100, 100, 0.5, down, {});
   assert(r.action.action == MissionAction::kStepForwardHalf);
   r = controller.Compute(Ball(0.5, 0.8), 100, 100, 0.6, down, {});
@@ -72,7 +70,8 @@ int main() {
   assert(r.action.action == MissionAction::kPickBall);
   assert(r.pickup_attempt_count == 1);
   r = controller.Compute(Ball(0.5, 0.7), 100, 100, 0.8, down, done);
-  assert(r.action.action == MissionAction::kRecatch);
+  assert(r.mode==BallMode::kVerifyPickupObservation);
+  assert(r.action.action == MissionAction::kNone);
 
   // DOWN fine recovery는 이미 내려간 카메라를 다시 요청하지 않고 TURN만 한다.
   BallController recovery(c, 3.0);
@@ -84,19 +83,23 @@ int main() {
   r = recovery.Compute(Ball(0.3, 0.6), 100, 100, .25, down, {});
   r = recovery.Compute(std::nullopt, 100, 100, .3, down, {});
   r = recovery.Compute(std::nullopt, 100, 100, .4, down, {});
-  assert(r.mode == BallMode::kBallRecoveryDown);
+  assert(r.mode == BallMode::kDownSearch);
   r = recovery.Compute(std::nullopt, 100, 100, .5, down, {});
-  assert(r.action.action == MissionAction::kTurnLeft);
+  assert(r.action.action == MissionAction::kStepForwardOne);
   assert(r.camera_request == CameraRequest::kNone);
 
   // pickup 성공 뒤 STEP_BACK 완료 시 즉시 camera-forward 단계로 넘어가며
   // 같은 back-away action을 다시 발행하지 않는다.
   r = controller.Compute(std::nullopt, 100, 100, .9, down, done);
-  r = controller.Compute(std::nullopt, 100, 100, 1.0, down, {});
+  r = controller.Compute(std::nullopt, 100, 100, 1.0, down, done);
   assert(r.action.action == MissionAction::kDefaultPosition);
   r = controller.Compute(std::nullopt, 100, 100, 1.1, down, done);
   assert(r.action.action == MissionAction::kStepBack);
   r = controller.Compute(std::nullopt, 100, 100, 1.2, down, done);
+  assert(r.action.action==MissionAction::kStepBack);
+  r = controller.Compute(std::nullopt,100,100,1.3,down,done);
+  assert(r.action.action==MissionAction::kStepBack);
+  r = controller.Compute(std::nullopt,100,100,1.4,down,done);
   assert(r.action.action == MissionAction::kNone);
   assert(r.camera_request == CameraRequest::kForward);
 
@@ -123,6 +126,7 @@ int main() {
   r = seven_hits.Compute(Ball(0.2, 0.7), 100, 100, 13.0, down, {});
   assert(r.action.action == MissionAction::kLeftSideStep);
   assert(r.pickup_attempt_count == 1);
+  seven_hits.ClearObservationHistory(); // Fresh post-lateral-motion coordinates.
   r = seven_hits.Compute(Ball(0.5, 0.7), 100, 100, 13.1, down, {});
   assert(r.action.action == MissionAction::kPickBall);
   assert(r.pickup_attempt_count == 2);
@@ -130,7 +134,6 @@ int main() {
   // 두 번째 attempt에서도 10 frame 중 7회 검출이면 기존 max-attempt
   // 실패 흐름으로 종료한다.
   r = seven_hits.Compute(Ball(0.5, 0.7), 100, 100, 13.2, down, done);
-  r = seven_hits.Compute(Ball(0.5, 0.7), 100, 100, 13.3, down, done);
   for (int i = 0; i < 7; ++i)
     r = seven_hits.Compute(Ball(0.5, 0.7), 100, 100, 13.4 + 0.1 * i,
                            down, {});
@@ -153,9 +156,9 @@ int main() {
   assert(r.mode == BallMode::kVerifyPickupObservation);
   assert(!r.has_ball && !r.pickup_failed);
   r = six_hits.Compute(std::nullopt, 100, 100, 22.9, down, {});
-  assert(r.mode == BallMode::kStandUpAfterPickup);
+  assert(r.mode == BallMode::kVerifyPickup);
   assert(r.has_ball && !r.pickup_failed);
-  assert(r.action.action == MissionAction::kDefaultPosition);
+  assert(r.action.action == MissionAction::kRecatch);
 
   // Fine retries preserve attempt count and never permit a fourth PICK.
   verify_config.pickup_max_attempts = 3;
@@ -184,15 +187,18 @@ int main() {
     retry_time += 0.1;
     assert(!r.tracked.stable); // New history, not the 10 verification hits.
     assert(r.action.action == MissionAction::kStepForwardHalf);
+    three_attempts.ClearObservationHistory(); // Next action uses fresh observation.
     r = three_attempts.Compute(Ball(0.5, 0.8), 100, 100,
                               retry_time, down, {});
     retry_time += 0.1;
     assert(r.action.action == MissionAction::kStepBack);
+    three_attempts.ClearObservationHistory(); // Next action uses fresh observation.
     r = three_attempts.Compute(Ball(0.8, 0.7), 100, 100,
                               retry_time, down, {});
     retry_time += 0.1;
     assert(r.action.action == MissionAction::kRightSideStep);
     assert(r.pickup_attempt_count == attempt);
+    three_attempts.ClearObservationHistory(); // Next action uses fresh observation.
     r = three_attempts.Compute(Ball(0.5, 0.7), 100, 100,
                               retry_time, down, {});
     retry_time += 0.1;
@@ -202,10 +208,7 @@ int main() {
     r = three_attempts.Compute(Ball(0.5, 0.7), 100, 100,
                               retry_time, down, done);
     retry_time += 0.1;
-    assert(r.action.action == MissionAction::kRecatch);
-    r = three_attempts.Compute(Ball(0.5, 0.7), 100, 100,
-                              retry_time, down, done);
-    retry_time += 0.1;
+    assert(r.action.action == MissionAction::kNone);
     assert(r.mode == BallMode::kVerifyPickupObservation);
   }
   // Camera-moving frames must not survive into the DOWN-view fine adjustment.
@@ -217,8 +220,9 @@ int main() {
                        {CameraMode::kTransition,false},{});
   assert(r.mode==BallMode::kWaitCameraDown && r.tracked.u_norm < .4);
   r=fresh_down.Compute(Ball(.9,.9),100,100,.2,down,{});
-  assert(r.mode==BallMode::kFineAdjustForPickup && !r.tracked.visible);
+  assert(r.mode==BallMode::kDownSearch && !r.tracked.visible);
   r=fresh_down.Compute(Ball(.2,.7),100,100,.3,down,{});
+  r=fresh_down.Compute(Ball(.2,.7),100,100,.31,down,{});
   assert(r.action.action==MissionAction::kLeftSideStep);
 
   assert(actual_picks == verify_config.pickup_max_attempts);

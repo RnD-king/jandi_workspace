@@ -41,6 +41,11 @@ struct MissionControllerConfig {
   bool enable_goal{};
   // Goal 단독 시험처럼 공 집기 과정을 생략하는 구성에서만 사용한다.
   bool initial_has_ball{};
+  bool goal_trial_start_forward{};
+  int test_ball_mission_index{};
+  int test_goal_mission_index{};
+  int mission_recovery_max_turns{};
+  int mission_recovery_yaw_deg{};
 };
 
 struct MissionFrameInput {
@@ -50,6 +55,7 @@ struct MissionFrameInput {
   std::optional<ObjectTarget> goal_target;
   std::optional<ObjectTarget> backboard_target;
   GoalPoseObservation goal_pose;
+  std::optional<double> backboard_center_depth_m;
   int image_width{0};
   int image_height{0};
   double now_sec{0.0};
@@ -98,6 +104,12 @@ struct MissionFrameResult {
   std::size_t post_motion_window_frames{0};
   int post_motion_valid{0};
   double post_motion_elapsed_sec{0.0};
+  bool trial_complete{false};
+  bool repeat_sequence{false};
+  int repeat_scope{0};
+  int ball_mission_index{1}, goal_mission_index{1};
+  int recovery_turns_completed{0};
+  bool recovery_failed{false};
   BallResult ball;
   HurdleResult hurdle;
   GoalResult goal;
@@ -178,6 +190,8 @@ public:
   // Explicit manual PREVIEW honors the LINE FSM's 2s failure / 1s recovery
   // observation instead of adding an unrelated one-second shortcut.
   double ManualPreviewDurationSec() const;
+  int RepeatScope() const;
+  bool SetTestMissionIndices(int ball_index, int goal_index);
   bool HasBall() const { return has_ball_; }
   // Observed 40%-to-READY LINE guide, for manual one-slot preview only.
   std::optional<LineGuide> LastReadyLineGuide() const { return last_ready_line_guide_; }
@@ -212,6 +226,8 @@ private:
   void AddObservation(const LineGuide &guide);
   std::optional<LineGuide> FinishObservation() const;
   void BeginLineReacquisition();
+  ActionRequest ComputeMissionLineRecovery(const MissionFrameInput& input,
+      const ActionExecutionFeedback& feedback, bool* valid, MissionFrameResult* output);
   bool ShouldDeferDone(const CommandDeliveryFeedback &feedback) const;
   void BeginDecisionObservation(double now_sec, MissionType mission,
                                 bool camera_only,
@@ -223,6 +239,14 @@ private:
   void FinishMission();
 
   MissionControllerConfig config_;
+  bool goal_trial_complete_{false};
+  int ball_mission_index_{0}, goal_mission_index_{0};
+  int mission_recovery_turns_{0};
+  bool mission_recovery_issued_{false};
+  bool mission_recovery_failed_{false};
+  bool mission_recovery_found_{false};
+  std::deque<bool> mission_recovery_hits_;
+  double decision_object_weight_{0.0};
   // Width for renormalizing cached LINE offsets after optical reference edits.
   int last_line_image_width_{0};
   LineP2pController line_p2p_controller_;
@@ -254,8 +278,8 @@ private:
   std::deque<bool> decision_goal_pose_hits_;
   std::size_t decision_observation_total_frames_{0};
   // Raw (already associated) object samples for the 1s stationary mean.
-  // EMA remains active during approach; one mean replaces EMA for the
-  // immediate post-DONE near-range decision only.
+  // Ball/hurdle use bounded later-weighted coordinates. Goal keeps its pose
+  // estimator; stationary means replace prior movement evidence.
   std::optional<ObjectTarget> decision_last_target_;
   double decision_target_u_sum_{0.0}, decision_target_v_sum_{0.0};
   double decision_rect_u_sum_{0.0}, decision_rect_v_sum_{0.0};

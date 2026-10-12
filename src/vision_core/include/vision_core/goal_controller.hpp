@@ -19,9 +19,16 @@ enum class GoalMode {
   kHeadingRecovery,
   kFailed,
   kRecoverySearch, // Preserve existing goal mission phase values.
+  kForwardApproach,
+  kPostShootBackAway,
 };
 
 struct GoalConfig {
+  double approach_short_z_m{};
+  double fine_one_step_range_error_m{};
+  double fine_two_step_range_error_m{};
+  double camera_goal_start_z_m{};
+  int post_shoot_back_steps{};
   int stable_window{};
   int stable_min_hits{};
   int lost_frames{};
@@ -95,6 +102,7 @@ public:
   GoalController();
   GoalController(const GoalConfig &config, double camera_motion_timeout_sec);
   void StartAfterPickup(double now_sec);
+  void StartForwardTrial();
   void SetHasBall(bool has_ball);
   void UpdateBallState(const BallResult &ball_result);
   bool HasBall() const { return has_ball_; }
@@ -105,7 +113,8 @@ public:
                      bool line_reference_valid,
                      const CameraFeedback &camera_feedback,
                      const ActionExecutionFeedback &action_feedback,
-                     bool allow_new_body_actions = true);
+                     bool allow_new_body_actions = true,
+                     std::optional<double> center_depth_m = std::nullopt);
   static const char *ModeName(GoalMode mode);
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
@@ -153,6 +162,8 @@ private:
   double last_seen_u_norm_{0.5};
   bool seen_after_camera_goal_{false};
   int recovery_visible_count_{0};
+  int completed_back_steps_{0};
+  bool back_away_issued_{false};
 };
 
 } // namespace vision_core

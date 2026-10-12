@@ -127,6 +127,12 @@ enum class MissionAction {
   // 실행기 mapping 준비 전까지 protocol에만 예약한다. 현재 HURDLE FSM은
   // STEP_FORWARD_ONE(10)을 contact action으로 사용한다.
   kContactWalk = 20,
+  kStepForwardTwo = 21,
+  kStepForwardThree = 22,
+  kStepForwardFour = 23,
+  kStepForwardLeftTwo = 24,
+  kStepForwardRightTwo = 25,
+  kStepForwardRightOne = 26,
 };
 
 enum class CruiseDirection {

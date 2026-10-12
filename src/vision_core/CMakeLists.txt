@@ -73,6 +73,11 @@ install(FILES
 )
 
 if(BUILD_TESTING)
+  add_executable(shared_vision_core_unified_sequence_test tests/unified_sequence_test.cpp)
+  target_link_libraries(shared_vision_core_unified_sequence_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_unified_sequence_test COMMAND shared_vision_core_unified_sequence_test)
+  set_tests_properties(shared_vision_core_unified_sequence_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml")
   add_executable(shared_vision_core_config_loader_test
     tests/config_loader_test.cpp
   )

@@ -1,4 +1,5 @@
 #include "vision_core/hurdle_controller.hpp"
+#include "vision_core/config_loader.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -9,13 +10,13 @@ static ObjectTarget H(double v) {
   t.height_px = 10; t.confidence = 1; return t;
 }
 int main() {
-  HurdleConfig c{}; c.stable_window = c.stable_min_hits = 1;
+  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle; c.recovery_settle_duration_sec=0; c.contact_steps=1; c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2; c.smooth_alpha = 1; c.acquire_min_v_norm = 0;
   c.tilt_trigger_v_norm = 0.75; c.tilt_trigger_window = c.tilt_trigger_min_hits = 1;
   HurdleController controller(c, 3.0);
   auto r = controller.Compute(H(0.5), 100, 100, 0, {}, {});
   assert(r.mode == HurdleMode::kApproach);
-  assert(r.action.action == MissionAction::kStepForwardFive);
+  assert(r.action.action == MissionAction::kStepForwardFour);
   ActionExecutionFeedback active; active.action_active = true;
   r = controller.Compute(H(0.8), 100, 100, .1, {}, active);
   assert(r.camera_request == CameraRequest::kNone);
@@ -24,7 +25,12 @@ int main() {
   assert(r.camera_request == CameraRequest::kDown);
   r = controller.Compute(H(0.8), 100, 100, .3,
                          {CameraMode::kDown, true}, {});
-  assert(r.action.action == MissionAction::kStepForwardOne);
+  assert(r.mode==HurdleMode::kDownSearch && !r.tracked.visible);
+  r=controller.Compute(H(.9),100,100,.31,{CameraMode::kDown,true},{});
+  assert(r.mode==HurdleMode::kFineAdjust);
+  r=controller.Compute(H(.9),100,100,.32,{CameraMode::kDown,true},{});
+  assert(r.mode==HurdleMode::kContactWalk);
+  assert(r.action.action == MissionAction::kStepForwardHalf);
   assert(r.action.action != MissionAction::kContactWalk);
   r = controller.Compute(H(0.8), 100, 100, .4,
                          {CameraMode::kDown, true}, done);
@@ -39,6 +45,6 @@ int main() {
   assert(r.mode==HurdleMode::kWaitCameraDown);
   r=fresh_down.Compute(H(.8),100,100,.2,
                        {CameraMode::kDown,true},{});
-  assert(r.mode==HurdleMode::kContactWalk && !r.tracked.visible);
+  assert(r.mode==HurdleMode::kDownSearch && !r.tracked.visible);
   return 0;
 }

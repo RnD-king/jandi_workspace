@@ -1,66 +1,54 @@
-# Jetson integration (ROS 2 Humble)
+# PC / Jetson unified integration — 2026-10-12
 
-The source packages here are copied from the independent upstream repositories:
+Source of truth:
 
-- `src/vision/` — RnD-king/vision main, source snapshot `73675f1`
-- `src/vision_core/` — RnD-king/vision_core main, source snapshot `870acc0`
-- `src/forward_walk/` — Jandi-integrated P2P executor (do not overwrite with the 2026_motion original)
+- `src/forward_walk`: unmodified `RnD-king/2026_motion` commit `f477db208c4877f36a4497583f20d976f55fa2d6`, folder `10.13.1/forward_walk`.
+- `src/vision`, `src/vision_core`: this jandi_workspace checkout. `vision/msg/ActionCommand.msg` uses the friend's exact constants and fields.
+- Deployment branch: `feature/forward-walk-10-12-1-integrated-20261011`.
 
-`vision_core` is a **standalone CMake** library (project `shared_vision_core`),
-not a ROS ament package. `src/vision_core/COLCON_IGNORE` is intentional:
-it prevents an uncoordinated `colcon build` from treating it as a workspace
-package. Build and install it **before** building `vision`.
+The friend executor includes new actions 21–26, modified right-turn manifests, cross-mission READY for the new walks, mission arm transitions and motor-health logging. Preserve the entire package. Its arm behavior remains as supplied by the friend.
 
-Run the following commands in a fresh Jetson terminal, adapting the workspace
-location if it is not `~/jandi`:
+`vision_core` is a standalone CMake library, intentionally marked COLCON_IGNORE. Build, test and install it before `vision`; do not mix old headers, libraries or algorithm YAML with the new adapter.
+
+## Existing Jetson checkout (/home/rnd/jandi)
+
+Run in the SSH terminal. Preserve existing local source changes before checking out the unified branch:
 
 ```bash
-source /opt/ros/humble/setup.bash
-cd ~/jandi
-git pull --ff-only origin main
-
-# Make the Jetson use the core from this checkout, not a stale ~/vision_core tree.
-cmake -S src/vision_core -B build/standalone_vision_core \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$HOME/vision_core/install"
-cmake --build build/standalone_vision_core -j2
-ctest --test-dir build/standalone_vision_core --output-on-failure
-cmake --install build/standalone_vision_core
-
-# The absolute core install path must be explicitly supplied to CMake.
-export VISION_CORE_ROOT="$HOME/vision_core/install"
-colcon build --symlink-install --packages-up-to forward_walk \
-  --cmake-args "-DSHARED_VISION_CORE_ROOT=$VISION_CORE_ROOT"
-source install/setup.bash
-colcon test --packages-select forward_walk --event-handlers console_direct+
-colcon test-result --verbose
+cd /home/rnd/jandi
+BACKUP="$HOME/jandi_backups/unified_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP"
+cp -a src/vision src/forward_walk src/vision_core "$BACKUP/"
+git stash push -u -m 'before unified mission update' -- src/vision src/forward_walk src/vision_core
+git fetch origin feature/forward-walk-10-12-1-integrated-20261011
+git switch feature/forward-walk-10-12-1-integrated-20261011
+git pull --ff-only origin feature/forward-walk-10-12-1-integrated-20261011
+git rev-parse HEAD
+bash scripts/build_unified.sh /home/rnd/jandi
+source /home/rnd/jandi/install/setup.bash
 ```
 
-Before trying the real robot:
-- Verify the TensorRT engine path specified in
-  `src/vision/config/yolo26_runtime.yaml` points to the Jetson-compatible
-  engine (currently `/home/rnd/jandi/src/dataset/best.engine`).
-- Verify the Dynamixel adapter is available as `/dev/jandi_dxl`.
-- Do not execute `main_node` until all motor and startup safety checks pass.
-- The legacy `robot_bringup` launch file still references old ROS nodes such
-  as `my_cv` and `decision`, so this guide only validates the individual
-  integrated packages, not the full launch.
-- Local build/test and motor deployment have **not** been verified remotely.
+These commands assume this checkout's origin is `RnD-king/jandi_workspace`. Keep the backup/stash; do not reapply the old forward_walk or messages over the unified source.
 
-## Current integration behavior
+The build script starts no camera or motor node. Executor integration tests use an in-memory Dynamixel implementation. PC verification does not establish Jetson or physical-robot behavior.
 
-- GOAL-camera last sighting: centered (±0.12 normalized) or never seen -> stationary search; left/right -> corresponding 15° turns after the target is lost. After a turn, wait 0.60 s and reacquire for 3 consecutive observations. Directional recovery stops after 5 s without reacquisition.
-- Camera transitions FORWARD/DOWN/GOAL never contribute object tracking evidence. Reset object association on camera transition; BALL/HURDLE/GOAL wait stages discard old tracking and restart once DONE and settled.
-- LINE READY uses observations from 40% of estimated motion duration until READY; inspect `[LINE OBS]` logs before tuning the number of required valid frames.
-- Existing fail-stop semantics and A→B Dynamixel SyncRead remain unchanged.
-- C++ build/CTest results for this newly synced revision must still be verified on the work PC and Jetson.
+## PC
 
-## Fresh observation contract (Oct 2026)
+`~/sync_jandi_to_my_cv.sh` and the checked-in copy `scripts/sync_jandi_to_my_cv.sh` now default to the deployment branch above. The script requires a clean source checkout and copies all three packages, builds the core first and then the ROS packages.
 
-- `vision` **73675f1**, `vision_core` **564e80a**. ROS adapter discards RGB frames with capture header timestamps at/before the newest Action/Camera DONE event (ROS time clock).
-- Long LINE (11/12/13) keeps its 40%-to-READY weighted observations and one-slot queue. LINE failure remains a 2 s observation, but LINE recovery TURN uses 1 s of fresh O/H.
-- Short, perception-driven Action DONE is deferred in the control coordinator while at least 1 s of newly acquired frames is observed; BALL/HURDLE/GOAL use a fresh 10-frame sliding window with >=7 detections. If insufficient, HOLD; no pre-DONE history is counted.
-- Camera DOWN/GOAL DONE starts the same 1 s fresh-view observation. Camera FORWARD return continues with the existing LINE reacquisition logic. HURDLE's fixed DOWN -> STEP_FORWARD_ONE -> HUDDLE sequence waits the 1 s camera window but does not require a fresh 7/10 detection at the fixed contact step.
-- Existing deterministic mission motion chains (PICK_BALL/RECATCH, HUDDLE, SHOOT, post-pickup stand/back-away) are exempt from generic Action-DONE observation; previously agreed fail-stop behavior stays unchanged.
-- `forward_walk`, its JSON motions, ACK/READY/DONE contract, SyncRead, and `2026_motion` are unchanged.
-- **Unverified:** new C++ core CTest/ROS vision build on the user's PC, live Vision-to-executor communication, Jetson real hardware. Do not run the motor executor until tests pass and the robot is secured.
+To build already synchronized PC sources:
+
+```bash
+bash /home/noh/jandi_workspace/scripts/build_unified.sh /home/noh/my_cv /home/noh/vision_core
+source /home/noh/my_cv/install/setup.bash
+```
+
+## Tuning
+
+Read [UNIFIED_MISSION_TUNING.md](src/vision/UNIFIED_MISSION_TUNING.md) for phase-level COMMIT, continued observation during repeat steps, adaptive approach/fine walks, pickup verification before RECATCH, alternating bounded line recovery and rqt scenario indices.
+
+The dedicated `goal_tuning_node` starts with FORWARD approach and completes fine alignment, SHOOT, two backwards actions and line recovery. It returns to WAIT_START for the next manually prepared trial.
+
+Model selection remains in `src/vision/config/yolo26_runtime.yaml`. Jetson defaults use `/home/rnd/jandi/src/dataset/best.engine`; supply `engine_path` when the engine lives elsewhere. The legacy robot_bringup launch is not the entrypoint for these tuning nodes.
+
+Image-independent watchdogs, new DONE timeouts and carrying-aware arm changes were explicitly deferred. Detection/time/count limits stop dispatching new repeat motions; accepted motions finish with their original ACK/DONE lifecycle.

@@ -296,6 +296,23 @@ void Dxl::syncWriteTheta()
   gSyncWriteTh.clearParam();
 }
 
+MotorHealth Dxl::ReadMotorHealth(int motor_id, double timeout_ms)
+{
+    MotorHealth h; h.id=motor_id;
+    uint8_t data[83]={0}, error=0;
+    int result=packetHandler->readTx(portHandler, static_cast<uint8_t>(motor_id), 64, 83);
+    if (result==COMM_SUCCESS) {
+        // SDK의 기본 timeout(약 34ms) 대신 이 진단 요청에만 짧은 timeout을 사용한다.
+        portHandler->setPacketTimeout(timeout_ms);
+        result=packetHandler->readRx(portHandler, static_cast<uint8_t>(motor_id), 83, data, &error);
+    }
+    if (result!=COMM_SUCCESS) {
+        h.communication_error=packetHandler->getTxRxResult(result);
+        return h;
+    }
+    return MotorHealth::Decode(motor_id, data, error);
+}
+
 std::unordered_map<int, int32_t> Dxl::GetRawPositions()
 {
   // 기존 syncReadTheta()가 Present Position을 position[]에 채운다.

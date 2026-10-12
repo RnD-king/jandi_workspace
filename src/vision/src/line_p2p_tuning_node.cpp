@@ -157,7 +157,7 @@ public:
     config.line_detection.class_id = line_class_id_;
     config.line_detection.confidence = conf_thres_;
     config.line_features.max_centers = get_parameter("max_centers").as_int();
-    config.line_features.image_center_u = get_parameter("cx").as_double();
+    // Keep the LINE reference from algorithm YAML; cx is the optical center.
 
     config.line_p2p.offset_gain =
         get_parameter("line_p2p_offset_gain").as_double();

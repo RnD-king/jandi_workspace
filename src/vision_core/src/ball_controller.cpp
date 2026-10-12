@@ -43,6 +43,7 @@ const char *BallController::ModeName(BallMode mode) {
   case BallMode::kBallRecoveryForward: return "BALL_RECOVERY_FORWARD";
   case BallMode::kBallRecoveryDown: return "BALL_RECOVERY_DOWN";
   case BallMode::kFailed: return "BALL_FAILED";
+  case BallMode::kDownSearch: return "BALL_DOWN_SEARCH";
   }
   return "UNKNOWN";
 }
@@ -60,35 +61,19 @@ void BallController::UpdateTracker(const std::optional<ObjectTarget> &target,
 
   if (detected) {
     lost_count_ = 0;
-    const Point2 center = target->center_rectified
-                              ? target->rectified_center_px
-                              : target->center_px;
-    TrackedBall observed;
-    observed.visible = true;
-    observed.center_px = center;
-    observed.u_norm = Clamp(center.u / Denom(image_width), 0.0, 1.0);
-    observed.v_norm = Clamp(center.v / Denom(image_height), 0.0, 1.0);
-    observed.h_norm = Clamp(target->height_px / Denom(image_height), 0.0, 1.0);
-    observed.area_norm = Clamp(target->area_px /
-                                   Denom(static_cast<double>(image_width) *
-                                         image_height),
-                               0.0, 1.0);
-    observed.confidence = target->confidence;
-    const double alpha = Clamp(config_.smooth_alpha, 0.0, 1.0);
-    if (!has_smoothed_) {
-      tracked_ = observed;
-      has_smoothed_ = true;
-    } else {
-      tracked_.visible = true;
-      tracked_.center_px = center;
-      tracked_.u_norm = (1.0 - alpha) * tracked_.u_norm + alpha * observed.u_norm;
-      tracked_.v_norm = (1.0 - alpha) * tracked_.v_norm + alpha * observed.v_norm;
-      tracked_.h_norm = (1.0 - alpha) * tracked_.h_norm + alpha * observed.h_norm;
-      tracked_.area_norm = observed.area_norm;
-      tracked_.confidence = observed.confidence;
-    }
+    observation_window_.Add(target, config_.stable_window);
+    const auto mean = observation_window_.Mean().value();
+    const Point2 center = mean.center_rectified ? mean.rectified_center_px : mean.center_px;
+    tracked_.visible = true;
+    tracked_.center_px = center;
+    tracked_.u_norm = Clamp(center.u / Denom(image_width), 0.0, 1.0);
+    tracked_.v_norm = Clamp(center.v / Denom(image_height), 0.0, 1.0);
+    tracked_.h_norm = Clamp(mean.height_px / Denom(image_height), 0.0, 1.0);
+    tracked_.area_norm = Clamp(mean.area_px / Denom(double(image_width)*image_height),0.0,1.0);
+    tracked_.confidence = mean.confidence;
     last_seen_u_norm_ = tracked_.u_norm;
   } else {
+    observation_window_.Add(std::nullopt, config_.stable_window);
     ++lost_count_;
     tracked_.visible = false;
   }
@@ -113,7 +98,8 @@ ActionRequest BallController::FarAction() const {
       true, tracked_.visible,
       tracked_.u_norm - config_.far_u_des_norm,
       config_.approach_u_deadband);
-  return Locomotion(CruiseAction(decision.direction));
+  return Locomotion(ApproachAction(decision.direction,
+      tracked_.v_norm >= config_.approach_short_v_norm));
 }
 
 ActionRequest BallController::FineAction() const {
@@ -136,8 +122,13 @@ ActionRequest BallController::FineAction() const {
     if (u_error > config_.fine_u_deadband)
       return Locomotion(MissionAction::kRightSideStep);
   }
-  if (v_error < -config_.fine_v_deadband)
+  if (v_error < -config_.fine_v_deadband) {
+    if (-v_error >= config_.fine_two_step_v_error_norm)
+      return Locomotion(MissionAction::kStepForwardTwo);
+    if (-v_error >= config_.fine_one_step_v_error_norm)
+      return Locomotion(MissionAction::kStepForwardOne);
     return Locomotion(MissionAction::kStepForwardHalf);
+  }
   if (v_error > config_.fine_v_deadband)
     return Locomotion(MissionAction::kStepBack);
   return {};
@@ -197,13 +188,6 @@ BallResult BallController::Compute(
   case BallMode::kLineFollow:
     return result;
   case BallMode::kApproachBall: {
-    if (lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = BallMode::kBallRecoveryForward;
-      state_enter_sec_ = now_sec;
-      recovery_visible_count_ = 0;
-      result.mode = mode_;
-      return result;
-    }
     const int tilt_hits = static_cast<int>(
         std::count(tilt_history_.begin(), tilt_history_.end(), true));
     camera_trigger_latched_ = camera_trigger_latched_ ||
@@ -216,6 +200,13 @@ BallResult BallController::Compute(
       result.camera_request = CameraRequest::kDown;
       return result;
     }
+    if (lost_count_ >= std::max(1, config_.lost_frames)) {
+      mode_ = BallMode::kBallRecoveryForward;
+      state_enter_sec_ = now_sec;
+      recovery_visible_count_ = 0;
+      result.mode = mode_;
+      return result;
+    }
     result.action = FarAction();
     return result;
   }
@@ -224,8 +215,8 @@ BallResult BallController::Compute(
     if (camera.actual_mode == CameraMode::kDown && camera.settled) {
       ClearTracking();  // Start fine control with fresh DOWN-view evidence.
       last_seen_u_norm_ = config_.far_u_des_norm;
-      mode_ = BallMode::kFineAdjustForPickup;
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
+      mode_ = BallMode::kDownSearch;
+      down_search_started_ = down_search_found_ = false;
       result.tracked = {};
       result.mode = mode_;
       result.camera_request = CameraRequest::kNone;
@@ -235,6 +226,28 @@ BallResult BallController::Compute(
       result.camera_request = CameraRequest::kNone;
     }
     return result;
+  case BallMode::kDownSearch: {
+    down_search_found_ = down_search_found_ || (tracked_.visible && tracked_.stable);
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (down_search_found_) {
+      mode_ = BallMode::kFineAdjustForPickup;
+      ClearTracking();
+      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
+      result.mode = mode_; result.action = {}; return result;
+    }
+    if (!down_search_started_) {
+      result.action = Locomotion(MissionAction::kStepForwardOne);
+      if (!allow_new_body_actions) return result;
+      down_search_started_ = true;
+      state_enter_sec_ = now_sec;
+    }
+    const bool expired = now_sec-state_enter_sec_ >= config_.down_search_timeout_sec;
+    if (expired) {
+      mode_ = BallMode::kFailed; result.mode = mode_; result.action = {}; return result;
+    }
+    result.action = Locomotion(MissionAction::kStepForwardOne);
+    return result;
+  }
   case BallMode::kFineAdjustForPickup:
     if (feedback.action_active && !feedback.action_done) return result;
     if (feedback.action_done) {
@@ -243,9 +256,8 @@ BallResult BallController::Compute(
     }
     if (now_sec + kEpsilon < settle_until_sec_) return result;
     if (lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = BallMode::kBallRecoveryDown;
-      state_enter_sec_ = now_sec;
-      recovery_visible_count_ = 0;
+      mode_ = BallMode::kDownSearch;
+      down_search_started_ = down_search_found_ = false;
       result.mode = mode_;
       return result;
     }
@@ -261,19 +273,15 @@ BallResult BallController::Compute(
   case BallMode::kPickupBall:
     result.action = Mission(MissionAction::kPickBall);
     if (feedback.action_done) {
-      mode_ = BallMode::kVerifyPickup;
-      ClearTracking();
-      result.mode = mode_;
-      result.action = Mission(MissionAction::kRecatch);
+      mode_ = BallMode::kVerifyPickupObservation;
+      ClearTracking(); result.mode = mode_; result.action = {};
     }
     return result;
   case BallMode::kVerifyPickup:
     result.action = Mission(MissionAction::kRecatch);
     if (feedback.action_done) {
-      mode_ = BallMode::kVerifyPickupObservation;
-      ClearTracking();
-      result.mode = mode_;
-      result.action = {};
+      mode_ = BallMode::kStandUpAfterPickup;
+      result.mode = mode_; result.action = Mission(MissionAction::kDefaultPosition);
     }
     return result;
   case BallMode::kVerifyPickupObservation:
@@ -284,10 +292,10 @@ BallResult BallController::Compute(
                                     hit_history_.end(), true)) <
         std::max(1, config_.stable_min_hits)) {
       has_ball_ = true;
-      mode_ = BallMode::kStandUpAfterPickup;
+      mode_ = BallMode::kVerifyPickup;
       result.mode = mode_;
       result.has_ball = true;
-      result.action = Mission(MissionAction::kDefaultPosition);
+      result.action = Mission(MissionAction::kRecatch);
     } else {
       if (pickup_attempt_count_ < std::max(1, config_.pickup_max_attempts)) {
         // 공이 이동했을 수 있으므로 새 위치에서 다시 fine 정렬한다.
@@ -311,6 +319,7 @@ BallResult BallController::Compute(
       if (has_ball_) {
         mode_ = BallMode::kPostPickupBackAway;
         back_away_issued_ = false;
+        completed_back_steps_ = 0;
         result.mode = mode_;
         result.action = Locomotion(MissionAction::kStepBack);
         back_away_issued_ = true;
@@ -324,13 +333,16 @@ BallResult BallController::Compute(
     return result;
   case BallMode::kPostPickupBackAway:
     if (feedback.action_done && back_away_issued_) {
-      mode_ = BallMode::kReturnCameraToLine;
-      result.mode = mode_;
-      result.camera_request = CameraRequest::kForward;
-      return result;
+      ++completed_back_steps_;
+      back_away_issued_ = false;
+      if (completed_back_steps_ >= config_.post_pickup_back_steps) {
+        mode_ = BallMode::kReturnCameraToLine;
+        result.mode = mode_; result.camera_request = CameraRequest::kForward;
+        result.action = {}; return result;
+      }
     }
     result.action = Locomotion(MissionAction::kStepBack);
-    back_away_issued_ = true;
+    if (allow_new_body_actions) back_away_issued_ = true;
     return result;
   case BallMode::kReturnCameraToLine:
     result.camera_request = CameraRequest::kForward;
@@ -389,6 +401,7 @@ void BallController::ClearObservationHistory() {
 }
 
 void BallController::ClearTracking() {
+  observation_window_.Clear();
   hit_history_.clear();
   upper_acquire_history_.clear();
   tilt_history_.clear();
@@ -404,6 +417,8 @@ void BallController::ResetToLine(bool clear_ignore) {
   settle_until_sec_ = 0.0;
   camera_trigger_latched_ = false;
   back_away_issued_ = false;
+  completed_back_steps_ = 0;
+  down_search_started_ = down_search_found_ = false;
   if (clear_ignore) ignore_ball_until_sec_ = 0.0;
   ClearTracking();
 }

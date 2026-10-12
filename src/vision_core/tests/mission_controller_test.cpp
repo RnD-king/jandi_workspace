@@ -31,6 +31,8 @@ static ObjectTarget Ball(double u_norm, double v_norm) {
 }
 int main() {
   auto c=LoadDefaultAlgorithmConfig();
+  c.line_features.image_center_u=320;
+  c.line_p2p.offset_gain=c.line_p2p.heading_gain=1.0;
   c.enable_ball=c.enable_hurdle=c.enable_goal=false;
   MissionController two_point_controller(c);
   auto two_point_input=Frame(0);
@@ -407,8 +409,10 @@ int main() {
   camera_config.initial_has_ball=true;
   camera_config.goal.post_pickup_wait_sec=0;
   camera_config.line.line_stable_window=camera_config.line.line_stable_min_hits=1;
+  camera_config.goal.stable_window=camera_config.goal.stable_min_hits=1;
   MissionController goal_timeout(camera_config);
-  in=Frame(0); r=goal_timeout.Step(in);
+  in=Frame(0); in.backboard_target=Ball(.5,.3); in.backboard_center_depth_m=.7;
+  r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
   in.now_sec=.4; r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
@@ -428,6 +432,7 @@ int main() {
   for (int i = 0; i < 7; ++i) {
     in = Frame(.1 * i);
     in.allow_new_line_action = false;
+    in.backboard_target=Ball(.5,.3); in.backboard_center_depth_m=.7;
     r = camera_gate.Step(in);
   }
   assert(r.active_mission == MissionType::kGoal);
@@ -456,7 +461,7 @@ int main() {
   in.backboard_target = Ball(.8, .3);
   r = camera_gate.Step(in);
   assert(r.active_mission == MissionType::kGoal);
-  assert(r.command.action == MissionAction::kStepForwardRight);
+  assert(r.command.action == MissionAction::kStepForwardRightTwo);
   assert(r.command.action_id != 0);
   // The next OBJECT action must use 10 NEW frames after this actual Action DONE.
   // Its camera remained GOAL throughout, so only the Action event resets evidence.

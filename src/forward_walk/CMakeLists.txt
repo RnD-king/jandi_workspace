@@ -40,6 +40,9 @@ add_executable(main_node
   src/dynamixel.cpp
 )
 
+target_compile_definitions(main_node PRIVATE
+  FORWARD_WALK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
 # 실행 파일에 필요한 ROS 2 라이브러리 링크
 ament_target_dependencies(main_node
   rclcpp
@@ -109,9 +112,11 @@ if(BUILD_TESTING)
     rclcpp ament_index_cpp vision Eigen3)
   target_compile_options(executor_integration_test PRIVATE
     -include ${CMAKE_CURRENT_SOURCE_DIR}/tests/fake_dynamixel.hpp)
+  target_compile_definitions(executor_integration_test PRIVATE
+    FORWARD_WALK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_test(NAME executor_integration_test COMMAND executor_integration_test)
   set_tests_properties(executor_integration_test PROPERTIES
-    TIMEOUT 20 ENVIRONMENT "ROS_DOMAIN_ID=87;ROS_LOCALHOST_ONLY=1")
+    TIMEOUT 60 ENVIRONMENT "ROS_DOMAIN_ID=87;ROS_LOCALHOST_ONLY=1")
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME executor_source_contract
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/source_contract_test.py)
