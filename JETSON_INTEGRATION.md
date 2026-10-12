@@ -4,7 +4,7 @@ Source of truth:
 
 - `src/forward_walk`: unmodified `RnD-king/2026_motion` commit `f477db208c4877f36a4497583f20d976f55fa2d6`, folder `10.13.1/forward_walk`.
 - `src/vision`, `src/vision_core`: this jandi_workspace checkout. `vision/msg/ActionCommand.msg` uses the friend's exact constants and fields.
-- Deployment branch: `feature/forward-walk-10-12-1-integrated-20261011`.
+- Deployment branch: `main`.
 
 The friend executor includes new actions 21–26, modified right-turn manifests, cross-mission READY for the new walks, mission arm transitions and motor-health logging. Preserve the entire package. Its arm behavior remains as supplied by the friend.
 
@@ -20,9 +20,9 @@ BACKUP="$HOME/jandi_backups/unified_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP"
 cp -a src/vision src/forward_walk src/vision_core "$BACKUP/"
 git stash push -u -m 'before unified mission update' -- src/vision src/forward_walk src/vision_core
-git fetch origin feature/forward-walk-10-12-1-integrated-20261011
-git switch feature/forward-walk-10-12-1-integrated-20261011
-git pull --ff-only origin feature/forward-walk-10-12-1-integrated-20261011
+git fetch origin main
+git switch main
+git pull --ff-only origin main
 git rev-parse HEAD
 bash scripts/build_unified.sh /home/rnd/jandi
 source /home/rnd/jandi/install/setup.bash

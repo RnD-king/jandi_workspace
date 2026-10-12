@@ -10,7 +10,7 @@ JANDI="$HOME/jandi_workspace"
 MY_CV="$HOME/my_cv"
 CORE="$HOME/vision_core"
 
-BRANCH="${JANDI_BRANCH:-feature/forward-walk-10-12-1-integrated-20261011}"
+BRANCH="${JANDI_BRANCH:-main}"
 
 SDK_DIR="$MY_CV/install/dynamixel_sdk/share/dynamixel_sdk/cmake"
 
