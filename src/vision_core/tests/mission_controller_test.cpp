@@ -887,7 +887,27 @@ int main() {
   ready_result=no_ready.Step(ready_frame);
   assert(ready_result.post_motion_observing);
   assert(!ready_result.object_ready_mean_used);
-  assert(ready_result.command.action_id==0);
+  // During the 1s stationary window, DONE is deferred and the acknowledged
+  // action's ID remains pending as a HOLD. Zero ID is NOT the contract.
+  assert(ready_result.command.command_type==CommandType::kHold);
+  assert(ready_result.command.action_id==no_ready_id);
+  // The deferred DONE must be consumed only after fresh stationary evidence.
+  for (int i=1;i<=9;++i) {
+    ready_frame=Frame(3.0+i*.1);
+    ready_frame.ball_target=Ball(.5,.8);
+    ready_result=no_ready.Step(ready_frame);
+    assert(ready_result.post_motion_observing);
+    assert(!ready_result.object_ready_mean_used);
+    assert(ready_result.command.command_type==CommandType::kHold);
+    assert(ready_result.command.action_id==no_ready_id);
+  }
+  ready_frame=Frame(4.0);
+  ready_frame.ball_target=Ball(.5,.8);
+  ready_result=no_ready.Step(ready_frame);
+  assert(!ready_result.post_motion_observing);
+  assert(!ready_result.object_ready_mean_used);
+  assert(ready_result.command.action==MissionAction::kStepForwardTwo);
+  assert(ready_result.command.action_id!=no_ready_id);
 
   // HURDLE: four-step mean leads to three-step, observation_complete
   // must be set when consuming verified READY evidence at DONE.
