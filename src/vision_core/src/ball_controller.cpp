@@ -93,14 +93,29 @@ void BallController::UpdateTracker(const std::optional<ObjectTarget> &target,
 }
 
 ActionRequest BallController::FarAction() const {
-  if (tracked_.visible && tracked_.center_px.v >= config_.approach_two_step_v_px)
-    return Locomotion(MissionAction::kStepForwardTwo);
   const CruiseDecision decision = SelectCruiseDecision(
       true, tracked_.visible,
       tracked_.center_px.u - config_.far_u_des_px,
       config_.approach_u_deadband_px);
-  return Locomotion(ApproachAction(decision.direction,
-      tracked_.center_px.v >= config_.approach_short_v_px));
+  if (decision.direction == CruiseDirection::kNone) return {};
+  const double v = tracked_.center_px.v;
+  // Near: rotate in WALK stance until the ball reaches center column;
+  // only center/near issues the final TWO steps and camera DOWN.
+  if (v >= config_.approach_two_step_v_px) {
+    if (decision.direction == CruiseDirection::kLeft)
+      return Locomotion(MissionAction::kStepForwardLeftOne);
+    if (decision.direction == CruiseDirection::kRight)
+      return Locomotion(MissionAction::kStepForwardRightOneHurdle);
+    return Locomotion(MissionAction::kStepForwardTwo);
+  }
+  // 11/12/13 are reserved for normal LINE cruise, not object approach.
+  if (decision.direction == CruiseDirection::kLeft)
+    return Locomotion(MissionAction::kStepForwardLeftTwo);
+  if (decision.direction == CruiseDirection::kRight)
+    return Locomotion(MissionAction::kStepForwardRightTwo);
+  return Locomotion(v >= config_.approach_short_v_px
+                        ? MissionAction::kStepForwardThree
+                        : MissionAction::kStepForwardFour);
 }
 
 ActionRequest BallController::FineAction() const {
