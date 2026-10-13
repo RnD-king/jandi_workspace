@@ -105,6 +105,7 @@ struct MissionFrameResult {
   bool has_ball{false};
   // Diagnostics of post-DONE observations, never counting pre-DONE history.
   bool post_motion_observing{false};
+  bool object_ready_mean_used{false}; // True only on the real object-action DONE.
   std::size_t post_motion_frames{0};
   std::size_t post_motion_window_frames{0};
   int post_motion_valid{0};
@@ -270,6 +271,9 @@ private:
   ActionRequest ComputeMissionLineRecovery(const MissionFrameInput& input,
       const ActionExecutionFeedback& feedback, bool* valid, MissionFrameResult* output);
   bool ShouldDeferDone(const CommandDeliveryFeedback &feedback) const;
+  // Production object approaches: cache 40%-to-READY evidence without
+  // starting an object successor/queue before the current DONE.
+  void TrackMovingObjectReadyWindow(const MissionFrameInput &input);
   void BeginDecisionObservation(double now_sec, MissionType mission,
                                 bool camera_only,
                                 const CommandDeliveryFeedback &done);
@@ -310,6 +314,24 @@ private:
   int last_line_image_width_{0};
   LineP2pController line_p2p_controller_;
   LineGuideAccumulator line_guide_accumulator_;
+  struct MovingObjectSample {
+    double now_sec{0.0};
+    std::optional<ObjectTarget> target;
+    std::optional<double> center_depth_m;
+    GoalPoseObservation pose;
+  };
+  struct MovingObjectReadyMean {
+    std::uint64_t action_id{0};
+    MissionType mission{MissionType::kNone};
+    CameraMode camera{CameraMode::kForward};
+    ObjectTarget target;
+    std::optional<double> center_depth_m;
+    GoalPoseObservation pose;
+  };
+  std::uint64_t moving_object_action_id_{0};
+  CameraMode moving_object_camera_{CameraMode::kForward};
+  std::vector<MovingObjectSample> moving_object_samples_;
+  std::optional<MovingObjectReadyMean> moving_object_ready_mean_;
   std::optional<LineGuide> last_ready_line_guide_;
   std::uint64_t ready_line_action_id_{0};
   bool line_failure_pending_done_{false};
