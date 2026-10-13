@@ -77,6 +77,8 @@ int main() {
     WriteTripleMission(directory/"missions/직진_좌회전_3번.json", left.filename().string());
     WriteTripleMission(directory/"missions/직진_우회전_3번.json", right.filename().string());
     WriteTripleMission(directory/"missions/직진_우회전_2번.json", right.filename().string(),2);
+    WriteTripleMission(directory/"missions/직진_좌회전_1번.json", left.filename().string(),1);
+    WriteTripleMission(directory/"missions/직진_우회전_1번_huddle.json", right.filename().string(),1);
     const std::vector<std::string> options={"executor_integration_test","--ros-args",
         "-p","p2p_asset_directory:="+directory.string(),
         "-p","motor_health_log_directory:="+(directory/"log").string(),
@@ -195,8 +197,8 @@ int main() {
             Check(Count(actions,id,Status::READY)==1,"non-LINE long walk must send READY once");
             Check(!node->queued_action_,"non-LINE READY erroneously queued another action");
         }
-        for(uint16_t code:{14,15,16,17}) Check(!MainNode::UsesFixedGripperPose(code),"task gripper exclusion missing");
-        for(uint16_t code:{1,2,3,7,11,13,18,21,22,23,24,25,26})
+        for(uint16_t code:{14,15,16,17,29,30}) Check(!MainNode::UsesFixedGripperPose(code),"task gripper exclusion missing");
+        for(uint16_t code:{1,2,3,7,11,13,18,21,22,23,24,25,26,27,28})
             Check(MainNode::UsesFixedGripperPose(code),"normal action gripper override missing");
         // 공을 향해 걷기 → 공 잡기 → 다시 걷기에서 action별 팔 목표 전환을 검증한다.
         WriteMotion(directory/"motions/공_줍고일어나기_최종.json");
@@ -271,17 +273,30 @@ int main() {
             Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"new queued walk lost symmetric arms");
         }
         std::cout<<"PASS all six new action ACK/READY/queue/DONE and arm targets\n";
+        // 단일 좌회전/허들 우회전은 JSON을 실행하지만 기존 READY 대상에는 포함되지 않는다.
+        for(uint16_t code:{27,28}) {
+            const uint64_t id=35000+code;
+            action(id,code);
+            pump([&]{return node->action_transactions_.completed.Contains(id);});flush();
+            Check(Count(actions,id,Status::ACK)==1&&Count(actions,id,Status::DONE)==1&&
+                  Count(actions,id,Status::READY)==0, "single-turn action lifecycle mismatch");
+            Check(Dxl::current.at(19)==1968, "single-turn action lost normal gripper override");
+        }
+        std::cout<<"PASS single-turn 27/28 JSON actions without new READY behavior\n";
 
         // 시작 시 읽은 고정값과 다른 RECATCH fixture로 제외 규칙을 검증한다.
         WriteMotion(directory/"motions/공_재그립.json",false,2168);
+        // 새 공 줍기 동작 역시 JSON의 집게손 값을 보존해야 한다.
+        WriteMotion(directory/"motions/공_줍고일어나기_최종_재그립제외.json",false,2168);
+        WriteMotion(directory/"motions/공_줍고일어나기_최종_재그립제외_일어나기.json",false,2168);
         // 제외된 action 모두 원래 JSON의 집게손을 사용한다.
         fs::create_directories(directory/"missions");
-        for(uint16_t code:{14,15,16,17}) {
+        for(uint16_t code:{14,15,16,17,29,30}) {
             const auto file=directory/node->ProgramFileForAction(code);
-            if(code!=15) WriteMotion(file);
+            if(code!=15&&code!=29&&code!=30) WriteMotion(file);
             const uint64_t id=45000+code;
             action(id,code,2);pump([&]{return node->action_transactions_.completed.Contains(id);});flush();
-            Check(Dxl::current.at(19)==(code==15?2168:2048),"task action lost original gripper JSON pose");
+            Check(Dxl::current.at(19)==((code==15||code==29||code==30)?2168:2048),"task action lost original gripper JSON pose");
         }
         // 돌아오는 팔 전환에서도 집게손 기준이 유지되어야 한다.
         action(45050,21,1);pump([&]{return node->action_transactions_.completed.Contains(45050);});flush();
