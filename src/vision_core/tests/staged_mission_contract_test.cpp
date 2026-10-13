@@ -54,6 +54,8 @@ struct Trial {
         : (mission==MissionType::kGoal ? CameraMode::kGoal
                                        : CameraMode::kDown);
     in.camera_feedback={camera,true};
+    if(mission==MissionType::kHurdle && stage<=1)
+      in.line_centers={{410,450},{410,400},{410,350},{410,300},{410,250}};
     in.allow_test_setup_body_actions=true;
     Tick();
     const MissionAction required=stage==3 ? MissionAction::kDefaultPoseMode
