@@ -53,6 +53,22 @@ int main() {
   c.pickup_max_attempts = 2;
   c.recovery_timeout_sec = 5.0; c.recovery_reacquire_min_hits = 1;
   c.recovery_center_tolerance_px = 32.0;
+  // Ball approach grid: NORMAL LINE cruise actions 11/12/13 are forbidden.
+  for (const auto& scenario : std::vector<std::pair<ObjectTarget,MissionAction>>{
+      {Ball(.5,.3),MissionAction::kStepForwardFour},    // zone 2
+      {Ball(.5,.65),MissionAction::kStepForwardThree},  // zone 5
+      {Ball(.5,.8),MissionAction::kStepForwardTwo},     // zone 8
+      {Ball(.3,.8),MissionAction::kStepForwardLeftOne}, // zone 7
+      {Ball(.7,.8),MissionAction::kStepForwardRightOneHurdle}, // zone 9
+      {Ball(.3,.3),MissionAction::kStepForwardLeftTwo},
+      {Ball(.7,.3),MissionAction::kStepForwardRightTwo}}) {
+    BallController grid(c,3.0);
+    const auto v=grid.Compute(scenario.first,640,480,0,{}, {});
+    assert(v.action.action==scenario.second);
+    if (scenario.second==MissionAction::kStepForwardLeftOne ||
+        scenario.second==MissionAction::kStepForwardRightOneHurdle)
+      assert(v.camera_request==CameraRequest::kNone);
+  }
   BallController controller(c, 3.0);
   auto r = controller.Compute(Ball(0.3, 0.3), 640,480, 0, {}, {});
   assert(r.mode == BallMode::kApproachBall);
