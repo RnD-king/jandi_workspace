@@ -216,12 +216,24 @@ install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
 
+# Motor-free manual executor UI (rclpy + tkinter) and its pure protocol model.
+install(PROGRAMS scripts/jandi_mock_executor_ui.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME jandi_mock_executor_ui
+)
+install(FILES scripts/mock_executor_protocol.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 if(BUILD_TESTING)
   enable_testing()
   add_executable(vision_backboard_depth_regions_test tests/backboard_depth_regions_test.cpp)
   target_include_directories(vision_backboard_depth_regions_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(vision_backboard_depth_regions_test ${OpenCV_LIBS})
   add_test(NAME vision_backboard_depth_regions_test COMMAND vision_backboard_depth_regions_test)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME vision_mock_executor_protocol_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_executor_protocol_test.py)
 endif()
 
 ament_package()
