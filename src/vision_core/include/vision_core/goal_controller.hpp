@@ -44,7 +44,8 @@ struct GoalConfig {
   double approach_u_deadband_px{};
   double fine_adjust_start_z_m{};
   double hoop_radius_m{};
-  double throwing_range_m{};
+  double throw_landing_x_m{};
+  double throw_landing_z_m{};
   double position_tolerance_m{};
   double fine_settle_duration_sec{};
   double shoot_yaw_limit_deg{};
@@ -166,6 +167,8 @@ private:
   std::optional<GoalPoseObservation> FinePoseMean() const;
   ActionRequest FineAction(const GoalPoseObservation &pose) const;
   double ComputeShootYawRad(double x_m, double z_m, double yaw_rad) const;
+  double LandingErrorM(double rim_x_m, double rim_z_m, double shoot_yaw_rad) const;
+  double ThrowRangeM() const;
   void ClearTracking();
   ActionRequest SearchRecoveryAction() const;
 
