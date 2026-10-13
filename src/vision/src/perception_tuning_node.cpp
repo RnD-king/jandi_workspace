@@ -2029,6 +2029,12 @@ private:
     const bool continuing_repeat=authorized_repeat_scope_!=0 &&
         mission_controller_->RepeatScope()==authorized_repeat_scope_ && run_state_==RunState::kRunning;
     perception_input.allow_new_body_actions = continuing_repeat;
+    const bool stage_setup_was_pending =
+        dedicated_test_ && mission_controller_->TestSetupPending();
+    // Stage START may automatically run its initial WALK/FINE pose only.
+    perception_input.allow_test_setup_body_actions =
+        stage_setup_was_pending &&
+        (run_state_ == RunState::kRunning || finishing_observation);
     if (finishing_observation && !manual_observation_session_) {
       // START uses this uniform LINE mean. Explicit manual PREVIEW
       // uses MissionController's own 1s object/LINE observation.
@@ -2123,6 +2129,7 @@ private:
     if (preview_ready_) {
       perception_result = preview_result_;
     } else if (manual_wait_preview_ &&
+               !stage_setup_was_pending &&
                !mission_controller_->NeedsStationaryObservation() &&
                !committed_done && !camera_done_edge &&
                !manual_action_active_ && pending_camera_id_ == 0 &&
@@ -2138,7 +2145,8 @@ private:
           finishing_observation &&
           !manual_action_active_ && outstanding_actions_.empty() &&
           pending_camera_id_ == 0 &&
-          perception_input.delivery_feedback.action_id == 0;
+          perception_input.delivery_feedback.action_id == 0 &&
+           !stage_setup_was_pending;
       if (can_capture_fresh &&
           capture_preview(perception_input, bgr)) {
         // Real controller remains poised before its final observation frame;
@@ -2205,6 +2213,7 @@ private:
                     ? ready_window_image_ : bgr);
           }
           if (!captured &&
+              !mission_controller_->TestSetupPending() &&
               pending_camera_id_ == 0 &&
               perception_result.mission.command.camera_request ==
                   vision_core::CameraRequest::kNone)
@@ -2219,7 +2228,8 @@ private:
       if (finishing_observation) {
         run_state_ = RunState::kRunning;
         manual_observation_session_ = false;
-        if (!preview_ready_ && pending_camera_id_ == 0 &&
+        if (!preview_ready_ && !stage_setup_was_pending &&
+            pending_camera_id_ == 0 &&
             perception_result.mission.command.camera_request ==
                 vision_core::CameraRequest::kNone)
           EnterWaitPreview(frame_now_sec);
@@ -2320,10 +2330,26 @@ private:
           set_parameter(rclcpp::Parameter("test_ball_mission_index",mission_result.ball_mission_index+1));
       }
     }
-    if (!preview_ready_ && manual_action_active_)
+    const bool stage_pose_command = dedicated_test_ &&
+        control_command.mission_phase == 903 &&
+        (control_command.action == vision_core::MissionAction::kWalkMode ||
+         control_command.action == vision_core::MissionAction::kDefaultPoseMode);
+    if (!preview_ready_ && (manual_action_active_ || stage_pose_command))
       PublishActionCommand(control_command);
     if (!preview_ready_)
       PublishCameraCommand(control_command.camera_request);
+    if (stage_setup_was_pending && !mission_controller_->TestSetupPending() &&
+        !manual_action_active_ && outstanding_actions_.empty() &&
+        pending_camera_id_ == 0 && run_state_ == RunState::kRunning) {
+      // Stage prep is complete. Clear setup-era evidence and begin a fresh
+      // one-second window automatically; mission actions still need COMMIT.
+      LeaveWaitPreview(frame_now_sec);
+      LeaveWaitCommit(frame_now_sec);
+      manual_observation_request_pending_ = true;
+      manual_observation_session_ = true;
+      observation_required_sec_ = 1.0;
+      BeginFreshObservation(frame_now_sec);
+    }
     ResendPendingCameraDuringPause();
     action_delivery_feedback_ = {};
     // PAUSED is entered only after every sent command has a matching DONE
