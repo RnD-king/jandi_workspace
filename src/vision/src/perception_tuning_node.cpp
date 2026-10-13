@@ -249,6 +249,7 @@ public:
     declare_parameter<double>("goal_hoop_radius_m", algorithm_defaults.goal.hoop_radius_m);
     declare_parameter<double>("goal_throwing_range_m", algorithm_defaults.goal.throwing_range_m);
     declare_parameter<double>("goal_position_tolerance_m", algorithm_defaults.goal.position_tolerance_m);
+    declare_parameter<double>("goal_shoot_yaw_limit_deg", algorithm_defaults.goal.shoot_yaw_limit_deg);
     declare_parameter<double>("camera_motion_timeout_sec", algorithm_defaults.camera_motion_timeout_sec);
 
     image_topic_ = get_parameter("image_topic").as_string();
@@ -338,6 +339,8 @@ public:
         get_parameter("goal_throwing_range_m").as_double();
     goal_cmd_cfg.position_tolerance_m =
         get_parameter("goal_position_tolerance_m").as_double();
+    goal_cmd_cfg.shoot_yaw_limit_deg =
+        get_parameter("goal_shoot_yaw_limit_deg").as_double();
     ball_cmd_cfg.far_u_des_px = get_parameter("ball_far_u_des_px").as_double();
     ball_cmd_cfg.approach_u_deadband_px = get_parameter("ball_approach_u_deadband_px").as_double();
     ball_cmd_cfg.upper_acquire_v_px = get_parameter("ball_upper_acquire_v_px").as_double();
@@ -467,14 +470,16 @@ public:
     start_service_ = create_service<std_srvs::srv::Trigger>(
         ServiceName("start"), [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          const bool goal_stage_one = dedicated_test_ && algorithm_mode_ == "goal" &&
+                                      tuning_config_.test_stage == 1;
           if (run_state_ != RunState::kWaitStart || !mission_controller_->FeetReadyToStart() || pending_camera_id_ != 0 ||
               !outstanding_actions_.empty() || !outstanding_cameras_.empty() ||
               manual_action_active_ || preview_ready_ ||
               !camera_feedback_.settled ||
-              (!(dedicated_test_ && tuning_config_.test_stage>=2) &&
+              (!(dedicated_test_ && (tuning_config_.test_stage>=2 || goal_stage_one)) &&
                camera_feedback_.actual_mode != vision_core::CameraMode::kForward)) {
             response->success = false;
-            response->message = "START requires WAIT_START, known foot stance and settled camera (FORWARD for full/far test)";
+            response->message = "START requires WAIT_START, known foot stance and settled camera (FORWARD for full/non-GOAL far test)";
             return;
           }
           authorized_repeat_scope_=0; trial_finished_=false;
@@ -879,6 +884,10 @@ private:
       else if (name == "goal_fine_adjust_start_z_m") target = &candidate.goal.fine_adjust_start_z_m;
       else if (name == "goal_throwing_range_m") target = &candidate.goal.throwing_range_m;
       else if (name == "goal_position_tolerance_m") target = &candidate.goal.position_tolerance_m;
+      else if (name == "goal_hoop_radius_m") target = &candidate.goal.hoop_radius_m;
+      else if (name == "goal_shoot_yaw_limit_deg") target = &candidate.goal.shoot_yaw_limit_deg;
+      else if (name == "backboard_min_depth_m") target = &candidate.backboard_min_depth_m;
+      else if (name == "backboard_max_depth_m") target = &candidate.backboard_max_depth_m;
       else if (name == "hurdle_upper_acquire_v_px") target = &candidate.hurdle.upper_acquire_v_px;
       else if (name == "hurdle_approach_two_step_v_px") target = &candidate.hurdle.approach_two_step_v_px;
       if (!target) continue;
@@ -932,17 +941,20 @@ private:
       // WAIT_PREVIEW has no frozen evidence; never accidentally advance a
       // speculative FSM on a zero-dimension/default PerceptionFrameInput.
       std::optional<vision_core::PerceptionMissionFrameResult> updated;
-      const bool depth_region_changed=candidate.backboard_depth_strip_width_px!=backboard_depth_strip_width_px_;
-      if (preview_ready_ && !depth_region_changed)
+      const bool depth_observation_changed =
+          candidate.backboard_depth_strip_width_px != backboard_depth_strip_width_px_ ||
+          candidate.backboard_min_depth_m != tuning_config_.backboard_min_depth_m ||
+          candidate.backboard_max_depth_m != tuning_config_.backboard_max_depth_m;
+      if (preview_ready_ && !depth_observation_changed)
         updated = trial_controller.PreviewPerception(trial_input);
       *mission_controller_ = std::move(trial_controller);
       tuning_config_ = candidate;
       backboard_depth_strip_width_px_=candidate.backboard_depth_strip_width_px;
-      if (preview_ready_ && depth_region_changed) {
+      if (preview_ready_ && depth_observation_changed) {
         LeaveWaitCommit(get_clock()->now().seconds());
         preview_ready_=false; preview_command_={}; preview_image_.release();
         EnterWaitPreview(get_clock()->now().seconds());
-        RCLCPP_INFO(get_logger(),"Depth regions changed: fresh PREVIEW required");
+        RCLCPP_INFO(get_logger(),"Depth sampling/filter changed: fresh PREVIEW required");
       } else if (preview_ready_) {
         preview_input_ = std::move(trial_input);
         preview_result_ = *updated;
