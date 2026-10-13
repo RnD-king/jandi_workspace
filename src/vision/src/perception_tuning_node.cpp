@@ -2679,8 +2679,9 @@ private:
           } else {
             tune_line(518, "far u-target: --", muted);
           }
-          std::snprintf(buf, sizeof(buf), "SHOOT range=%.3fm  tolerance=%.3fm  yaw limit=%.1fdeg",
-              gc.throwing_range_m, gc.position_tolerance_m, gc.shoot_yaw_limit_deg);
+          std::snprintf(buf, sizeof(buf), "SHOOT 0deg landing=(%+.1f,%.1f)cm  tol=%.1fcm  limit=%.0fdeg",
+              100.0*gc.throw_landing_x_m, 100.0*gc.throw_landing_z_m,
+              100.0*gc.position_tolerance_m, gc.shoot_yaw_limit_deg);
           tune_line(546, buf, text_color);
           const auto &fine = goal_cmd.fine_decision_pose;
           if (selected_goal && goal_cmd.fine_decision_pose_used && fine.valid &&
@@ -2691,18 +2692,27 @@ private:
             const double rim_x = fine.x_m + gc.hoop_radius_m * std::sin(fine.yaw_rad);
             const double rim_z = fine.z_m - gc.hoop_radius_m * std::cos(fine.yaw_rad);
             const double distance = std::hypot(rim_x, rim_z);
-            const double error = distance - gc.throwing_range_m;
-            const double shoot_yaw_deg = distance > 1e-9
-                ? -std::atan2(rim_x, rim_z) * 180.0 / M_PI : 0.0;
-            std::snprintf(buf, sizeof(buf), "fine input x=%+.4fm  z=%.4fm  yaw=%+.2fdeg",
-                fine.x_m, fine.z_m, fine.yaw_rad * 180.0 / M_PI);
+            const double throw_range = std::hypot(gc.throw_landing_x_m, gc.throw_landing_z_m);
+            const double range_error = distance - throw_range;
+            const double shoot_yaw_rad = distance > 1e-9
+                ? std::atan2(gc.throw_landing_x_m, gc.throw_landing_z_m)
+                    - std::atan2(rim_x, rim_z) : 0.0;
+            const double shoot_yaw_deg = shoot_yaw_rad * 180.0 / M_PI;
+            const double cosine = std::cos(shoot_yaw_rad), sine = std::sin(shoot_yaw_rad);
+            const double land_x = cosine*gc.throw_landing_x_m-sine*gc.throw_landing_z_m;
+            const double land_z = sine*gc.throw_landing_x_m+cosine*gc.throw_landing_z_m;
+            const double position_error = std::hypot(rim_x-land_x, rim_z-land_z);
+            std::snprintf(buf, sizeof(buf),
+                "board=(%+.1f,%.1f)cm yaw=%+.1fdeg  rim=(%+.1f,%.1f)cm",
+                100.0*fine.x_m,100.0*fine.z_m,fine.yaw_rad*180.0/M_PI,
+                100.0*rim_x,100.0*rim_z);
             tune_line(574, buf, goal_color);
             std::snprintf(buf, sizeof(buf),
-                "rim distance=%.4fm  |  error=%+.4fm  |  band=[%+.4f,%+.4f]m",
-                distance, error, -gc.position_tolerance_m, gc.position_tolerance_m);
-            tune_line(602, buf, std::abs(error) <= gc.position_tolerance_m
+                "land=(%+.1f,%.1f)cm  2D err=%.2fcm  radial err=%+.2fcm",
+                100.0*land_x,100.0*land_z,100.0*position_error,100.0*range_error);
+            tune_line(602, buf, position_error <= gc.position_tolerance_m
                 ? line_color : ball_color);
-            std::snprintf(buf, sizeof(buf), "shoot yaw=%+.2fdeg  |  band=[%+.1f,%+.1f]deg",
+            std::snprintf(buf, sizeof(buf), "shoot yaw=%+.2fdeg  |  limit=[%+.1f,%+.1f]deg",
                 shoot_yaw_deg, -gc.shoot_yaw_limit_deg, gc.shoot_yaw_limit_deg);
             tune_line(630, buf, goal_color);
           } else {
@@ -2714,7 +2724,7 @@ private:
             } else {
               tune_line(574, "fine input x/z/yaw: --", muted);
             }
-            tune_line(602, "rim distance / range error: --", muted);
+            tune_line(602, "predicted landing / 2D error: --", muted);
             tune_line(630, "shoot yaw: --", muted);
           }
 
