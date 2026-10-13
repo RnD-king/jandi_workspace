@@ -131,6 +131,13 @@ int main() {
   assert(r.foot_pose==FootPose::kFine);
   in=Frame(2.4); in.line_centers.clear();
   r=controller.Step(in);
+  // DEFAULT_POSE_MODE DONE starts a fresh 1s stationary observation window.
+  // Never start turning while that post-pose window is active.
+  assert(r.post_motion_observing);
+  assert(r.command.action==MissionAction::kNone);
+  in=Frame(3.4); in.line_centers.clear();
+  r=controller.Step(in);
+  assert(!r.post_motion_observing);
   assert(r.command.action==MissionAction::kTurnLeft);
   assert(r.command.target_yaw_deg==15);
 
@@ -213,11 +220,15 @@ int main() {
   r=turning.Step(in);
   assert(r.foot_pose==FootPose::kFine);
   in=Frame(.3); in.line_centers.clear(); r=turning.Step(in);
+  assert(r.post_motion_observing);
+  assert(r.command.action==MissionAction::kNone);
+  in=Frame(1.3); in.line_centers.clear(); r=turning.Step(in);
+  assert(!r.post_motion_observing);
   for (int turn=1; turn<=5; ++turn) {
     assert(r.command.action==MissionAction::kTurnLeft);
     assert(r.command.target_yaw_deg==15);
     action_id=r.command.action_id;
-    const double done_time=.3+turn*.2-.1;
+    const double done_time=1.3+turn*.2-.1;
     in=Frame(done_time); in.line_centers.clear();
     in.delivery_feedback={action_id,true,true,false};
     r=turning.Step(in);
