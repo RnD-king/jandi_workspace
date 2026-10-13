@@ -997,10 +997,17 @@ private:
     return "ONE ACTION";
   }
   static bool IsReadyWalk(vision_core::MissionAction action) {
-    return action == vision_core::MissionAction::kStepForwardLeft ||
-           action == vision_core::MissionAction::kStepForwardFive ||
-           action == vision_core::MissionAction::kStepForwardRight ||
-           (static_cast<int>(action)>=21 && static_cast<int>(action)<=26);
+    using vision_core::MissionAction;
+    // Keep long LINE 11/12/13, and object approaches: straight 3/4
+    // and directional approach 24/25 (both are two-step turning walks).
+    // Straight 1/2 (10/21) and short right-one (26) must observe after DONE.
+    return action == MissionAction::kStepForwardLeft ||
+           action == MissionAction::kStepForwardFive ||
+           action == MissionAction::kStepForwardRight ||
+           action == MissionAction::kStepForwardThree ||
+           action == MissionAction::kStepForwardFour ||
+           action == MissionAction::kStepForwardLeftTwo ||
+           action == MissionAction::kStepForwardRightTwo;
   }
   static bool IsFixedSuccessor(vision_core::MissionType mission,
                               vision_core::MissionAction action) {
