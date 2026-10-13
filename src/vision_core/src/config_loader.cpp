@@ -1,5 +1,6 @@
 #include "vision_core/config_loader.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
@@ -102,6 +103,29 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.mission_recovery_max_turns,"mission.mission_recovery_max_turns");
   PositiveInt(c.mission_recovery_yaw_deg,"mission.mission_recovery_yaw_deg");
   if (c.mission_recovery_yaw_deg>180) throw std::runtime_error("recovery yaw exceeds 180 degrees");
+  // An invalid ID would never receive READY from forward_walk. Reject such
+  // YAML errors at startup rather than silently doing a post-DONE fallback.
+  const std::array<int, 9> ready_capable_actions = {
+      static_cast<int>(MissionAction::kStepForwardLeft),
+      static_cast<int>(MissionAction::kStepForwardRight),
+      static_cast<int>(MissionAction::kStepForwardFive),
+      static_cast<int>(MissionAction::kStepForwardTwo),
+      static_cast<int>(MissionAction::kStepForwardThree),
+      static_cast<int>(MissionAction::kStepForwardFour),
+      static_cast<int>(MissionAction::kStepForwardLeftTwo),
+      static_cast<int>(MissionAction::kStepForwardRightTwo),
+      static_cast<int>(MissionAction::kStepForwardRightOne)};
+  for (std::size_t i = 0; i < c.object_ready_mean_actions.size(); ++i) {
+    const int action = c.object_ready_mean_actions[i];
+    if (std::find(ready_capable_actions.begin(), ready_capable_actions.end(),
+                  action) == ready_capable_actions.end())
+      throw std::runtime_error(
+          "mission.object_ready_mean_actions contains an action without READY support");
+    if (std::find(c.object_ready_mean_actions.begin(),
+                  c.object_ready_mean_actions.begin() + i, action) !=
+        c.object_ready_mean_actions.begin() + i)
+      throw std::runtime_error("mission.object_ready_mean_actions has duplicate action IDs");
+  }
 
   PositiveInt(c.line_features.max_centers, "line_features.max_centers");
   if (c.line_features.guide_min_points < 3 ||
@@ -435,6 +459,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   Assign(m, "camera_motion_timeout_sec", c.camera_motion_timeout_sec);
   Assign(m, "post_motion_observation_sec", c.post_motion_observation_sec);
+  Assign(m, "object_ready_mean_actions", c.object_ready_mean_actions);
   Assign(m, "backboard_min_depth_m", c.backboard_min_depth_m);
   Assign(m, "backboard_max_depth_m", c.backboard_max_depth_m);
   Assign(m, "enable_ball", c.enable_ball);
