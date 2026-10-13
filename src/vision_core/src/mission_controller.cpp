@@ -671,24 +671,42 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     PopulateDiagnostics(output,input.now_sec); return output;
   }
   if (test_setup_pending_) {
-    const CameraMode wanted=config_.test_mission==MissionType::kGoal ? CameraMode::kGoal : CameraMode::kDown;
+    const CameraMode wanted = config_.test_stage == 0 ||
+            (config_.test_stage == 1 && config_.test_mission != MissionType::kGoal)
+        ? CameraMode::kForward
+        : (config_.test_mission == MissionType::kGoal
+            ? CameraMode::kGoal : CameraMode::kDown);
     const bool camera_ready=input.camera_feedback.settled && input.camera_feedback.actual_mode==wanted;
+    const MissionAction initial_pose = config_.test_stage == 3
+        ? MissionAction::kDefaultPoseMode : MissionAction::kWalkMode;
+    if (pose_done && last_command_.action == initial_pose)
+      test_setup_pose_done_ = true;
     CameraRequest camera_request=CameraRequest::kNone;
     ActionRequest pose;
     if (!camera_ready && input.allow_new_commands) {
       if (!test_setup_camera_started_) { test_setup_camera_started_=true; test_setup_camera_start_sec_=input.now_sec; }
       if (input.now_sec-test_setup_camera_start_sec_>=config_.camera_motion_timeout_sec) test_failed_=true;
     }
-    if (!camera_ready) camera_request=wanted==CameraMode::kGoal ? CameraRequest::kGoal : CameraRequest::kDown;
-    else if (config_.test_stage==3 && foot_pose_!=FootPose::kFine)
-      pose={MissionAction::kDefaultPoseMode,ActionCategory::kLocomotion,0,false};
-    else if ((config_.test_stage==2 ||
-              (config_.test_stage==1 && config_.test_mission==MissionType::kGoal)) &&
-             foot_pose_!=FootPose::kWalk)
-      pose={MissionAction::kWalkMode,ActionCategory::kLocomotion,0,false};
-    else {
+    if (!camera_ready)
+      camera_request=wanted==CameraMode::kGoal ? CameraRequest::kGoal :
+          wanted==CameraMode::kDown ? CameraRequest::kDown : CameraRequest::kForward;
+    if (!test_setup_pose_done_)
+      pose={initial_pose,ActionCategory::kLocomotion,0,false};
+    if (camera_ready && test_setup_pose_done_) {
       test_setup_pending_=false; ClearObservationEvidence();
-      if (config_.test_mission==MissionType::kBall) {
+      test_entry_pending_ = config_.test_stage <= 1 &&
+          config_.test_mission != MissionType::kGoal;
+      if (config_.test_stage <= 1) {
+        if (config_.test_mission == MissionType::kGoal) {
+          if (config_.test_stage == 0) {
+            goal_controller_.StartForwardTrial();
+            goal_result_.mode=GoalMode::kForwardApproach;
+          } else {
+            goal_controller_.StartTestNear();
+            goal_result_.mode=GoalMode::kWaitCameraGoal;
+          }
+        }
+      } else if (config_.test_mission==MissionType::kBall) {
         if (config_.test_stage==2) ball_controller_.StartTestNear(); else ball_controller_.StartTestExecute();
         ball_result_.mode=config_.test_stage==2 ? BallMode::kWaitCameraDown : BallMode::kFineAdjustForPickup;
       } else if (config_.test_mission==MissionType::kHurdle) {
@@ -1581,6 +1599,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   reset_camera_command_sent_=false;
   reset_walk_done_=false;
   test_setup_camera_started_=test_failed_=false;
+  test_setup_pose_done_=false;
   fresh_after_search_=test_setup_pending_=test_entry_pending_=test_execution_started_=false;
   goal_trial_complete_=false;
   ball_mission_index_=config_.test_ball_mission_index-1;
@@ -1672,8 +1691,7 @@ void MissionController::InitializeTest() {
   ball_result_={}; hurdle_result_={}; goal_result_={};
   test_execution_started_=false;
   // GOAL stage 1 begins in the GOAL camera and approaches until close-walk entry.
-  test_setup_pending_=config_.test_stage>=2 ||
-      (config_.test_mission==MissionType::kGoal && config_.test_stage==1);
+  test_setup_pending_=true;
   test_entry_pending_=!test_setup_pending_ && active_mission_!=MissionType::kGoal;
   has_ball_=active_mission_==MissionType::kGoal;
   if (active_mission_==MissionType::kBall) ball_mission_index_=config_.test_ball_mission_index;
