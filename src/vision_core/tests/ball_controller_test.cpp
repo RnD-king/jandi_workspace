@@ -111,7 +111,7 @@ int main() {
   // never the initial blind-forward search or a new camera movement.
   BallController recovery(c, 3.0);
   r = recovery.Compute(Ball(0.3, 0.3), 640,480, 0, {}, {});
-  r = recovery.Compute(Ball(0.3, 0.8), 640,480, .1, {}, done);
+  r = recovery.Compute(Ball(0.5, 0.8), 640,480, .1, {}, done);
   assert(r.action.action==MissionAction::kStepForwardTwo);
   recovery.Compute({},640,480,.11,{},done);
   r = recovery.Compute(Ball(0.3, 0.6), 640,480, .2, down, {});
