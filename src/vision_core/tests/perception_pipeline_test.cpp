@@ -22,6 +22,9 @@ MissionControllerConfig BallPipelineConfig() {
   c.enable_hurdle=c.enable_goal=false;
   c.ball.smooth_alpha=1.0; c.ball.fine_settle_duration_sec=.6;
   c.ball.upper_acquire_v_px=480.0;
+  // Exercise the historical pickup rectangle independently of YAML tuning.
+  c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
+  c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
   c.object_association.max_center_distance_norm=.1;
   return c;
 }
