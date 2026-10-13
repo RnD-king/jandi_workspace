@@ -256,7 +256,7 @@
       "duration_sec": 0.1,
       "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 400,
+      "max_speed_deg_s": 80,
       "name": "재그립_벌리기",
       "positions": {
         "0": 2076,
