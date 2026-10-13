@@ -90,7 +90,8 @@ ROS 어댑터 설정은 `config/vision_params.yaml`에 둔다.
   일반 LINE 인식 실패 후의 2초 정지 관측은 그대로 유지한다.
 - HURDLE 최초 안정 검출은 10/7이며, DOWN 카메라 이후의 고정
   `STEP_FORWARD_ONE → HUDDLE` 연속 시퀀스에는 10/7 재확인을 요구하지 않는다.
-  PICK_BALL → RECATCH, SHOOT → FORWARD 등 고정 시퀀스도 대기 예외다.
+  PICK_BALL 뒤 잔존 공을 확인하며, 확인 후 DEFAULT_POSITION과
+  SHOOT → FORWARD 같은 고정 후속 동작은 대기 예외다.
 - 노드는 실제 ROS Camera/Action DONE 수신 시각을 기록하고,
   이를 기준으로 촬영 시각(header.stamp)이 더 오래된 RGB 프레임을
   추론/FSM에 전달하지 않는다. 카메라와 ROS 시간의 시계 일치가 전제다.

@@ -138,12 +138,9 @@ Trial PickAndBack() {
   t.Commit(); assert(t.out.command.action==MissionAction::kPickBall);
   t.in.ball_target.reset(); t.Tick(true);
   assert(t.out.ball.mode==BallMode::kVerifyPickupObservation);
-  assert(t.out.command.action_id==0); // RECATCH must not precede verification.
+  assert(t.out.command.action_id==0); // Finish verification before the next action.
   for(int i=0;i<10;++i)t.Tick();
   assert(t.out.ball.has_ball && t.out.command.action_id==0);
-  assert(t.Preview().command.action==MissionAction::kRecatch);
-  t.Commit(); t.Tick(true);
-  assert(t.out.command.action_id==0); // DEFAULT requires another commit.
   assert(t.Preview().command.action==MissionAction::kDefaultPosition);
   t.Commit(); t.Tick(true);
   assert(t.out.ball.mode==BallMode::kPostPickupBackAway && t.permit==0);

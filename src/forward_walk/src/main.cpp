@@ -305,7 +305,7 @@ private:
             return "missions/직진_4걸음.json";
             
         case vision::msg::ActionCommand::PICK_BALL:
-            return "motions/공_줍고일어나기.json";
+            return "motions/공_줍고일어나기_최종.json";
 
         case vision::msg::ActionCommand::RECATCH:
             return "motions/공_재그립.json";

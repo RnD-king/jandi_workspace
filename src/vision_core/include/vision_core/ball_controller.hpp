@@ -15,8 +15,7 @@ enum class BallMode {
   kWaitCameraDown,
   kFineAdjustForPickup,
   kPickupBall,
-  kVerifyPickup,
-  kVerifyPickupObservation,
+  kVerifyPickupObservation = 6, // Keep later phase IDs stable after removing RECATCH.
   kStandUpAfterPickup,
   kPostPickupBackAway,
   kReturnCameraToLine,

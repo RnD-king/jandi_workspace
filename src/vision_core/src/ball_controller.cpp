@@ -34,7 +34,6 @@ const char *BallController::ModeName(BallMode mode) {
   case BallMode::kWaitCameraDown: return "BALL_CAMERA_DOWN";
   case BallMode::kFineAdjustForPickup: return "BALL_FINE";
   case BallMode::kPickupBall: return "BALL_PICKUP";
-  case BallMode::kVerifyPickup: return "BALL_VERIFY";
   case BallMode::kVerifyPickupObservation: return "BALL_VERIFY_OBSERVE";
   case BallMode::kStandUpAfterPickup: return "BALL_STAND_UP";
   case BallMode::kPostPickupBackAway: return "BALL_BACK_AWAY";
@@ -307,13 +306,6 @@ BallResult BallController::Compute(
       ClearTracking(); result.mode = mode_; result.action = {};
     }
     return result;
-  case BallMode::kVerifyPickup:
-    result.action = Mission(MissionAction::kRecatch);
-    if (feedback.action_done) {
-      mode_ = BallMode::kStandUpAfterPickup;
-      result.mode = mode_; result.action = Mission(MissionAction::kDefaultPosition);
-    }
-    return result;
   case BallMode::kVerifyPickupObservation:
     if (static_cast<int>(hit_history_.size()) <
         std::max(1, config_.stable_window))
@@ -322,10 +314,10 @@ BallResult BallController::Compute(
                                     hit_history_.end(), true)) <
         std::max(1, config_.stable_min_hits)) {
       has_ball_ = true;
-      mode_ = BallMode::kVerifyPickup;
+      mode_ = BallMode::kStandUpAfterPickup;
       result.mode = mode_;
       result.has_ball = true;
-      result.action = Mission(MissionAction::kRecatch);
+      result.action = Mission(MissionAction::kDefaultPosition);
     } else {
       if (pickup_attempt_count_ < std::max(1, config_.pickup_max_attempts)) {
         // 공이 이동했을 수 있으므로 새 위치에서 다시 fine 정렬한다.

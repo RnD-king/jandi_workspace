@@ -175,8 +175,8 @@ void TestVerificationSixHitsSucceeds() {
   pipeline.Tick({});
   assert(pipeline.result.mission.ball.has_ball);
   assert(!pipeline.result.mission.ball.pickup_failed);
-  assert(pipeline.result.mission.ball.mode==BallMode::kVerifyPickup);
-  assert(pipeline.result.mission.command.action==MissionAction::kRecatch);
+  assert(pipeline.result.mission.ball.mode==BallMode::kStandUpAfterPickup);
+  assert(pipeline.result.mission.command.action==MissionAction::kDefaultPosition);
 }
 void TestBackboardValidDepthCanBeRetuned() {
   auto c=LoadDefaultAlgorithmConfig();

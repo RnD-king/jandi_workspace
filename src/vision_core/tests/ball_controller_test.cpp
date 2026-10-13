@@ -112,16 +112,16 @@ int main() {
 
   // pickup 성공 뒤 STEP_BACK 완료 시 즉시 camera-forward 단계로 넘어가며
   // 같은 back-away action을 다시 발행하지 않는다.
-  r = controller.Compute(std::nullopt, 640,480, .9, down, done);
-  r = controller.Compute(std::nullopt, 640,480, 1.0, down, done);
+  r = controller.Compute(std::nullopt, 640,480, .9, down, {});
   assert(r.action.action == MissionAction::kDefaultPosition);
-  r = controller.Compute(std::nullopt, 640,480, 1.1, down, done);
+  assert(r.mode == BallMode::kStandUpAfterPickup && r.has_ball);
+  r = controller.Compute(std::nullopt, 640,480, 1.0, down, done);
   assert(r.action.action == MissionAction::kStepBack);
-  r = controller.Compute(std::nullopt, 640,480, 1.2, down, done);
+  r = controller.Compute(std::nullopt, 640,480, 1.1, down, done);
+  assert(r.action.action==MissionAction::kStepBack);
+  r = controller.Compute(std::nullopt,640,480,1.2,down,done);
   assert(r.action.action==MissionAction::kStepBack);
   r = controller.Compute(std::nullopt,640,480,1.3,down,done);
-  assert(r.action.action==MissionAction::kStepBack);
-  r = controller.Compute(std::nullopt,640,480,1.4,down,done);
   assert(r.action.action == MissionAction::kNone);
   assert(r.camera_request == CameraRequest::kForward);
 
@@ -190,9 +190,9 @@ int main() {
   assert(r.mode == BallMode::kVerifyPickupObservation);
   assert(!r.has_ball && !r.pickup_failed);
   r = six_hits.Compute(std::nullopt, 640,480, 22.9, down, {});
-  assert(r.mode == BallMode::kVerifyPickup);
+  assert(r.mode == BallMode::kStandUpAfterPickup);
   assert(r.has_ball && !r.pickup_failed);
-  assert(r.action.action == MissionAction::kRecatch);
+  assert(r.action.action == MissionAction::kDefaultPosition);
 
   // Fine retries preserve attempt count and never permit a fourth PICK.
   verify_config.pickup_max_attempts = 3;

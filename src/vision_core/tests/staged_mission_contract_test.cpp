@@ -245,7 +245,7 @@ void ExecuteStageCompletesRecovery(MissionType mission) {
   assert(t.out.foot_pose==FootPose::kWalk && t.out.command.action_id==0);
   assert(walk_pose==1 && forward_camera);
   if(mission==MissionType::kBall)
-    assert(picked==1 && recaught==1 && stood==1 && backed==3 && turned>=1);
+    assert(picked==1 && recaught==0 && stood==1 && backed==3 && turned>=1);
   else if(mission==MissionType::kGoal)
     assert(shot==1 && backed==2 && turned>=1);
   else

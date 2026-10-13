@@ -47,8 +47,9 @@ current DONE 뒤 queued action을 시작한다. [LINE OBS] 로그에 사용 프�
 ## Mission 요약
 
 - BALL: 원거리 direct cruise → 카메라 DOWN → lateral 우선 fine → 전후 보정
-  → PICK_BALL → 한 번 STEP_BACK → 카메라 FORWARD → LINE recovery
-  (RECATCH 후 10-frame verification에서 7회 이상 검출되면 남은 attempt에
+  → PICK_BALL(내부 재그립) → 잔존 공 확인 → 기본 자세 → STEP_BACK 3회
+  → 카메라 FORWARD → LINE recovery
+  (PICK_BALL 후 10-frame verification에서 7회 이상 검출되면 남은 attempt에
   한해 FineAdjust로 복귀한다. 이 관찰 상태에서만 association 없이 raw 최상위
   ball 후보를 사용하며, 다음 일반 tracking은 새 identity를 acquire한다.)
 - HURDLE: F5 반복 → raw v 0.75, 10-window/7-hit latch → 현재 action DONE
