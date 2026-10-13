@@ -285,7 +285,6 @@ void MissionController::TrackMovingObjectReadyWindow(
   }
   if (moving_object_action_id_ != last_command_.action_id) {
     moving_object_action_id_ = last_command_.action_id;
-    moving_object_mission_ = active_mission_;
     moving_object_camera_ = input.camera_feedback.actual_mode;
     moving_object_samples_.clear();
     moving_object_ready_mean_.reset();
@@ -661,6 +660,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   }
   const int incoming_repeat_scope=RepeatScope();
   MissionFrameResult output;
+  output.object_ready_mean_used=applied_object_ready_mean;
   if (goal_trial_complete_ || test_failed_) {
     output.trial_complete=goal_trial_complete_; output.goal_mission_index=std::max(1,goal_mission_index_);
     output.ball_mission_index=std::max(1,ball_mission_index_);
