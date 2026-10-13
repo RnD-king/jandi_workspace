@@ -434,8 +434,8 @@ public:
           observation_accumulator_.Reset();
           run_state_ = RunState::kResetting;
           DrivePhysicalReset();
-          // Preserve next_camera_id_, actual camera_feedback_ and last
-          // completion timestamps. RESET never moves motors or camera.
+          // Preserve unique IDs and completion timestamps. The physical
+          // reset explicitly commands WALK stance and FORWARD camera.
           {
             std::lock_guard<std::mutex> lock(image_mutex_);
             latest_image_.reset();
