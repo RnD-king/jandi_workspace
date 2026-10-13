@@ -15,6 +15,25 @@ int main() {
   c.approach_two_step_v_px = 360.0;
   CruiseDecision straight; straight.applicable=true;
   straight.direction=CruiseDirection::kStraight;
+  CruiseDecision left = straight, right = straight, missing = straight;
+  left.direction=CruiseDirection::kLeft;
+  right.direction=CruiseDirection::kRight;
+  missing.direction=CruiseDirection::kNone;
+  for (const auto& scenario : std::vector<std::pair<double,MissionAction>>{
+      {.5,MissionAction::kStepForwardLeftTwo},
+      {.7,MissionAction::kStepForwardLeftOne},
+      {.8,MissionAction::kStepForwardLeftOne}}) {
+    HurdleController grid(c,3.0);
+    const auto v=grid.Compute(H(scenario.first),640,480,0,{}, {},left);
+    assert(v.action.action==scenario.second);
+    assert(v.camera_request==CameraRequest::kNone);
+  }
+  HurdleController right_near(c,3.0);
+  assert(right_near.Compute(H(.8),640,480,0,{}, {},right).action.action==
+         MissionAction::kStepForwardRightOneHurdle);
+  HurdleController invalid_line(c,3.0);
+  assert(invalid_line.Compute(H(.5),640,480,0,{}, {},missing).action.action==
+         MissionAction::kNone);
   HurdleController controller(c, 3.0);
   auto r = controller.Compute(H(0.5), 640,480, 0, {}, {}, straight);
   assert(r.mode == HurdleMode::kApproach);
