@@ -25,6 +25,10 @@ void Assign(const YAML::Node &node, const char *key, T &value) {
                              key + "': " + error.what());
   }
 }
+void Finite(double value, const char *key) {
+  if (!std::isfinite(value))
+    throw std::runtime_error(std::string("vision algorithm key '") + key + "' must be finite");
+}
 void Nonnegative(double value, const char *key) {
   if (!std::isfinite(value) || value < 0.0)
     throw std::runtime_error(std::string("vision algorithm key '") + key +
