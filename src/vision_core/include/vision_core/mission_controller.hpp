@@ -313,6 +313,7 @@ private:
   bool test_entry_pending_{false}, test_setup_pending_{false}, test_execution_started_{false};
   bool fresh_after_search_{false};
   bool test_setup_camera_started_{false}, test_failed_{false};
+  bool test_setup_pose_done_{false};
   double test_setup_camera_start_sec_{0};
   FootPose foot_pose_{FootPose::kWalk};
   bool pose_change_pending_{false};
