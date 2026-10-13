@@ -1931,7 +1931,7 @@ private:
             cv::Mat camera_view = bgr.clone();
             DrawYoloDetections(camera_view, dets);
             for (const auto& detection:dets) if (detection.class_id==backboard_class_id_)
-              vision::DrawDepthRegions(camera_view,detection.box,backboard_depth_strip_width_px_);
+              vision::DrawDepthRegions(camera_view,detection.box,backboard_depth_strip_width_px_,aligned_depth);
             const std::string indices="BALL #"+std::to_string(tuning_config_.test_ball_mission_index)+
               (tuning_config_.test_ball_mission_index%2 ? " RIGHT" : " LEFT")+" | GOAL #"+
               std::to_string(tuning_config_.test_goal_mission_index)+
@@ -2397,7 +2397,7 @@ private:
           // so live detections never replace the evidence approved by COMMIT.
           cv::Mat vis = bgr.clone();
           for (const auto& detection:dets) if (detection.class_id==backboard_class_id_)
-            vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_);
+            vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_,aligned_depth);
           DrawYoloDetections(vis, dets);
           const int ref_u = static_cast<int>(std::lround(
               tuning_config_.line_features.image_center_u));
