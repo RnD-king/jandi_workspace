@@ -861,7 +861,9 @@ int main() {
   for (int i=1;i<=27;++i) {
     ready_frame=Frame(i*.1);
     ready_frame.backboard_target=Ball(.5,.3);
-    ready_frame.backboard_center_depth_m=i>=12 ? 1.0 : 1.8;
+    // A transient near-range reading early in the moving action must
+    // not leave a latched camera change after the verified READY mean.
+    ready_frame.backboard_center_depth_m=i==3 ? .5 : (i>=12 ? 1.0 : 1.8);
     ready_frame.delivery_feedback={goal_ready_id,true,false,i==27};
     ready_result=goal_ready.Step(ready_frame);
   }
