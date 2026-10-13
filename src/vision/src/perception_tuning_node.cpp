@@ -247,7 +247,8 @@ public:
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
     declare_parameter<double>("goal_fine_adjust_start_z_m", algorithm_defaults.goal.fine_adjust_start_z_m);
     declare_parameter<double>("goal_hoop_radius_m", algorithm_defaults.goal.hoop_radius_m);
-    declare_parameter<double>("goal_throwing_range_m", algorithm_defaults.goal.throwing_range_m);
+    declare_parameter<double>("goal_throw_landing_x_m", algorithm_defaults.goal.throw_landing_x_m);
+    declare_parameter<double>("goal_throw_landing_z_m", algorithm_defaults.goal.throw_landing_z_m);
     declare_parameter<double>("goal_position_tolerance_m", algorithm_defaults.goal.position_tolerance_m);
     declare_parameter<double>("goal_shoot_yaw_limit_deg", algorithm_defaults.goal.shoot_yaw_limit_deg);
     declare_parameter<double>("camera_motion_timeout_sec", algorithm_defaults.camera_motion_timeout_sec);
@@ -335,8 +336,10 @@ public:
         get_parameter("goal_fine_adjust_start_z_m").as_double();
     goal_cmd_cfg.hoop_radius_m =
         get_parameter("goal_hoop_radius_m").as_double();
-    goal_cmd_cfg.throwing_range_m =
-        get_parameter("goal_throwing_range_m").as_double();
+    goal_cmd_cfg.throw_landing_x_m =
+        get_parameter("goal_throw_landing_x_m").as_double();
+    goal_cmd_cfg.throw_landing_z_m =
+        get_parameter("goal_throw_landing_z_m").as_double();
     goal_cmd_cfg.position_tolerance_m =
         get_parameter("goal_position_tolerance_m").as_double();
     goal_cmd_cfg.shoot_yaw_limit_deg =
@@ -882,7 +885,8 @@ private:
       else if (name == "goal_target_u_px") target = &candidate.goal.target_u_px;
       else if (name == "goal_approach_u_deadband_px") target = &candidate.goal.approach_u_deadband_px;
       else if (name == "goal_fine_adjust_start_z_m") target = &candidate.goal.fine_adjust_start_z_m;
-      else if (name == "goal_throwing_range_m") target = &candidate.goal.throwing_range_m;
+      else if (name == "goal_throw_landing_x_m") target = &candidate.goal.throw_landing_x_m;
+      else if (name == "goal_throw_landing_z_m") target = &candidate.goal.throw_landing_z_m;
       else if (name == "goal_position_tolerance_m") target = &candidate.goal.position_tolerance_m;
       else if (name == "goal_hoop_radius_m") target = &candidate.goal.hoop_radius_m;
       else if (name == "goal_shoot_yaw_limit_deg") target = &candidate.goal.shoot_yaw_limit_deg;
@@ -1232,6 +1236,8 @@ private:
     case MissionAction::kStepForwardLeftTwo: return "STEP_FORWARD_LEFT_TWO";
     case MissionAction::kStepForwardRightTwo: return "STEP_FORWARD_RIGHT_TWO";
     case MissionAction::kStepForwardRightOne: return "STEP_FORWARD_RIGHT_ONE";
+    case MissionAction::kStepForwardLeftOne: return "STEP_FORWARD_LEFT_ONE";
+    case MissionAction::kStepForwardRightOneHurdle: return "STEP_FORWARD_RIGHT_ONE_HUDDLE";
     case MissionAction::kPickBall: return "PICK_BALL";
     case MissionAction::kRecatch: return "RECATCH";
     case MissionAction::kHurdle: return "HUDDLE";
@@ -1925,7 +1931,7 @@ private:
             cv::Mat camera_view = bgr.clone();
             DrawYoloDetections(camera_view, dets);
             for (const auto& detection:dets) if (detection.class_id==backboard_class_id_)
-              vision::DrawDepthRegions(camera_view,detection.box,backboard_depth_strip_width_px_);
+              vision::DrawDepthRegions(camera_view,detection.box,backboard_depth_strip_width_px_,aligned_depth);
             const std::string indices="BALL #"+std::to_string(tuning_config_.test_ball_mission_index)+
               (tuning_config_.test_ball_mission_index%2 ? " RIGHT" : " LEFT")+" | GOAL #"+
               std::to_string(tuning_config_.test_goal_mission_index)+
@@ -2023,6 +2029,12 @@ private:
     const bool continuing_repeat=authorized_repeat_scope_!=0 &&
         mission_controller_->RepeatScope()==authorized_repeat_scope_ && run_state_==RunState::kRunning;
     perception_input.allow_new_body_actions = continuing_repeat;
+    const bool stage_setup_was_pending =
+        dedicated_test_ && mission_controller_->TestSetupPending();
+    // Stage START may automatically run its initial WALK/FINE pose only.
+    perception_input.allow_test_setup_body_actions =
+        stage_setup_was_pending &&
+        (run_state_ == RunState::kRunning || finishing_observation);
     if (finishing_observation && !manual_observation_session_) {
       // START uses this uniform LINE mean. Explicit manual PREVIEW
       // uses MissionController's own 1s object/LINE observation.
@@ -2111,12 +2123,14 @@ private:
       return true;
     };
 
+    const int mission_state_before = mission_controller_->MissionStateKey();
     vision_core::PerceptionMissionFrameResult perception_result;
     const bool was_stationary_observing = mission_controller_->NeedsStationaryObservation();
     bool stepped_real_core = false;
     if (preview_ready_) {
       perception_result = preview_result_;
     } else if (manual_wait_preview_ &&
+               !stage_setup_was_pending &&
                !mission_controller_->NeedsStationaryObservation() &&
                !committed_done && !camera_done_edge &&
                !manual_action_active_ && pending_camera_id_ == 0 &&
@@ -2132,7 +2146,8 @@ private:
           finishing_observation &&
           !manual_action_active_ && outstanding_actions_.empty() &&
           pending_camera_id_ == 0 &&
-          perception_input.delivery_feedback.action_id == 0;
+          perception_input.delivery_feedback.action_id == 0 &&
+           !stage_setup_was_pending;
       if (can_capture_fresh &&
           capture_preview(perception_input, bgr)) {
         // Real controller remains poised before its final observation frame;
@@ -2199,6 +2214,7 @@ private:
                     ? ready_window_image_ : bgr);
           }
           if (!captured &&
+              !mission_controller_->TestSetupPending() &&
               pending_camera_id_ == 0 &&
               perception_result.mission.command.camera_request ==
                   vision_core::CameraRequest::kNone)
@@ -2213,7 +2229,8 @@ private:
       if (finishing_observation) {
         run_state_ = RunState::kRunning;
         manual_observation_session_ = false;
-        if (!preview_ready_ && pending_camera_id_ == 0 &&
+        if (!preview_ready_ && !stage_setup_was_pending &&
+            pending_camera_id_ == 0 &&
             perception_result.mission.command.camera_request ==
                 vision_core::CameraRequest::kNone)
           EnterWaitPreview(frame_now_sec);
@@ -2225,6 +2242,25 @@ private:
             observation_cycle_id_, frame_now_sec,
             perception_result.mission.line_features.guide);
       }
+    }
+    // An internal FSM-only transition must not consume a second PREVIEW click.
+    // Do not bypass COMMIT for any real action: this only starts a new
+    // stationary observation if a preceding window/camera completion changed
+    // the FSM without issuing a body or camera command.
+    if (!stage_setup_was_pending && (finishing_observation || camera_done_edge) &&
+        mission_controller_->MissionStateKey() != mission_state_before &&
+        !preview_ready_ && !manual_action_active_ &&
+        outstanding_actions_.empty() && pending_camera_id_ == 0 &&
+        perception_result.mission.command.action_id == 0 &&
+        perception_result.mission.command.camera_request ==
+            vision_core::CameraRequest::kNone &&
+        !mission_controller_->IsTerminalHold() &&
+        run_state_ == RunState::kRunning) {
+      LeaveWaitPreview(frame_now_sec);
+      manual_observation_request_pending_ = true;
+      manual_observation_session_ = true;
+      observation_required_sec_ = 1.0;
+      BeginFreshObservation(frame_now_sec);
     }
     if (mission_controller_->NeedsStationaryObservation()) {
       // Stationary recovery is automatic observation, not a human wait.
@@ -2314,10 +2350,26 @@ private:
           set_parameter(rclcpp::Parameter("test_ball_mission_index",mission_result.ball_mission_index+1));
       }
     }
-    if (!preview_ready_ && manual_action_active_)
+    const bool stage_pose_command = dedicated_test_ &&
+        control_command.mission_phase == 903 &&
+        (control_command.action == vision_core::MissionAction::kWalkMode ||
+         control_command.action == vision_core::MissionAction::kDefaultPoseMode);
+    if (!preview_ready_ && (manual_action_active_ || stage_pose_command))
       PublishActionCommand(control_command);
     if (!preview_ready_)
       PublishCameraCommand(control_command.camera_request);
+    if (stage_setup_was_pending && !mission_controller_->TestSetupPending() &&
+        !manual_action_active_ && outstanding_actions_.empty() &&
+        pending_camera_id_ == 0 && run_state_ == RunState::kRunning) {
+      // Stage prep is complete. Clear setup-era evidence and begin a fresh
+      // one-second window automatically; mission actions still need COMMIT.
+      LeaveWaitPreview(frame_now_sec);
+      LeaveWaitCommit(frame_now_sec);
+      manual_observation_request_pending_ = true;
+      manual_observation_session_ = true;
+      observation_required_sec_ = 1.0;
+      BeginFreshObservation(frame_now_sec);
+    }
     ResendPendingCameraDuringPause();
     action_delivery_feedback_ = {};
     // PAUSED is entered only after every sent command has a matching DONE
@@ -2345,7 +2397,7 @@ private:
           // so live detections never replace the evidence approved by COMMIT.
           cv::Mat vis = bgr.clone();
           for (const auto& detection:dets) if (detection.class_id==backboard_class_id_)
-            vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_);
+            vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_,aligned_depth);
           DrawYoloDetections(vis, dets);
           const int ref_u = static_cast<int>(std::lround(
               tuning_config_.line_features.image_center_u));
@@ -2627,8 +2679,9 @@ private:
           } else {
             tune_line(518, "far u-target: --", muted);
           }
-          std::snprintf(buf, sizeof(buf), "SHOOT range=%.3fm  tolerance=%.3fm  yaw limit=%.1fdeg",
-              gc.throwing_range_m, gc.position_tolerance_m, gc.shoot_yaw_limit_deg);
+          std::snprintf(buf, sizeof(buf), "SHOOT 0deg landing=(%+.1f,%.1f)cm  tol=%.1fcm  limit=%.0fdeg",
+              100.0*gc.throw_landing_x_m, 100.0*gc.throw_landing_z_m,
+              100.0*gc.position_tolerance_m, gc.shoot_yaw_limit_deg);
           tune_line(546, buf, text_color);
           const auto &fine = goal_cmd.fine_decision_pose;
           if (selected_goal && goal_cmd.fine_decision_pose_used && fine.valid &&
@@ -2639,18 +2692,27 @@ private:
             const double rim_x = fine.x_m + gc.hoop_radius_m * std::sin(fine.yaw_rad);
             const double rim_z = fine.z_m - gc.hoop_radius_m * std::cos(fine.yaw_rad);
             const double distance = std::hypot(rim_x, rim_z);
-            const double error = distance - gc.throwing_range_m;
-            const double shoot_yaw_deg = distance > 1e-9
-                ? -std::atan2(rim_x, rim_z) * 180.0 / M_PI : 0.0;
-            std::snprintf(buf, sizeof(buf), "fine input x=%+.4fm  z=%.4fm  yaw=%+.2fdeg",
-                fine.x_m, fine.z_m, fine.yaw_rad * 180.0 / M_PI);
+            const double throw_range = std::hypot(gc.throw_landing_x_m, gc.throw_landing_z_m);
+            const double range_error = distance - throw_range;
+            const double shoot_yaw_rad = distance > 1e-9
+                ? std::atan2(gc.throw_landing_x_m, gc.throw_landing_z_m)
+                    - std::atan2(rim_x, rim_z) : 0.0;
+            const double shoot_yaw_deg = shoot_yaw_rad * 180.0 / M_PI;
+            const double cosine = std::cos(shoot_yaw_rad), sine = std::sin(shoot_yaw_rad);
+            const double land_x = cosine*gc.throw_landing_x_m-sine*gc.throw_landing_z_m;
+            const double land_z = sine*gc.throw_landing_x_m+cosine*gc.throw_landing_z_m;
+            const double position_error = std::hypot(rim_x-land_x, rim_z-land_z);
+            std::snprintf(buf, sizeof(buf),
+                "board=(%+.1f,%.1f)cm yaw=%+.1fdeg  rim=(%+.1f,%.1f)cm",
+                100.0*fine.x_m,100.0*fine.z_m,fine.yaw_rad*180.0/M_PI,
+                100.0*rim_x,100.0*rim_z);
             tune_line(574, buf, goal_color);
             std::snprintf(buf, sizeof(buf),
-                "rim distance=%.4fm  |  error=%+.4fm  |  band=[%+.4f,%+.4f]m",
-                distance, error, -gc.position_tolerance_m, gc.position_tolerance_m);
-            tune_line(602, buf, std::abs(error) <= gc.position_tolerance_m
+                "land=(%+.1f,%.1f)cm  2D err=%.2fcm  radial err=%+.2fcm",
+                100.0*land_x,100.0*land_z,100.0*position_error,100.0*range_error);
+            tune_line(602, buf, position_error <= gc.position_tolerance_m
                 ? line_color : ball_color);
-            std::snprintf(buf, sizeof(buf), "shoot yaw=%+.2fdeg  |  band=[%+.1f,%+.1f]deg",
+            std::snprintf(buf, sizeof(buf), "shoot yaw=%+.2fdeg  |  limit=[%+.1f,%+.1f]deg",
                 shoot_yaw_deg, -gc.shoot_yaw_limit_deg, gc.shoot_yaw_limit_deg);
             tune_line(630, buf, goal_color);
           } else {
@@ -2662,7 +2724,7 @@ private:
             } else {
               tune_line(574, "fine input x/z/yaw: --", muted);
             }
-            tune_line(602, "rim distance / range error: --", muted);
+            tune_line(602, "predicted landing / 2D error: --", muted);
             tune_line(630, "shoot yaw: --", muted);
           }
 

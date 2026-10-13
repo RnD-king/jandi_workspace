@@ -25,6 +25,10 @@ void Assign(const YAML::Node &node, const char *key, T &value) {
                              key + "': " + error.what());
   }
 }
+void Finite(double value, const char *key) {
+  if (!std::isfinite(value))
+    throw std::runtime_error(std::string("vision algorithm key '") + key + "' must be finite");
+}
 void Nonnegative(double value, const char *key) {
   if (!std::isfinite(value) || value < 0.0)
     throw std::runtime_error(std::string("vision algorithm key '") + key +
@@ -221,7 +225,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.goal.approach_u_deadband_px, "goal.approach_u_deadband_px");
   Nonnegative(c.goal.fine_adjust_start_z_m, "goal.fine_adjust_start_z_m");
   Nonnegative(c.goal.hoop_radius_m, "goal.hoop_radius_m");
-  Positive(c.goal.throwing_range_m, "goal.throwing_range_m");
+  Finite(c.goal.throw_landing_x_m, "goal.throw_landing_x_m");
+  Positive(c.goal.throw_landing_z_m, "goal.throw_landing_z_m");
   Nonnegative(c.goal.position_tolerance_m, "goal.position_tolerance_m");
   Nonnegative(c.goal.fine_settle_duration_sec,
               "goal.fine_settle_duration_sec");
@@ -412,7 +417,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "approach_u_deadband_px", c.goal.approach_u_deadband_px);
   Assign(g, "fine_adjust_start_z_m", c.goal.fine_adjust_start_z_m);
   Assign(g, "hoop_radius_m", c.goal.hoop_radius_m);
-  Assign(g, "throwing_range_m", c.goal.throwing_range_m);
+  Assign(g, "throw_landing_x_m", c.goal.throw_landing_x_m);
+  Assign(g, "throw_landing_z_m", c.goal.throw_landing_z_m);
   Assign(g, "position_tolerance_m", c.goal.position_tolerance_m);
   Assign(g, "fine_settle_duration_sec", c.goal.fine_settle_duration_sec);
   Assign(g, "shoot_yaw_limit_deg", c.goal.shoot_yaw_limit_deg);

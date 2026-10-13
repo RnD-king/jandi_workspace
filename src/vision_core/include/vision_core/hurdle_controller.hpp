@@ -81,6 +81,7 @@ public:
                        int image_width, int image_height, double now_sec,
                        const CameraFeedback &camera_feedback,
                        const ActionExecutionFeedback &action_feedback,
+                       const CruiseDecision &line_decision,
                        bool allow_new_body_actions = true);
   static const char *ModeName(HurdleMode mode);
   // Discard all observations made before the most recent motion DONE.

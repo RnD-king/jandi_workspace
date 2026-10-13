@@ -191,7 +191,8 @@ public:
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
     declare_parameter<double>("goal_fine_adjust_start_z_m", algorithm_defaults.goal.fine_adjust_start_z_m);
     declare_parameter<double>("goal_hoop_radius_m", algorithm_defaults.goal.hoop_radius_m);
-    declare_parameter<double>("goal_throwing_range_m", algorithm_defaults.goal.throwing_range_m);
+    declare_parameter<double>("goal_throw_landing_x_m", algorithm_defaults.goal.throw_landing_x_m);
+    declare_parameter<double>("goal_throw_landing_z_m", algorithm_defaults.goal.throw_landing_z_m);
     declare_parameter<double>("goal_position_tolerance_m", algorithm_defaults.goal.position_tolerance_m);
     declare_parameter<double>("camera_motion_timeout_sec", algorithm_defaults.camera_motion_timeout_sec);
 
@@ -269,8 +270,10 @@ public:
         get_parameter("goal_fine_adjust_start_z_m").as_double();
     goal_cmd_cfg.hoop_radius_m =
         get_parameter("goal_hoop_radius_m").as_double();
-    goal_cmd_cfg.throwing_range_m =
-        get_parameter("goal_throwing_range_m").as_double();
+    goal_cmd_cfg.throw_landing_x_m =
+        get_parameter("goal_throw_landing_x_m").as_double();
+    goal_cmd_cfg.throw_landing_z_m =
+        get_parameter("goal_throw_landing_z_m").as_double();
     goal_cmd_cfg.position_tolerance_m =
         get_parameter("goal_position_tolerance_m").as_double();
     vision_core::MissionControllerConfig mission_config = algorithm_defaults;
@@ -282,6 +285,7 @@ public:
     mission_config.ball = ball_cmd_cfg;
     mission_config.hurdle = hurdle_cmd_cfg;
     mission_config.goal = goal_cmd_cfg;
+    goal_debug_cfg_ = goal_cmd_cfg;
     mission_config.line_detection.class_id = line_class_id_;
     mission_config.line_detection.confidence = conf_thres_;
     mission_config.object_targets.ball_class_id = ball_class_id_;
@@ -430,8 +434,8 @@ public:
           observation_accumulator_.Reset();
           run_state_ = RunState::kResetting;
           DrivePhysicalReset();
-          // Preserve next_camera_id_, actual camera_feedback_ and last
-          // completion timestamps. RESET never moves motors or camera.
+          // Preserve unique IDs and completion timestamps. The physical
+          // reset explicitly commands WALK stance and FORWARD camera.
           {
             std::lock_guard<std::mutex> lock(image_mutex_);
             latest_image_.reset();
@@ -646,6 +650,14 @@ private:
     case MissionAction::kStepForwardLeft: return "STEP_FORWARD_LEFT";
     case MissionAction::kStepForwardRight: return "STEP_FORWARD_RIGHT";
     case MissionAction::kStepForwardFive: return "STEP_FORWARD_FIVE";
+    case MissionAction::kStepForwardTwo: return "STEP_FORWARD_TWO";
+    case MissionAction::kStepForwardThree: return "STEP_FORWARD_THREE";
+    case MissionAction::kStepForwardFour: return "STEP_FORWARD_FOUR";
+    case MissionAction::kStepForwardLeftTwo: return "STEP_FORWARD_LEFT_TWO";
+    case MissionAction::kStepForwardRightTwo: return "STEP_FORWARD_RIGHT_TWO";
+    case MissionAction::kStepForwardRightOne: return "STEP_FORWARD_RIGHT_ONE";
+    case MissionAction::kStepForwardLeftOne: return "STEP_FORWARD_LEFT_ONE";
+    case MissionAction::kStepForwardRightOneHurdle: return "STEP_FORWARD_RIGHT_ONE_HUDDLE";
     case MissionAction::kPickBall: return "PICK_BALL";
     case MissionAction::kRecatch: return "RECATCH";
     case MissionAction::kHurdle: return "HUDDLE";
@@ -1543,7 +1555,7 @@ private:
 
           cv::Mat vis = bgr.clone();
           for (const auto& detection:dets) if (detection.class_id==backboard_class_id_)
-            vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_);
+            vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_,aligned_depth);
           DrawConfirmedDetections(
               vis, prepared.line_centers, line_confirmed, ball_target,
               ball_confirmed, backboard_target, backboard_confirmed,
@@ -1578,11 +1590,11 @@ private:
                       show_p2p_action ? 0.55 : 0.70,
                       cv::Scalar(0, 200, 255), 2);
 
-          cv::Mat state_panel(360, 1100, CV_8UC3,
+          cv::Mat state_panel(420, 1100, CV_8UC3,
                               cv::Scalar(20, 20, 20));
           cv::putText(state_panel,
               std::string("CONTROL: ") + RunStateName(run_state_),
-              cv::Point(760, 335), cv::FONT_HERSHEY_SIMPLEX, 0.55,
+              cv::Point(760, 395), cv::FONT_HERSHEY_SIMPLEX, 0.55,
               cv::Scalar(0, 200, 255), 1);
           int state_y = 24;
           const auto draw_state = [&state_panel, &state_y](
@@ -1665,6 +1677,32 @@ private:
             std::snprintf(buf, sizeof(buf), "SHOOT ROTATION YAW: --");
           }
           draw_state(buf, cv::Scalar(0, 200, 255));
+
+          if (pose_confirmed) {
+            const double rim_x=goal_cmd.pose.x_m+
+                goal_debug_cfg_.hoop_radius_m*std::sin(goal_cmd.pose.yaw_rad);
+            const double rim_z=goal_cmd.pose.z_m-
+                goal_debug_cfg_.hoop_radius_m*std::cos(goal_cmd.pose.yaw_rad);
+            const double target_yaw=std::atan2(goal_debug_cfg_.throw_landing_x_m,
+                goal_debug_cfg_.throw_landing_z_m)-std::atan2(rim_x,rim_z);
+            const double cosine=std::cos(target_yaw),sine=std::sin(target_yaw);
+            const double land_x=cosine*goal_debug_cfg_.throw_landing_x_m-
+                sine*goal_debug_cfg_.throw_landing_z_m;
+            const double land_z=sine*goal_debug_cfg_.throw_landing_x_m+
+                cosine*goal_debug_cfg_.throw_landing_z_m;
+            std::snprintf(buf,sizeof(buf),
+                "GOAL RIM: x=%+.1fcm z=%.1fcm | LAND: x=%+.1fcm z=%.1fcm",
+                100*rim_x,100*rim_z,100*land_x,100*land_z);
+            draw_state(buf,cv::Scalar(0,210,255));
+            std::snprintf(buf,sizeof(buf),
+                "THROW: yaw=%+.2fdeg  2D error=%.2fcm  limit=%.1fdeg",
+                target_yaw*180.0/M_PI,100*std::hypot(rim_x-land_x,rim_z-land_z),
+                goal_debug_cfg_.shoot_yaw_limit_deg);
+            draw_state(buf,cv::Scalar(0,210,255));
+          } else {
+            draw_state("GOAL RIM/LANDING: --",cv::Scalar(0,210,255));
+            draw_state("THROW 2D ERROR: --",cv::Scalar(0,210,255));
+          }
 
           if (backboard_confirmed) {
             std::snprintf(
@@ -1799,6 +1837,7 @@ private:
   std::unique_ptr<YoloTrtEngine> yolo_;
   std::unique_ptr<vision_core::MissionController> mission_controller_;
   vision_core::Intrinsics camera_intrinsics_{};
+  vision_core::GoalConfig goal_debug_cfg_{};
 
   // IMU 최신 상태(latest)
   std::mutex imu_mutex_;

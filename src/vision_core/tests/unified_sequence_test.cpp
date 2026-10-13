@@ -7,6 +7,7 @@
 #include <cmath>
 
 using namespace vision_core;
+static CruiseDecision StraightLine() { CruiseDecision d; d.applicable=true; d.direction=CruiseDirection::kStraight; return d; }
 namespace {
 ObjectTarget Target(double u=.5,double v=.7) {
   ObjectTarget t; t.center_px={u*640,v*480};
@@ -86,10 +87,10 @@ void TestCameraLatchSurvivesLoss() {
   c.hurdle.stable_window=c.hurdle.stable_min_hits=1; c.hurdle.lost_frames=1;
   c.hurdle.upper_acquire_v_px=480;
   HurdleController hurdle(c.hurdle,3);
-  hurdle.Compute(Target(.5,.85),640,480,0,{},{});
-  hurdle.Compute(Target(.5,.85),640,480,.1,{},busy);
-  auto h=hurdle.Compute({},640,480,.2,{},busy); assert(h.mode==HurdleMode::kApproachTwoBeforeDown);
-  h=hurdle.Compute({},640,480,.3,{},done); assert(h.camera_request==CameraRequest::kDown);
+  hurdle.Compute(Target(.5,.85),640,480,0,{},{},StraightLine());
+  hurdle.Compute(Target(.5,.85),640,480,.1,{},busy,StraightLine());
+  auto h=hurdle.Compute({},640,480,.2,{},busy,StraightLine()); assert(h.mode==HurdleMode::kApproachTwoBeforeDown);
+  h=hurdle.Compute({},640,480,.3,{},done,StraightLine()); assert(h.camera_request==CameraRequest::kDown);
   c.goal.stable_window=c.goal.stable_min_hits=1;
   GoalController goal(c.goal,3); goal.StartForwardTrial();
   goal.Compute({},Target(),{},640,480,.1,true,{},busy,true,.7);
@@ -206,7 +207,7 @@ void TestGoalForwardTrial() {
   t.in.backboard_center_depth_m=.7; t.Tick(true);
   assert(t.out.command.camera_request==CameraRequest::kGoal);
   t.in.camera_feedback={CameraMode::kGoal,true}; t.Tick();
-  t.in.goal_pose={true,0,.5,0,1};
+  t.in.goal_pose={true,0,.6,0,1};
   for(int i=0;i<8;++i)t.Tick();
   assert(t.out.goal.mode==GoalMode::kWaitFinePose);
   assert(t.Preview().command.action==MissionAction::kDefaultPoseMode);
@@ -238,6 +239,8 @@ void TestHurdleSearchAndContact() {
   c.hurdle.upper_acquire_v_px=480;
   c.hurdle.recovery_settle_duration_sec=0;
   Trial t(c); t.in.hurdle_target=Target(.5,.85);
+  // HURDLE now aligns using LINE O/H, so supply a straight guide.
+  t.in.line_centers={{410,450},{410,400},{410,350},{410,300},{410,250}};
   for(int i=0;i<7;++i)t.Tick();
   assert(t.out.hurdle.mode==HurdleMode::kApproachTwoBeforeDown);
   t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardTwo);
@@ -265,9 +268,9 @@ int main() {
   goal.Compute({},Target(),{true,0,.7,0,1},640,480,0,true,{}, {},true,.7);
   goal.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
   goal.Compute({},Target(),{true,0,.7,0,1},640,480,.2,true,{CameraMode::kGoal,true},{});
-  auto large=goal.Compute({},Target(),{true,0,.8,0,1},640,480,.3,true,{CameraMode::kGoal,true},{});
+  auto large=goal.Compute({},Target(),{true,0,.9,0,1},640,480,.3,true,{CameraMode::kGoal,true},{});
   assert(large.fine_decision_pose_used && large.action.action==MissionAction::kStepForwardTwo);
-  auto medium=goal.Compute({},Target(),{true,0,.65,0,1},640,480,.4,true,{CameraMode::kGoal,true},{});
+  auto medium=goal.Compute({},Target(),{true,0,.75,0,1},640,480,.4,true,{CameraMode::kGoal,true},{});
   assert(medium.fine_decision_pose_used && medium.action.action==MissionAction::kStepForwardOne);
   TestCameraLatchSurvivesLoss(); TestWindowAndDeadline(); TestAlternatingBoundedRecovery();
   TestGoalForwardTrial(); TestHurdleSearchAndContact();

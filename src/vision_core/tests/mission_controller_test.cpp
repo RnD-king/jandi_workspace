@@ -504,7 +504,7 @@ int main() {
   in.backboard_target = Ball(.8, .3);
   r = camera_gate.Step(in);
   assert(r.active_mission == MissionType::kGoal);
-  assert(r.command.action == MissionAction::kStepForwardRightTwo);
+  assert(r.command.action == MissionAction::kStepForwardRightOneHurdle);
   assert(r.command.action_id != 0);
   // The next OBJECT action must use 10 NEW frames after this actual Action DONE.
   // Its camera remained GOAL throughout, so only the Action event resets evidence.
@@ -960,5 +960,55 @@ int main() {
   assert(!ready_result.post_motion_observing);
   assert(ready_result.object_ready_mean_used);
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
+  // A physical RESET must publish a fresh camera FORWARD request even when
+  // the last software camera feedback already claims FORWARD/settled.
+  MissionController reset_probe(c);
+  reset_probe.BeginPhysicalReset();
+  auto reset_step=reset_probe.StepPhysicalReset({}, {CameraMode::kForward,true},0);
+  assert(reset_step.command.action==MissionAction::kWalkMode);
+  assert(reset_step.command.camera_request==CameraRequest::kForward);
+  assert(!reset_step.physical_reset_complete);
+  const auto reset_id=reset_step.command.action_id;
+  assert(reset_id!=0);
+  reset_step=reset_probe.StepPhysicalReset(
+      {reset_id,true,true,false},{CameraMode::kTransition,false},1);
+  assert(!reset_step.physical_reset_complete);
+  reset_step=reset_probe.StepPhysicalReset({},{CameraMode::kForward,true},2);
+  assert(reset_step.physical_reset_complete);
+
+  // The Stage setup stance is the ONLY body command allowed before COMMIT.
+  auto stage_cfg=c;
+  stage_cfg.test_mission=MissionType::kBall;
+  stage_cfg.test_stage=3;
+  MissionController stage_probe(stage_cfg);
+  assert(stage_probe.TestSetupPending());
+  auto stage_input=Frame(0);
+  stage_input.camera_feedback={CameraMode::kDown,true};
+  stage_input.allow_new_body_actions=false;
+  stage_input.allow_test_setup_body_actions=true;
+  auto stage_step=stage_probe.Step(stage_input);
+  assert(stage_step.command.action==MissionAction::kDefaultPoseMode);
+  assert(stage_step.command.mission_phase==903);
+  const auto stage_id=stage_step.command.action_id;
+  assert(stage_id!=0);
+  stage_input=Frame(1);
+  stage_input.camera_feedback={CameraMode::kDown,true};
+  stage_input.allow_new_body_actions=false;
+  stage_input.allow_test_setup_body_actions=true;
+  stage_input.delivery_feedback={stage_id,true,true,false};
+  stage_step=stage_probe.Step(stage_input);
+  assert(!stage_probe.TestSetupPending());
+  assert(stage_step.command.action_id==0);
+
+  // Without the dedicated stage setup permission manual tuning cannot
+  // dispatch its initial pose automatically.
+  MissionController gated_stage(stage_cfg);
+  auto gated_stage_input=Frame(0);
+  gated_stage_input.camera_feedback={CameraMode::kDown,true};
+  gated_stage_input.allow_new_body_actions=false;
+  auto gated_stage_result=gated_stage.Step(gated_stage_input);
+  assert(gated_stage_result.command.action_id==0);
+  assert(gated_stage.TestSetupPending());
+
   return 0;
 }

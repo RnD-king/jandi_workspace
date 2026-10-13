@@ -3,6 +3,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cmath>
 #include <limits>
 int main() {
   const cv::Rect box(10,20,30,40);
@@ -16,6 +17,9 @@ int main() {
   depth.at<float>(20,10)=0;depth.at<float>(21,10)=std::numeric_limits<float>::quiet_NaN();
   assert(vision::MedianRegionMeters(depth,region.left).value()==1);
   assert(vision::MedianRegionMeters(depth,region.right).value()==2);
+  const auto left_stats=vision::CountValidDepthPixels(depth,region.left);
+  assert(left_stats.total==200 && left_stats.valid==198);
+  assert(std::abs(left_stats.Ratio()-.99)<1e-12);
   // Most valid rows can differ from the old middle 3x3, and define the new median.
   depth(cv::Rect(10,39,5,3)).setTo(3);
   assert(vision::MedianRegionMeters(depth,region.left).value()==1);

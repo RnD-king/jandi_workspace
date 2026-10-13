@@ -19,6 +19,18 @@ ActionRequest Locomotion(MissionAction action) {
 ActionRequest Mission(MissionAction action, std::int16_t yaw = 0) {
   return {action, ActionCategory::kMission, yaw, false};
 }
+MissionAction GoalApproachWalk(CruiseDirection direction, bool short_distance) {
+  // Keep normal LINE cruise IDs 11/12/13 out of GOAL approach.
+  switch (direction) {
+  case CruiseDirection::kLeft: return MissionAction::kStepForwardLeftOne;
+  case CruiseDirection::kRight: return MissionAction::kStepForwardRightOneHurdle;
+  case CruiseDirection::kStraight:
+    return short_distance ? MissionAction::kStepForwardThree
+                          : MissionAction::kStepForwardFour;
+  case CruiseDirection::kNone: return MissionAction::kNone;
+  }
+  return MissionAction::kNone;
+}
 double Wrap(double angle) {
   while (angle > kPi)
     angle -= 2.0 * kPi;
@@ -288,6 +300,20 @@ std::optional<GoalPoseObservation> GoalController::FinePoseMean() const {
                              confidence / divisor};
 }
 
+double GoalController::ThrowRangeM() const {
+  return std::hypot(config_.throw_landing_x_m, config_.throw_landing_z_m);
+}
+
+double GoalController::LandingErrorM(double rim_x, double rim_z, double angle) const {
+  const double cosine = std::cos(angle);
+  const double sine = std::sin(angle);
+  const double x = cosine * config_.throw_landing_x_m -
+                   sine * config_.throw_landing_z_m;
+  const double z = sine * config_.throw_landing_x_m +
+                   cosine * config_.throw_landing_z_m;
+  return std::hypot(rim_x - x, rim_z - z);
+}
+
 double GoalController::ComputeShootYawRad(double x_m, double z_m,
                                           double yaw_rad) const {
   const double rim_x = x_m + config_.hoop_radius_m * std::sin(yaw_rad);
@@ -295,7 +321,9 @@ double GoalController::ComputeShootYawRad(double x_m, double z_m,
   if (!std::isfinite(rim_x) || !std::isfinite(rim_z) ||
       std::hypot(rim_x, rim_z) <= kEpsilon)
     return 0.0;
-  return Wrap(-std::atan2(rim_x, rim_z));
+  // Camera +X is right. Negative waist yaw rotates landing toward +X.
+  return Wrap(std::atan2(config_.throw_landing_x_m, config_.throw_landing_z_m) -
+              std::atan2(rim_x, rim_z));
 }
 
 ActionRequest
@@ -307,21 +335,24 @@ GoalController::FineAction(const GoalPoseObservation &pose) const {
       pose.x_m + config_.hoop_radius_m * std::sin(pose.yaw_rad);
   const double rim_z =
       pose.z_m - config_.hoop_radius_m * std::cos(pose.yaw_rad);
-  const double error = std::hypot(rim_x, rim_z) - config_.throwing_range_m;
-  if (error > config_.position_tolerance_m) {
+  const double range_error = std::hypot(rim_x, rim_z) - ThrowRangeM();
+  if (range_error > config_.position_tolerance_m)
     return Locomotion(MissionAction::kStepForwardHalf);
-  }
-  if (error < -config_.position_tolerance_m)
+  if (range_error < -config_.position_tolerance_m)
     return Locomotion(MissionAction::kStepBack);
   const double yaw_deg =
       ComputeShootYawRad(pose.x_m, pose.z_m, pose.yaw_rad) * 180.0 / kPi;
   if (std::abs(yaw_deg) <= config_.shoot_yaw_limit_deg) {
-    const double clamped = Clamp(yaw_deg, -180.0, 180.0);
-    return Mission(MissionAction::kShoot,
-                   static_cast<std::int16_t>(std::lround(clamped)));
+    const auto command_deg = static_cast<std::int16_t>(std::lround(yaw_deg));
+    const double predicted_error = LandingErrorM(
+        rim_x, rim_z, static_cast<double>(command_deg) * kPi / 180.0);
+    if (predicted_error <= config_.position_tolerance_m)
+      return Mission(MissionAction::kShoot, command_deg);
+    return Locomotion(range_error >= 0.0 ?
+                          MissionAction::kStepForwardHalf : MissionAction::kStepBack);
   }
-  return Locomotion(rim_x > 0.0 ? MissionAction::kRightSideStep
-                                : MissionAction::kLeftSideStep);
+  return Locomotion(yaw_deg < 0.0 ? MissionAction::kRightSideStep
+                                  : MissionAction::kLeftSideStep);
 }
 
 GoalResult GoalController::Compute(
@@ -390,7 +421,7 @@ GoalResult GoalController::Compute(
         true, true, tracked_.center_px.u - config_.target_u_px,
         config_.approach_u_deadband_px);
     result.action = Locomotion(
-        ApproachAction(d.direction, distance <= config_.approach_short_z_m));
+        GoalApproachWalk(d.direction, distance <= config_.approach_short_z_m));
     return result;
   }
   case GoalMode::kWaitCameraGoal:
@@ -443,10 +474,7 @@ GoalResult GoalController::Compute(
       const auto decision = SelectCruiseDecision(
           true, true, tracked_.center_px.u - config_.target_u_px,
           config_.approach_u_deadband_px);
-      result.action = Locomotion(ApproachAction(
-          decision.direction, center_depth_m.value_or(tracked_pose_.z_m) > 0 &&
-                                  center_depth_m.value_or(tracked_pose_.z_m) <=
-                                      config_.approach_short_z_m));
+      result.action = Locomotion(GoalApproachWalk(decision.direction, center_depth_m.value_or(tracked_pose_.z_m) > 0 && center_depth_m.value_or(tracked_pose_.z_m) <= config_.approach_short_z_m));
     }
     return result;
   }
@@ -480,10 +508,7 @@ GoalResult GoalController::Compute(
     const auto decision = SelectCruiseDecision(
         true, tracked_.visible, tracked_.center_px.u - config_.target_u_px,
         config_.approach_u_deadband_px);
-    result.action = Locomotion(ApproachAction(
-        decision.direction, center_depth_m.value_or(tracked_pose_.z_m) > 0 &&
-                                center_depth_m.value_or(tracked_pose_.z_m) <=
-                                    config_.approach_short_z_m));
+    result.action = Locomotion(GoalApproachWalk(decision.direction, center_depth_m.value_or(tracked_pose_.z_m) > 0 && center_depth_m.value_or(tracked_pose_.z_m) <= config_.approach_short_z_m));
     return result;
   }
   case GoalMode::kCoarseAdjust: {
@@ -508,7 +533,7 @@ GoalResult GoalController::Compute(
         pose.x_m + config_.hoop_radius_m * std::sin(pose.yaw_rad);
     const double rim_z =
         pose.z_m - config_.hoop_radius_m * std::cos(pose.yaw_rad);
-    const double error = std::hypot(rim_x, rim_z) - config_.throwing_range_m;
+    const double error = std::hypot(rim_x, rim_z) - ThrowRangeM();
     result.fine_decision_pose = pose;
     result.fine_decision_pose_used = true;
     if (error >= config_.fine_one_step_range_error_m &&

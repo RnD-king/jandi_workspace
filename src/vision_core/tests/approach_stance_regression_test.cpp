@@ -4,6 +4,7 @@
 #endif
 #include <cassert>
 using namespace vision_core;
+static CruiseDecision StraightLine() { CruiseDecision d; d.applicable=true; d.direction=CruiseDirection::kStraight; return d; }
 namespace {
 ObjectTarget Target(double u,double v) {
   ObjectTarget t; t.center_px={u,v}; t.box_px={u-10,v-10,20,20};
@@ -17,7 +18,7 @@ void BallStages() {
   c.down_one_step_v_px=216.0; c.fine_mode_v_px=278.4;
   c.pickup_v1_px=307.2; c.pickup_v2_px=364.8;
   BallController ball(c,3);
-  auto r=ball.Compute(Target(100,400),640,480,0,{},{});
+  auto r=ball.Compute(Target(380,400),640,480,0,{},{});
   assert(r.mode==BallMode::kApproachTwoBeforeDown && r.action.action==MissionAction::kStepForwardTwo);
   ActionExecutionFeedback busy; busy.action_active=true;
   r=ball.Compute({},640,480,.1,{},busy); assert(r.camera_request==CameraRequest::kNone);
@@ -38,15 +39,15 @@ void HurdlePostWalkPolicy(int steps) {
   c.stable_window=c.stable_min_hits=1; c.lost_frames=1;
   HurdleController hurdle(c,3);
   const double v=steps==4 ? 200 : steps==3 ? 330 : 400;
-  auto r=hurdle.Compute(Target(100,v),640,480,0,{},{});
+  auto r=hurdle.Compute(Target(100,v),640,480,0,{},{},StraightLine());
   assert(r.action.action==(steps==4 ? MissionAction::kStepForwardFour :
       steps==3 ? MissionAction::kStepForwardThree : MissionAction::kStepForwardTwo));
   ActionExecutionFeedback done; done.action_done=true;
-  r=hurdle.Compute({},640,480,.1,{},done);
+  r=hurdle.Compute({},640,480,.1,{},done,StraightLine());
   if (steps==2) { assert(r.camera_request==CameraRequest::kDown); return; }
   assert(r.camera_request==CameraRequest::kNone);
   ActionExecutionFeedback observed; observed.observation_complete=true;
-  r=hurdle.Compute({},640,480,.2,{},observed);
+  r=hurdle.Compute({},640,480,.2,{},observed,StraightLine());
   if (steps==3) assert(r.camera_request==CameraRequest::kDown);
   else assert(r.mode==HurdleMode::kRecoveryForward && r.camera_request==CameraRequest::kNone);
 }

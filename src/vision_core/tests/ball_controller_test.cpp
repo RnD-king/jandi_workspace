@@ -4,6 +4,8 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <utility>
+#include <vector>
 
 using namespace vision_core;
 static ObjectTarget Ball(double u, double v) {
@@ -53,6 +55,22 @@ int main() {
   c.pickup_max_attempts = 2;
   c.recovery_timeout_sec = 5.0; c.recovery_reacquire_min_hits = 1;
   c.recovery_center_tolerance_px = 32.0;
+  // Ball approach grid: NORMAL LINE cruise actions 11/12/13 are forbidden.
+  for (const auto& scenario : std::vector<std::pair<ObjectTarget,MissionAction>>{
+      {Ball(.5,.3),MissionAction::kStepForwardFour},    // zone 2
+      {Ball(.5,.65),MissionAction::kStepForwardThree},  // zone 5
+      {Ball(.5,.8),MissionAction::kStepForwardTwo},     // zone 8
+      {Ball(.3,.8),MissionAction::kStepForwardLeftOne}, // zone 7
+      {Ball(.7,.8),MissionAction::kStepForwardRightOneHurdle}, // zone 9
+      {Ball(.3,.3),MissionAction::kStepForwardLeftTwo},
+      {Ball(.7,.3),MissionAction::kStepForwardRightTwo}}) {
+    BallController grid(c,3.0);
+    const auto v=grid.Compute(scenario.first,640,480,0,{}, {});
+    assert(v.action.action==scenario.second);
+    if (scenario.second==MissionAction::kStepForwardLeftOne ||
+        scenario.second==MissionAction::kStepForwardRightOneHurdle)
+      assert(v.camera_request==CameraRequest::kNone);
+  }
   BallController controller(c, 3.0);
   auto r = controller.Compute(Ball(0.3, 0.3), 640,480, 0, {}, {});
   assert(r.mode == BallMode::kApproachBall);
@@ -93,7 +111,7 @@ int main() {
   // never the initial blind-forward search or a new camera movement.
   BallController recovery(c, 3.0);
   r = recovery.Compute(Ball(0.3, 0.3), 640,480, 0, {}, {});
-  r = recovery.Compute(Ball(0.3, 0.8), 640,480, .1, {}, done);
+  r = recovery.Compute(Ball(0.5, 0.8), 640,480, .1, {}, done);
   assert(r.action.action==MissionAction::kStepForwardTwo);
   recovery.Compute({},640,480,.11,{},done);
   r = recovery.Compute(Ball(0.3, 0.6), 640,480, .2, down, {});
@@ -239,13 +257,13 @@ int main() {
   // Camera-moving frames must not survive into the DOWN-view fine adjustment.
   BallController fresh_down(c,3.0);
   fresh_down.Compute(Ball(.3,.3),640,480,0,{},{});
-  r=fresh_down.Compute(Ball(.3,.8),640,480,.1,{},done);
+  r=fresh_down.Compute(Ball(.5,.8),640,480,.1,{},done);
   assert(r.mode==BallMode::kApproachTwoBeforeDown);
   r=fresh_down.Compute({},640,480,.11,{},done);
   assert(r.mode==BallMode::kWaitCameraDown);
   r=fresh_down.Compute(Ball(.9,.9),640,480,.15,
                        {CameraMode::kTransition,false},{});
-  assert(r.mode==BallMode::kWaitCameraDown && r.tracked.u_norm < .4);
+  assert(r.mode==BallMode::kWaitCameraDown && r.tracked.u_norm < .6);
   r=fresh_down.Compute(Ball(.9,.9),640,480,.2,down,{});
   assert(r.mode==BallMode::kDownSearch && !r.tracked.visible);
   r=fresh_down.Compute(Ball(.2,.7),640,480,.3,down,{});

@@ -58,16 +58,16 @@ int main(int argc, char **argv) {
   assert(c.goal.recovery_timeout_sec == 5.0);
   assert(c.goal.recovery_reacquire_min_hits == 3);
   assert(c.goal.recovery_center_tolerance_px == 76.8);
-  assert(c.ball.pickup_u1_px == 280);
-  assert(c.ball.pickup_u2_px == 330);
-  assert(c.ball.pickup_v1_px == 110);
-  assert(c.ball.pickup_v2_px == 140);
+  assert(c.ball.pickup_u1_px == 310);
+  assert(c.ball.pickup_u2_px == 385);
+  assert(c.ball.pickup_v1_px == 80);
+  assert(c.ball.pickup_v2_px == 130);
   assert(c.ball.down_one_step_v_px == 10);
   assert(c.ball.fine_mode_v_px == 80);
   assert(c.ball.pickup_max_attempts == 100);
   assert(c.hurdle.contact_steps == 5);
   assert(c.hurdle.down_one_step_v_px == 120);
-  assert(c.hurdle.fine_mode_v_px == 250);
+  assert(c.hurdle.fine_mode_v_px == 210);
   assert(c.goal.fine_one_step_range_error_m == 0.15);
   assert(c.goal.fine_two_step_range_error_m == 0.30);
   assert(c.backboard_max_depth_m == 2.50);
@@ -120,18 +120,19 @@ int main(int argc, char **argv) {
   Reject(text.str(), "line_stable_min_hits: 7", "line_stable_min_hits: 11");
   Reject(text.str(), "failure_min_valid_samples: 5",
          "failure_min_valid_samples: 0");
-  Reject(text.str(), "pickup_u1_px: 280", "pickup_u1_px: -1.0");
-  Reject(text.str(), "pickup_u1_px: 280", "pickup_u1_px: .nan");
-  Reject(text.str(), "pickup_u1_px: 280", "pickup_u1_px: 330");
-  Reject(text.str(), "pickup_u2_px: 330", "pickup_u2_px: 279.0");
-  Reject(text.str(), "pickup_v1_px: 110", "pickup_v1_px: 141.0");
-  Reject(text.str(), "pickup_v2_px: 140", "pickup_v2_px: .inf");
+  Reject(text.str(), "pickup_u1_px: 310", "pickup_u1_px: -1.0");
+  Reject(text.str(), "pickup_u1_px: 310", "pickup_u1_px: .nan");
+  Reject(text.str(), "pickup_u1_px: 310", "pickup_u1_px: 386");
+  Reject(text.str(), "pickup_u2_px: 385", "pickup_u2_px: 309.0");
+  Reject(text.str(), "pickup_v1_px: 80", "pickup_v1_px: 131.0");
+  Reject(text.str(), "pickup_v2_px: 130", "pickup_v2_px: .inf");
   Reject(text.str(), "smooth_alpha: 0.45", "smooth_alpha: .nan");
   Reject(text.str(), "approach_two_step_v_px: 360.0", "approach_two_step_v_px: .nan");
   Reject(text.str(), "pickup_max_attempts: 100", "pickup_max_attempts: 0");
   Reject(text.str(), "upper_acquire_v_px: 470.0", "upper_acquire_v_px: -0.1");
   Reject(text.str(), "target_u_px: 380.0", "target_u_px: .inf");
-  Reject(text.str(), "throwing_range_m: 0.40", "throwing_range_m: 0.0");
+  Reject(text.str(), "throw_landing_z_m: 0.48", "throw_landing_z_m: 0.0");
+  Reject(text.str(), "throw_landing_x_m: -0.08", "throw_landing_x_m: .nan");
   Reject(text.str(), "fine_settle_duration_sec: 0.60",
          "fine_settle_duration_sec: -0.1");
   Reject(text.str(), "action_ack_timeout_sec: 10.0",
