@@ -608,6 +608,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       input.backboard_target = mean.target;
       input.backboard_center_depth_m = mean.center_depth_m;
       input.goal_pose = mean.pose;
+      goal_controller_.ClearMovingApproachTriggers();
       goal_controller_.ClearObservationHistory();
       for (int i=1; i<std::max(1,config_.goal.stable_min_hits); ++i)
         goal_controller_.ObserveOnly(input.backboard_target,input.goal_pose,
