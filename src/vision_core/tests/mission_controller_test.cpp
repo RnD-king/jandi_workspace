@@ -764,8 +764,9 @@ int main() {
   assert(ready_result.command.action==MissionAction::kStepForwardTwo);
   assert(ready_result.command.action_id!=ball_ready_id);
 
-  // Directional object approaches are action 24/25 (turn + two steps),
-  // NOT straight two-step action 21. Both use moving READY evidence.
+  // Directional object approaches (24/25) change the camera heading
+  // during the motion. Even a fully valid READY 10/7 window must be
+  // DISCARDED: wait for fresh post-DONE observations in final coordinates.
   for (double lateral_u : {.05, .95}) {
     MissionController directional(ready_cfg);
     ready_frame=Frame(0.0);
@@ -780,13 +781,30 @@ int main() {
       ready_frame.ball_target=Ball(i>=12 ? .5 : lateral_u,i>=12 ? .8 : .2);
       ready_frame.delivery_feedback={lateral_id,true,false,i==27};
       ready_result=directional.Step(ready_frame);
+      assert(!ready_result.object_ready_mean_used);
     }
     ready_frame=Frame(3.0);
     ready_frame.ball_target=Ball(lateral_u,.2);
     ready_frame.delivery_feedback={lateral_id,true,true,false};
     ready_result=directional.Step(ready_frame);
-    assert(ready_result.object_ready_mean_used);
+    assert(!ready_result.object_ready_mean_used);
+    assert(ready_result.post_motion_observing);
+    assert(ready_result.command.action_id==0 ||
+           ready_result.command.action_id==lateral_id);
+    for (int i=1;i<=9;++i) {
+      ready_frame=Frame(3.0+i*.1);
+      ready_frame.ball_target=Ball(.5,.8);
+      ready_result=directional.Step(ready_frame);
+      assert(!ready_result.object_ready_mean_used);
+      assert(ready_result.post_motion_observing);
+    }
+    ready_frame=Frame(4.0);
+    ready_frame.ball_target=Ball(.5,.8);
+    ready_result=directional.Step(ready_frame);
+    assert(!ready_result.object_ready_mean_used);
+    assert(!ready_result.post_motion_observing);
     assert(ready_result.command.action==MissionAction::kStepForwardTwo);
+    assert(ready_result.command.action_id!=lateral_id);
   }
 
   // Straight two-step is deliberately not a moving READY candidate.
