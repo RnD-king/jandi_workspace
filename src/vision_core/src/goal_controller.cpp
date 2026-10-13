@@ -19,6 +19,18 @@ ActionRequest Locomotion(MissionAction action) {
 ActionRequest Mission(MissionAction action, std::int16_t yaw = 0) {
   return {action, ActionCategory::kMission, yaw, false};
 }
+MissionAction GoalApproachWalk(CruiseDirection direction, bool short_distance) {
+  // Keep normal LINE cruise IDs 11/12/13 out of GOAL approach.
+  switch (direction) {
+  case CruiseDirection::kLeft: return MissionAction::kStepForwardLeftOne;
+  case CruiseDirection::kRight: return MissionAction::kStepForwardRightOneHurdle;
+  case CruiseDirection::kStraight:
+    return short_distance ? MissionAction::kStepForwardThree
+                          : MissionAction::kStepForwardFour;
+  case CruiseDirection::kNone: return MissionAction::kNone;
+  }
+  return MissionAction::kNone;
+}
 double Wrap(double angle) {
   while (angle > kPi)
     angle -= 2.0 * kPi;
@@ -409,7 +421,7 @@ GoalResult GoalController::Compute(
         true, true, tracked_.center_px.u - config_.target_u_px,
         config_.approach_u_deadband_px);
     result.action = Locomotion(
-        (d.direction == CruiseDirection::kLeft ? MissionAction::kStepForwardLeftOne : d.direction == CruiseDirection::kRight ? MissionAction::kStepForwardRightOneHurdle : d.direction == CruiseDirection::kStraight ? (distance <= config_.approach_short_z_m ? MissionAction::kStepForwardThree : MissionAction::kStepForwardFour) : MissionAction::kNone));
+        GoalApproachWalk(d.direction, distance <= config_.approach_short_z_m));
     return result;
   }
   case GoalMode::kWaitCameraGoal:
@@ -462,7 +474,7 @@ GoalResult GoalController::Compute(
       const auto decision = SelectCruiseDecision(
           true, true, tracked_.center_px.u - config_.target_u_px,
           config_.approach_u_deadband_px);
-      result.action = Locomotion((decision.direction == CruiseDirection::kLeft ? MissionAction::kStepForwardLeftOne : decision.direction == CruiseDirection::kRight ? MissionAction::kStepForwardRightOneHurdle : decision.direction == CruiseDirection::kStraight ? ((center_depth_m.value_or(tracked_pose_.z_m) > 0 && center_depth_m.value_or(tracked_pose_.z_m) <= config_.approach_short_z_m) ? MissionAction::kStepForwardThree : MissionAction::kStepForwardFour) : MissionAction::kNone));
+      result.action = Locomotion(GoalApproachWalk(decision.direction, center_depth_m.value_or(tracked_pose_.z_m) > 0 && center_depth_m.value_or(tracked_pose_.z_m) <= config_.approach_short_z_m));
     }
     return result;
   }
@@ -496,7 +508,7 @@ GoalResult GoalController::Compute(
     const auto decision = SelectCruiseDecision(
         true, tracked_.visible, tracked_.center_px.u - config_.target_u_px,
         config_.approach_u_deadband_px);
-    result.action = Locomotion((decision.direction == CruiseDirection::kLeft ? MissionAction::kStepForwardLeftOne : decision.direction == CruiseDirection::kRight ? MissionAction::kStepForwardRightOneHurdle : decision.direction == CruiseDirection::kStraight ? ((center_depth_m.value_or(tracked_pose_.z_m) > 0 && center_depth_m.value_or(tracked_pose_.z_m) <= config_.approach_short_z_m) ? MissionAction::kStepForwardThree : MissionAction::kStepForwardFour) : MissionAction::kNone));
+    result.action = Locomotion(GoalApproachWalk(decision.direction, center_depth_m.value_or(tracked_pose_.z_m) > 0 && center_depth_m.value_or(tracked_pose_.z_m) <= config_.approach_short_z_m));
     return result;
   }
   case GoalMode::kCoarseAdjust: {
