@@ -285,6 +285,7 @@ public:
     mission_config.ball = ball_cmd_cfg;
     mission_config.hurdle = hurdle_cmd_cfg;
     mission_config.goal = goal_cmd_cfg;
+    goal_debug_cfg_ = goal_cmd_cfg;
     mission_config.line_detection.class_id = line_class_id_;
     mission_config.line_detection.confidence = conf_thres_;
     mission_config.object_targets.ball_class_id = ball_class_id_;
@@ -1589,11 +1590,11 @@ private:
                       show_p2p_action ? 0.55 : 0.70,
                       cv::Scalar(0, 200, 255), 2);
 
-          cv::Mat state_panel(360, 1100, CV_8UC3,
+          cv::Mat state_panel(420, 1100, CV_8UC3,
                               cv::Scalar(20, 20, 20));
           cv::putText(state_panel,
               std::string("CONTROL: ") + RunStateName(run_state_),
-              cv::Point(760, 335), cv::FONT_HERSHEY_SIMPLEX, 0.55,
+              cv::Point(760, 395), cv::FONT_HERSHEY_SIMPLEX, 0.55,
               cv::Scalar(0, 200, 255), 1);
           int state_y = 24;
           const auto draw_state = [&state_panel, &state_y](
@@ -1676,6 +1677,32 @@ private:
             std::snprintf(buf, sizeof(buf), "SHOOT ROTATION YAW: --");
           }
           draw_state(buf, cv::Scalar(0, 200, 255));
+
+          if (pose_confirmed) {
+            const double rim_x=goal_cmd.pose.x_m+
+                goal_debug_cfg_.hoop_radius_m*std::sin(goal_cmd.pose.yaw_rad);
+            const double rim_z=goal_cmd.pose.z_m-
+                goal_debug_cfg_.hoop_radius_m*std::cos(goal_cmd.pose.yaw_rad);
+            const double target_yaw=std::atan2(goal_debug_cfg_.throw_landing_x_m,
+                goal_debug_cfg_.throw_landing_z_m)-std::atan2(rim_x,rim_z);
+            const double cosine=std::cos(target_yaw),sine=std::sin(target_yaw);
+            const double land_x=cosine*goal_debug_cfg_.throw_landing_x_m-
+                sine*goal_debug_cfg_.throw_landing_z_m;
+            const double land_z=sine*goal_debug_cfg_.throw_landing_x_m+
+                cosine*goal_debug_cfg_.throw_landing_z_m;
+            std::snprintf(buf,sizeof(buf),
+                "GOAL RIM: x=%+.1fcm z=%.1fcm | LAND: x=%+.1fcm z=%.1fcm",
+                100*rim_x,100*rim_z,100*land_x,100*land_z);
+            draw_state(buf,cv::Scalar(0,210,255));
+            std::snprintf(buf,sizeof(buf),
+                "THROW: yaw=%+.2fdeg  2D error=%.2fcm  limit=%.1fdeg",
+                target_yaw*180.0/M_PI,100*std::hypot(rim_x-land_x,rim_z-land_z),
+                goal_debug_cfg_.shoot_yaw_limit_deg);
+            draw_state(buf,cv::Scalar(0,210,255));
+          } else {
+            draw_state("GOAL RIM/LANDING: --",cv::Scalar(0,210,255));
+            draw_state("THROW 2D ERROR: --",cv::Scalar(0,210,255));
+          }
 
           if (backboard_confirmed) {
             std::snprintf(
@@ -1810,6 +1837,7 @@ private:
   std::unique_ptr<YoloTrtEngine> yolo_;
   std::unique_ptr<vision_core::MissionController> mission_controller_;
   vision_core::Intrinsics camera_intrinsics_{};
+  vision_core::GoalConfig goal_debug_cfg_{};
 
   // IMU 최신 상태(latest)
   std::mutex imu_mutex_;
