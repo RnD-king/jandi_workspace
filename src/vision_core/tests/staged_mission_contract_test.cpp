@@ -34,7 +34,7 @@ struct Trial {
   void TargetNow(MissionType mission) {
     if(mission==MissionType::kBall)in.ball_target=Target();
     else if(mission==MissionType::kHurdle)in.hurdle_target=Target(320,420);
-    else {in.backboard_target=Target();in.backboard_center_depth_m=.5;in.goal_pose={true,0,.5,0,1};}
+    else {in.backboard_target=Target();in.backboard_center_depth_m=.6;in.goal_pose={true,0,.6,0,1};}
   }
   MissionFrameResult Preview() const {auto trial=core;auto input=in;input.allow_new_body_actions=true;input.delivery_feedback={};return trial.Step(input);}
   void Commit(MissionAction action) {
@@ -171,6 +171,10 @@ void WeightedCoordinatesUseHistory() {
 }
 void FineAdjustmentUsesFreshEqualMeans() {
   auto c=LoadDefaultAlgorithmConfig();
+  // This test isolates averaging behavior using its legacy synthetic
+  // landing geometry; calibrated -8cm/48cm geometry has a dedicated test.
+  c.goal.throw_landing_x_m=0.0;
+  c.goal.throw_landing_z_m=0.4;
   c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
   c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
   BallController ball(c.ball,3);
@@ -292,7 +296,14 @@ void ManualCoreKeepsRecoveryLive() {
   auto c=Config(MissionType::kBall,0);MissionController core(c);MissionFrameInput in;
   in.image_width=640;in.image_height=480;in.command_transport_enabled=true;
   in.manual_observation_control=true;in.allow_new_body_actions=false;
-  MissionFrameResult out;
+  in.allow_test_setup_body_actions=true;
+  MissionFrameResult out=core.Step(in);
+  const auto setup_id=out.command.action_id;
+  assert(setup_id!=0 && out.command.action==MissionAction::kWalkMode);
+  in.delivery_feedback={setup_id,true,true,false};
+  out=core.Step(in);
+  assert(!core.TestSetupPending());
+  in.delivery_feedback={};in.allow_test_setup_body_actions=false;
   for(int i=0;i<7;++i){in.now_sec+=.12;in.ball_target=Target(320,144);out=core.Step(in);}
   for(int i=0;i<5;++i){in.now_sec+=.12;in.ball_target.reset();out=core.Step(in);}
   assert(core.NeedsStationaryObservation());
