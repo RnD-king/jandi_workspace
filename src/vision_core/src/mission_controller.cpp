@@ -699,7 +699,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         goal_result_.mode=config_.test_stage<=2 ? GoalMode::kWaitCameraGoal : GoalMode::kFineAdjust;
       }
     }
-    if (!input.allow_new_body_actions) pose={};
+    if (!input.allow_new_body_actions && !input.allow_test_setup_body_actions) pose={};
     if (!input.allow_new_commands || test_failed_) { pose={}; camera_request=CameraRequest::kNone; }
     output.command=command_coordinator_.Compute(active_mission_,903,pose,camera_request,
         input.delivery_feedback,input.now_sec);
@@ -1376,6 +1376,7 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   prepared.allow_new_line_action = input.allow_new_line_action;
   prepared.allow_new_commands = input.allow_new_commands;
   prepared.allow_new_body_actions = input.allow_new_body_actions;
+  prepared.allow_test_setup_body_actions = input.allow_test_setup_body_actions;
   prepared.allow_new_mission_entry = input.allow_new_mission_entry;
   prepared.advance_line_fsm = input.advance_line_fsm;
   prepared.manual_observation_control = input.manual_observation_control;
@@ -1577,6 +1578,7 @@ void MissionController::Reset() { Reset(false); }
 void MissionController::Reset(bool preserve_action_ids) {
   if (!preserve_action_ids) foot_pose_=FootPose::kWalk;
   pose_change_pending_=mission_finish_pending_=physical_reset_pending_=pose_observation_pending_=false;
+  reset_camera_command_sent_=false;
   reset_walk_done_=false;
   test_setup_camera_started_=test_failed_=false;
   fresh_after_search_=test_setup_pending_=test_entry_pending_=test_execution_started_=false;
@@ -1636,7 +1638,10 @@ void MissionController::Reset(bool preserve_action_ids) {
   InitializeTest();
 }
 void MissionController::BeginPhysicalReset() {
-  Reset(true); physical_reset_pending_=true; reset_walk_done_=false;
+  Reset(true);
+  physical_reset_pending_=true;
+  reset_walk_done_=false;
+  reset_camera_command_sent_=false;
 }
 MissionFrameResult MissionController::StepPhysicalReset(
     const CommandDeliveryFeedback &feedback,const CameraFeedback &camera,double now_sec) {
@@ -1644,10 +1649,16 @@ MissionFrameResult MissionController::StepPhysicalReset(
   if (!physical_reset_pending_) { result.physical_reset_complete=true; return result; }
   if (feedback.done && last_command_.action_id!=0 && feedback.action_id==last_command_.action_id &&
       last_command_.action==MissionAction::kWalkMode) { reset_walk_done_=true; foot_pose_=FootPose::kWalk; }
-  const bool camera_ready=camera.settled && camera.actual_mode==CameraMode::kForward;
+  // Force a NEW FORWARD command on every physical RESET even if the cached
+  // mode already says FORWARD. In hardware the pending command sets camera
+  // feedback to TRANSITION until its own new ID receives DONE.
+  const bool camera_ready = reset_camera_command_sent_ &&
+      camera.settled && camera.actual_mode==CameraMode::kForward;
   result.command=command_coordinator_.Compute(MissionType::kLine,902,
       reset_walk_done_ ? ActionRequest{} : ActionRequest{MissionAction::kWalkMode,ActionCategory::kLocomotion,0,false},
       camera_ready ? CameraRequest::kNone : CameraRequest::kForward,feedback,now_sec);
+  if (result.command.camera_request == CameraRequest::kForward)
+    reset_camera_command_sent_=true;
   last_command_=result.command;
   if (reset_walk_done_ && camera_ready && last_command_.action_id==0) {
     physical_reset_pending_=false; Reset(true); result.physical_reset_complete=true;
