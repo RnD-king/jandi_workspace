@@ -22,6 +22,19 @@ static void Reject(const std::string &yaml, const std::string &from,
   std::remove(path); assert(rejected);
 }
 
+static vision_core::MissionControllerConfig LoadText(const std::string &yaml) {
+  const char *path = "modified_algorithm.yaml";
+  { std::ofstream out(path); out << yaml; }
+  try {
+    auto result = vision_core::LoadAlgorithmConfig(path);
+    std::remove(path);
+    return result;
+  } catch (...) {
+    std::remove(path);
+    throw;
+  }
+}
+
 int main(int argc, char **argv) {
   assert(argc == 2);
   const auto c = vision_core::LoadAlgorithmConfig(argv[1]);
@@ -34,6 +47,11 @@ int main(int argc, char **argv) {
   assert(c.hurdle.stable_window == 10);
   assert(c.hurdle.stable_min_hits == 7);
   assert(c.post_motion_observation_sec == 1.0);
+  assert(c.object_ready_mean_actions == std::vector<int>({22, 23}));
+  assert(defaults.object_ready_mean_actions == c.object_ready_mean_actions);
+  assert(c.UsesObjectReadyMean(vision_core::MissionAction::kStepForwardThree));
+  assert(c.UsesObjectReadyMean(vision_core::MissionAction::kStepForwardFour));
+  assert(!c.UsesObjectReadyMean(vision_core::MissionAction::kStepForwardLeftTwo));
   assert(c.test_stage==0 && c.test_mission==vision_core::MissionType::kNone);
   assert(c.backboard_depth_strip_width_px==5);
   assert(c.line_p2p.recovery_observation_sec == 1.0);
@@ -57,6 +75,32 @@ int main(int argc, char **argv) {
   assert(c.camera_motion_timeout_sec == 3.0);
   assert(c.line_features.guide_min_points == 3);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
+  // Future opt-in only edits YAML; AUTO and tuning use the same parser.
+  const auto replaced = [&text](const std::string &value) {
+    std::string modified = text.str();
+    const std::string original = "object_ready_mean_actions: [22, 23]";
+    const auto pos = modified.find(original);
+    assert(pos != std::string::npos);
+    modified.replace(pos, original.size(), value);
+    return modified;
+  };
+  auto future = LoadText(replaced("object_ready_mean_actions: [22, 23, 24, 25]"));
+  assert(future.UsesObjectReadyMean(vision_core::MissionAction::kStepForwardLeftTwo));
+  assert(future.UsesObjectReadyMean(vision_core::MissionAction::kStepForwardRightTwo));
+  auto disabled = LoadText(replaced("object_ready_mean_actions: []"));
+  assert(disabled.object_ready_mean_actions.empty());
+  assert(!disabled.UsesObjectReadyMean(vision_core::MissionAction::kStepForwardFour));
+  Reject(text.str(), "object_ready_mean_actions: [22, 23]",
+         "object_ready_mean_actions: [22, 23, 22]");
+  Reject(text.str(), "object_ready_mean_actions: [22, 23]",
+         "object_ready_mean_actions: [10, 22]");
+  Reject(text.str(), "object_ready_mean_actions: [22, 23]",
+         "object_ready_mean_actions: [7]");
+  Reject(text.str(), "object_ready_mean_actions: [22, 23]",
+         "object_ready_mean_actions: [22, not_an_action]");
+  Reject(text.str(), "object_ready_mean_actions: [22, 23]",
+         "object_ready_mean_actions: 22");
+  Reject(text.str(), "object_ready_mean_actions: [22, 23]", "");
   Reject(text.str(), "post_motion_observation_sec: 1.0", "post_motion_observation_sec: 0.0");
   Reject(text.str(), "test_stage: 0", "test_stage: 4");
   Reject(text.str(), "backboard_depth_strip_width_px: 5", "backboard_depth_strip_width_px: 0");

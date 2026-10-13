@@ -807,6 +807,54 @@ int main() {
     assert(ready_result.command.action_id!=lateral_id);
   }
 
+  // Changing only the allowlist enables the exact same READY path for
+  // directional 24/25, without modifying controller source.
+  auto turn_enabled_cfg = ready_cfg;
+  turn_enabled_cfg.object_ready_mean_actions = {22, 23, 24, 25};
+  ValidateAlgorithmConfig(turn_enabled_cfg);
+  for (double lateral_u : {.05, .95}) {
+    MissionController turn_enabled(turn_enabled_cfg);
+    ready_frame=Frame(0.0); ready_frame.ball_target=Ball(lateral_u,.2);
+    ready_result=turn_enabled.Step(ready_frame);
+    assert(ready_result.command.action ==
+        (lateral_u<.5 ? MissionAction::kStepForwardLeftTwo
+                       : MissionAction::kStepForwardRightTwo));
+    const auto turn_id=ready_result.command.action_id;
+    for (int i=1;i<=27;++i) {
+      ready_frame=Frame(i*.1);
+      ready_frame.ball_target=Ball(i>=12 ? .5 : lateral_u,i>=12 ? .8 : .2);
+      ready_frame.delivery_feedback={turn_id,true,false,i==27};
+      ready_result=turn_enabled.Step(ready_frame);
+    }
+    ready_frame=Frame(3.0);
+    ready_frame.ball_target=Ball(lateral_u,.2);
+    ready_frame.delivery_feedback={turn_id,true,true,false};
+    ready_result=turn_enabled.Step(ready_frame);
+    assert(ready_result.object_ready_mean_used);
+    assert(!ready_result.post_motion_observing);
+    assert(ready_result.command.action==MissionAction::kStepForwardTwo);
+  }
+
+  // Empty allowlist disables the object READY mean even for straight 22/23.
+  auto disabled_ready_cfg=ready_cfg;
+  disabled_ready_cfg.object_ready_mean_actions.clear();
+  ValidateAlgorithmConfig(disabled_ready_cfg);
+  MissionController disabled_ready(disabled_ready_cfg);
+  ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
+  ready_result=disabled_ready.Step(ready_frame);
+  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  const auto disabled_id=ready_result.command.action_id;
+  for (int i=1;i<=27;++i) {
+    ready_frame=Frame(i*.1); ready_frame.ball_target=Ball(.5,.8);
+    ready_frame.delivery_feedback={disabled_id,true,false,i==27};
+    ready_result=disabled_ready.Step(ready_frame);
+  }
+  ready_frame=Frame(3.0); ready_frame.ball_target=Ball(.5,.8);
+  ready_frame.delivery_feedback={disabled_id,true,true,false};
+  ready_result=disabled_ready.Step(ready_frame);
+  assert(!ready_result.object_ready_mean_used);
+  assert(ready_result.post_motion_observing);
+
   // Straight two-step is deliberately not a moving READY candidate.
   MissionController straight_two(ready_cfg);
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.85);
