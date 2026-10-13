@@ -4,6 +4,8 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <utility>
+#include <vector>
 
 using namespace vision_core;
 static ObjectTarget Ball(double u, double v) {
