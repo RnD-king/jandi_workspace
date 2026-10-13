@@ -3,7 +3,7 @@
 main 시작 시 `motions/공_재그립.json` 마지막 키프레임의 `positions[19]`를 읽고 검증한다.
 현재 값은 1968 tick이다. 실행 중에는 이 값을 보관하며 JSON 변경은 다음 실행부터 반영한다.
 
-PICK_BALL(14), RECATCH(15), HUDDLE(16), SHOOT(17)는 제외한다.
+PICK_BALL(14), RECATCH(15), HUDDLE(16), SHOOT(17), PICK_BALL_RE(29), PICK_BALL_RE_STAND(30)는 제외한다.
 그 외 action은 mission과 관계없이 준비한 모든 키프레임의 19번 목표를 기준 tick으로 바꾼다.
 시작 초기 자세, 반복, 뒤에 붙는 걷기, 선예약에도 적용한다.
 미션 팔 전환이 필요한 일반 action은 해당 전환에도 19번 목표를 반영한다.
