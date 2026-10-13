@@ -734,5 +734,97 @@ int main() {
   paused_frame=Frame(.3);
   paused_result=pausable.Step(paused_frame);
   assert(paused_result.command.action_id==1);
+
+  // BALL: 4-step 40%-READY mean should select 2-step at DONE even if
+  // the raw DONE frame would incorrectly select four-step.
+  auto ready_cfg=LoadDefaultAlgorithmConfig();
+  ready_cfg.enable_ball=true;
+  ready_cfg.enable_goal=ready_cfg.enable_hurdle=false;
+  ready_cfg.ball.stable_window=ready_cfg.ball.stable_min_hits=1;
+  ready_cfg.ball.upper_acquire_v_px=480;
+  MissionController ball_ready(ready_cfg);
+  auto ready_frame=Frame(0.0);
+  ready_frame.ball_target=Ball(.5,.2);
+  auto ready_result=ball_ready.Step(ready_frame);
+  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  const auto ball_ready_id=ready_result.command.action_id;
+  for (int i=1;i<=27;++i) {
+    ready_frame=Frame(i*.1);
+    ready_frame.ball_target=Ball(.5,i>=12 ? .8 : .2);
+    ready_frame.delivery_feedback={ball_ready_id,true,false,i==27};
+    ready_result=ball_ready.Step(ready_frame);
+    assert(ready_result.command.action_id==ball_ready_id);
+  }
+  ready_frame=Frame(3.0); ready_frame.ball_target=Ball(.5,.2);
+  ready_frame.delivery_feedback={ball_ready_id,true,true,false};
+  ready_result=ball_ready.Step(ready_frame);
+  assert(!ready_result.post_motion_observing);
+  assert(ready_result.ball.mode==BallMode::kApproachTwoBeforeDown);
+  assert(ready_result.command.action==MissionAction::kStepForwardTwo);
+  assert(ready_result.command.action_id!=ball_ready_id);
+
+  // Missing READY: reject moving samples and retain stationary 1s gate.
+  MissionController no_ready(ready_cfg);
+  ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
+  ready_result=no_ready.Step(ready_frame);
+  const auto no_ready_id=ready_result.command.action_id;
+  for (int i=1;i<=27;++i) {
+    ready_frame=Frame(i*.1); ready_frame.ball_target=Ball(.5,.8);
+    ready_frame.delivery_feedback={no_ready_id,true,false,false};
+    ready_result=no_ready.Step(ready_frame);
+  }
+  ready_frame=Frame(3.0); ready_frame.ball_target=Ball(.5,.8);
+  ready_frame.delivery_feedback={no_ready_id,true,true,false};
+  ready_result=no_ready.Step(ready_frame);
+  assert(ready_result.post_motion_observing);
+  assert(ready_result.command.action_id==0);
+
+  // HURDLE: four-step mean leads to three-step, observation_complete
+  // must be set when consuming verified READY evidence at DONE.
+  auto hurdle_ready_cfg=ready_cfg;
+  hurdle_ready_cfg.enable_ball=false; hurdle_ready_cfg.enable_hurdle=true;
+  hurdle_ready_cfg.hurdle.stable_window=hurdle_ready_cfg.hurdle.stable_min_hits=1;
+  hurdle_ready_cfg.hurdle.upper_acquire_v_px=480;
+  MissionController hurdle_ready(hurdle_ready_cfg);
+  ready_frame=Frame(0.0); ready_frame.hurdle_target=Ball(.5,.3);
+  ready_result=hurdle_ready.Step(ready_frame);
+  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  const auto hurdle_ready_id=ready_result.command.action_id;
+  for (int i=1;i<=27;++i) {
+    ready_frame=Frame(i*.1);
+    ready_frame.hurdle_target=Ball(.5,i>=12 ? .7 : .3);
+    ready_frame.delivery_feedback={hurdle_ready_id,true,false,i==27};
+    ready_result=hurdle_ready.Step(ready_frame);
+  }
+  ready_frame=Frame(3.0); ready_frame.hurdle_target=Ball(.5,.9);
+  ready_frame.delivery_feedback={hurdle_ready_id,true,true,false};
+  ready_result=hurdle_ready.Step(ready_frame);
+  assert(!ready_result.post_motion_observing);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
+
+  // GOAL: center-depth mean prevents premature camera transition at DONE.
+  auto goal_ready_cfg=ready_cfg;
+  goal_ready_cfg.enable_ball=false; goal_ready_cfg.enable_goal=true;
+  goal_ready_cfg.goal_trial_start_forward=true;
+  goal_ready_cfg.goal.stable_window=goal_ready_cfg.goal.stable_min_hits=1;
+  MissionController goal_ready(goal_ready_cfg);
+  ready_frame=Frame(0.0); ready_frame.backboard_target=Ball(.5,.3);
+  ready_frame.backboard_center_depth_m=1.8;
+  ready_result=goal_ready.Step(ready_frame);
+  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  const auto goal_ready_id=ready_result.command.action_id;
+  for (int i=1;i<=27;++i) {
+    ready_frame=Frame(i*.1);
+    ready_frame.backboard_target=Ball(.5,.3);
+    ready_frame.backboard_center_depth_m=i>=12 ? 1.0 : 1.8;
+    ready_frame.delivery_feedback={goal_ready_id,true,false,i==27};
+    ready_result=goal_ready.Step(ready_frame);
+  }
+  ready_frame=Frame(3.0); ready_frame.backboard_target=Ball(.5,.3);
+  ready_frame.backboard_center_depth_m=.5;
+  ready_frame.delivery_feedback={goal_ready_id,true,true,false};
+  ready_result=goal_ready.Step(ready_frame);
+  assert(!ready_result.post_motion_observing);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
   return 0;
 }
