@@ -1000,7 +1000,9 @@ private:
     using vision_core::MissionAction;
     // LINE READY uses its original 11/12/13 protocol, regardless of YAML.
     // Object mean eligibility is shared with AUTO via the loaded core config.
-    if (manual_committed_command_.mission == vision_core::MissionType::kLine)
+    const auto mission = mission_controller_->ActiveMission();
+    if (manual_committed_command_.mission != mission) return false;
+    if (mission == vision_core::MissionType::kLine)
       return action == MissionAction::kStepForwardLeft ||
              action == MissionAction::kStepForwardFive ||
              action == MissionAction::kStepForwardRight;
@@ -1289,12 +1291,16 @@ private:
     bool ready_sent{false};
   };
 
-  bool IsSimulatedLongWalk(vision_core::MissionAction action) const {
+  static bool IsSimulatedLongWalk(vision_core::MissionAction action) {
     using vision_core::MissionAction;
-    // Mirror forward_walk READY capability (11/12/13, 21..26), independent
-    // of which actions are safe for moving-window perception.
-    return IsReadyWalk(action) ||
+    // Mirror forward_walk's READY protocol independently of the YAML
+    // object-average allowlist, which controls perception only.
+    return action == MissionAction::kStepForwardLeft ||
+           action == MissionAction::kStepForwardRight ||
+           action == MissionAction::kStepForwardFive ||
            action == MissionAction::kStepForwardTwo ||
+           action == MissionAction::kStepForwardThree ||
+           action == MissionAction::kStepForwardFour ||
            action == MissionAction::kStepForwardLeftTwo ||
            action == MissionAction::kStepForwardRightTwo ||
            action == MissionAction::kStepForwardRightOne;
