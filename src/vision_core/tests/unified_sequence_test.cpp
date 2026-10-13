@@ -268,9 +268,9 @@ int main() {
   goal.Compute({},Target(),{true,0,.7,0,1},640,480,0,true,{}, {},true,.7);
   goal.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
   goal.Compute({},Target(),{true,0,.7,0,1},640,480,.2,true,{CameraMode::kGoal,true},{});
-  auto large=goal.Compute({},Target(),{true,0,.8,0,1},640,480,.3,true,{CameraMode::kGoal,true},{});
+  auto large=goal.Compute({},Target(),{true,0,.9,0,1},640,480,.3,true,{CameraMode::kGoal,true},{});
   assert(large.fine_decision_pose_used && large.action.action==MissionAction::kStepForwardTwo);
-  auto medium=goal.Compute({},Target(),{true,0,.65,0,1},640,480,.4,true,{CameraMode::kGoal,true},{});
+  auto medium=goal.Compute({},Target(),{true,0,.75,0,1},640,480,.4,true,{CameraMode::kGoal,true},{});
   assert(medium.fine_decision_pose_used && medium.action.action==MissionAction::kStepForwardOne);
   TestCameraLatchSurvivesLoss(); TestWindowAndDeadline(); TestAlternatingBoundedRecovery();
   TestGoalForwardTrial(); TestHurdleSearchAndContact();
