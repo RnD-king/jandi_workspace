@@ -1554,7 +1554,7 @@ private:
 
           cv::Mat vis = bgr.clone();
           for (const auto& detection:dets) if (detection.class_id==backboard_class_id_)
-            vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_);
+            vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_,aligned_depth);
           DrawConfirmedDetections(
               vis, prepared.line_centers, line_confirmed, ball_target,
               ball_confirmed, backboard_target, backboard_confirmed,
