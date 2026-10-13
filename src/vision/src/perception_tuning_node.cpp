@@ -2123,6 +2123,7 @@ private:
       return true;
     };
 
+    const int mission_state_before = mission_controller_->MissionStateKey();
     vision_core::PerceptionMissionFrameResult perception_result;
     const bool was_stationary_observing = mission_controller_->NeedsStationaryObservation();
     bool stepped_real_core = false;
@@ -2241,6 +2242,25 @@ private:
             observation_cycle_id_, frame_now_sec,
             perception_result.mission.line_features.guide);
       }
+    }
+    // An internal FSM-only transition must not consume a second PREVIEW click.
+    // Do not bypass COMMIT for any real action: this only starts a new
+    // stationary observation if a preceding window/camera completion changed
+    // the FSM without issuing a body or camera command.
+    if (!stage_setup_was_pending && (finishing_observation || camera_done_edge) &&
+        mission_controller_->MissionStateKey() != mission_state_before &&
+        !preview_ready_ && !manual_action_active_ &&
+        outstanding_actions_.empty() && pending_camera_id_ == 0 &&
+        perception_result.mission.command.action_id == 0 &&
+        perception_result.mission.command.camera_request ==
+            vision_core::CameraRequest::kNone &&
+        !mission_controller_->IsTerminalHold() &&
+        run_state_ == RunState::kRunning) {
+      LeaveWaitPreview(frame_now_sec);
+      manual_observation_request_pending_ = true;
+      manual_observation_session_ = true;
+      observation_required_sec_ = 1.0;
+      BeginFreshObservation(frame_now_sec);
     }
     if (mission_controller_->NeedsStationaryObservation()) {
       // Stationary recovery is automatic observation, not a human wait.
