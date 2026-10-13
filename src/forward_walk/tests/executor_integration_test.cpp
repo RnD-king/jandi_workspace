@@ -199,7 +199,7 @@ int main() {
         for(uint16_t code:{1,2,3,7,11,13,18,21,22,23,24,25,26})
             Check(MainNode::UsesFixedGripperPose(code),"normal action gripper override missing");
         // 공을 향해 걷기 → 공 잡기 → 다시 걷기에서 action별 팔 목표 전환을 검증한다.
-        WriteMotion(directory/"motions/공_줍고일어나기.json");
+        WriteMotion(directory/"motions/공_줍고일어나기_최종.json");
         action(9190,14,2);
         pump([&]{return node->action_transactions_.completed.Contains(9190);});flush();
         Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048,"PICK_BALL did not restore JSON arm pose");
