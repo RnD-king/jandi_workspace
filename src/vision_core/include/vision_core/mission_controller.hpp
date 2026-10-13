@@ -90,6 +90,8 @@ struct MissionFrameInput {
   // In manual tuning, camera requests and DONE processing continue while
   // new body actions wait for explicit NEXT authorization.
   bool allow_new_body_actions{true};
+  // Only dedicated Stage START may execute setup pose actions without COMMIT.
+  bool allow_test_setup_body_actions{false};
   // During PAUSING do not discover a NEW object mission from moving images.
   bool allow_new_mission_entry{true};
   // false이면 특징은 계산하되 LINE 판단/recovery 상태는 동결한다.
@@ -169,6 +171,8 @@ struct PerceptionFrameInput {
   bool allow_new_line_action{true};
   bool allow_new_commands{true};
   bool allow_new_body_actions{true};
+  // Only dedicated Stage START may execute setup pose actions without COMMIT.
+  bool allow_test_setup_body_actions{false};
   bool allow_new_mission_entry{true};
   bool advance_line_fsm{true};
   // Manual PREVIEW triggers observation; AUTO default keeps post-DONE gates.
@@ -227,6 +231,14 @@ public:
   bool NeedsStationaryObservation() const;
   bool SetTestMissionIndices(int ball_index, int goal_index);
   bool SetTestStage(MissionType mission,int stage);
+  bool TestSetupPending() const { return test_setup_pending_; }
+  int MissionStateKey() const {
+    return 10000 * static_cast<int>(active_mission_) +
+        (active_mission_ == MissionType::kBall ? static_cast<int>(ball_result_.mode) :
+         active_mission_ == MissionType::kGoal ? static_cast<int>(goal_result_.mode) :
+         active_mission_ == MissionType::kHurdle ? static_cast<int>(hurdle_result_.mode) :
+         static_cast<int>(line_state_));
+  }
   // Transport-only advancement: no observations, body requests, or synthetic DONE.
   ControlCommand AcceptDeliveryFeedback(const CommandDeliveryFeedback&,double now_sec);
   bool HasBall() const { return has_ball_; }
@@ -309,6 +321,7 @@ private:
   double pose_started_sec_{0.0};
   bool mission_finish_pending_{false};
   bool physical_reset_pending_{false}, reset_walk_done_{false};
+  bool reset_camera_command_sent_{false};
   int ball_mission_index_{0}, goal_mission_index_{0};
   int mission_recovery_turns_{0};
   bool mission_recovery_issued_{false};
