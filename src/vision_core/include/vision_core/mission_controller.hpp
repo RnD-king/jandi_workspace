@@ -105,6 +105,7 @@ struct MissionFrameResult {
   bool has_ball{false};
   // Diagnostics of post-DONE observations, never counting pre-DONE history.
   bool post_motion_observing{false};
+  bool object_ready_mean_used{false}; // True only on the real object-action DONE.
   std::size_t post_motion_frames{0};
   std::size_t post_motion_window_frames{0};
   int post_motion_valid{0};
@@ -328,7 +329,6 @@ private:
     GoalPoseObservation pose;
   };
   std::uint64_t moving_object_action_id_{0};
-  MissionType moving_object_mission_{MissionType::kNone};
   CameraMode moving_object_camera_{CameraMode::kForward};
   std::vector<MovingObjectSample> moving_object_samples_;
   std::optional<MovingObjectReadyMean> moving_object_ready_mean_;
