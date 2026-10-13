@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
   Reject(text.str(), "approach_two_step_v_px: 360.0", "approach_two_step_v_px: .nan");
   Reject(text.str(), "pickup_max_attempts: 100", "pickup_max_attempts: 0");
   Reject(text.str(), "upper_acquire_v_px: 470.0", "upper_acquire_v_px: -0.1");
-  Reject(text.str(), "target_u_px: 320.0", "target_u_px: .inf");
+  Reject(text.str(), "target_u_px: 380.0", "target_u_px: .inf");
   Reject(text.str(), "throwing_range_m: 0.40", "throwing_range_m: 0.0");
   Reject(text.str(), "fine_settle_duration_sec: 0.60",
          "fine_settle_duration_sec: -0.1");
