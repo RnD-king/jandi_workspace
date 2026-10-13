@@ -996,17 +996,15 @@ private:
     if (scope==400+static_cast<int>(HurdleMode::kContactWalk)) return "CONTACT x"+std::to_string(tuning_config_.hurdle.contact_steps);
     return "ONE ACTION";
   }
-  static bool IsReadyWalk(vision_core::MissionAction action) {
+  bool IsReadyWalk(vision_core::MissionAction action) const {
     using vision_core::MissionAction;
-    // Eligible for 40%-to-READY observation averages, NOT the list of
-    // actions for which forward_walk actually emits READY.
-    // LINE 11/12/13 stays unchanged. Object 22/23 use moving means;
-    // turning 24/25 and straight 1/2-step 10/21 need fresh post-DONE views.
-    return action == MissionAction::kStepForwardLeft ||
-           action == MissionAction::kStepForwardFive ||
-           action == MissionAction::kStepForwardRight ||
-           action == MissionAction::kStepForwardThree ||
-           action == MissionAction::kStepForwardFour;
+    // LINE READY uses its original 11/12/13 protocol, regardless of YAML.
+    // Object mean eligibility is shared with AUTO via the loaded core config.
+    if (manual_committed_command_.mission == vision_core::MissionType::kLine)
+      return action == MissionAction::kStepForwardLeft ||
+             action == MissionAction::kStepForwardFive ||
+             action == MissionAction::kStepForwardRight;
+    return tuning_config_.UsesObjectReadyMean(action);
   }
   static bool IsFixedSuccessor(vision_core::MissionType mission,
                               vision_core::MissionAction action) {
