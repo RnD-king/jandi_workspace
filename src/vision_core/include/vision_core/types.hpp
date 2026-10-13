@@ -133,6 +133,8 @@ enum class MissionAction {
   kStepForwardLeftTwo = 24,
   kStepForwardRightTwo = 25,
   kStepForwardRightOne = 26,
+  kStepForwardLeftOne = 27,
+  kStepForwardRightOneHurdle = 28,
 };
 
 enum class CruiseDirection {
