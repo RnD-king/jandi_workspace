@@ -18,7 +18,7 @@ void BallStages() {
   c.down_one_step_v_px=216.0; c.fine_mode_v_px=278.4;
   c.pickup_v1_px=307.2; c.pickup_v2_px=364.8;
   BallController ball(c,3);
-  auto r=ball.Compute(Target(100,400),640,480,0,{},{});
+  auto r=ball.Compute(Target(380,400),640,480,0,{},{});
   assert(r.mode==BallMode::kApproachTwoBeforeDown && r.action.action==MissionAction::kStepForwardTwo);
   ActionExecutionFeedback busy; busy.action_active=true;
   r=ball.Compute({},640,480,.1,{},busy); assert(r.camera_request==CameraRequest::kNone);
