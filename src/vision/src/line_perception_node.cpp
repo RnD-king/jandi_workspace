@@ -191,7 +191,8 @@ public:
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
     declare_parameter<double>("goal_fine_adjust_start_z_m", algorithm_defaults.goal.fine_adjust_start_z_m);
     declare_parameter<double>("goal_hoop_radius_m", algorithm_defaults.goal.hoop_radius_m);
-    declare_parameter<double>("goal_throwing_range_m", algorithm_defaults.goal.throwing_range_m);
+    declare_parameter<double>("goal_throw_landing_x_m", algorithm_defaults.goal.throw_landing_x_m);
+    declare_parameter<double>("goal_throw_landing_z_m", algorithm_defaults.goal.throw_landing_z_m);
     declare_parameter<double>("goal_position_tolerance_m", algorithm_defaults.goal.position_tolerance_m);
     declare_parameter<double>("camera_motion_timeout_sec", algorithm_defaults.camera_motion_timeout_sec);
 
@@ -269,8 +270,10 @@ public:
         get_parameter("goal_fine_adjust_start_z_m").as_double();
     goal_cmd_cfg.hoop_radius_m =
         get_parameter("goal_hoop_radius_m").as_double();
-    goal_cmd_cfg.throwing_range_m =
-        get_parameter("goal_throwing_range_m").as_double();
+    goal_cmd_cfg.throw_landing_x_m =
+        get_parameter("goal_throw_landing_x_m").as_double();
+    goal_cmd_cfg.throw_landing_z_m =
+        get_parameter("goal_throw_landing_z_m").as_double();
     goal_cmd_cfg.position_tolerance_m =
         get_parameter("goal_position_tolerance_m").as_double();
     vision_core::MissionControllerConfig mission_config = algorithm_defaults;
@@ -646,6 +649,14 @@ private:
     case MissionAction::kStepForwardLeft: return "STEP_FORWARD_LEFT";
     case MissionAction::kStepForwardRight: return "STEP_FORWARD_RIGHT";
     case MissionAction::kStepForwardFive: return "STEP_FORWARD_FIVE";
+    case MissionAction::kStepForwardTwo: return "STEP_FORWARD_TWO";
+    case MissionAction::kStepForwardThree: return "STEP_FORWARD_THREE";
+    case MissionAction::kStepForwardFour: return "STEP_FORWARD_FOUR";
+    case MissionAction::kStepForwardLeftTwo: return "STEP_FORWARD_LEFT_TWO";
+    case MissionAction::kStepForwardRightTwo: return "STEP_FORWARD_RIGHT_TWO";
+    case MissionAction::kStepForwardRightOne: return "STEP_FORWARD_RIGHT_ONE";
+    case MissionAction::kStepForwardLeftOne: return "STEP_FORWARD_LEFT_ONE";
+    case MissionAction::kStepForwardRightOneHurdle: return "STEP_FORWARD_RIGHT_ONE_HUDDLE";
     case MissionAction::kPickBall: return "PICK_BALL";
     case MissionAction::kRecatch: return "RECATCH";
     case MissionAction::kHurdle: return "HUDDLE";
