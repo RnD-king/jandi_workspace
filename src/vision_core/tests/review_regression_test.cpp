@@ -123,7 +123,11 @@ void TestManualPerceptionStationaryRecovery() {
   assert(!reacquired.NeedsStationaryObservation());
 }
 void TestStationaryRecoveryAndNoHurdleCentering() {
-  const auto c=LoadDefaultAlgorithmConfig();
+  auto c=LoadDefaultAlgorithmConfig();
+  // This fixture tests mode recovery, not the production 0.60s post-search
+  // settling time. With a 10/7 observation window, the remaining frames
+  // otherwise end before the settle deadline and never reach kWaitFinePose.
+  c.ball.fine_settle_duration_sec=0.0;
   BallController ball(c.ball,3);
   CameraFeedback forward{}, down{CameraMode::kDown,true};
   double now=0; BallResult b;

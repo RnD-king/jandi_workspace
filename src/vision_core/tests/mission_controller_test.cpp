@@ -120,6 +120,17 @@ int main() {
   r=controller.Step(in); assert(r.command.command_type==CommandType::kHold);
   in=Frame(2.2); in.line_centers.clear();
   r=controller.Step(in);
+  // Recovery turns use the FINE stance: the real pose transition must
+  // complete before TURN_LEFT can be dispatched.
+  assert(r.command.action==MissionAction::kDefaultPoseMode);
+  const auto recovery_pose_id=r.command.action_id;
+  assert(recovery_pose_id!=0);
+  in=Frame(2.3); in.line_centers.clear();
+  in.delivery_feedback={recovery_pose_id,true,true,false};
+  r=controller.Step(in);
+  assert(r.foot_pose==FootPose::kFine);
+  in=Frame(2.4); in.line_centers.clear();
+  r=controller.Step(in);
   assert(r.command.action==MissionAction::kTurnLeft);
   assert(r.command.target_yaw_deg==15);
 
@@ -194,11 +205,19 @@ int main() {
   in.delivery_feedback={action_id,true,true,false};
   r=turning.Step(in);
   in=Frame(.2); in.line_centers.clear(); r=turning.Step(in);
+  assert(r.command.action==MissionAction::kDefaultPoseMode);
+  const auto turn_pose_id=r.command.action_id;
+  assert(turn_pose_id!=0);
+  in=Frame(.25); in.line_centers.clear();
+  in.delivery_feedback={turn_pose_id,true,true,false};
+  r=turning.Step(in);
+  assert(r.foot_pose==FootPose::kFine);
+  in=Frame(.3); in.line_centers.clear(); r=turning.Step(in);
   for (int turn=1; turn<=5; ++turn) {
     assert(r.command.action==MissionAction::kTurnLeft);
     assert(r.command.target_yaw_deg==15);
     action_id=r.command.action_id;
-    const double done_time=.2+turn*.2-.1;
+    const double done_time=.3+turn*.2-.1;
     in=Frame(done_time); in.line_centers.clear();
     in.delivery_feedback={action_id,true,true,false};
     r=turning.Step(in);
@@ -438,6 +457,9 @@ int main() {
   camera_gate_cfg.post_motion_observation_sec = 1.0;
   camera_gate_cfg.goal.stable_window = 10;
   camera_gate_cfg.goal.stable_min_hits = 7;
+  // This test checks the RIGHT-side action, not live calibrated 380 +/-160 ROI.
+  camera_gate_cfg.goal.target_u_px = 320.0;
+  camera_gate_cfg.goal.approach_u_deadband_px = 16.0;
   MissionController camera_gate(camera_gate_cfg);
   for (int i = 0; i < 7; ++i) {
     in = Frame(.1 * i);
