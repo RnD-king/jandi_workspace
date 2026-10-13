@@ -2,6 +2,7 @@
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/cruise_selector.hpp"
+#include "vision_core/cruise_selector.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -96,6 +97,7 @@ HurdleResult HurdleController::Compute(
     const std::optional<ObjectTarget> &target, int image_width,
     int image_height, double now_sec, const CameraFeedback &camera,
     const ActionExecutionFeedback &feedback,
+    const CruiseDecision &line_decision,
     bool allow_new_body_actions) {
   if (mode_ == HurdleMode::kLineFollow && now_sec < ignore_until_sec_)
     return {};
@@ -153,9 +155,24 @@ HurdleResult HurdleController::Compute(
       }
       return result;
     }
+    // Horizontal alignment comes from the shared LINE O/H steering score,
+    // not from the HURDLE YOLO box's horizontal center.
+    if (line_decision.direction == CruiseDirection::kNone)
+      return result;  // HOLD on invalid line evidence.
     const double v=tracked_.center_px.v;
     const int steps=v>=config_.approach_two_step_v_px ? 2 :
         (v>=config_.approach_short_v_px ? 3 : 4);
+    const bool straight = line_decision.direction == CruiseDirection::kStraight;
+    if (!straight) {
+      const bool left = line_decision.direction == CruiseDirection::kLeft;
+      result.action = Locomotion(steps==4
+          ? (left ? MissionAction::kStepForwardLeftTwo
+                  : MissionAction::kStepForwardRightTwo)
+          : (left ? MissionAction::kStepForwardLeftOne
+                  : MissionAction::kStepForwardRightOneHurdle));
+      if (allow_new_body_actions) last_approach_steps_=0;
+      return result;
+    }
     result.action=Locomotion(steps==2 ? MissionAction::kStepForwardTwo :
         steps==3 ? MissionAction::kStepForwardThree : MissionAction::kStepForwardFour);
     if (allow_new_body_actions) last_approach_steps_=steps;
