@@ -49,10 +49,10 @@ vision_algorithm:
     down_one_step_v_px: 10.0 # 위 가로선 (2걸음)
     fine_mode_v_px: 80 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
 
-    pickup_u1_px: 280
-    pickup_u2_px: 330 # ㅇㅋ
-    pickup_v1_px: 110
-    pickup_v2_px: 140 # ㅇㅋ
+    pickup_u1_px: 310
+    pickup_u2_px: 385 # ㅇㅋ
+    pickup_v1_px: 80
+    pickup_v2_px: 130 # ㅇㅋ
 
     pickup_max_attempts: 100
     ball_ignore_duration_sec: 5.0
@@ -84,10 +84,10 @@ vision_algorithm:
 
     # DOWN 카메라 세로 3구역
     down_one_step_v_px: 120.0 # 위 가로선 (2걸음)
-    fine_mode_v_px: 250     # 아래 가로선 (1걸음)
+    fine_mode_v_px: 210     # 아래 가로선 (1걸음)
 
     # 허들 접촉 및 넘기
-    contact_v_px: 360 # 접촉 선 (반걸음)
+    contact_v_px: 260 # 접촉 선 (반걸음)
     contact_steps: 5     # 접촉 보행 반 걸음 횟수
 
     hurdle_ignore_duration_sec: 5.0
