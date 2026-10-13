@@ -123,7 +123,8 @@ vision_algorithm:
 
     # 골대 위치 및 투척
     hoop_radius_m: 0.10         # 림 위치 보정에 사용하는 반지름
-    throwing_range_m: 0.40      # 목표 투척 거리
+    throw_landing_x_m: -0.08   # 카메라 기준 허리 0도 공 낙하 X (m)
+    throw_landing_z_m: 0.48    # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
     position_tolerance_m: 0.08  # 목표 거리의 허용 오차
     shoot_yaw_limit_deg: 30.0   # 투척 허용 각도 (±30도)
 
