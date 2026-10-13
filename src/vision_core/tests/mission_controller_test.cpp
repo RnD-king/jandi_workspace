@@ -759,6 +759,7 @@ int main() {
   ready_frame.delivery_feedback={ball_ready_id,true,true,false};
   ready_result=ball_ready.Step(ready_frame);
   assert(!ready_result.post_motion_observing);
+  assert(ready_result.object_ready_mean_used);
   assert(ready_result.ball.mode==BallMode::kApproachTwoBeforeDown);
   assert(ready_result.command.action==MissionAction::kStepForwardTwo);
   assert(ready_result.command.action_id!=ball_ready_id);
@@ -777,6 +778,7 @@ int main() {
   ready_frame.delivery_feedback={no_ready_id,true,true,false};
   ready_result=no_ready.Step(ready_frame);
   assert(ready_result.post_motion_observing);
+  assert(!ready_result.object_ready_mean_used);
   assert(ready_result.command.action_id==0);
 
   // HURDLE: four-step mean leads to three-step, observation_complete
@@ -800,6 +802,7 @@ int main() {
   ready_frame.delivery_feedback={hurdle_ready_id,true,true,false};
   ready_result=hurdle_ready.Step(ready_frame);
   assert(!ready_result.post_motion_observing);
+  assert(ready_result.object_ready_mean_used);
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
 
   // GOAL: center-depth mean prevents premature camera transition at DONE.
@@ -825,6 +828,7 @@ int main() {
   ready_frame.delivery_feedback={goal_ready_id,true,true,false};
   ready_result=goal_ready.Step(ready_frame);
   assert(!ready_result.post_motion_observing);
+  assert(ready_result.object_ready_mean_used);
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
   return 0;
 }
