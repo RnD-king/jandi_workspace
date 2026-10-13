@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <deque>
 #include <optional>
@@ -32,6 +33,14 @@ struct MissionControllerConfig {
   double camera_motion_timeout_sec{};
   // Fresh, post-DONE observation interval for non-queued actions and camera turns.
   double post_motion_observation_sec{};
+  // YAML-only allowlist of READY-capable object-approach actions.
+  // Empty means all object walks use post-DONE stationary observation.
+  std::vector<int> object_ready_mean_actions;
+  bool UsesObjectReadyMean(MissionAction action) const {
+    return std::find(object_ready_mean_actions.begin(),
+                     object_ready_mean_actions.end(), static_cast<int>(action)) !=
+           object_ready_mean_actions.end();
+  }
   // YOLO backboard 후보 중심의 aligned depth가 이 범위 안에 있어야 실제
   // backboard 관측으로 인정한다.
   double backboard_min_depth_m{};
