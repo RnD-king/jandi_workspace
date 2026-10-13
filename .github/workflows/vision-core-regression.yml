@@ -1,0 +1,23 @@
+name: Vision core regression
+on:
+  pull_request:
+    paths:
+      - 'src/vision_core/**'
+      - 'src/vision/**'
+      - '.github/workflows/vision-core-regression.yml'
+  workflow_dispatch:
+jobs:
+  shared-vision-core:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install C++ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libyaml-cpp-dev
+      - name: Configure standalone vision_core
+        run: cmake -S src/vision_core -B build/shared_vision_core -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug
+      - name: Build vision_core and tests
+        run: cmake --build build/shared_vision_core --parallel 2
+      - name: Run shared vision core regressions
+        run: ctest --test-dir build/shared_vision_core --output-on-failure
