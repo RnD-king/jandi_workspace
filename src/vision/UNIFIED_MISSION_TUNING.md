@@ -178,3 +178,12 @@ test_stage=0은 이전과 같이 FORWARD 접근부터 시작한다.
 `backboard_max_depth_m`을 추가로 실시간 적용한다.
 백보드 유효 깊이 범위 또는 depth strip 폭을 바꾸면 새로운 PREVIEW를 요청한다.
 튜닝은 기존 WAIT_PREVIEW/WAIT_COMMIT 게이트에서만 가능하며, YAML 자동 저장은 하지 않는다.
+
+## 2026-10-14 투척·스테이지·Reset 동작
+
+- GOAL 좌표 튜닝: 카메라 렌즈 기준 기본 낙하점은 X=-0.08m, Z=0.48m이다. 새로운 파라미터는 `goal_throw_landing_x_m`, `goal_throw_landing_z_m`이며 2차원 림/예상 낙하점 오차와 허리 회전 한도로 SHOOT을 판단한다.
+- 공의 FORWARD 3×3: 중앙 먼/중간/가까운 영역은 각각 직진 4/3/2걸음이며, 가까운 좌우 영역은 짧은 보행 자세 회전 후 재관측한다.
+- 허들은 FORWARD 카메라에서 LINE O/H 값으로 가로 3구역을 정하고 허들 중심 높이로 세로 3구역을 정한다. DOWN 이후는 유지한다.
+- 전용 스테이지 START 시 초기 발 자세(WALK/FINE)와 카메라를 자동 준비하며, PICK/SHOOT/HURDLE 및 접근 모션은 계속 COMMIT을 요구한다.
+- RESET은 저장된 카메라 상태가 FORWARD이더라도 새 FORWARD 명령 ID와 WALK_MODE 명령을 발행하고 양쪽 완료를 기다린다.
+- 백보드 RGB-D 디버그에는 좌/중/우 영역 유효 깊이 픽셀 수, 비율, 중앙값을 표시한다. 기존 깊이 유효성 판정은 변경하지 않는다.
