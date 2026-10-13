@@ -131,7 +131,8 @@ int main(int argc, char **argv) {
   Reject(text.str(), "pickup_max_attempts: 100", "pickup_max_attempts: 0");
   Reject(text.str(), "upper_acquire_v_px: 470.0", "upper_acquire_v_px: -0.1");
   Reject(text.str(), "target_u_px: 380.0", "target_u_px: .inf");
-  Reject(text.str(), "throwing_range_m: 0.40", "throwing_range_m: 0.0");
+  Reject(text.str(), "throw_landing_z_m: 0.48", "throw_landing_z_m: 0.0");
+  Reject(text.str(), "throw_landing_x_m: -0.08", "throw_landing_x_m: .nan");
   Reject(text.str(), "fine_settle_duration_sec: 0.60",
          "fine_settle_duration_sec: -0.1");
   Reject(text.str(), "action_ack_timeout_sec: 10.0",
