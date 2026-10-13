@@ -21,39 +21,40 @@ enum class HurdleMode {
   kDownSearch,
   kFineAdjust,
   kRecoveryDown,
+  kApproachTwoBeforeDown,
+  kCoarseAdjust,
+  kWaitFinePose,
 };
 
 struct HurdleConfig {
-  double approach_short_v_norm{};
+  double approach_short_v_px{};
   double down_search_timeout_sec{};
   double recovery_observation_sec{};
   int recovery_max_observations{};
-  double fine_one_step_v_error_norm{};
-  double fine_two_step_v_error_norm{};
-  double target_u_norm{};
-  double u_deadband{};
-  double fine_target_v_norm{};
-  double contact_v_norm{};
+  double target_u_px{};
+  double u_deadband_px{};
+  double contact_v_px{};
   int contact_steps{};
 
   int stable_window{};
   int stable_min_hits{};
   int lost_frames{};
   double smooth_alpha{}; // Legacy config key; position uses the bounded 1->3 window.
-  double acquire_min_v_norm{};
-  double tilt_trigger_v_norm{};
-  int tilt_trigger_window{};
-  int tilt_trigger_min_hits{};
+  double upper_acquire_v_px{};
+  double approach_two_step_v_px{};
+  double down_one_step_v_px{};
+  double fine_mode_v_px{};
   double hurdle_ignore_duration_sec{};
   int recovery_reacquire_min_hits{};
   double recovery_timeout_sec{};
-  double recovery_center_tolerance_norm{};
+  double recovery_center_tolerance_px{};
   double recovery_settle_duration_sec{};
 };
 
 struct TrackedHurdle {
   bool stable{false};
   bool visible{false};
+  Point2 center_px;
   double u_norm{0.0};
   double v_norm{0.0};
   double h_norm{0.0};
@@ -88,7 +89,15 @@ public:
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
   void UpdateTuning(const HurdleConfig &config) { config_ = config; }
+  void ShiftTimers(double duration) { state_enter_sec_+=duration; settle_until_sec_+=duration; }
+  // Isolated test startup selects an existing FSM phase; no completion is fabricated.
+  void StartTestNear() { Reset(); mode_=HurdleMode::kWaitCameraDown; test_camera_pending_=true; }
+  void StartTestExecute() { Reset(); fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; }
   void Reset();
+  bool ExecutionObservationReady() const {
+    return tracked_.visible && tracked_.stable &&
+        hit_history_.size()>=static_cast<std::size_t>(config_.stable_window);
+  }
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   double DownSearchRemaining(double now) const {
@@ -109,7 +118,11 @@ private:
   HurdleMode mode_{HurdleMode::kLineFollow};
   std::deque<bool> hit_history_;
   std::deque<bool> acquire_history_;
-  std::deque<bool> tilt_history_;
+  bool awaiting_approach_observation_{false};
+  int last_approach_steps_{0};
+  bool fine_pose_entered_{false};
+  bool approach_two_issued_{false};
+  bool test_camera_pending_{false};
   int lost_count_{0};
   int recovery_visible_count_{0};
   bool has_smoothed_{false};
@@ -120,11 +133,10 @@ private:
   int completed_back_steps_{0};
   int completed_contact_steps_{0};
   TrackedHurdle tracked_;
-  double last_seen_u_norm_{0.5};
+  double last_seen_u_px_{0.0};
   double state_enter_sec_{0.0};
   double settle_until_sec_{0.0};
   double ignore_until_sec_{0.0};
-  bool close_trigger_latched_{false};
 };
 
 } // namespace vision_core

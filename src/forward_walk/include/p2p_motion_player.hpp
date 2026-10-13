@@ -52,6 +52,7 @@ public:
                                    const std::string& motion_directory,
                                    const StartOptions& options) const;
     // 현재 전체 목표를 유지하며 지정 관절만 전환하는 메모리 내 P2P 모션을 준비한다.
+    static int32_t FinalMotorTick(const std::string& json_path, int motor_id);
     static PreparedProgram PreparePoseTransition(const RawPositions& held_pose,
                                                 const RawPositions& targets, double duration_sec);
     bool StartPrepared(const PreparedProgram& program);

@@ -39,12 +39,12 @@ checks = {
 }
 for action, filename in {
     'STEP_FORWARD_LEFT_THREE': 'missions/직진_좌회전_3번.json',
-    'STEP_FORWARD_RIGHT_THREE': 'missions/직진_우회전_3번.json',
+    'STEP_FORWARD_RIGHT_THREE': 'missions/직진_우회전_2번.json',
     'STEP_FORWARD_TWO': 'missions/직진_2걸음.json',
     'STEP_FORWARD_THREE': 'missions/직진_3걸음.json',
     'STEP_FORWARD_FOUR': 'missions/직진_4걸음.json',
     'STEP_FORWARD_LEFT_TWO': 'missions/직진_좌회전_2번.json',
-    'STEP_FORWARD_RIGHT_TWO': 'missions/직진_우회전_2번.json',
+    'STEP_FORWARD_RIGHT_TWO': 'missions/직진_우회전_2번_ball.json',
     'STEP_FORWARD_RIGHT_ONE': 'missions/직진_우회전_1번.json',
     'STEP_FORWARD_FIVE': 'missions/연속걷기.json',
     'DEFAULT_POSITION': 'motions/초기자세_다소곳_.json',

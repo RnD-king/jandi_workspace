@@ -16,13 +16,17 @@ public:
     while (samples_.size() > static_cast<std::size_t>(std::max(1, window)))
       samples_.pop_front();
   }
-  std::optional<ObjectTarget> Mean() const {
+  // Approach keeps the recent-biased mean; fine adjustment treats every
+  // stationary, valid observation equally.
+  std::optional<ObjectTarget> Mean(bool recent_weighted = true) const {
     std::optional<ObjectTarget> result;
     double total = 0, u=0, v=0, ru=0, rv=0, x=0, y=0, w=0, h=0, pw=0, ph=0, c=0;
     for (std::size_t i=0; i<samples_.size(); ++i) {
       if (!samples_[i]) continue;
       const auto& t = *samples_[i];
-      const double weight = 1.0 + 2.0 * i / std::max<std::size_t>(1, samples_.size()-1);
+      const double weight = recent_weighted
+          ? 1.0 + 2.0 * i / std::max<std::size_t>(1, samples_.size()-1)
+          : 1.0;
       result=t; total+=weight;
       u+=weight*t.center_px.u; v+=weight*t.center_px.v;
       const auto p=t.center_rectified ? t.rectified_center_px : t.center_px;

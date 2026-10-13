@@ -46,7 +46,12 @@ struct MissionControllerConfig {
   int test_goal_mission_index{};
   int mission_recovery_max_turns{};
   int mission_recovery_yaw_deg{};
+  MissionType test_mission{MissionType::kNone};
+  int test_stage{}; // 0 full, 1 far approach, 2 near alignment, 3 mission execution/recovery
+  int backboard_depth_strip_width_px{};
 };
+
+enum class FootPose { kWalk, kFine };
 
 struct MissionFrameInput {
   std::vector<Point2> line_centers;
@@ -105,12 +110,21 @@ struct MissionFrameResult {
   int post_motion_valid{0};
   double post_motion_elapsed_sec{0.0};
   bool trial_complete{false};
+  int test_stage{0};
+  bool test_ready{false};
+  bool test_executing{false};
   bool repeat_sequence{false};
   int repeat_scope{0};
   int ball_mission_index{1}, goal_mission_index{1};
   int recovery_turns_completed{0};
   bool recovery_failed{false};
+  bool terminal_hold{false};
   bool recovery_verifying{false};
+  int recovery_max_turns{0};
+  int recovery_observation_frames{0};
+  FootPose foot_pose{FootPose::kWalk};
+  bool foot_transition{false};
+  bool physical_reset_complete{false};
   double goal_walk_elapsed_sec{0.0}, goal_walk_remaining_sec{0.0};
   bool goal_walk_gate_active{false};
   BallResult ball;
@@ -125,6 +139,7 @@ struct PerceptionDetection {
   std::optional<double> center_depth_m;
   std::optional<double> left_depth_m;
   std::optional<double> right_depth_m;
+  std::optional<double> left_depth_u_px, right_depth_u_px;
 };
 
 struct PerceptionFrameInput {
@@ -164,6 +179,7 @@ struct PreparedPerceptionFrame {
   std::optional<double> backboard_center_depth_m;
   std::optional<double> backboard_left_depth_m;
   std::optional<double> backboard_right_depth_m;
+  std::optional<double> backboard_left_depth_u_px, backboard_right_depth_u_px;
   bool imu_rectification_applied{false};
 };
 
@@ -187,16 +203,37 @@ public:
   // Speculative preview never changes the real FSM or allocates a real ID.
   PerceptionMissionFrameResult PreviewPerception(
       const PerceptionFrameInput &input) const;
-  // Update the 18 user-tunable decision parameters, retaining mission state.
+  // Update user-tunable decision parameters, retaining mission state.
   bool UpdateTuning(const MissionControllerConfig &candidate);
   MissionType ActiveMission() const { return active_mission_; }
   // Explicit manual PREVIEW honors the LINE FSM's 2s failure / 1s recovery
   // observation instead of adding an unrelated one-second shortcut.
   double ManualPreviewDurationSec() const;
+  bool ManualObservationHasEnoughFrames() const {
+    return !decision_observation_active_ || decision_observation_mission_==MissionType::kLine ||
+        decision_object_hits_.size()>=9; // next processed frame completes the 10-frame window
+  }
   int RepeatScope() const;
   bool NeedsStationaryObservation() const;
   bool SetTestMissionIndices(int ball_index, int goal_index);
+  bool SetTestStage(MissionType mission,int stage);
+  // Transport-only advancement: no observations, body requests, or synthetic DONE.
+  ControlCommand AcceptDeliveryFeedback(const CommandDeliveryFeedback&,double now_sec);
   bool HasBall() const { return has_ball_; }
+  bool IsTerminalHold() const {
+    return test_failed_ || mission_recovery_failed_ || line_state_==LineState::kFinalHold ||
+        (active_mission_==MissionType::kBall && ball_result_.mode==BallMode::kFailed) ||
+        (active_mission_==MissionType::kGoal && goal_result_.mode==GoalMode::kFailed) ||
+        (active_mission_==MissionType::kHurdle && hurdle_result_.mode==HurdleMode::kFailed);
+  }
+  bool FeetReadyToStart() const {
+    const bool known_stance=foot_pose_==FootPose::kWalk ||
+        (config_.test_mission!=MissionType::kNone && config_.test_stage>=2);
+    return known_stance && !pose_change_pending_ && !physical_reset_pending_;
+  }
+  void BeginPhysicalReset();
+  MissionFrameResult StepPhysicalReset(const CommandDeliveryFeedback &feedback,
+                                      const CameraFeedback &camera, double now_sec);
   // Observed 40%-to-READY LINE guide, for manual one-slot preview only.
   std::optional<LineGuide> LastReadyLineGuide() const { return last_ready_line_guide_; }
   // 진행 중 action/짧은 동작 후 관측이 없을 때만 LINE direct selector
@@ -242,9 +279,23 @@ private:
   void EnterMission(MissionType mission);
   void FinishMission();
   void PopulateDiagnostics(MissionFrameResult &output, double now_sec) const;
+  void InitializeTest();
+  bool TestExecutionReady() const;
+  bool TestBoundaryReached(const CameraFeedback&) const;
 
   MissionControllerConfig config_;
-  bool goal_trial_complete_{false};
+  bool goal_trial_complete_{false}; // Shared trial completion, retained name for compatibility.
+  bool test_entry_pending_{false}, test_setup_pending_{false}, test_execution_started_{false};
+  bool fresh_after_search_{false};
+  bool test_setup_camera_started_{false}, test_failed_{false};
+  double test_setup_camera_start_sec_{0};
+  FootPose foot_pose_{FootPose::kWalk};
+  bool pose_change_pending_{false};
+  bool pose_observation_pending_{false};
+  FootPose pose_target_{FootPose::kWalk};
+  double pose_started_sec_{0.0};
+  bool mission_finish_pending_{false};
+  bool physical_reset_pending_{false}, reset_walk_done_{false};
   int ball_mission_index_{0}, goal_mission_index_{0};
   int mission_recovery_turns_{0};
   bool mission_recovery_issued_{false};

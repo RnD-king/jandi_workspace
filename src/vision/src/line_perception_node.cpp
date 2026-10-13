@@ -1,3 +1,4 @@
+#include "vision/backboard_depth.hpp"
 // vision/src/line_perception_node.cpp
 //
 // 1. line_perception_node.cpp
@@ -184,6 +185,7 @@ public:
     declare_parameter<double>("simulate_turn_duration_sec", 1.0);
     declare_parameter<double>("simulate_ready_lead_sec", 0.25);
     declare_parameter<bool>("enable_command_transport", true);
+    declare_parameter<int>("backboard_depth_strip_width_px",algorithm_defaults.backboard_depth_strip_width_px);
     declare_parameter<double>("max_depth_age_sec", 0.20);
     declare_parameter<double>("backboard_min_depth_m", algorithm_defaults.backboard_min_depth_m);
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
@@ -239,6 +241,7 @@ public:
         get_parameter("simulate_ready_lead_sec").as_double();
     enable_command_transport_ = get_parameter("enable_command_transport").as_bool();
     max_depth_age_sec_ = get_parameter("max_depth_age_sec").as_double();
+    backboard_depth_strip_width_px_=static_cast<int>(get_parameter("backboard_depth_strip_width_px").as_int());
     if (algorithm_mode_ != "all" && algorithm_mode_ != "line" && algorithm_mode_ != "ball" &&
         algorithm_mode_ != "hurdle" && algorithm_mode_ != "goal") {
       throw std::invalid_argument("algorithm_mode must be one of: all, line, ball, hurdle, goal");
@@ -271,6 +274,7 @@ public:
     goal_cmd_cfg.position_tolerance_m =
         get_parameter("goal_position_tolerance_m").as_double();
     vision_core::MissionControllerConfig mission_config = algorithm_defaults;
+    mission_config.backboard_depth_strip_width_px=backboard_depth_strip_width_px_;
     mission_config.camera_motion_timeout_sec =
         get_parameter("camera_motion_timeout_sec").as_double();
     mission_config.line_features = line_feature_cfg;
@@ -354,7 +358,7 @@ public:
     start_service_ = create_service<std_srvs::srv::Trigger>(
         "start", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-          if (run_state_ != RunState::kWaitStart) {
+          if (run_state_ != RunState::kWaitStart || !mission_controller_->FeetReadyToStart()) {
             response->success = false;
             response->message = "START requires WAIT_START (RESET when PAUSED)";
             return;
@@ -403,6 +407,7 @@ public:
     reset_service_ = create_service<std_srvs::srv::Trigger>(
         "reset", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+          DrainExecutionFeedback();
           bool feedback_empty;
           {
             std::lock_guard<std::mutex> lock(action_feedback_mutex_);
@@ -417,9 +422,14 @@ public:
             response->message = "RESET requires PAUSED with no outstanding action/camera/feedback";
             return;
           }
-          mission_controller_->Reset(true); // Do not reuse IDs in executor history.
+          if (!enable_command_transport_ && !simulate_decision_) {
+            response->success=false; response->message="RESET requires body transport or simulated executor"; return;
+          }
+          applied_action_feedback_queue_.clear(); action_delivery_feedback_={};
+          mission_controller_->BeginPhysicalReset(); // Do not reuse IDs in executor history.
           observation_accumulator_.Reset();
-          run_state_ = RunState::kWaitStart;
+          run_state_ = RunState::kResetting;
+          DrivePhysicalReset();
           // Preserve next_camera_id_, actual camera_feedback_ and last
           // completion timestamps. RESET never moves motors or camera.
           {
@@ -427,7 +437,7 @@ public:
             latest_image_.reset();
           }
           response->success = true;
-          response->message = "RESET complete; WAIT_START (Action IDs preserved)";
+          response->message = "RESET: WALK feet and FORWARD camera pending; WAIT_START (Action IDs preserved)";
           RCLCPP_INFO(get_logger(), "[CONTROL] RESET -> WAIT_START");
         });
 
@@ -512,6 +522,10 @@ public:
       }
     }
 
+    reset_timer_=create_wall_timer(std::chrono::milliseconds(20),[this]() {
+      if (run_state_==RunState::kResetting) DrivePhysicalReset();
+      else DrainExecutionFeedback();
+    });
     // ---- heartbeat(1Hz) ----
     hb_timer_ = create_wall_timer(std::chrono::seconds(1), [this]() {
       RCLCPP_INFO(get_logger(), "[HB] frames=%zu imu=%zu action_pub=%zu (last_img_stamp=%.9f)", frames_count_, imu_count_,
@@ -549,7 +563,7 @@ public:
 
 private:
 
-  enum class RunState { kWaitStart, kObserving, kRunning, kPausing, kPaused };
+  enum class RunState { kWaitStart, kObserving, kRunning, kPausing, kPaused, kResetting };
   static const char *RunStateName(RunState s) {
     switch (s) {
     case RunState::kWaitStart: return "WAIT_START";
@@ -557,6 +571,7 @@ private:
     case RunState::kRunning: return "RUNNING";
     case RunState::kPausing: return "PAUSING";
     case RunState::kPaused: return "PAUSED";
+    case RunState::kResetting: return "RESET_FEET_CAMERA";
     }
     return "UNKNOWN";
   }
@@ -653,37 +668,6 @@ private:
     return static_cast<double>(header.stamp.sec) + static_cast<double>(header.stamp.nanosec) * 1e-9;
   }
 
-  static std::optional<double> MedianDepthMeters(const cv::Mat &depth, int center_u, int center_v) {
-    if (depth.empty())
-      return std::nullopt;
-    std::vector<double> values;
-    values.reserve(9);
-    for (int dv = -1; dv <= 1; ++dv) {
-      for (int du = -1; du <= 1; ++du) {
-        const int u = center_u + du;
-        const int v = center_v + dv;
-        if (u < 0 || u >= depth.cols || v < 0 || v >= depth.rows)
-          continue;
-        double meters = 0.0;
-        if (depth.type() == CV_16UC1) {
-          meters = static_cast<double>(depth.at<std::uint16_t>(v, u)) * 0.001;
-        } else if (depth.type() == CV_32FC1) {
-          meters = static_cast<double>(depth.at<float>(v, u));
-        } else {
-          return std::nullopt;
-        }
-        if (std::isfinite(meters) && meters > 0.05 && meters < 10.0) {
-          values.push_back(meters);
-        }
-      }
-    }
-    if (values.empty())
-      return std::nullopt;
-    const auto middle = values.begin() + values.size() / 2;
-    std::nth_element(values.begin(), middle, values.end());
-    return *middle;
-  }
-
   std::vector<vision_core::PerceptionDetection> BuildPerceptionDetections(
       const std::vector<Detection> &detections, const cv::Mat &depth) const {
     std::vector<vision_core::PerceptionDetection> output;
@@ -699,20 +683,12 @@ private:
       // 모든 backboard 후보에 표본을 붙인다. 최종 후보 선택과 pose 계산은
       // core에서 한 번만 수행한다.
       if (detection.class_id == backboard_class_id_ && !depth.empty()) {
-        const int center_u = static_cast<int>(std::round(
-            static_cast<double>(detection.box.x) +
-            0.5 * static_cast<double>(detection.box.width)));
-        const int left_u = detection.box.x;
-        const int right_u = detection.box.x + detection.box.width - 1;
-        const int middle_v = static_cast<int>(std::round(
-            static_cast<double>(detection.box.y) +
-            0.5 * static_cast<double>(detection.box.height)));
-        observation.center_depth_m =
-            MedianDepthMeters(depth, center_u, middle_v);
-        observation.left_depth_m =
-            MedianDepthMeters(depth, left_u, middle_v);
-        observation.right_depth_m =
-            MedianDepthMeters(depth, right_u, middle_v);
+        const auto region=vision::DepthRegions(detection.box,depth.size(),backboard_depth_strip_width_px_);
+        observation.center_depth_m=vision::MedianRegionMeters(depth,region.center);
+        observation.left_depth_m=vision::MedianRegionMeters(depth,region.left);
+        observation.right_depth_m=vision::MedianRegionMeters(depth,region.right);
+        if (!region.left.empty()) observation.left_depth_u_px=region.left_u;
+        if (!region.right.empty()) observation.right_depth_u_px=region.right_u;
       }
       output.push_back(observation);
     }
@@ -860,6 +836,8 @@ private:
     }
     if (msg->status != vision::msg::CommandStatus::DONE) return;
     last_camera_done_event_sec_ = this->get_clock()->now().seconds();
+    RCLCPP_INFO(get_logger(),"[FEEDBACK] CAMERA DONE id=%llu received; awaiting fresh image",
+        static_cast<unsigned long long>(msg->command_id));
     switch (pending_camera_request_) {
     case vision_core::CameraRequest::kDown:
       camera_feedback_ = {vision_core::CameraMode::kDown, true};
@@ -879,6 +857,64 @@ private:
     camera_acknowledged_ = false;
   }
 
+  double ExecutionClock(double now) const {
+    return (run_state_==RunState::kPausing ? pause_requested_sec_ : now)-paused_accumulated_sec_;
+  }
+  void DrainExecutionFeedback() {
+    const double now=get_clock()->now().seconds();
+    std::deque<vision_core::CommandDeliveryFeedback> arrived;
+    if (simulate_decision_) {
+      UpdateSimulatedDecisionFeedback(now);
+      if (action_delivery_feedback_.action_id!=0) {
+        arrived.push_back(action_delivery_feedback_); action_delivery_feedback_={};
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lock(action_feedback_mutex_);
+      while (!action_feedback_queue_.empty()) {
+        arrived.push_back(action_feedback_queue_.front()); action_feedback_queue_.pop_front();
+      }
+    }
+    for (const auto& feedback:arrived) {
+      last_transport_command_=mission_controller_->AcceptDeliveryFeedback(feedback,ExecutionClock(now));
+      applied_action_feedback_queue_.push_back(feedback);
+      if (feedback.done) {
+        last_received_done_id_=feedback.action_id;
+        RCLCPP_INFO(get_logger(),"[FEEDBACK] DONE id=%llu received and accepted by core; awaiting fresh observation",
+            static_cast<unsigned long long>(feedback.action_id));
+      }
+    }
+    last_transport_command_=mission_controller_->AcceptDeliveryFeedback({},ExecutionClock(now));
+    // Only retransmit IDs already dispatched. Never select a new body/camera action here.
+    if (last_transport_command_.command_type==vision_core::CommandType::kAction &&
+        outstanding_actions_.count(last_transport_command_.action_id)!=0)
+      PublishActionCommand(last_transport_command_);
+    if (pending_camera_id_!=0) PublishCameraCommand(pending_camera_request_);
+    // Physical PAUSE completion depends on received DONE, not availability of RGB.
+    // Keep the ordered sensory edges for RESUME, or discard them on explicit RESET.
+    CompletePauseAfterFeedback();
+  }
+
+  void DrivePhysicalReset() {
+    if (run_state_!=RunState::kResetting) return;
+    const double now=get_clock()->now().seconds();
+    if (simulate_decision_) UpdateSimulatedDecisionFeedback(now);
+    vision_core::CommandDeliveryFeedback feedback;
+    if (simulate_decision_ && action_delivery_feedback_.action_id!=0) {
+      feedback=action_delivery_feedback_; action_delivery_feedback_={};
+    }
+    {
+      std::lock_guard<std::mutex> lock(action_feedback_mutex_);
+      if (!action_feedback_queue_.empty()) { feedback=action_feedback_queue_.front(); action_feedback_queue_.pop_front(); }
+    }
+    const auto result=mission_controller_->StepPhysicalReset(feedback,camera_feedback_,now);
+    PublishActionCommand(result.command); PublishCameraCommand(result.command.camera_request);
+    if (result.physical_reset_complete && outstanding_actions_.empty() && outstanding_cameras_.empty()) {
+      run_state_=RunState::kWaitStart;
+      RCLCPP_INFO(get_logger(),"[RESET] WALK feet + FORWARD camera DONE -> WAIT_START");
+    }
+  }
+
   void PublishActionCommand(const vision_core::ControlCommand &command) {
     if (command.command_type != vision_core::CommandType::kAction) return;
     // During PAUSING, only retransmit IDs published before PAUSE. Never
@@ -886,7 +922,7 @@ private:
     if (run_state_ == RunState::kPausing &&
         outstanding_actions_.count(command.action_id) == 0) return;
     if (run_state_ != RunState::kRunning &&
-        run_state_ != RunState::kPausing) return;
+        run_state_ != RunState::kPausing && run_state_ != RunState::kResetting) return;
     outstanding_actions_.insert(command.action_id);
     if (simulate_decision_) {
       if (simulated_current_action_.id == command.action_id) {
@@ -939,7 +975,8 @@ private:
   void PublishCameraCommand(vision_core::CameraRequest request) {
     if (request == vision_core::CameraRequest::kNone) return;
     // The node may only originate new camera requests in RUNNING.
-    if (run_state_ != RunState::kRunning) return;
+    if (run_state_ != RunState::kRunning &&
+        !(run_state_==RunState::kResetting && request==vision_core::CameraRequest::kForward)) return;
     if (simulate_camera_feedback_) {
       switch (request) {
       case vision_core::CameraRequest::kDown:
@@ -1290,7 +1327,7 @@ private:
     }
 
     if (run_state_ == RunState::kWaitStart ||
-        run_state_ == RunState::kPaused) {
+        run_state_ == RunState::kPaused || run_state_ == RunState::kResetting) {
       // Disarmed/paused: inference and visualization continue, but StepPerception
       // does not run at all. This freezes ALL mission/controller states and
       // prevents both ActionCommand and CameraCommand from being generated.
@@ -1306,11 +1343,11 @@ private:
             DrawYoloDetections(camera_view, dets);
             cv::imshow(kDebugWindowName, camera_view);
             cv::Mat state_view(360, 1100, CV_8UC3, cv::Scalar(20, 20, 20));
-            cv::putText(state_view, run_state_ == RunState::kPaused
+            cv::putText(state_view, run_state_==RunState::kResetting ? "RESET: WALK FEET + CAMERA / WAIT_DONE" : run_state_ == RunState::kPaused
                 ? "PAUSED / WAIT_RESUME_OR_RESET" : "DISARMED / WAIT_START",
                         cv::Point(28, 70), cv::FONT_HERSHEY_SIMPLEX,
                         1.1, cv::Scalar(0, 210, 255), 2);
-            cv::putText(state_view, "YOLO active. No ROS motion commands will be sent.",
+            cv::putText(state_view, run_state_==RunState::kResetting ? "RESET only: WALK_MODE + FORWARD / WAIT_DONE" : "YOLO active. No ROS motion commands will be sent.",
                         cv::Point(28, 125), cv::FONT_HERSHEY_SIMPLEX,
                         0.65, cv::Scalar(230, 230, 230), 1);
             cv::putText(state_view, run_state_ == RunState::kPaused
@@ -1335,14 +1372,12 @@ private:
     // 4) ROS/sensor 형식을 core의 raw perception 입력으로만 변환한다.
     const auto t3 = std::chrono::steady_clock::now();
     const double frame_now_sec = this->get_clock()->now().seconds();
-    if (simulate_decision_) {
-      UpdateSimulatedDecisionFeedback(frame_now_sec);
-    } else {
-      std::lock_guard<std::mutex> lock(action_feedback_mutex_);
-      if (!action_feedback_queue_.empty()) {
-        action_delivery_feedback_ = action_feedback_queue_.front();
-        action_feedback_queue_.pop_front();
-      }
+    DrainExecutionFeedback();
+    action_delivery_feedback_={};
+    if (!applied_action_feedback_queue_.empty()) {
+      action_delivery_feedback_=applied_action_feedback_queue_.front();
+      applied_action_feedback_queue_.pop_front();
+      if (action_delivery_feedback_.done) last_processed_done_id_=action_delivery_feedback_.action_id;
     }
     vision_core::PerceptionFrameInput perception_input;
     perception_input.detections =
@@ -1378,6 +1413,7 @@ private:
       perception_input.line_decision_guide_override =
           averaged ? *averaged : vision_core::LineGuide{};
     }
+    if (!applied_action_feedback_queue_.empty()) perception_input.allow_new_commands=false;
     perception_input.camera_feedback = camera_feedback_;
     perception_input.command_transport_enabled =
         enable_command_transport_ || simulate_decision_;
@@ -1500,6 +1536,8 @@ private:
               goal_cmd.pose.visible && goal_pose.valid;
 
           cv::Mat vis = bgr.clone();
+          for (const auto& detection:dets) if (detection.class_id==backboard_class_id_)
+            vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_);
           DrawConfirmedDetections(
               vis, prepared.line_centers, line_confirmed, ball_target,
               ball_confirmed, backboard_target, backboard_confirmed,
@@ -1576,11 +1614,11 @@ private:
 
           if (ball_confirmed) {
             std::snprintf(buf, sizeof(buf),
-                          "BALL STATE: active=%d mode=%s stable=1 visible=1 u=%.2f v=%.2f h=%.2f",
+                          "BALL STATE: active=%d mode=%s stable=1 visible=1 u=%.1fpx v=%.1fpx h=%.1fpx",
                           selected_ball ? 1 : 0,
                           vision_core::BallController::ModeName(ball_cmd.mode),
-                          ball_cmd.tracked.u_norm, ball_cmd.tracked.v_norm,
-                          ball_cmd.tracked.h_norm);
+                          ball_cmd.tracked.center_px.u, ball_cmd.tracked.center_px.v,
+                          ball_cmd.tracked.h_norm * bgr.rows);
           } else {
             std::snprintf(buf, sizeof(buf),
                           "BALL STATE: active=%d mode=%s stable=%d visible=%d u=-- v=-- h=--",
@@ -1625,10 +1663,10 @@ private:
           if (backboard_confirmed) {
             std::snprintf(
                 buf, sizeof(buf),
-                "BACKBOARD APPROACH: active=%d mode=%s stable=1 visible=1 u=%.2f v=%.2f",
+                "BACKBOARD APPROACH: active=%d mode=%s stable=1 visible=1 u=%.1fpx v=%.1fpx",
                 selected_goal ? 1 : 0,
                 vision_core::GoalController::ModeName(goal_cmd.mode),
-                goal_cmd.tracked.u_norm, goal_cmd.tracked.v_norm);
+                goal_cmd.tracked.center_px.u, goal_cmd.tracked.center_px.v);
           } else {
             std::snprintf(
                 buf, sizeof(buf),
@@ -1749,6 +1787,7 @@ private:
   double paused_accumulated_sec_{0.0};
   rclcpp::TimerBase::SharedPtr hb_timer_;
   rclcpp::TimerBase::SharedPtr inference_timer_;
+  rclcpp::TimerBase::SharedPtr reset_timer_;
 
   // 모듈
   std::unique_ptr<YoloTrtEngine> yolo_;
@@ -1782,6 +1821,9 @@ private:
   vision_core::CommandDeliveryFeedback action_delivery_feedback_{};
   std::mutex action_feedback_mutex_;
   std::deque<vision_core::CommandDeliveryFeedback> action_feedback_queue_;
+  std::deque<vision_core::CommandDeliveryFeedback> applied_action_feedback_queue_;
+  vision_core::ControlCommand last_transport_command_;
+  std::uint64_t last_received_done_id_{0}, last_processed_done_id_{0};
   SimulatedActionState simulated_current_action_;
   SimulatedActionState simulated_queued_action_;
   std::deque<SimulatedActionState> simulated_completed_actions_;
@@ -1798,6 +1840,7 @@ private:
   vision_core::CameraRequest pending_camera_request_{
       vision_core::CameraRequest::kNone};
   bool camera_acknowledged_{false};
+  int backboard_depth_strip_width_px_{};
   double max_depth_age_sec_{0.20};
   std::string algorithm_mode_{"all"};
 

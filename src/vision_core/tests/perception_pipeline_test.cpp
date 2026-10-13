@@ -20,8 +20,8 @@ PerceptionDetection BallDetection(double u, double v, double confidence=1.0,
 MissionControllerConfig BallPipelineConfig() {
   auto c=LoadDefaultAlgorithmConfig();
   c.enable_hurdle=c.enable_goal=false;
-  c.ball.smooth_alpha=1.0; c.post_motion_observation_sec=0; c.ball.fine_settle_duration_sec=.6;
-  c.ball.upper_acquire_v_norm=1.0;
+  c.ball.smooth_alpha=1.0; c.ball.fine_settle_duration_sec=.6;
+  c.ball.upper_acquire_v_px=480.0;
   c.object_association.max_center_distance_norm=.1;
   return c;
 }
@@ -35,6 +35,7 @@ struct BallPipeline {
     input.command_transport_enabled=true;
     // Isolate BALL tests from unrelated LINE decisions without skipping BALL.
     input.advance_line_fsm=false;
+    input.manual_observation_control=true; // This fixture explicitly drives action completion.
   }
   const PerceptionMissionFrameResult &Tick(
       std::vector<PerceptionDetection> detections, bool done=false) {
@@ -49,11 +50,13 @@ struct BallPipeline {
   void EnterVerification() {
     // Keep the production 10/7 acquisition and close-trigger thresholds.
     for (int i=0;i<7;++i) Tick({BallDetection(.5,.8)});
+    assert(result.mission.ball.mode==BallMode::kApproachTwoBeforeDown);
+    Tick({},true);
     assert(result.mission.ball.mode==BallMode::kWaitCameraDown);
     input.camera_feedback={CameraMode::kDown,true};
     Tick({BallDetection(.5,.7)});
     assert(result.mission.ball.mode==BallMode::kDownSearch);
-    for (int i=0;i<20;++i) {
+    for (int i=0;i<80;++i) {
       Tick({BallDetection(.5,.7)},true);
       if (result.mission.ball.mode==BallMode::kPickupBall) break;
     }
@@ -104,7 +107,7 @@ void TestVerificationBypassesAssociationAndFineReacquires() {
   assert(fresh.mission.ball.tracked.u_norm==.1);
   assert(!fresh.mission.ball.tracked.stable); // Verification history cleared.
   assert(fresh.mission.ball.action.action==MissionAction::kNone); // Settle.
-  for (int i=0;i<6;++i) {
+  for (int i=0;i<9;++i) {
     pipeline.Tick({BallDetection(.1,.7)});
     if (pipeline.result.mission.ball.action.action!=MissionAction::kNone) break;
   }

@@ -299,6 +299,13 @@ P2PMotionPlayer::PreparedProgram P2PMotionPlayer::PrepareProgram(
     return prepared;
 }
 
+int32_t P2PMotionPlayer::FinalMotorTick(const std::string& json_path, int motor_id)
+{
+    P2PMotionPlayer parser(nullptr);
+    const auto motion=parser.LoadMotion(json_path);
+    return motion.keyframes.back().positions.at(motor_id);
+}
+
 P2PMotionPlayer::PreparedProgram P2PMotionPlayer::PreparePoseTransition(
     const RawPositions& held_pose, const RawPositions& targets, double duration_sec)
 {

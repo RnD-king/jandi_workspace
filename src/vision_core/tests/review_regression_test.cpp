@@ -76,7 +76,7 @@ void TestClockExcludesIdleAndDeferredDone() {
 }
 void TestManualPerceptionStationaryRecovery() {
   auto cfg=LoadDefaultAlgorithmConfig(); cfg.enable_goal=cfg.enable_hurdle=false;
-  cfg.ball.upper_acquire_v_norm=1; cfg.ball.tilt_down_min_hits=1;
+  cfg.ball.upper_acquire_v_px=480.0;
   MissionController core(cfg);
   PerceptionFrameInput in; in.image_width=640; in.image_height=480;
   in.manual_observation_control=true; in.command_transport_enabled=true;
@@ -87,10 +87,22 @@ void TestManualPerceptionStationaryRecovery() {
   };
   PerceptionMissionFrameResult out;
   for(int i=0;i<10;++i) { in.now_sec+=.1; in.detections={detection(.85)}; out=core.StepPerception(in); }
+  assert(out.mission.ball.mode==BallMode::kApproachTwoBeforeDown);
+  in.allow_new_body_actions=true; out=core.StepPerception(in);
+  assert(out.mission.command.action==MissionAction::kStepForwardTwo);
+  in.now_sec+=.1; in.allow_new_body_actions=false;
+  in.delivery_feedback={out.mission.command.action_id,true,true,false};
+  out=core.StepPerception(in); in.delivery_feedback={};
   assert(out.mission.ball.mode==BallMode::kWaitCameraDown);
   in.camera_feedback={CameraMode::kDown,true}; in.detections.clear(); in.now_sec+=.1;
   core.StepPerception(in);
-  for(int i=0;i<20;++i) { in.now_sec+=.1; in.detections={detection(.5)}; out=core.StepPerception(in); }
+  for(int i=0;i<20;++i) { in.now_sec+=.1; in.detections={detection(.7)}; out=core.StepPerception(in); }
+  assert(out.mission.ball.mode==BallMode::kWaitFinePose);
+  in.allow_new_body_actions=true; out=core.StepPerception(in);
+  assert(out.mission.command.action==MissionAction::kDefaultPoseMode);
+  in.now_sec+=.1; in.allow_new_body_actions=false;
+  in.delivery_feedback={out.mission.command.action_id,true,true,false};
+  out=core.StepPerception(in); in.delivery_feedback={};
   assert(out.mission.ball.mode==BallMode::kFineAdjustForPickup);
   in.detections.clear();
   for(int i=0;i<10 && !core.NeedsStationaryObservation();++i) { in.now_sec+=.1; out=core.StepPerception(in); }
@@ -117,9 +129,17 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   double now=0; BallResult b;
   for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.3),640,480,now+=.1,forward,{},false);
   for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.85),640,480,now+=.1,forward,{},false);
+  assert(b.mode==BallMode::kApproachTwoBeforeDown);
+  b=ball.Compute(Target(.5,.85),640,480,now+=.1,forward,{},true);
+  ActionExecutionFeedback done; done.action_done=true;
+  b=ball.Compute({},640,480,now+=.1,forward,done,false);
   assert(b.mode==BallMode::kWaitCameraDown);
   ball.Compute({},640,480,now+=.1,down,{},false);
-  for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.5),640,480,now+=.1,down,{},false);
+  for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.7),640,480,now+=.1,down,{},false);
+  assert(b.mode==BallMode::kWaitFinePose);
+  b=ball.Compute(Target(.5,.7),640,480,now+=.1,down,{},true);
+  b=ball.Compute({},640,480,now+=.1,down,done,false);
+  assert(b.mode==BallMode::kFineAdjustForPickup);
   for(int i=0;i<10;++i)b=ball.Compute({},640,480,now+=.1,down,{},false);
   assert(b.mode==BallMode::kBallRecoveryDown);
   for(int i=0;i<60 && b.mode!=BallMode::kFailed;++i) {
@@ -132,9 +152,20 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,.62),640,480,now+=.1,forward,{},false);
   assert(h.action.action==MissionAction::kStepForwardFour); // Strongly off-center still walks straight.
   for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,.85),640,480,now+=.1,forward,{},false);
+  assert(h.mode==HurdleMode::kApproachTwoBeforeDown);
+  h=hurdle.Compute(Target(.05,.85),640,480,now+=.1,forward,{},true);
+  h=hurdle.Compute({},640,480,now+=.1,forward,done,false);
+  assert(h.mode==HurdleMode::kWaitCameraDown);
   hurdle.Compute({},640,480,now+=.1,down,{},false);
   for(int i=0;i<18;++i)h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},false);
-  assert(h.mode==HurdleMode::kFineAdjust && h.action.action==MissionAction::kStepForwardHalf);
+  assert(h.mode==HurdleMode::kWaitFinePose);
+  h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},true);
+  h=hurdle.Compute({},640,480,now+=.1,down,done,false);
+  assert(h.mode==HurdleMode::kFineAdjust);
+  h=hurdle.Compute(Target(.05,.9),640,480,now+=.7,down,{},false);
+  for(int i=1;i<10;++i)
+    h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},false);
+  assert(h.action.action==MissionAction::kStepForwardHalf);
   for(int i=0;i<6;++i)h=hurdle.Compute({},640,480,now+=.1,down,{},false);
   assert(h.mode==HurdleMode::kRecoveryDown);
   for(int i=0;i<12;++i)h=hurdle.Compute(Target(.95,.7),640,480,now+=.1,down,{},false);

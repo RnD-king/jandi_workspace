@@ -2,7 +2,7 @@ vision_algorithm:
   line_features:
     max_centers: 8
     guide_min_points: 3
-    image_center_u: 420.0
+    image_center_u: 410.0
     curve_min_points: 5
     curve_min_v_span_px: 80.0
     curve_local_fit_points: 4
@@ -24,63 +24,61 @@ vision_algorithm:
     recovery_max_turns: 5
     recovery_turn_yaw_deg: 15
 
+  # Pixel thresholds refer to the actual input image (defaults: 640x480).
   ball:
-    approach_short_v_norm: 0.60
+    approach_short_v_px: 288.0
     down_search_timeout_sec: 10.0
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
-    fine_one_step_v_error_norm: 0.12
-    fine_two_step_v_error_norm: 0.25
     post_pickup_back_steps: 3
     stable_window: 10
     stable_min_hits: 7
     lost_frames: 5
     smooth_alpha: 0.45
-    far_u_des_norm: 0.50
-    approach_u_deadband: 0.025
-    upper_acquire_v_norm: 0.65
-    tilt_down_v_norm: 0.75
-    tilt_down_window: 10
-    tilt_down_min_hits: 7
+    far_u_des_px: 320.0
+    approach_u_deadband_px: 16.0
+    upper_acquire_v_px: 470.0
+    approach_two_step_v_px: 360.0
+    down_one_step_v_px: 216.0
+    fine_mode_v_px: 278.4
     pickup_max_attempts: 10
     ball_ignore_duration_sec: 5.0
-    fine_target_u_norm: 0.50
-    fine_target_v_norm: 0.70
-    fine_u_deadband: 0.06
-    fine_v_deadband: 0.06
+    pickup_u1_px: 281.6
+    pickup_u2_px: 358.4
+    pickup_v1_px: 307.2
+    pickup_v2_px: 364.8
     fine_settle_duration_sec: 0.60
     recovery_timeout_sec: 5.0
     recovery_reacquire_min_hits: 3
-    recovery_center_tolerance_norm: 0.12
+    recovery_center_tolerance_px: 76.8
     recovery_settle_duration_sec: 0.60
 
   hurdle:
-    approach_short_v_norm: 0.65
+    approach_short_v_px: 312.0
     down_search_timeout_sec: 10.0
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
-    fine_one_step_v_error_norm: 0.12
-    fine_two_step_v_error_norm: 0.25
-    target_u_norm: 0.50
-    u_deadband: 0.06
-    fine_target_v_norm: 0.85
-    contact_v_norm: 0.85
+    target_u_px: 320.0
+    u_deadband_px: 38.4
+    contact_v_px: 408.0
     contact_steps: 3
     stable_window: 10
     stable_min_hits: 7
     lost_frames: 5
     smooth_alpha: 0.45
-    acquire_min_v_norm: 0.60
-    tilt_trigger_v_norm: 0.75
-    tilt_trigger_window: 10
-    tilt_trigger_min_hits: 7
+    upper_acquire_v_px: 470.0
+    approach_two_step_v_px: 360.0
+    down_one_step_v_px: 288.0
+    fine_mode_v_px: 350.4
     hurdle_ignore_duration_sec: 5.0
     recovery_reacquire_min_hits: 3
     recovery_timeout_sec: 5.0
-    recovery_center_tolerance_norm: 0.12
+    recovery_center_tolerance_px: 76.8
     recovery_settle_duration_sec: 0.60
 
   goal:
+    recovery_observation_sec: 1.0
+    recovery_max_observations: 5
     approach_short_z_m: 1.20
     fine_one_step_range_error_m: 0.12
     fine_two_step_range_error_m: 0.25
@@ -91,8 +89,8 @@ vision_algorithm:
     lost_frames: 5
     smooth_alpha: 0.45
     post_pickup_wait_sec: 5.0  # Active LINE walking, including executor arm transition
-    target_u_norm: 0.50
-    approach_u_deadband: 0.025
+    target_u_px: 320.0
+    approach_u_deadband_px: 16.0
     fine_adjust_start_z_m: 0.80
     hoop_radius_m: 0.10
     throwing_range_m: 0.40
@@ -102,7 +100,7 @@ vision_algorithm:
     # After GOAL camera settles: center -> hold; off-center loss -> 15deg turn.
     recovery_timeout_sec: 5.0
     recovery_reacquire_min_hits: 3
-    recovery_center_tolerance_norm: 0.12
+    recovery_center_tolerance_px: 76.8
     recovery_settle_duration_sec: 0.60
 
   line_detection:
@@ -135,10 +133,13 @@ vision_algorithm:
     action_ack_timeout_sec: 10.0
 
   mission:
+    test_mission: 0
+    test_stage: 0
+    backboard_depth_strip_width_px: 5
     goal_trial_start_forward: false
     test_ball_mission_index: 1
     test_goal_mission_index: 1
-    mission_recovery_max_turns: 5
+    mission_recovery_max_turns: 10
     mission_recovery_yaw_deg: 15
     camera_motion_timeout_sec: 3.0
     post_motion_observation_sec: 1.0

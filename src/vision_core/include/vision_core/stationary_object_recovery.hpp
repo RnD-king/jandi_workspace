@@ -16,7 +16,8 @@ public:
     hits_.push_back(detected);
     while (hits_.size() > static_cast<std::size_t>(window)) hits_.pop_front();
     if (detected) last_seen_ = now;
-    if (Elapsed(now) + 1e-9 < duration) return Result::kWaiting;
+    if (Elapsed(now) + 1e-9 < duration || hits_.size()<static_cast<std::size_t>(window))
+      return Result::kWaiting;
     ++completed_;
     if (hits_.size() == static_cast<std::size_t>(window) &&
         std::count(hits_.begin(), hits_.end(), true) >= min_hits &&

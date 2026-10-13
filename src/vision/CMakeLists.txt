@@ -135,6 +135,10 @@ add_executable(perception_tuning_node
   src/perception_tuning_node.cpp
 )
 
+add_executable(ball_tuning_node src/perception_tuning_node.cpp)
+target_compile_definitions(ball_tuning_node PRIVATE VISION_BALL_TUNING_NODE=1)
+add_executable(hurdle_tuning_node src/perception_tuning_node.cpp)
+target_compile_definitions(hurdle_tuning_node PRIVATE VISION_HURDLE_TUNING_NODE=1)
 add_executable(goal_tuning_node src/perception_tuning_node.cpp)
 target_compile_definitions(goal_tuning_node PRIVATE VISION_GOAL_TUNING_NODE=1)
 
@@ -178,6 +182,14 @@ ament_target_dependencies(perception_tuning_node
   rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge
 )
 
+foreach(mission_test_target ball_tuning_node hurdle_tuning_node)
+  target_link_libraries(${mission_test_target} vision_core "${vision_typesupport_target}")
+  set_target_properties(${mission_test_target} PROPERTIES
+    BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
+    INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
+  ament_target_dependencies(${mission_test_target}
+    rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge)
+endforeach()
 target_link_libraries(goal_tuning_node vision_core "${vision_typesupport_target}")
 set_target_properties(goal_tuning_node PROPERTIES
   BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
@@ -191,6 +203,8 @@ install(TARGETS
   line_p2p_tuning_node
   perception_tuning_node
   goal_tuning_node
+  ball_tuning_node
+  hurdle_tuning_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -201,5 +215,13 @@ install(DIRECTORY include/
 install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
+
+if(BUILD_TESTING)
+  enable_testing()
+  add_executable(vision_backboard_depth_regions_test tests/backboard_depth_regions_test.cpp)
+  target_include_directories(vision_backboard_depth_regions_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(vision_backboard_depth_regions_test ${OpenCV_LIBS})
+  add_test(NAME vision_backboard_depth_regions_test COMMAND vision_backboard_depth_regions_test)
+endif()
 
 ament_package()

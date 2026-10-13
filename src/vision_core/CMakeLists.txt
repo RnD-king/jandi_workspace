@@ -73,6 +73,16 @@ install(FILES
 )
 
 if(BUILD_TESTING)
+  add_executable(shared_vision_core_staged_mission_contract_test tests/staged_mission_contract_test.cpp)
+  target_link_libraries(shared_vision_core_staged_mission_contract_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_staged_mission_contract_test COMMAND shared_vision_core_staged_mission_contract_test)
+  set_tests_properties(shared_vision_core_staged_mission_contract_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml")
+  add_executable(shared_vision_core_approach_stance_regression_test tests/approach_stance_regression_test.cpp)
+  target_link_libraries(shared_vision_core_approach_stance_regression_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_approach_stance_regression_test COMMAND shared_vision_core_approach_stance_regression_test)
+  set_tests_properties(shared_vision_core_approach_stance_regression_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml")
   add_executable(shared_vision_core_review_regression_test tests/review_regression_test.cpp)
   target_link_libraries(shared_vision_core_review_regression_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_review_regression_test COMMAND shared_vision_core_review_regression_test)

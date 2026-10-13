@@ -21,9 +21,15 @@ enum class GoalMode {
   kRecoverySearch, // Preserve existing goal mission phase values.
   kForwardApproach,
   kPostShootBackAway,
+  kCoarseAdjust,
+  kWaitFinePose,
+  kFineRecovery,
+  kCoarseRecovery,
 };
 
 struct GoalConfig {
+  double recovery_observation_sec{};
+  int recovery_max_observations{};
   double approach_short_z_m{};
   double fine_one_step_range_error_m{};
   double fine_two_step_range_error_m{};
@@ -34,8 +40,8 @@ struct GoalConfig {
   int lost_frames{};
   double smooth_alpha{};
   double post_pickup_wait_sec{};
-  double target_u_norm{};
-  double approach_u_deadband{};
+  double target_u_px{};
+  double approach_u_deadband_px{};
   double fine_adjust_start_z_m{};
   double hoop_radius_m{};
   double throwing_range_m{};
@@ -44,7 +50,7 @@ struct GoalConfig {
   double shoot_yaw_limit_deg{};
   double recovery_timeout_sec{};
   int recovery_reacquire_min_hits{};
-  double recovery_center_tolerance_norm{};
+  double recovery_center_tolerance_px{};
   double recovery_settle_duration_sec{};
 };
 
@@ -78,6 +84,7 @@ struct TrackedGoalPose {
 struct TrackedGoal {
   bool stable{false};
   bool visible{false};
+  Point2 center_px;
   double u_norm{0.0};
   double v_norm{0.0};
   double h_norm{0.0};
@@ -85,12 +92,14 @@ struct TrackedGoal {
 };
 
 struct GoalResult {
+  int recovery_observations_completed{0};
+  double recovery_observation_elapsed_sec{0.0};
   bool active{false};
   CameraRequest camera_request{CameraRequest::kNone};
   GoalMode mode{GoalMode::kLineFollow};
   TrackedGoal tracked;
   TrackedGoalPose pose;
-  // Exact unsmoothed/averaged Pose supplied to FineAction for this step.
+  // Equal-weight stationary pose supplied to FineAction for this step.
   GoalPoseObservation fine_decision_pose;
   bool fine_decision_pose_used{false};
   double shoot_yaw_rad{0.0};
@@ -103,9 +112,18 @@ public:
   GoalController(const GoalConfig &config, double camera_motion_timeout_sec);
   void StartAfterPickup(double now_sec);
   void StartForwardTrial();
+  void StartTestNear() { Reset(); StartAfterPickup(0); mode_=GoalMode::kWaitCameraGoal; }
+  void StartTestExecute() { Reset(); test_execute_requires_stable_=true; SetHasBall(true); mode_=GoalMode::kFineAdjust; }
   void SetHasBall(bool has_ball);
   void UpdateBallState(const BallResult &ball_result);
   bool HasBall() const { return has_ball_; }
+  bool ExecutionObservationReady() const {
+    return tracked_.visible && tracked_.stable && tracked_pose_.visible && tracked_pose_.stable &&
+        hit_history_.size()>=static_cast<std::size_t>(config_.stable_window) &&
+        pose_hit_history_.size()>=static_cast<std::size_t>(config_.stable_window);
+  }
+  int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
+  double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   GoalResult Compute(const std::optional<ObjectTarget> &goal_target,
                      const std::optional<ObjectTarget> &backboard_target,
                      const GoalPoseObservation &goal_pose,
@@ -122,8 +140,14 @@ public:
   void ClearObservationHistory();
   void ObserveOnly(const std::optional<ObjectTarget> &target,
                    const GoalPoseObservation &pose, int width, int height);
-  void UseNextObservationAsMean() { has_smoothed_ = false; has_pose_smoothed_ = false; }
+  void UseNextObservationAsMean() {
+    has_smoothed_ = false; has_pose_smoothed_ = false;
+    fine_pose_window_.clear();
+    fine_pose_mean_pending_ = true;
+    fine_pose_is_preaveraged_ = false;
+  }
   void UpdateTuning(const GoalConfig &config) { config_ = config; }
+  void ShiftTimers(double duration) { state_enter_sec_+=duration; settle_until_sec_+=duration; }
   void Reset();
 
 private:
@@ -133,6 +157,7 @@ private:
   void UpdatePoseTracker(const std::optional<ObjectTarget> &backboard_target,
                          const GoalPoseObservation &goal_pose);
   bool PoseReadyForFineAdjust() const;
+  std::optional<GoalPoseObservation> FinePoseMean() const;
   ActionRequest FineAction(const GoalPoseObservation &pose) const;
   double ComputeShootYawRad(double x_m, double z_m, double yaw_rad) const;
   void ClearTracking();
@@ -140,10 +165,14 @@ private:
 
   GoalConfig config_;
   double camera_motion_timeout_sec_{};
+  bool test_execute_requires_stable_{false};
   GoalMode mode_{GoalMode::kLineFollow};
   std::deque<bool> hit_history_;
   std::deque<bool> pose_hit_history_;
   std::deque<bool> fine_enter_history_;
+  std::deque<std::optional<GoalPoseObservation>> fine_pose_window_;
+  bool fine_pose_mean_pending_{false};
+  bool fine_pose_is_preaveraged_{false};
   int lost_count_{0};
   int pose_lost_count_{0};
   bool has_smoothed_{false};
@@ -161,11 +190,12 @@ private:
   bool camera_trigger_latched_{false};
   bool camera_request_started_{false};
   bool fine_trigger_latched_{false};
-  double last_seen_u_norm_{0.5};
+  double last_seen_u_px_{0.0};
   bool seen_after_camera_goal_{false};
   int recovery_visible_count_{0};
   int completed_back_steps_{0};
   bool back_away_issued_{false};
+  StationaryObjectRecovery stationary_recovery_;
 };
 
 } // namespace vision_core

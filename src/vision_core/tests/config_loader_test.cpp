@@ -34,14 +34,20 @@ int main(int argc, char **argv) {
   assert(c.hurdle.stable_window == 10);
   assert(c.hurdle.stable_min_hits == 7);
   assert(c.post_motion_observation_sec == 1.0);
+  assert(c.test_stage==0 && c.test_mission==vision_core::MissionType::kNone);
+  assert(c.backboard_depth_strip_width_px==5);
   assert(c.line_p2p.recovery_observation_sec == 1.0);
   assert(c.goal.recovery_timeout_sec == 5.0);
   assert(c.goal.recovery_reacquire_min_hits == 3);
-  assert(c.goal.recovery_center_tolerance_norm == 0.12);
-  assert(c.ball.fine_target_u_norm == 0.50);
+  assert(c.goal.recovery_center_tolerance_px == 76.8);
+  assert(c.ball.pickup_u1_px == 281.6);
+  assert(c.line_features.image_center_u == 410.0);
   assert(c.camera_motion_timeout_sec == 3.0);
   assert(c.line_features.guide_min_points == 3);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
+  Reject(text.str(), "post_motion_observation_sec: 1.0", "post_motion_observation_sec: 0.0");
+  Reject(text.str(), "test_stage: 0", "test_stage: 4");
+  Reject(text.str(), "backboard_depth_strip_width_px: 5", "backboard_depth_strip_width_px: 0");
   Reject(text.str(), "offset_gain: 0.3", "offset_gain: .nan");
   Reject(text.str(), "guide_min_points: 3", "guide_min_points: 2");
   Reject(text.str(), "guide_min_points: 3", "guide_min_points: 9");
@@ -58,12 +64,17 @@ int main(int argc, char **argv) {
   Reject(text.str(), "line_stable_min_hits: 7", "line_stable_min_hits: 11");
   Reject(text.str(), "failure_min_valid_samples: 5",
          "failure_min_valid_samples: 0");
-  Reject(text.str(), "fine_target_u_norm: 0.50", "fine_target_u_norm: 1.1");
+  Reject(text.str(), "pickup_u1_px: 281.6", "pickup_u1_px: -1.0");
+  Reject(text.str(), "pickup_u1_px: 281.6", "pickup_u1_px: .nan");
+  Reject(text.str(), "pickup_u1_px: 281.6", "pickup_u1_px: 358.4");
+  Reject(text.str(), "pickup_u2_px: 358.4", "pickup_u2_px: 280.0");
+  Reject(text.str(), "pickup_v1_px: 307.2", "pickup_v1_px: 365.0");
+  Reject(text.str(), "pickup_v2_px: 364.8", "pickup_v2_px: .inf");
   Reject(text.str(), "smooth_alpha: 0.45", "smooth_alpha: .nan");
-  Reject(text.str(), "tilt_down_min_hits: 7", "tilt_down_min_hits: 11");
+  Reject(text.str(), "approach_two_step_v_px: 360.0", "approach_two_step_v_px: .nan");
   Reject(text.str(), "pickup_max_attempts: 10", "pickup_max_attempts: 0");
-  Reject(text.str(), "acquire_min_v_norm: 0.60", "acquire_min_v_norm: -0.1");
-  Reject(text.str(), "target_u_norm: 0.50", "target_u_norm: .inf");
+  Reject(text.str(), "upper_acquire_v_px: 470.0", "upper_acquire_v_px: -0.1");
+  Reject(text.str(), "target_u_px: 320.0", "target_u_px: .inf");
   Reject(text.str(), "throwing_range_m: 0.40", "throwing_range_m: 0.0");
   Reject(text.str(), "fine_settle_duration_sec: 0.60",
          "fine_settle_duration_sec: -0.1");

@@ -21,6 +21,7 @@ struct Trial {
   explicit Trial(MissionControllerConfig c):core(c) {
     in.image_width=640; in.image_height=480; in.command_transport_enabled=true;
     in.advance_line_fsm=false; in.allow_new_body_actions=false;
+    in.manual_observation_control=true; // Explicit per-action trial, with independent repeat observation.
   }
   void Tick(bool done=false,std::uint64_t duplicate=0) {
     in.now_sec+=.1;
@@ -49,9 +50,9 @@ struct Trial {
 };
 MissionControllerConfig Config() {
   auto c=LoadDefaultAlgorithmConfig();
-  c.enable_hurdle=c.enable_goal=false; c.post_motion_observation_sec=0;
-  c.ball.upper_acquire_v_norm=1;
-  c.ball.tilt_down_window=c.ball.tilt_down_min_hits=1;
+  c.enable_hurdle=c.enable_goal=false;
+  c.ball.upper_acquire_v_px=480.0;
+
   c.ball.fine_settle_duration_sec=0;
   c.goal.fine_settle_duration_sec=0;
   return c;
@@ -59,6 +60,10 @@ MissionControllerConfig Config() {
 Trial BallSearch() {
   Trial t(Config()); t.in.ball_target=Target(.5,.85);
   for(int i=0;i<7;++i)t.Tick();
+  assert(t.out.ball.mode==BallMode::kApproachTwoBeforeDown);
+  assert(t.out.command.action_id==0);
+  t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardTwo);
+  t.Tick(true);
   assert(t.out.ball.mode==BallMode::kWaitCameraDown);
   assert(t.out.command.camera_request==CameraRequest::kDown);
   t.in.camera_feedback={CameraMode::kDown,true}; t.in.ball_target.reset(); t.Tick(); t.Tick();
@@ -70,17 +75,17 @@ void TestCameraLatchSurvivesLoss() {
   auto c=Config(); c.ball.stable_window=c.ball.stable_min_hits=1; c.ball.lost_frames=1;
   BallController ball(c.ball,3); ActionExecutionFeedback busy; busy.action_active=true;
   ActionExecutionFeedback done; done.action_done=true;
-  ball.Compute(Target(.5,.3),640,480,0,{},{});
+  ball.Compute(Target(.5,.85),640,480,0,{},{});
   auto b=ball.Compute(Target(.5,.85),640,480,.1,{},busy);
-  assert(b.mode==BallMode::kApproachBall && b.camera_request==CameraRequest::kNone);
-  b=ball.Compute({},640,480,.2,{},busy); assert(b.mode==BallMode::kApproachBall);
+  assert(b.mode==BallMode::kApproachTwoBeforeDown && b.camera_request==CameraRequest::kNone);
+  b=ball.Compute({},640,480,.2,{},busy); assert(b.mode==BallMode::kApproachTwoBeforeDown);
   b=ball.Compute({},640,480,.3,{},done); assert(b.camera_request==CameraRequest::kDown);
   c.hurdle.stable_window=c.hurdle.stable_min_hits=1; c.hurdle.lost_frames=1;
-  c.hurdle.acquire_min_v_norm=0; c.hurdle.tilt_trigger_window=c.hurdle.tilt_trigger_min_hits=1;
+  c.hurdle.upper_acquire_v_px=480;
   HurdleController hurdle(c.hurdle,3);
-  hurdle.Compute(Target(.5,.3),640,480,0,{},{});
+  hurdle.Compute(Target(.5,.85),640,480,0,{},{});
   hurdle.Compute(Target(.5,.85),640,480,.1,{},busy);
-  auto h=hurdle.Compute({},640,480,.2,{},busy); assert(h.mode==HurdleMode::kApproach);
+  auto h=hurdle.Compute({},640,480,.2,{},busy); assert(h.mode==HurdleMode::kApproachTwoBeforeDown);
   h=hurdle.Compute({},640,480,.3,{},done); assert(h.camera_request==CameraRequest::kDown);
   c.goal.stable_window=c.goal.stable_min_hits=1;
   GoalController goal(c.goal,3); goal.StartForwardTrial();
@@ -115,8 +120,13 @@ Trial PickAndBack() {
     t.Tick(i%2==1);
     assert(t.out.ball.mode==BallMode::kDownSearch); // Finish accepted motion first.
   }
-  t.Tick(true); assert(t.out.ball.mode==BallMode::kFineAdjustForPickup);
+  t.Tick(true); assert(t.out.ball.mode==BallMode::kCoarseAdjust);
   assert(t.out.command.action_id==0 && t.permit==0);
+  for(int i=0;i<7;++i)t.Tick();
+  assert(t.Preview().command.action==MissionAction::kDefaultPoseMode);
+  t.Commit(); t.Tick(true);
+  assert(t.out.ball.mode==BallMode::kFineAdjustForPickup);
+  for(int i=0;i<10;++i)t.Tick();
   t.Tick(false,old_id); // Old DONE cannot advance a new phase.
   const auto before=t.out.ball.pickup_attempt_count;
   assert(t.Preview().command.action==MissionAction::kPickBall);
@@ -151,30 +161,38 @@ void TestAlternatingBoundedRecovery() {
   assert(left.core.SetTestMissionIndices(2,1));
   left.Commit(); assert(left.out.command.action==MissionAction::kTurnLeft);
   right.Commit(); assert(right.out.command.action==MissionAction::kTurnRight);
-  auto found_on_fifth=right;
-  for(int i=0;i<5;++i)right.Tick(true);
-  assert(right.out.recovery_turns_completed==5 && right.out.recovery_failed);
+  auto found_on_last=right;
+  for(int i=0;i<10;++i)right.Tick(true);
+  assert(right.out.recovery_turns_completed==10 && right.out.recovery_verifying);
+  assert(!right.out.recovery_failed); // Final turn still receives a full stationary check.
+  for(int i=0;i<11;++i)right.Tick();
+  assert(right.out.recovery_failed);
   assert(right.out.command.action_id==0 && right.permit==0);
   right.in.line_centers={{420,450},{420,350},{420,250}};
   for(int i=0;i<10;++i)right.Tick();
   assert(right.out.recovery_failed && right.out.command.action_id==0);
-  for(int i=0;i<4;++i)found_on_fifth.Tick(true);
-  found_on_fifth.in.line_centers={{420,450},{420,350},{420,250}};
-  for(int i=0;i<7;++i)found_on_fifth.Tick();
-  assert(found_on_fifth.out.command.action_id!=0);
-  found_on_fifth.Tick(true);
-  assert(!found_on_fifth.out.recovery_failed);
-  assert(found_on_fifth.out.recovery_verifying);
-  assert(found_on_fifth.out.active_mission==MissionType::kBall);
-  auto lost_after_rotation = found_on_fifth;
+  for(int i=0;i<9;++i)found_on_last.Tick(true);
+  found_on_last.in.line_centers={{420,450},{420,350},{420,250}};
+  for(int i=0;i<7;++i)found_on_last.Tick();
+  assert(found_on_last.out.command.action_id!=0);
+  found_on_last.Tick(true);
+  assert(!found_on_last.out.recovery_failed);
+  assert(found_on_last.out.recovery_verifying);
+  assert(found_on_last.out.active_mission==MissionType::kBall);
+  auto lost_after_rotation = found_on_last;
   lost_after_rotation.in.line_centers.clear();
   for (int i=0;i<11;++i) lost_after_rotation.Tick();
   assert(lost_after_rotation.out.recovery_failed);
-  assert(lost_after_rotation.out.recovery_turns_completed==5);
+  assert(lost_after_rotation.out.recovery_turns_completed==10);
   assert(lost_after_rotation.out.command.action_id==0);
-  for (int i=0;i<11;++i) found_on_fifth.Tick();
-  assert(found_on_fifth.out.active_mission==MissionType::kLine);
-  assert(found_on_fifth.out.command.action_id==0 && found_on_fifth.permit==0);
+  for (int i=0;i<11;++i) found_on_last.Tick();
+  assert(found_on_last.out.active_mission==MissionType::kBall);
+  assert(found_on_last.out.command.action_id==0 && found_on_last.permit==0);
+  assert(found_on_last.Preview().command.action==MissionAction::kWalkMode);
+  found_on_last.Commit(); found_on_last.Tick(true);
+  assert(found_on_last.out.active_mission==MissionType::kLine);
+  assert(found_on_last.out.foot_pose==FootPose::kWalk);
+  assert(found_on_last.out.command.action_id==0 && found_on_last.permit==0);
 }
 void TestGoalForwardTrial() {
   auto c=Config(); c.enable_ball=false; c.enable_goal=true;
@@ -190,6 +208,10 @@ void TestGoalForwardTrial() {
   t.in.camera_feedback={CameraMode::kGoal,true}; t.Tick();
   t.in.goal_pose={true,0,.5,0,1};
   for(int i=0;i<8;++i)t.Tick();
+  assert(t.out.goal.mode==GoalMode::kWaitFinePose);
+  assert(t.Preview().command.action==MissionAction::kDefaultPoseMode);
+  t.Commit(); t.Tick(true);
+  for(int i=0;i<10;++i)t.Tick();
   assert(t.out.goal.mode==GoalMode::kFineAdjust);
   assert(t.Preview().command.action==MissionAction::kShoot);
   t.Commit(); t.Tick(true); assert(t.out.command.action_id==0);
@@ -203,6 +225,9 @@ void TestGoalForwardTrial() {
   for(int i=0;i<7;++i)t.Tick(); t.Tick(true);
   assert(t.out.recovery_verifying && !t.out.trial_complete);
   for(int i=0;i<11;++i)t.Tick();
+  assert(!t.out.trial_complete && t.out.command.action_id==0);
+  assert(t.Preview().command.action==MissionAction::kWalkMode);
+  t.Commit(); t.Tick(true);
   assert(t.out.trial_complete && t.out.command.action_id==0);
   t.Tick(); assert(t.out.trial_complete && t.out.command.action_id==0);
   assert(t.core.SetTestMissionIndices(1,3));
@@ -210,16 +235,22 @@ void TestGoalForwardTrial() {
 }
 void TestHurdleSearchAndContact() {
   auto c=Config(); c.enable_ball=false; c.enable_hurdle=true;
-  c.hurdle.acquire_min_v_norm=0; c.hurdle.tilt_trigger_window=c.hurdle.tilt_trigger_min_hits=1;
+  c.hurdle.upper_acquire_v_px=480;
   c.hurdle.recovery_settle_duration_sec=0;
   Trial t(c); t.in.hurdle_target=Target(.5,.85);
   for(int i=0;i<7;++i)t.Tick();
-  assert(t.out.command.camera_request==CameraRequest::kDown);
+  assert(t.out.hurdle.mode==HurdleMode::kApproachTwoBeforeDown);
+  t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardTwo);
+  t.Tick(true); assert(t.out.command.camera_request==CameraRequest::kDown);
   t.in.hurdle_target.reset(); t.in.camera_feedback={CameraMode::kDown,true}; t.Tick(); t.Tick();
   t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardOne);
   for(int i=0;i<7;++i) {t.in.hurdle_target=Target(.5,.9); t.Tick(i%2==1);}
-  t.Tick(true); assert(t.out.hurdle.mode==HurdleMode::kFineAdjust && t.permit==0);
-  t.Tick(); t.Commit(); assert(t.out.hurdle.mode==HurdleMode::kContactWalk);
+  t.Tick(true); assert(t.out.hurdle.mode==HurdleMode::kCoarseAdjust && t.permit==0);
+  for(int i=0;i<7;++i)t.Tick();
+  t.Commit(); assert(t.out.command.action==MissionAction::kDefaultPoseMode);
+  t.Tick(true); assert(t.out.hurdle.mode==HurdleMode::kFineAdjust);
+  for(int i=0;i<10;++i)t.Tick();
+  t.Commit(); assert(t.out.hurdle.mode==HurdleMode::kContactWalk);
   assert(t.out.command.action==MissionAction::kStepForwardHalf);
   for(int i=0;i<3;++i)t.Tick(true);
   assert(t.out.hurdle.mode==HurdleMode::kCross && t.out.command.action_id==0 && t.permit==0);

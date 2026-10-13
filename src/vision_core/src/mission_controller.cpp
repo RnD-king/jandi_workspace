@@ -54,6 +54,7 @@ MissionController::MissionController(const MissionControllerConfig &config)
     goal_controller_.StartForwardTrial();
     goal_result_.mode=GoalMode::kForwardApproach;
   }
+  InitializeTest();
 }
 
 ActionRequest MissionController::CruiseAction(const LineGuide &guide,
@@ -240,11 +241,15 @@ void MissionController::EnterMission(MissionType mission) {
 }
 
 void MissionController::FinishMission() {
+  if (foot_pose_ != FootPose::kWalk) { mission_finish_pending_=true; return; }
   if (active_mission_ == MissionType::kBall)
     goal_walk_baseline_sec_ = command_coordinator_.LineExecutionSeconds();
-  if (active_mission_==MissionType::kGoal && config_.goal_trial_start_forward) goal_trial_complete_=true;
+  if (config_.test_mission!=MissionType::kNone ||
+      (active_mission_==MissionType::kGoal && config_.goal_trial_start_forward)) goal_trial_complete_=true;
   active_mission_ = MissionType::kLine;
-  ball_result_ = {}; hurdle_result_ = {}; goal_result_ = {};
+  if (config_.test_mission==MissionType::kNone) {
+    ball_result_ = {}; hurdle_result_ = {}; goal_result_ = {};
+  }
 }
 
 bool MissionController::ShouldDeferDone(
@@ -271,6 +276,9 @@ bool MissionController::ShouldDeferDone(
       (active_mission_ == MissionType::kGoal &&
        goal_result_.mode == GoalMode::kWaitCameraGoal))
     return false;
+  if (action == MissionAction::kDefaultPoseMode || action == MissionAction::kWalkMode ||
+      (active_mission_ == MissionType::kBall && ball_result_.mode == BallMode::kApproachTwoBeforeDown) ||
+      (active_mission_ == MissionType::kHurdle && hurdle_result_.mode == HurdleMode::kApproachTwoBeforeDown)) return false;
   // Fixed multi-motion chains have no perception-dependent successor.
   if (action == MissionAction::kPickBall ||
       action == MissionAction::kRecatch ||
@@ -346,7 +354,13 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
     if (detected) {
       const ObjectTarget &t = target->value();
       decision_last_target_ = t;
-      const double weight=decision_observation_mission_==MissionType::kGoal ? 1.0 :
+      const bool fine_adjustment =
+          (decision_observation_mission_ == MissionType::kBall &&
+           ball_result_.mode == BallMode::kFineAdjustForPickup) ||
+          (decision_observation_mission_ == MissionType::kHurdle &&
+           hurdle_result_.mode == HurdleMode::kFineAdjust) ||
+          decision_observation_mission_ == MissionType::kGoal;
+      const double weight=fine_adjustment ? 1.0 :
           1.0+2.0*std::clamp((input.now_sec-decision_observation_start_sec_)/
               std::max(1e-9,config_.post_motion_observation_sec),0.0,1.0);
       decision_object_weight_+=weight;
@@ -392,7 +406,7 @@ bool MissionController::DecisionObservationReady(double now_sec) const {
   if (decision_observation_mission_ == MissionType::kLine) return true;
   // Object 10/7 evidence is reserved for initial acquisition.
   // After DONE, end at one second; missing targets go to recovery FSM.
-  return decision_observation_total_frames_ > 0;
+  return decision_object_hits_.size() >= 10;
 }
 
 std::optional<LineGuide> MissionController::DecisionLineGuide() const {
@@ -417,11 +431,85 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   // Consume the real completion edge for timing before any observation gate
   // defers it. Stationary post-DONE samples must never count as walking.
   command_coordinator_.ObserveExecutionTime(input.delivery_feedback, input.now_sec);
+  const bool pose_done = input.delivery_feedback.done && last_command_.action_id != 0 &&
+      input.delivery_feedback.action_id == last_command_.action_id &&
+      (last_command_.action == MissionAction::kDefaultPoseMode || last_command_.action == MissionAction::kWalkMode);
+  if (pose_done && !input.manual_observation_control) pose_observation_pending_=true;
+  if (pose_done) foot_pose_ = last_command_.action == MissionAction::kWalkMode ? FootPose::kWalk : FootPose::kFine;
+  if (pose_change_pending_) {
+    MissionFrameResult pose_result;
+    pose_result.command = command_coordinator_.Compute(active_mission_, 901, {},
+        CameraRequest::kNone, input.delivery_feedback, input.now_sec);
+    if (pose_result.command.action_id!=0 || pose_done) last_command_ = pose_result.command;
+    if (pose_done) {
+      pose_change_pending_ = false;
+      const double pose_duration=std::max(0.0,input.now_sec-pose_started_sec_);
+      ball_controller_.ShiftTimers(pose_duration); hurdle_controller_.ShiftTimers(pose_duration);
+      goal_controller_.ShiftTimers(pose_duration);
+      ClearObservationEvidence();
+      if (mission_finish_pending_) { mission_finish_pending_=false; FinishMission(); }
+    }
+    pose_result.active_mission=active_mission_; pose_result.has_ball=has_ball_;
+    pose_result.ball=ball_result_; pose_result.goal=goal_result_; pose_result.hurdle=hurdle_result_;
+    pose_result.trial_complete=goal_trial_complete_;
+    PopulateDiagnostics(pose_result,input.now_sec); return pose_result;
+  }
+  if (mission_finish_pending_) {
+    MissionFrameResult pose_result;
+    const ActionRequest pose_request = input.allow_new_commands && input.allow_new_body_actions
+        ? ActionRequest{MissionAction::kWalkMode,ActionCategory::kLocomotion,0,false} : ActionRequest{};
+    pose_result.command=command_coordinator_.Compute(active_mission_,901,pose_request,
+        CameraRequest::kNone,input.delivery_feedback,input.now_sec);
+    if (pose_result.command.action_id != 0) { pose_started_sec_=input.now_sec; pose_change_pending_=true; pose_target_=FootPose::kWalk; }
+    last_command_=pose_result.command;
+    pose_result.active_mission=active_mission_; pose_result.has_ball=has_ball_;
+    pose_result.ball=ball_result_; pose_result.goal=goal_result_; pose_result.hurdle=hurdle_result_;
+    PopulateDiagnostics(pose_result,input.now_sec); return pose_result;
+  }
   const int incoming_repeat_scope=RepeatScope();
   MissionFrameResult output;
-  if (goal_trial_complete_) {
-    output.trial_complete=true; output.goal_mission_index=std::max(1,goal_mission_index_);
-    output.ball_mission_index=std::max(1,ball_mission_index_); return output;
+  if (goal_trial_complete_ || test_failed_) {
+    output.trial_complete=goal_trial_complete_; output.goal_mission_index=std::max(1,goal_mission_index_);
+    output.ball_mission_index=std::max(1,ball_mission_index_);
+    output.ball=ball_result_; output.hurdle=hurdle_result_; output.goal=goal_result_;
+    output.active_mission=active_mission_; output.has_ball=has_ball_;
+    PopulateDiagnostics(output,input.now_sec); return output;
+  }
+  if (test_setup_pending_) {
+    const CameraMode wanted=config_.test_mission==MissionType::kGoal ? CameraMode::kGoal : CameraMode::kDown;
+    const bool camera_ready=input.camera_feedback.settled && input.camera_feedback.actual_mode==wanted;
+    CameraRequest camera_request=CameraRequest::kNone;
+    ActionRequest pose;
+    if (!camera_ready && input.allow_new_commands) {
+      if (!test_setup_camera_started_) { test_setup_camera_started_=true; test_setup_camera_start_sec_=input.now_sec; }
+      if (input.now_sec-test_setup_camera_start_sec_>=config_.camera_motion_timeout_sec) test_failed_=true;
+    }
+    if (!camera_ready) camera_request=wanted==CameraMode::kGoal ? CameraRequest::kGoal : CameraRequest::kDown;
+    else if (config_.test_stage==3 && foot_pose_!=FootPose::kFine)
+      pose={MissionAction::kDefaultPoseMode,ActionCategory::kLocomotion,0,false};
+    else if (config_.test_stage==2 && foot_pose_!=FootPose::kWalk)
+      pose={MissionAction::kWalkMode,ActionCategory::kLocomotion,0,false};
+    else {
+      test_setup_pending_=false; ClearObservationEvidence();
+      if (config_.test_mission==MissionType::kBall) {
+        if (config_.test_stage==2) ball_controller_.StartTestNear(); else ball_controller_.StartTestExecute();
+        ball_result_.mode=config_.test_stage==2 ? BallMode::kWaitCameraDown : BallMode::kFineAdjustForPickup;
+      } else if (config_.test_mission==MissionType::kHurdle) {
+        if (config_.test_stage==2) hurdle_controller_.StartTestNear(); else hurdle_controller_.StartTestExecute();
+        hurdle_result_.mode=config_.test_stage==2 ? HurdleMode::kWaitCameraDown : HurdleMode::kFineAdjust;
+      } else {
+        if (config_.test_stage==2) goal_controller_.StartTestNear(); else goal_controller_.StartTestExecute();
+        goal_result_.mode=config_.test_stage==2 ? GoalMode::kWaitCameraGoal : GoalMode::kFineAdjust;
+      }
+    }
+    if (!input.allow_new_body_actions) pose={};
+    if (!input.allow_new_commands || test_failed_) { pose={}; camera_request=CameraRequest::kNone; }
+    output.command=command_coordinator_.Compute(active_mission_,903,pose,camera_request,
+        input.delivery_feedback,input.now_sec);
+    last_command_=output.command;
+    output.active_mission=active_mission_; output.has_ball=has_ball_;
+    output.ball=ball_result_; output.goal=goal_result_; output.hurdle=hurdle_result_;
+    PopulateDiagnostics(output,input.now_sec); return output;
   }
   if (input.image_width > 1) last_line_image_width_ = input.image_width;
   // Observe the camera transition edge even if no ActionCommand is pending.
@@ -433,6 +521,17 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
        input.camera_feedback.actual_mode == CameraMode::kGoal);
   previous_camera_settled_ = input.camera_feedback.settled;
   previous_camera_mode_ = input.camera_feedback.actual_mode;
+  if (fresh_after_search_) {
+    fresh_after_search_=false;
+    if (!input.manual_observation_control)
+      BeginDecisionObservation(input.now_sec,active_mission_,false,{});
+  }
+  // Deliver the pose's actual DONE to its owning FSM first. Its fresh
+  // observation begins on the next frame and must never swallow that edge.
+  if (pose_observation_pending_ && !input.manual_observation_control && !pose_done) {
+    pose_observation_pending_=false;
+    BeginDecisionObservation(input.now_sec,active_mission_,false,{});
+  }
   if (input.manual_observation_control && RepeatScope()==0) {
     // DONE is always acknowledged by the coordinator immediately. Only a
     // deliberate PREVIEW may start the next one-second stationary window.
@@ -448,11 +547,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   }
   // A deferred DONE remains pending at the coordinator while new, post-DONE
   // frames are collected. This makes the next action impossible before 1 s.
+  bool observation_finished=false;
   bool observation_hold = decision_observation_active_;
   if (observation_hold) {
     if (!decision_observation_first_frame_ || !decision_observation_camera_only_)
       AddDecisionObservation(input);
     if (DecisionObservationReady(input.now_sec)) {
+      observation_finished=true;
       if (!decision_observation_camera_only_)
         input.delivery_feedback = deferred_done_;
       // Object acquisition 10/7 applies only on entry. After DONE one
@@ -548,7 +649,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                                       decision_object_hits_.end(), true));
     output.post_motion_elapsed_sec =
         std::max(0.0, input.now_sec - decision_observation_start_sec_);
-    last_command_ = output.command;
+    if (deferred_done_.action_id==0 || output.command.action_id!=0)
+      last_command_ = output.command;
     output.active_mission = active_mission_;
     output.line_in_recovery = line_state_ != LineState::kNormal;
     output.ball = ball_result_;
@@ -559,6 +661,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     return output;
   }
   decision_observation_first_frame_ = false;
+  const int line_turns_before=line_recovery_turns_;
   ActionExecutionFeedback action_feedback = input.action_feedback;
   const bool matching_feedback = last_command_.action_id != 0 &&
       input.delivery_feedback.action_id == last_command_.action_id;
@@ -568,6 +671,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     action_feedback.action_active = last_command_.action_id != 0 &&
                                     !action_feedback.action_done;
   }
+  action_feedback.observation_complete=observation_finished;
   bool line_reference_valid = false;
   ActionRequest line_action;
   const auto compute_line = [&]() {
@@ -670,7 +774,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
             input.goal_target, input.backboard_target, input.goal_pose,
             input.image_width, input.image_height, input.now_sec,
             line_reference_valid, input.camera_feedback, action_feedback,
-            input.allow_new_body_actions, input.backboard_center_depth_m,
+            input.allow_new_body_actions && input.allow_new_commands, input.backboard_center_depth_m,
             std::max(0.0, command_coordinator_.LineExecutionSeconds() - goal_walk_baseline_sec_));
         if (goal_result_.mode != GoalMode::kLineFollow)
           EnterMission(MissionType::kGoal);
@@ -680,7 +784,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         hurdle_result_ = hurdle_controller_.Compute(
             input.hurdle_target, input.image_width, input.image_height,
             input.now_sec, input.camera_feedback, action_feedback,
-            input.allow_new_body_actions);
+            input.allow_new_body_actions && input.allow_new_commands);
         if (hurdle_result_.mode != HurdleMode::kLineFollow) {
           EnterMission(MissionType::kHurdle); break;
         }
@@ -689,7 +793,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         ball_result_ = ball_controller_.Compute(
             input.ball_target, input.image_width, input.image_height,
             input.now_sec, input.camera_feedback, action_feedback,
-            input.allow_new_body_actions);
+            input.allow_new_body_actions && input.allow_new_commands);
         if (ball_result_.mode != BallMode::kLineFollow)
           EnterMission(MissionType::kBall);
       }
@@ -697,12 +801,16 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     break;
   case MissionType::kBall: {
     const BallMode before = ball_result_.mode;
+    const bool controller_allow=input.allow_new_body_actions && input.allow_new_commands && !(config_.test_mission!=MissionType::kNone && config_.test_stage==2 && before==BallMode::kFineAdjustForPickup);
     if (before == BallMode::kPostPickupLineRecovery)
       line_action=ComputeMissionLineRecovery(input,action_feedback,&line_reference_valid,&output);
     ball_result_ = ball_controller_.Compute(
         input.ball_target, input.image_width, input.image_height,
         input.now_sec, input.camera_feedback, action_feedback,
-            input.allow_new_body_actions);
+            controller_allow);
+    if (ball_result_.mode!=BallMode::kLineFollow) test_entry_pending_=false;
+    if (before==BallMode::kDownSearch && ball_result_.mode==BallMode::kCoarseAdjust)
+      fresh_after_search_=true;
     has_ball_ = ball_result_.has_ball;
     if (ball_result_.mode==BallMode::kPostPickupLineRecovery) ball_result_.action=line_action;
     if (before != BallMode::kPostPickupLineRecovery &&
@@ -715,31 +823,38 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         goal_controller_.UpdateBallState(ball_result_);
       FinishMission();
     } else if (ball_result_.mode == BallMode::kLineFollow &&
-               !ball_result_.active) {
+               !ball_result_.active && !test_entry_pending_) {
       BeginLineReacquisition(); FinishMission();
     }
     break;
   }
-  case MissionType::kHurdle:
+  case MissionType::kHurdle: {
+    const auto before=hurdle_result_.mode;
+    const bool controller_allow=input.allow_new_body_actions && input.allow_new_commands && !(config_.test_mission!=MissionType::kNone && config_.test_stage==2 && before==HurdleMode::kFineAdjust);
     hurdle_result_ = hurdle_controller_.Compute(
         input.hurdle_target, input.image_width, input.image_height,
         input.now_sec, input.camera_feedback, action_feedback,
-            input.allow_new_body_actions);
+            controller_allow);
+    if (hurdle_result_.mode!=HurdleMode::kLineFollow) test_entry_pending_=false;
+    if (before==HurdleMode::kDownSearch && hurdle_result_.mode==HurdleMode::kCoarseAdjust)
+      fresh_after_search_=true;
     if (hurdle_result_.mode == HurdleMode::kLineFollow &&
-        !hurdle_result_.active) {
+        !hurdle_result_.active && !test_entry_pending_) {
       ball_controller_.ClearEntryEvidence();
       BeginLineReacquisition(); FinishMission();
     }
     break;
+  }
   case MissionType::kGoal: {
     const GoalMode before = goal_result_.mode;
+    const bool controller_allow=input.allow_new_body_actions && input.allow_new_commands && !(config_.test_mission!=MissionType::kNone && config_.test_stage==2 && before==GoalMode::kFineAdjust);
     if (before == GoalMode::kHeadingRecovery)
       line_action=ComputeMissionLineRecovery(input,action_feedback,&line_reference_valid,&output);
     goal_result_ = goal_controller_.Compute(
         input.goal_target, input.backboard_target, input.goal_pose,
         input.image_width, input.image_height, input.now_sec,
         line_reference_valid, input.camera_feedback, action_feedback,
-            input.allow_new_body_actions, input.backboard_center_depth_m);
+            controller_allow, input.backboard_center_depth_m);
     if (goal_result_.mode==GoalMode::kHeadingRecovery) goal_result_.action=line_action;
     has_ball_ = goal_controller_.HasBall();
     ball_controller_.SetHasBall(has_ball_);
@@ -770,6 +885,41 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   } else {
     request = line_action; phase = static_cast<int>(line_state_);
   }
+  if (config_.test_mission!=MissionType::kNone && !action_feedback.action_active &&
+      TestBoundaryReached(input.camera_feedback)) {
+    goal_trial_complete_=true; request={}; camera_request=CameraRequest::kNone;
+  }
+  // Alignment trials must never dispatch the mission primitive, including
+  // while the full observation window is still accumulating.
+  if (config_.test_mission!=MissionType::kNone && config_.test_stage==2 &&
+      (request.action==MissionAction::kPickBall || request.action==MissionAction::kShoot ||
+       request.action==MissionAction::kHurdle ||
+       (config_.test_mission==MissionType::kHurdle &&
+        hurdle_result_.mode==HurdleMode::kFineAdjust &&
+        hurdle_result_.tracked.center_px.v>=config_.hurdle.contact_v_px))) request={};
+  if (config_.test_mission!=MissionType::kNone && config_.test_stage==3 &&
+      !test_execution_started_ && !TestExecutionReady()) request={};
+  if (mission_finish_pending_) {
+    request={MissionAction::kWalkMode,ActionCategory::kLocomotion,0,false};
+    camera_request=CameraRequest::kNone; phase=901;
+  }
+  // All recovery turns and resumed normal walking obey the same stance contract.
+  const int action_number=static_cast<int>(request.action);
+  const bool wants_walk=action_number==9 || (action_number>=10 && action_number<=13) ||
+      (action_number>=21 && action_number<=26);
+  const bool wants_fine=(action_number>=1 && action_number<=8) ||
+      (action_number>=14 && action_number<=17);
+  const bool implicit_pose=request.action!=MissionAction::kDefaultPoseMode &&
+      request.action!=MissionAction::kWalkMode &&
+      ((wants_walk && foot_pose_!=FootPose::kWalk) || (wants_fine && foot_pose_!=FootPose::kFine));
+  if (implicit_pose) {
+    if (active_mission_==MissionType::kLine && wants_fine) {
+      recovery_turn_issued_=false; line_recovery_turns_=line_turns_before;
+    }
+    request={wants_walk ? MissionAction::kWalkMode : MissionAction::kDefaultPoseMode,
+             ActionCategory::kLocomotion,0,false};
+    camera_request=CameraRequest::kNone; phase=901;
+  }
   // one-shot tuning gate는 perception/FSM/feedback 처리를 막거나 기존
   // pending/queued action을 취소하지 않는다. coordinator 직전의 새 LINE
   // request만 제거하여 READY/DONE 조기 반환 경로까지 동일하게 막는다.
@@ -793,10 +943,21 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   output.command = command_coordinator_.Compute(
       active_mission_, phase, request, camera_request,
       input.delivery_feedback, input.now_sec);
+  if (config_.test_mission!=MissionType::kNone && config_.test_stage==3 &&
+      output.command.command_type==CommandType::kAction && TestExecutionReady())
+    test_execution_started_=true;
+  if (output.command.action_id != 0 && phase==901 &&
+      (output.command.action==MissionAction::kDefaultPoseMode || output.command.action==MissionAction::kWalkMode)) {
+    pose_started_sec_=input.now_sec; pose_change_pending_=true;
+    pose_target_=output.command.action==MissionAction::kWalkMode ? FootPose::kWalk : FootPose::kFine;
+  }
   if (input.advance_line_fsm && input.delivery_feedback.done &&
       input.delivery_feedback.action_id == ready_line_action_id_)
     ready_line_action_id_ = 0;
-  last_command_ = output.command;
+  // The transport may already have accepted DONE while an earlier ACK/READY
+  // still awaits sensory processing. Keep its FSM ID until that DONE edge.
+  if (output.command.action_id!=0 || action_feedback.action_done || last_command_.action_id==0)
+    last_command_ = output.command;
   output.active_mission = active_mission_;
   output.ball = ball_result_; output.hurdle = hurdle_result_;
   output.goal = goal_result_; output.has_ball = has_ball_;
@@ -812,9 +973,18 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 }
 
 void MissionController::PopulateDiagnostics(MissionFrameResult &output, double now) const {
+  output.test_stage=config_.test_stage; output.test_ready=TestExecutionReady(); output.test_executing=test_execution_started_;
+  output.terminal_hold=IsTerminalHold();
+  output.foot_pose=foot_pose_;
+  output.foot_transition=pose_change_pending_ ||
+      (last_command_.action_id!=0 && (last_command_.action==MissionAction::kDefaultPoseMode || last_command_.action==MissionAction::kWalkMode));
+  output.recovery_max_turns=config_.mission_recovery_max_turns;
+  output.recovery_observation_frames=static_cast<int>(mission_recovery_hits_.size());
   output.repeat_scope = RepeatScope(); output.repeat_sequence = output.repeat_scope != 0;
-  output.ball_mission_index = std::max(1, ball_mission_index_);
-  output.goal_mission_index = std::max(1, goal_mission_index_);
+  output.ball_mission_index = std::max(1, (active_mission_==MissionType::kBall || (goal_trial_complete_ && config_.test_mission==MissionType::kBall)) ? ball_mission_index_ : ball_mission_index_+1);
+  output.goal_mission_index = std::max(1, (active_mission_==MissionType::kGoal || (goal_trial_complete_ &&
+      (config_.test_mission==MissionType::kGoal ||
+       (config_.test_mission==MissionType::kNone && config_.goal_trial_start_forward)))) ? goal_mission_index_ : goal_mission_index_+1);
   output.recovery_turns_completed = mission_recovery_turns_;
   output.recovery_failed = mission_recovery_failed_;
   output.recovery_verifying = mission_recovery_verifying_;
@@ -825,6 +995,8 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output, double n
   output.goal_walk_gate_active = has_ball_ && config_.enable_goal &&
       !config_.goal_trial_start_forward && (active_mission_ == MissionType::kLine ||
       (active_mission_ == MissionType::kGoal && goal_result_.mode == GoalMode::kWaitCameraGoal));
+  output.goal.recovery_observations_completed=goal_controller_.RecoveryObservationsCompleted();
+  output.goal.recovery_observation_elapsed_sec=goal_controller_.RecoveryObservationElapsed(now);
   output.ball.recovery_observations_completed = ball_controller_.RecoveryObservationsCompleted();
   output.ball.recovery_observation_elapsed_sec = ball_controller_.RecoveryObservationElapsed(now);
   output.ball.down_search_remaining_sec = ball_controller_.DownSearchRemaining(now);
@@ -960,8 +1132,11 @@ PerceptionMissionFrameResult MissionController::StepPerception(
     output.perception.backboard_center_depth_m = depth.center_depth_m;
     output.perception.backboard_left_depth_m = depth.left_depth_m;
     output.perception.backboard_right_depth_m = depth.right_depth_m;
+    output.perception.backboard_left_depth_u_px=depth.left_depth_u_px;
+    output.perception.backboard_right_depth_u_px=depth.right_depth_u_px;
     const bool fine = active_mission_ == MissionType::kGoal &&
-        (goal_result_.mode == GoalMode::kFineAdjust ||
+        (goal_result_.mode == GoalMode::kFineAdjust || goal_result_.mode == GoalMode::kCoarseAdjust ||
+         goal_result_.mode == GoalMode::kFineRecovery || goal_result_.mode == GoalMode::kCoarseRecovery ||
          goal_result_.mode == GoalMode::kShoot);
     const bool near = depth.center_depth_m &&
         *depth.center_depth_m <= config_.goal.fine_adjust_start_z_m;
@@ -973,8 +1148,8 @@ PerceptionMissionFrameResult MissionController::StepPerception(
       const double right = std::round(backboard->box_px.x +
                                       backboard->box_px.width - 1.0);
       output.perception.goal_pose = EstimateGoalPoseFromBackboardDepths(
-          center, *depth.center_depth_m, left, *depth.left_depth_m,
-          right, *depth.right_depth_m, input.intrinsics,
+          center, *depth.center_depth_m, depth.left_depth_u_px.value_or(left), *depth.left_depth_m,
+          depth.right_depth_u_px.value_or(right), *depth.right_depth_m, input.intrinsics,
           backboard->confidence);
     }
   }
@@ -1015,7 +1190,7 @@ PerceptionMissionFrameResult MissionController::PreviewPerception(
 
 
 int MissionController::RepeatScope() const {
-  if (mission_recovery_failed_) return 0;
+  if (mission_recovery_failed_ || mission_finish_pending_ || pose_change_pending_) return 0;
   if (active_mission_==MissionType::kBall) {
     if (ball_result_.mode==BallMode::kDownSearch ||
         ball_result_.mode==BallMode::kPostPickupBackAway ||
@@ -1032,8 +1207,12 @@ int MissionController::RepeatScope() const {
 }
 
 bool MissionController::NeedsStationaryObservation() const {
-  return (active_mission_ == MissionType::kBall && ball_result_.mode == BallMode::kBallRecoveryDown) ||
-      (active_mission_ == MissionType::kHurdle && hurdle_result_.mode == HurdleMode::kRecoveryDown) ||
+  return (active_mission_ == MissionType::kBall &&
+      (ball_result_.mode == BallMode::kBallRecoveryDown || ball_result_.mode == BallMode::kBallRecoveryForward)) ||
+      (active_mission_ == MissionType::kHurdle &&
+      (hurdle_result_.mode == HurdleMode::kRecoveryDown || hurdle_result_.mode == HurdleMode::kRecoveryForward)) ||
+      (active_mission_ == MissionType::kGoal &&
+       (goal_result_.mode==GoalMode::kFineRecovery || goal_result_.mode==GoalMode::kCoarseRecovery || goal_result_.mode==GoalMode::kRecoverySearch)) ||
       mission_recovery_verifying_;
 }
 
@@ -1059,7 +1238,8 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
     while (mission_recovery_hits_.size()>static_cast<std::size_t>(config_.line.line_stable_window))
       mission_recovery_hits_.pop_front();
     if (input.now_sec - mission_recovery_verify_start_sec_ + 1e-9 <
-        config_.line_p2p.recovery_observation_sec) return {};
+        config_.line_p2p.recovery_observation_sec ||
+        mission_recovery_hits_.size()<static_cast<std::size_t>(config_.line.line_stable_window)) return {};
     const bool confirmed = guide.valid && mission_recovery_hits_.size() ==
         static_cast<std::size_t>(config_.line.line_stable_window) &&
         std::count(mission_recovery_hits_.begin(), mission_recovery_hits_.end(), true) >=
@@ -1084,7 +1264,7 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
   }
   *valid=false;
   if (feedback.action_active && !feedback.action_done) return {};
-  if (mission_recovery_found_) {
+  if (mission_recovery_found_ || mission_recovery_turns_>=config_.mission_recovery_max_turns) {
     mission_recovery_verifying_ = true;
     mission_recovery_verify_start_sec_ = input.now_sec;
     mission_recovery_hits_.clear(); return {};
@@ -1093,7 +1273,7 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
     mission_recovery_failed_=true; return {};
   }
   if (mission_recovery_failed_) return {};
-  if (input.allow_new_body_actions) mission_recovery_issued_=true;
+  if (input.allow_new_body_actions && input.allow_new_commands) mission_recovery_issued_=true;
   const int index=active_mission_==MissionType::kBall ? ball_mission_index_ : goal_mission_index_;
   return RecoveryTurn(index%2==0,config_.mission_recovery_yaw_deg);
 }
@@ -1125,20 +1305,8 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.ball=candidate.ball;
   updated.hurdle=candidate.hurdle;
   updated.goal=candidate.goal;
-  updated.ball.far_u_des_norm = candidate.ball.far_u_des_norm;
-  updated.ball.approach_u_deadband = candidate.ball.approach_u_deadband;
-  updated.ball.tilt_down_v_norm = candidate.ball.tilt_down_v_norm;
-  updated.ball.fine_target_u_norm = candidate.ball.fine_target_u_norm;
-  updated.ball.fine_target_v_norm = candidate.ball.fine_target_v_norm;
-  updated.ball.fine_u_deadband = candidate.ball.fine_u_deadband;
-  updated.ball.fine_v_deadband = candidate.ball.fine_v_deadband;
-  updated.goal.target_u_norm = candidate.goal.target_u_norm;
-  updated.goal.approach_u_deadband = candidate.goal.approach_u_deadband;
-  updated.goal.fine_adjust_start_z_m = candidate.goal.fine_adjust_start_z_m;
-  updated.goal.throwing_range_m = candidate.goal.throwing_range_m;
-  updated.goal.position_tolerance_m = candidate.goal.position_tolerance_m;
-  updated.hurdle.acquire_min_v_norm = candidate.hurdle.acquire_min_v_norm;
-  updated.hurdle.tilt_trigger_v_norm = candidate.hurdle.tilt_trigger_v_norm;
+  updated.mission_recovery_max_turns=candidate.mission_recovery_max_turns;
+  updated.backboard_depth_strip_width_px=candidate.backboard_depth_strip_width_px;
   ValidateAlgorithmConfig(updated);
   // All existing offset accumulators were measured relative to the OLD
   // reference. Rebase in normalized coordinates without altering heading.
@@ -1188,6 +1356,11 @@ void MissionController::ClearObservationEvidence() {
 void MissionController::Reset() { Reset(false); }
 
 void MissionController::Reset(bool preserve_action_ids) {
+  if (!preserve_action_ids) foot_pose_=FootPose::kWalk;
+  pose_change_pending_=mission_finish_pending_=physical_reset_pending_=pose_observation_pending_=false;
+  reset_walk_done_=false;
+  test_setup_camera_started_=test_failed_=false;
+  fresh_after_search_=test_setup_pending_=test_entry_pending_=test_execution_started_=false;
   goal_trial_complete_=false;
   ball_mission_index_=config_.test_ball_mission_index-1;
   goal_mission_index_=config_.test_goal_mission_index-1;
@@ -1238,5 +1411,78 @@ void MissionController::Reset(bool preserve_action_ids) {
     goal_mission_index_=config_.test_goal_mission_index;
     goal_controller_.StartForwardTrial(); goal_result_.mode=GoalMode::kForwardApproach;
   }
+  InitializeTest();
 }
+void MissionController::BeginPhysicalReset() {
+  Reset(true); physical_reset_pending_=true; reset_walk_done_=false;
+}
+MissionFrameResult MissionController::StepPhysicalReset(
+    const CommandDeliveryFeedback &feedback,const CameraFeedback &camera,double now_sec) {
+  MissionFrameResult result;
+  if (!physical_reset_pending_) { result.physical_reset_complete=true; return result; }
+  if (feedback.done && last_command_.action_id!=0 && feedback.action_id==last_command_.action_id &&
+      last_command_.action==MissionAction::kWalkMode) { reset_walk_done_=true; foot_pose_=FootPose::kWalk; }
+  const bool camera_ready=camera.settled && camera.actual_mode==CameraMode::kForward;
+  result.command=command_coordinator_.Compute(MissionType::kLine,902,
+      reset_walk_done_ ? ActionRequest{} : ActionRequest{MissionAction::kWalkMode,ActionCategory::kLocomotion,0,false},
+      camera_ready ? CameraRequest::kNone : CameraRequest::kForward,feedback,now_sec);
+  last_command_=result.command;
+  if (reset_walk_done_ && camera_ready && last_command_.action_id==0) {
+    physical_reset_pending_=false; Reset(true); result.physical_reset_complete=true;
+  }
+  PopulateDiagnostics(result,now_sec); return result;
+}
+
+void MissionController::InitializeTest() {
+  if (config_.test_mission==MissionType::kNone) return;
+  active_mission_=config_.test_mission;
+  ball_result_={}; hurdle_result_={}; goal_result_={};
+  test_execution_started_=false;
+  test_setup_pending_=config_.test_stage>=2;
+  test_entry_pending_=!test_setup_pending_ && active_mission_!=MissionType::kGoal;
+  has_ball_=active_mission_==MissionType::kGoal;
+  if (active_mission_==MissionType::kBall) ball_mission_index_=config_.test_ball_mission_index;
+  if (active_mission_==MissionType::kGoal) {
+    goal_mission_index_=config_.test_goal_mission_index;
+    if (!test_setup_pending_) { goal_controller_.StartForwardTrial(); goal_result_.mode=GoalMode::kForwardApproach; }
+  }
+}
+bool MissionController::SetTestStage(MissionType mission,int stage) {
+  if (last_command_.action_id!=0 || pose_change_pending_ || physical_reset_pending_ ||
+      (mission!=MissionType::kBall && mission!=MissionType::kGoal && mission!=MissionType::kHurdle) ||
+      stage<0 || stage>3) return false;
+  config_.test_mission=mission; config_.test_stage=stage; Reset(true); return true;
+}
+bool MissionController::TestExecutionReady() const {
+  if (config_.test_mission==MissionType::kBall)
+    return ball_controller_.ExecutionObservationReady() &&
+        ball_result_.action.action==MissionAction::kPickBall;
+  if (config_.test_mission==MissionType::kGoal)
+    return goal_controller_.ExecutionObservationReady() &&
+        goal_result_.action.action==MissionAction::kShoot;
+  if (config_.test_mission==MissionType::kHurdle)
+    return hurdle_controller_.ExecutionObservationReady() &&
+        hurdle_result_.tracked.center_px.v>=config_.hurdle.contact_v_px &&
+        (hurdle_result_.mode==HurdleMode::kFineAdjust || hurdle_result_.mode==HurdleMode::kContactWalk);
+  return false;
+}
+bool MissionController::TestBoundaryReached(const CameraFeedback& camera) const {
+  if (config_.test_stage==2) return TestExecutionReady();
+  if (config_.test_stage!=1 || !camera.settled) return false;
+  if (config_.test_mission==MissionType::kBall)
+    return camera.actual_mode==CameraMode::kDown && ball_result_.mode==BallMode::kDownSearch;
+  if (config_.test_mission==MissionType::kHurdle)
+    return camera.actual_mode==CameraMode::kDown && hurdle_result_.mode==HurdleMode::kDownSearch;
+  return config_.test_mission==MissionType::kGoal && camera.actual_mode==CameraMode::kGoal &&
+      goal_result_.mode==GoalMode::kSearch;
+}
+ControlCommand MissionController::AcceptDeliveryFeedback(const CommandDeliveryFeedback& feedback,double now_sec) {
+  // Keep last_command_ as the sensory FSM's matching edge until its next frame.
+  if (feedback.done && feedback.action_id!=0 && feedback.action_id==last_command_.action_id) {
+    if (last_command_.action==MissionAction::kDefaultPoseMode) foot_pose_=FootPose::kFine;
+    if (last_command_.action==MissionAction::kWalkMode) foot_pose_=FootPose::kWalk;
+  }
+  return command_coordinator_.Compute(active_mission_,0,{},CameraRequest::kNone,feedback,now_sec);
+}
+
 } // namespace vision_core

@@ -194,6 +194,9 @@ struct CameraFeedback {
 struct ActionExecutionFeedback {
   bool action_done{false};
   bool action_active{false};
+  // A fresh stationary observation window completed in the shared core.
+  // This is evidence metadata, never a simulated action DONE.
+  bool observation_complete{false};
 };
 
 struct ActionRequest {

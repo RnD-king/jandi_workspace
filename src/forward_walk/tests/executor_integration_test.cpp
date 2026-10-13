@@ -39,16 +39,16 @@ void Check(bool value, const char* message) {
 int Count(const Events& events, uint64_t id, uint8_t status) {
     return std::count(events.begin(),events.end(),std::make_pair(id,status));
 }
-void WriteTripleMission(const fs::path& path, const std::string& filename) {
+void WriteTripleMission(const fs::path& path, const std::string& filename, int count=3) {
     std::ofstream stream(path);
     stream << "{\"motions\":[";
-    for (int i=0; i<3; ++i) {
+    for (int i=0; i<count; ++i) {
         if (i) stream << ',';
         stream << "{\"filename\":\"" << filename << "\"}";
     }
     stream << "]}";
 }
-void WriteMotion(const fs::path& path, bool startup=false) {
+void WriteMotion(const fs::path& path, bool startup=false, int gripper=2048) {
     std::ofstream stream(path);
     stream << "{\"keyframes\":[";
     for(int frame=0;frame<(startup?1:2);++frame) {
@@ -58,7 +58,7 @@ void WriteMotion(const fs::path& path, bool startup=false) {
         bool first=true;
         for(int id:Dxl::MotorIds()) {
             if(!first)stream<<',';first=false;
-            stream<<'"'<<id<<"\":"<<(id==0&&!startup?2148+frame*100:2048);
+            stream<<'"'<<id<<"\":"<<(id==19?gripper:(id==0&&!startup?2148+frame*100:2048));
         }
         stream<<"}}";
     }
@@ -73,8 +73,10 @@ int main() {
     const auto left=directory/"motions/보행_좌회전전진_20도_최종_초기X.json";
     const auto right=directory/"motions/보행_우회전전진_20도_최종_초기X.json";
     WriteMotion(startup,true);WriteMotion(left);WriteMotion(right);
+    WriteMotion(directory/"motions/공_재그립.json",false,1968);
     WriteTripleMission(directory/"missions/직진_좌회전_3번.json", left.filename().string());
     WriteTripleMission(directory/"missions/직진_우회전_3번.json", right.filename().string());
+    WriteTripleMission(directory/"missions/직진_우회전_2번.json", right.filename().string(),2);
     const std::vector<std::string> options={"executor_integration_test","--ros-args",
         "-p","p2p_asset_directory:="+directory.string(),
         "-p","motor_health_log_directory:="+(directory/"log").string(),
@@ -126,8 +128,9 @@ int main() {
         Check(Dxl::packets.front().at(15)>1379&&Dxl::packets.front().at(15)<2048&&
               Dxl::packets.front().at(16)>2048&&Dxl::packets.front().at(16)<2765,
               "startup arms jumped instead of using P2P interpolation");
-        for(int id:Dxl::MotorIds())if(id!=15&&id!=16&&id!=21&&id!=22)
+        for(int id:Dxl::MotorIds())if(id!=15&&id!=16&&id!=19&&id!=21&&id!=22)
             Check(Dxl::current.at(id)==2048,"startup FORWARD hold changed body");
+        Check(Dxl::current.at(19)==1968,"startup missed RECATCH gripper target");
         // A normal body JSON contains different head ticks; the automatic FORWARD hold wins.
         action(9001,11);
         // 실제 모터 없이 오류/통신 단절/복구와 활성 동작의 로그를 검증한다.
@@ -164,6 +167,7 @@ int main() {
         Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537,"ordinary P2P JSON overwrote FORWARD head pose");
         Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"LINE walking missed arm pose override");
         Check(Dxl::current.at(13)==2048,"LINE arm override changed ID 13");
+        Check(Dxl::current.at(19)==1968,"walking did not override ID19");
         Check(cameras.empty(),"automatic FORWARD hold emitted a camera command status");
         std::cout<<"PASS real MainNode startup FORWARD transmission/hold and ordinary P2P override\n";
 
@@ -191,14 +195,19 @@ int main() {
             Check(Count(actions,id,Status::READY)==1,"non-LINE long walk must send READY once");
             Check(!node->queued_action_,"non-LINE READY erroneously queued another action");
         }
+        for(uint16_t code:{14,15,16,17}) Check(!MainNode::UsesFixedGripperPose(code),"task gripper exclusion missing");
+        for(uint16_t code:{1,2,3,7,11,13,18,21,22,23,24,25,26})
+            Check(MainNode::UsesFixedGripperPose(code),"normal action gripper override missing");
         // 공을 향해 걷기 → 공 잡기 → 다시 걷기에서 action별 팔 목표 전환을 검증한다.
         WriteMotion(directory/"motions/공_줍고일어나기.json");
         action(9190,14,2);
         pump([&]{return node->action_transactions_.completed.Contains(9190);});flush();
         Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048,"PICK_BALL did not restore JSON arm pose");
+        Check(Dxl::current.at(19)==2048,"PICK_BALL gripper was overridden");
         action(9191,11,2);
         pump([&]{return node->action_transactions_.completed.Contains(9191);});flush();
         Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048,"BALL walking incorrectly overrode arms");
+        Check(Dxl::current.at(19)==1968,"non-LINE walking missed gripper override");
         action(9200,11);
         Check(node->arm_transition_in_progress_,"return to LINE missed arm opening transition");
         pump([&]{return !node->arm_transition_in_progress_;});
@@ -211,6 +220,7 @@ int main() {
         Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"LINE arm pose still depends on action type");
         Check(Count(actions,9200,Status::READY)==1,"LINE READY missing after non-LINE walks");
         Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"return to LINE did not reapply arm pose");
+        Check(Dxl::current.at(19)==2048,"LINE task action incorrectly overrode gripper");
         std::cout<<"PASS mission-only arm scope, restoration/opening before action, duplicate ACK and LINE task action\n";
 
         action(1001,11);action(1001,11);action(1002,12);action(0,11);
@@ -262,6 +272,20 @@ int main() {
         }
         std::cout<<"PASS all six new action ACK/READY/queue/DONE and arm targets\n";
 
+        // 시작 시 읽은 고정값과 다른 RECATCH fixture로 제외 규칙을 검증한다.
+        WriteMotion(directory/"motions/공_재그립.json",false,2168);
+        // 제외된 action 모두 원래 JSON의 집게손을 사용한다.
+        fs::create_directories(directory/"missions");
+        for(uint16_t code:{14,15,16,17}) {
+            const auto file=directory/node->ProgramFileForAction(code);
+            if(code!=15) WriteMotion(file);
+            const uint64_t id=45000+code;
+            action(id,code,2);pump([&]{return node->action_transactions_.completed.Contains(id);});flush();
+            Check(Dxl::current.at(19)==(code==15?2168:2048),"task action lost original gripper JSON pose");
+        }
+        // 돌아오는 팔 전환에서도 집게손 기준이 유지되어야 한다.
+        action(45050,21,1);pump([&]{return node->action_transactions_.completed.Contains(45050);});flush();
+        Check(Dxl::current.at(19)==1968,"LINE return/queued walking missed gripper target");
         const auto body_before=Dxl::current;
         camera(2002,2);
         pump([&]{return node->camera_transactions_.completed.Contains(2002);});flush();

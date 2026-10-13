@@ -1,155 +1,152 @@
-# 통합 미션 튜닝 — 2026-10-12
+# PC 통합 미션 튜닝 — 2026-10-13
 
-`forward_walk` 원본은 `RnD-king/2026_motion`, 커밋
-`f477db208c4877f36a4497583f20d976f55fa2d6`의 `10.13.1/forward_walk`이다.
-이 패키지는 수정하지 않는다. 메시지는 친구의 ActionCommand 정의와 일치한다.
-`vision` 및 독립 CMake 라이브러리 `vision_core`의 원본은 이 jandi_workspace
-체크아웃이다. PC는 이 소스를 my_cv와 ~/vision_core에 동기화하고,
-Jetson은 같은 브랜치/커밋의 소스를 빌드한다.
+현재 PC의 forward_walk는 친구 2026_motion의 10.13.2/forward_walk 원본이다.
+12번의 기존 이름과 번호는 유지하며 최신 JSON 매핑을 따른다.
+이 수정은 PC의 my_cv/src/vision 및 ~/vision_core에서 개발한다.
+GitHub·젯슨·로컬 jandi_workspace는 이 작업에서 갱신하지 않는다.
 
-## 제어와 COMMIT
+## 파라미터와 관측
 
-`start → preview → commit` 서비스를 사용한다. 일반 접근/미세조정은 COMMIT당
-한 동작을 실행한다. 다음 단계는 COMMIT 한 번으로 해당 단계만 승인한다.
+알고리즘 기본값은 ~/vision_core/config/vision_algorithm.yaml 한곳에서 관리한다.
+노드의 기본 실행 설정은 ~/vision_core/install/share/shared_vision_core/config/vision_algorithm.yaml이다.
+YAML만 변경할 때는 이 설치본으로 복사하고 노드를 재시작한다.
+소스·헤더 변경은 코어 설치 및 vision 재빌드가 필요하다.
 
-| 승인 단계 | 실행 | 종료 |
-|---|---|---|
-| BALL/HURDLE DOWN 검색 | action 10 연속 | 최근 10 관측 중 7 감지 또는 10초 |
-| BALL 후진 | action 4 세 번 | 세 번째 DONE |
-| GOAL 후진 | action 4 두 번 | 두 번째 DONE |
-| BALL/GOAL 라인 탐색 | action 7/8 반복 | 유효 라인 7-hit 또는 최대 5회 완료 |
-| HURDLE 접촉 | action 3 반복 | hurdle_contact_steps 완료 |
+화면 좌표 기준은 입력 이미지 픽셀이다. 초기값은 640×480 기준이다.
+해상도를 바꾸면 기준을 다시 맞춘다. 골대의 실제 거리(m)와 LINE O/H 점수는
+기존 단위를 유지한다. 공·허들 위치는 최근 관측 창에서 후반 가중치 1→3을 사용한다.
+미검출도 창의 한 칸이지만 좌표 0으로 평균하지 않는다.
 
-모션마다 고유 action_id와 실제 ACK/DONE을 처리한다. 재전송에는 같은 ID를
-사용한다. 반복 중 DONE은 감지 이력을 초기화하지 않으며, 별도의 정지 관측이나
-COMMIT을 기다리지 않는다. 조건을 충족해도 실행 중인 모션은 끝까지 완료한다.
-그 뒤 추가 명령을 중단한다. 10초 이후에는 새 걸음을 발행하지 않으므로,
-실제 종료 시점에는 마지막 걸음의 남은 시간이 포함될 수 있다.
+공·허들 진입은 원본 중심 v≤470px인 관측이 최근 10회 중 7회일 때다.
+공/허들 upper_acquire_v_px는 같은 방향의 상한 기준이다.
+보행 구간은 판단용 후반 가중 v로 선택한다.
 
-단계 승인은 다음 단계로 넘어갈 때 해제된다. PICK/RECATCH/자세 복귀,
-HUDDLE/SHOOT 및 새로운 반복 단계는 별도 COMMIT이 필요하다.
-카메라 전환은 기존처럼 body DONE 이후 자동으로 진행한다.
-`stop_repeat`는 반복 승인을 취소한다. 현재 수락된 모션의 DONE은 기다린다.
-이는 실행 중인 모션을 중간 취소하는 서비스가 아니다.
+## 접근 구간과 화면
 
-```bash
-ros2 service call /perception_tuning_node/start std_srvs/srv/Trigger '{}'
-ros2 service call /perception_tuning_node/preview std_srvs/srv/Trigger '{}'
-ros2 service call /perception_tuning_node/commit std_srvs/srv/Trigger '{}'
-ros2 service call /perception_tuning_node/stop_repeat std_srvs/srv/Trigger '{}'
-ros2 service call /perception_tuning_node/reset std_srvs/srv/Trigger '{}'
-```
+공 FORWARD: 좌우 허용 폭과 v 경계로 3×3을 만든다.
 
-RESET은 idle 상태에서 시험을 초기화하고 카메라를 FORWARD로 복귀시킨다.
-동작이나 미처리 feedback이 남으면 거부한다. 기존 Action/Camera ID는 보존한다.
+| 구간 | 동작 |
+|---|---|
+| 1·4 | 24: 좌회전 전진 |
+| 3·6 | 25: 우회전 전진 |
+| 2 | 23: 직진 4걸음 |
+| 5 | 22: 직진 3걸음 |
+| 7·8·9 | 21: 직진 2걸음 완료 후 DOWN |
 
-## 보행과 관측
+아래 구간에 대해 2걸음→DOWN을 잠근다. 모션 중 검출이 사라져도 실제 DONE 뒤
+DOWN으로 간다. 카메라가 내려가기 전 추가 접근 보행은 발행하지 않는다.
+공 접근의 세로 경계 2개와 가로 경계 2개를 두께 1px로 표시한다.
 
-LINE은 11/12/13을 유지한다. 기본 기준 u=420px, O/H gain은 각각 0.3이다.
-공 접근은 v에 따라 직진 23→22로 줄이고, 좌우 오차가 크면 24/25를
-사용한다. GOAL 접근은 중심 depth로 23/22를 고른다. 가까운 미세조정에서는
-기존 미세 보행을 유지하고, 전진 오차가 큰 경우에는 21/10을 사용한다.
+허들 FORWARD는 v로 4/3/2걸음만 사용한다. 좌우 정렬은 추후 LINE 기반으로 구현한다.
+4걸음 뒤 새 정지 관측에서 유효 검출을 못 얻으면 복구로 간다.
+3걸음 뒤 새 정지 관측에서 유효 검출을 못 얻으면 DOWN으로 간다.
+2걸음 구간은 실제 DONE 직후 검출 여부와 관계없이 DOWN으로 간다.
+가로 경계선은 2개다.
 
-BALL/HURDLE 위치는 최근 카메라 관측 창에서 뒤쪽에 1→3 가중치를 준다.
-미검출 프레임도 창의 한 칸을 차지하지만 좌표 0으로 평균하지 않는다.
-10/7 감지 증거와 위치 평균은 구분한다. 반복 중에는 창을 유지하고,
-카메라 전환이나 새로운 정지 위치 관측에서는 창을 정리한다.
-GOAL의 RGB-D pose 및 raw fine 슛 기하 계산은 유지한다.
+골대 FORWARD/GOAL 접근은 target_u_px와 approach_u_deadband_px로 방향을 정한다.
+중심선과 좌우 경계 3개를 표시한다. 거리로 직진 23/22를 고르는 기존 접근을 유지한다.
 
-READY는 11/12/13 및 21~26에서 관측 종료 이정표다. 완료 신호가 아니다.
-기존 40%-to-READY 및 최소 표본 조건을 유지한다. 표본이 부족하면 DONE 뒤
-새 PREVIEW를 사용한다. 실행기 한 칸 예약은 LINE→LINE에서만 허용되며,
-수동 튜닝은 COMMIT 전 body 선예약을 하지 않는다.
+공·허들 DOWN 초기 검색은 10번 반복, 최근 10회 중 7회 검출 또는 최대 10초다.
+발견 조건을 채워도 현재 수락된 걸음의 실제 DONE까지 기다린다.
+이후 큰 보행으로 거리만 조정한다:
 
-## 미션 시퀀스
+- v < down_one_step_v_px: 21번, 2걸음.
+- down_one_step_v_px ≤ v < fine_mode_v_px: 10번, 1걸음.
+- v ≥ fine_mode_v_px: 2번 자세 전환 → 새 관측 → 미세보행.
 
-BALL: FORWARD 접근 → v 조건으로 DOWN → 검색 → 새 위치 관측/미세조정
-→ PICK → 잔존 공 확인 → 성공이면 RECATCH → 기본 자세 → 후진 3회
-→ FORWARD → 라인 탐색. 실패하면 재정렬 후 PICK을 재시도하며 최대 10회다.
-성공 판정은 기존처럼 10 관측 중 7회 미만 감지이다. 손 안의 공을 직접 검증하는
-센서는 아니다. DOWN 검색 시간 소진과 라인 탐색 횟수 소진은 RESET 전 HOLD다.
+공이 줍기 영역의 v 구간까지 도달한 경우에도 더 전진하지 않고 미세보행으로 전환한다.
+전환선은 fine_mode_v_px와 pickup_v1_px 중 먼저 도달하는 실제 기준을 표시한다.
+공 DOWN 화면은 줍기 사각형 하나와 가로선 2개다. 허들 DOWN도 가로선 2개만 표시하며
+접촉 기준은 글자 패널과 contact_v_px에서 확인한다.
+미세보행 진입 후 공은 3/4/5/6, 허들은 3번만 사용한다. 10/21로 자동 복귀하지 않는다.
 
-HURDLE: FORWARD 접근 → v 조건으로 DOWN → action 10 검색 → 새 위치
-관측/미세조정 → contact_v 조건 → action 3 접촉 반복 → 별도 COMMIT으로
-HUDDLE → FORWARD/기존 라인 재관측. action 20은 실행기 미구현이므로 발행하지 않는다.
+| rqt 파라미터 | 기본값(px) | 의미 |
+|---|---:|---|
+| ball_upper_acquire_v_px | 470 | 공 진입 상한 |
+| hurdle_upper_acquire_v_px | 470 | 허들 진입 상한 |
+| ball_far_u_des_px | 320 | 공 접근 좌우 중심 |
+| ball_approach_u_deadband_px | 16 | 공 좌우 허용 반폭 |
+| ball_approach_short_v_px | 288 | 중앙 4→3걸음 경계 |
+| ball_approach_two_step_v_px | 360 | 공 아래 행 2걸음→DOWN 경계 |
+| ball_down_one_step_v_px | 216 | DOWN 2→1걸음 경계 |
+| ball_fine_mode_v_px | 278.4 | 미세보행 진입선 |
+| ball_pickup_u1_px / ball_pickup_u2_px | 281.6 / 358.4 | 줍기 영역 왼쪽 / 오른쪽 |
+| ball_pickup_v1_px / ball_pickup_v2_px | 307.2 / 364.8 | 줍기 영역 위쪽 / 아래쪽 |
+| hurdle_approach_short_v_px | 312 | 허들 4→3걸음 경계 |
+| hurdle_approach_two_step_v_px | 360 | 허들 3→2걸음 경계 |
+| hurdle_down_one_step_v_px | 288 | DOWN 2→1걸음 경계 |
+| hurdle_fine_mode_v_px | 350.4 | 미세보행 진입선 |
+| hurdle_contact_v_px | 408 | 미세 접촉 반복 진입 |
+| goal_target_u_px / goal_approach_u_deadband_px | 320 / 16 | 골대 접근 중심 / 허용 반폭 |
 
-GOAL 통합 모드: 공 보유/라인 복귀 → LINE 보행 실행시간 누적 5초 →
-새 LINE 예약 차단 → 이미 수락된 보행 DONE → GOAL 카메라 → 접근/미세조정
-→ SHOOT → 후진 2회 → FORWARD → 라인 탐색. 팔 전환은 보행 실행시간에
-포함하고 사람의 COMMIT 대기, 정지 관측, 후진, 회전은 제외한다. 예약 ACK는
-저장 완료일 뿐이므로 현재 보행 DONE 뒤 실제 실행부터 누적한다.
-고개를 올린 뒤 골대가 안 보이면 HOLD한다. 단독 시험은 FORWARD 접근부터
-시작하고 중심 depth 조건으로 고개를 올리는 기존 시험 시퀀스를 유지한다.
+기존 ball_tilt_down_v_px/hurdle_tilt_trigger_v_px는 approach_two_step_v_px로,
+hurdle_acquire_min_v_px는 hurdle_upper_acquire_v_px로 대체한다.
+공·허들의 fine_one_step_v_error_px/fine_two_step_v_error_px는 두 절대 v 경계로 대체한다.
+hurdle_fine_target_v_px 대신 접촉 목표는 hurdle_contact_v_px를 사용한다.
 
-공·허들의 초기 DOWN 검색은 최대 10초 전진이다. 일단 발견하여 미세조정에
-들어간 뒤 객체를 놓치면 초기 검색으로 돌아가지 않고 별도 정지 재관측을
-실행한다. 매회 새로운 1초 관측/10프레임 중 7회 검출을 사용하며 총 5회까지만
-시도한다. 재발견하면 미세조정으로 돌아가고 5회 실패하면 HOLD/RESET이다.
-몸 동작을 발행하거나 DONE을 모사하지 않으며, 사람의 새 PREVIEW 없이 관측을
-계속한다. 재발견 이후의 몸 동작에는 다시 COMMIT이 필요하다.
+## 발 자세와 미션
 
-허들은 현재 v 기준 앞뒤 접근만 사용한다. 허들 bbox 중심을 이용한 회전 전진,
-옆걸음, 놓친 객체의 방향 회전은 비활성화했다. 좌우/방향 정렬은 나중에 라인을
-기준으로 구현한다. hurdle_target_u_norm/hurdle_u_deadband는 현재 사용하지 않는다.
+일반 보행 자세와 미세보행 자세를 shared core에서 관리한다.
+2번 DEFAULT_POSE_MODE가 미세보행 전환, 9번 WALK_MODE가 일반 보행 전환이다.
+전환은 실제 ACK/DONE으로 완료하고 READY는 완료로 취급하지 않는다.
+전환 DONE은 후진·접촉·라인 회전 카운터에 전달하지 않는다.
+미션 완료는 보행 자세 복귀 DONE 뒤 확정하며, 골대 단독 시험 완료도 동일하다.
+일반 LINE 실패 복구의 7/8 회전에도 필요한 발 전환을 적용한다.
 
-공·골대 라인 복귀는 회전 도중 10/7 발견 후 현재 회전을 완료하고, 별도 1초
-정지 관측/10프레임 중 7회로 재확인한다. 확인에 실패하면 사용한 회전 횟수를
-유지하고 남은 회전만 시도한다. 다섯 번째 회전 후 재확인 실패는 HOLD다.
+BALL: 접근 → 2걸음/DOWN → 검색 → 21/10 거리 조정 → 2 전환 → 미세 정렬
+→ 14 PICK → 잔존 공 관측 → 성공이면 15 RECATCH → 1 기본 자세
+→ 4 후진 3회 → FORWARD → 같은 방향 회전·라인 확인 → 9 → LINE.
+PICK 실패 시 다시 미세 정렬하며 최대 10회다. 성공 판정은 기존 잔존 공 10/7 기준이다.
 
-## 골대 전체 시퀀스 단독 시험
+GOAL: 공 보유/라인 복귀 뒤 LINE 실행시간 5초 → 수락된 보행 DONE → GOAL 시야
+→ 접근 → 림 거리 오차로 21/10 조정 → 2 → 3/4/5/6 미세 정렬 → 17 슛
+→ 4 후진 2회 → FORWARD → 회전·라인 확인 → 9 → LINE.
+골대 단독 시험은 FORWARD 접근부터 시작한다. GOAL로 올렸는데 아직 골대를 못 본
+상태에서는 의도대로 정지한다. 팔 전환을 포함한 실제 LINE 보행 시간만 5초에 포함한다.
 
-`goal_tuning_node`는 perception_tuning_node와 같은 구현 및 공통 코어를 사용한다.
-다른 미션은 비활성화하고 FORWARD 접근부터 시작한다. 시험 완료 후 WAIT_START로
-돌아가며, 성공적으로 완료한 골대 시험은 다음 회차를 rqt에 설정한다.
-공을 다시 준비한 뒤 START로 반복하거나, WAIT_START에서 회차를 다시 지정한다. 골대 mode는 goal로 고정한다.
-perception_tuning_node의 `algorithm_mode:=goal`도 같은 단독 시퀀스를 제공한다.
+HURDLE: 접근 → DOWN → 검색 → 21/10 거리 조정 → 2 → 3 미세 접근
+→ contact_v_px 도달 → 3 접촉 반복(hurdle_contact_steps 기본 3) → 16 넘기
+→ FORWARD → 9 → LINE 재관측. 20번 박치기는 발행하지 않는다.
+
+정면 접근 및 초기 DOWN 검색 이후 공·허들·골대에서 놓친 물체는 정지 재관측 최대 5회다.
+각 관측은 1초 이상이며 10프레임 증거를 확보한 뒤 10/7로 판정한다. 연속 3회 재발견 기준은 사용하지 않는다. 미세보행 진입 여부를
+유지하여 재발견 후 큰 보행과 미세보행을 섞지 않는다.
+
+## 라인 복귀와 실패 표시
+
+공·골대의 회전은 mission_recovery_max_turns 기본 10회, 요청 각도 15도다.
+각 미션 회차가 홀수면 오른쪽, 짝수면 왼쪽이다. 일반 LINE 실패 회전의 5회 설정은 별도다.
+마지막 회전에도 정지 확인 기회를 준다. 1초가 지나도 10프레임이 없으면 관측을 계속한다.
+최근 10회 중 유효 guide 7회와 현재 guide 유효를 확인해야 복귀한다.
+확인 실패는 사용한 회전 횟수를 유지하고, 10회 소진 후 실패하면 HOLD/RESET이다.
+UI 상단에 HOLD/RESET 이유를 표시하고 PREVIEW로 실패 상태를 해제하지 않는다.
+
+LINE 기준은 410px, O/H gain은 각각 0.3이다. 청록색 기준선과 초록색 offset 판단선을 유지한다.
+실시간 RGB·YOLO 박스와 판단 좌표는 유지한다. WAIT_COMMIT에서는 판단 결과만 유지한다.
+
+## PREVIEW/COMMIT과 RESET
+
+start → preview → commit 서비스를 사용한다. 일반 접근/작은 보행/자세 전환은 각각
+한 COMMIT이다. 반복 검색·후진·라인 회전·허들 접촉은 COMMIT 한 번으로 해당 단계만 승인한다.
+다음 단계로 넘어가면 승인 해제, 수락된 동작은 실제 DONE까지 완료한다.
+전환 후 AUTO는 새 정지 관측, 수동 튜닝은 새 PREVIEW로 위치를 확인한다.
+
+RESET은 실제 동작이 완료되고 feedback을 접수한 상태에서 보행 자세9와 카메라 FORWARD를 복귀시킨다.
+이미 완료된 이벤트의 영상 적용 대기는 RESET으로 폐기할 수 있다.
+실제 동작 DONE과 카메라 settled를 모두 확인한 뒤 WAIT_START가 된다.
+영상이 없어도 제어 타이머에서 일반 실행 및 RESET feedback을 코디네이터에 반영한다.
+새 지각 판단은 실제 영상 관측을 기다린다. 이미 발행한 미수락 ID의 재전송만 타이머에서 수행한다. 명령 ID는 보존한다.
+RESET/START는 새 미션 시험이며 START 이전 실제 발 자세를 임의로 WALK로 간주하지 않는다.
+일반 rqt 값은 idle WAIT_PREVIEW/WAIT_COMMIT에서, 시험 회차는 WAIT_START에서 변경한다.
+
+미션별 독립 노드와 test_stage 0/1/2/3 사용법은 [MISSION_STAGE_TESTING.md](MISSION_STAGE_TESTING.md)를 따른다.
+
+골대 단독 전체 시험:
 
 ```bash
 ros2 run vision goal_tuning_node
 ros2 service call /goal_tuning_node/start std_srvs/srv/Trigger '{}'
+# UI가 WAIT_PREVIEW이면 preview, WAIT_COMMIT이면 commit을 하나씩 호출한다.
 ros2 service call /goal_tuning_node/preview std_srvs/srv/Trigger '{}'
 ros2 service call /goal_tuning_node/commit std_srvs/srv/Trigger '{}'
 ```
-
-실행 알고리즘 노드는 perception_tuning_node/goal_tuning_node 중 하나를 사용한다.
-TensorRT engine 경로는 yolo26_runtime.yaml의 PC/Jetson 설정 또는 engine_path로 선택한다.
-
-## rqt와 화면
-
-`test_ball_mission_index`, `test_goal_mission_index`는 WAIT_START에서 바꾼다.
-각 미션의 회차는 독립적이며 홀수는 오른쪽, 짝수는 왼쪽으로 라인을 탐색한다.
-실제 미션 진입에서만 회차가 진행되며 PREVIEW와 재전송은 증가시키지 않는다.
-
-일반 튜닝 값은 WAIT_PREVIEW/WAIT_COMMIT의 idle 상태에서 변경한다.
-변경 시 후보를 다시 계산한다. 반복 실행 중에는 변경하지 않는다.
-
-| 용도 | 추가 rqt 파라미터 |
-|---|---|
-| BALL 접근 | ball_approach_short_v_norm |
-| BALL 큰 미세 전진 | ball_fine_one_step_v_error_norm, ball_fine_two_step_v_error_norm |
-| HURDLE 접근 | hurdle_approach_short_v_norm (u 정렬 파라미터는 현재 비활성) |
-| HURDLE DOWN 접근 | hurdle_fine_target_v_norm, hurdle_fine_one_step_v_error_norm, hurdle_fine_two_step_v_error_norm |
-| HURDLE 접촉 | hurdle_contact_v_norm, hurdle_contact_steps |
-| GOAL 접근 | goal_approach_short_z_m, goal_camera_goal_start_z_m |
-| GOAL 큰 미세 전진 | goal_fine_one_step_range_error_m, goal_fine_two_step_range_error_m |
-
-기존 LINE, BALL pickup u/v target/deadband, 카메라 DOWN v, GOAL 슛 파라미터도 유지한다.
-접근 보행 전환 v는 DOWN v 이하, one-step 오차는 two-step 오차 이하로 설정한다.
-v는 [0,1] 값이며 패널에는 현재 이미지 높이에 곱한 픽셀 기준도 표시한다.
-
-영상 배경과 raw YOLO bbox/labels는 LIVE다. 최근 판단 중심·박스는 retained
-preview에 따라 표시한다. BALL/HURDLE의 보행 전환선과 카메라 전환선은 1px이다.
-픽업 허용 영역은 기존 노란 사각형이다. 상태 패널에 승인 범위, 회차와 회전 방향,
-회전 완료 횟수, 전환선 픽셀값을 표시한다. 골대 전환까지의 누적 보행시간과
-잔여시간, 초기 DOWN 검색 잔여시간, 정지 복구 관측 회차와 라인 정지 재확인
-상태도 표시한다. 허들 마커/패널은 보행 길이와 앞뒤 미세조정에 사용하는 후반
-가중 v를 표시한다. LINE 정지/READY 집계는 모든 실행 노드에서 공통 최소 유효
-표본 수(line_p2p.failure_min_valid_samples, 기본 5)를 요구한다.
-
-## 검증 범위
-
-코어 테스트는 미검출 검색, 10초, 단계별 승인 경계, 중복 DONE, 후진 3/2회,
-교대 회전, 5회 HOLD, 다섯 번째 회전에서 발견, 슛 후 단독 시험 종료 및
-허들 접촉/넘기 분리를 확인한다. 실행기 테스트는 in-memory Dynamixel을 사용한다.
-PC 빌드/소프트웨어 테스트와 실제 로봇 검증은 구분한다.
-영상 독립 watchdog, DONE 대기 제한과 공 보유에 따른 팔 정책 변경은 이번 범위에서 제외했다.

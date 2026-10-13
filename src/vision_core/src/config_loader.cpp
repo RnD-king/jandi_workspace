@@ -60,36 +60,43 @@ void HitsWithinWindow(int hits, int window, const char *hits_key,
 } // namespace
 
 void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
-  Unit(c.ball.approach_short_v_norm, "ball.approach_short_v_norm");
+  Nonnegative(c.ball.down_one_step_v_px, "ball.down_one_step_v_px");
+  Nonnegative(c.ball.fine_mode_v_px, "ball.fine_mode_v_px");
+  if (c.ball.down_one_step_v_px >= c.ball.fine_mode_v_px)
+    throw std::runtime_error("ball DOWN thresholds must be ordered");
+  Nonnegative(c.ball.approach_short_v_px, "ball.approach_short_v_px");
   Positive(c.ball.down_search_timeout_sec, "ball.down_search_timeout_sec");
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
-  Unit(c.ball.fine_one_step_v_error_norm, "ball.fine_one_step_v_error_norm");
-  Unit(c.ball.fine_two_step_v_error_norm, "ball.fine_two_step_v_error_norm");
   PositiveInt(c.ball.post_pickup_back_steps, "ball.post_pickup_back_steps");
-  Unit(c.hurdle.approach_short_v_norm, "hurdle.approach_short_v_norm");
+  Nonnegative(c.hurdle.down_one_step_v_px, "hurdle.down_one_step_v_px");
+  Nonnegative(c.hurdle.fine_mode_v_px, "hurdle.fine_mode_v_px");
+  if (c.hurdle.down_one_step_v_px >= c.hurdle.fine_mode_v_px)
+    throw std::runtime_error("hurdle DOWN thresholds must be ordered");
+  Nonnegative(c.hurdle.approach_short_v_px, "hurdle.approach_short_v_px");
   Positive(c.hurdle.down_search_timeout_sec, "hurdle.down_search_timeout_sec");
   Positive(c.hurdle.recovery_observation_sec, "hurdle.recovery_observation_sec");
   PositiveInt(c.hurdle.recovery_max_observations, "hurdle.recovery_max_observations");
-  Unit(c.hurdle.fine_one_step_v_error_norm, "hurdle.fine_one_step_v_error_norm");
-  Unit(c.hurdle.fine_two_step_v_error_norm, "hurdle.fine_two_step_v_error_norm");
-  Unit(c.hurdle.target_u_norm, "hurdle.target_u_norm");
-  Unit(c.hurdle.u_deadband, "hurdle.u_deadband");
-  Unit(c.hurdle.fine_target_v_norm, "hurdle.fine_target_v_norm");
-  Unit(c.hurdle.contact_v_norm, "hurdle.contact_v_norm");
+  Nonnegative(c.hurdle.target_u_px, "hurdle.target_u_px");
+  Nonnegative(c.hurdle.u_deadband_px, "hurdle.u_deadband_px");
+  Nonnegative(c.hurdle.contact_v_px, "hurdle.contact_v_px");
   PositiveInt(c.hurdle.contact_steps, "hurdle.contact_steps");
   Nonnegative(c.goal.fine_one_step_range_error_m,"goal.fine_one_step_range_error_m");
   Nonnegative(c.goal.fine_two_step_range_error_m,"goal.fine_two_step_range_error_m");
+  Positive(c.goal.recovery_observation_sec, "goal.recovery_observation_sec");
+  PositiveInt(c.goal.recovery_max_observations, "goal.recovery_max_observations");
   Positive(c.goal.approach_short_z_m, "goal.approach_short_z_m");
   Positive(c.goal.camera_goal_start_z_m, "goal.camera_goal_start_z_m");
   PositiveInt(c.goal.post_shoot_back_steps, "goal.post_shoot_back_steps");
-  if (c.ball.approach_short_v_norm > c.ball.tilt_down_v_norm ||
-      c.hurdle.approach_short_v_norm > c.hurdle.tilt_trigger_v_norm ||
-      c.ball.fine_one_step_v_error_norm > c.ball.fine_two_step_v_error_norm ||
-      c.hurdle.fine_one_step_v_error_norm > c.hurdle.fine_two_step_v_error_norm ||
+  if (c.ball.approach_short_v_px >= c.ball.approach_two_step_v_px ||
+      c.hurdle.approach_short_v_px >= c.hurdle.approach_two_step_v_px ||
       c.goal.camera_goal_start_z_m > c.goal.approach_short_z_m ||
       c.goal.fine_one_step_range_error_m > c.goal.fine_two_step_range_error_m)
     throw std::runtime_error("approach/fine transition thresholds must be ordered");
+  const int tm=static_cast<int>(c.test_mission);
+  if ((tm!=0 && tm!=2 && tm!=3 && tm!=4) || c.test_stage<0 || c.test_stage>3 ||
+      (tm==0 && c.test_stage!=0)) throw std::runtime_error("invalid test mission/stage");
+  PositiveInt(c.backboard_depth_strip_width_px,"mission.backboard_depth_strip_width_px");
   PositiveInt(c.test_ball_mission_index,"mission.test_ball_mission_index");
   PositiveInt(c.test_goal_mission_index,"mission.test_goal_mission_index");
   PositiveInt(c.mission_recovery_max_turns,"mission.mission_recovery_max_turns");
@@ -140,26 +147,27 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "ball.stable_min_hits", "ball.stable_window");
   PositiveInt(c.ball.lost_frames, "ball.lost_frames");
   Unit(c.ball.smooth_alpha, "ball.smooth_alpha");
-  Unit(c.ball.far_u_des_norm, "ball.far_u_des_norm");
-  Unit(c.ball.approach_u_deadband, "ball.approach_u_deadband");
-  Unit(c.ball.upper_acquire_v_norm, "ball.upper_acquire_v_norm");
-  Unit(c.ball.tilt_down_v_norm, "ball.tilt_down_v_norm");
-  HitsWithinWindow(c.ball.tilt_down_min_hits, c.ball.tilt_down_window,
-                   "ball.tilt_down_min_hits", "ball.tilt_down_window");
+  Nonnegative(c.ball.far_u_des_px, "ball.far_u_des_px");
+  Nonnegative(c.ball.approach_u_deadband_px, "ball.approach_u_deadband_px");
+  Nonnegative(c.ball.upper_acquire_v_px, "ball.upper_acquire_v_px");
+  Nonnegative(c.ball.approach_two_step_v_px, "ball.approach_two_step_v_px");
   PositiveInt(c.ball.pickup_max_attempts, "ball.pickup_max_attempts");
   Nonnegative(c.ball.ball_ignore_duration_sec,
               "ball.ball_ignore_duration_sec");
-  Unit(c.ball.fine_target_u_norm, "ball.fine_target_u_norm");
-  Unit(c.ball.fine_target_v_norm, "ball.fine_target_v_norm");
-  Unit(c.ball.fine_u_deadband, "ball.fine_u_deadband");
-  Unit(c.ball.fine_v_deadband, "ball.fine_v_deadband");
+  Nonnegative(c.ball.pickup_u1_px, "ball.pickup_u1_px");
+  Nonnegative(c.ball.pickup_u2_px, "ball.pickup_u2_px");
+  Nonnegative(c.ball.pickup_v1_px, "ball.pickup_v1_px");
+  Nonnegative(c.ball.pickup_v2_px, "ball.pickup_v2_px");
+  if (c.ball.pickup_u1_px >= c.ball.pickup_u2_px ||
+      c.ball.pickup_v1_px >= c.ball.pickup_v2_px)
+    throw std::runtime_error("ball pickup edges require u1 < u2 and v1 < v2");
   Nonnegative(c.ball.fine_settle_duration_sec,
               "ball.fine_settle_duration_sec");
   Nonnegative(c.ball.recovery_timeout_sec, "ball.recovery_timeout_sec");
   PositiveInt(c.ball.recovery_reacquire_min_hits,
               "ball.recovery_reacquire_min_hits");
-  Unit(c.ball.recovery_center_tolerance_norm,
-       "ball.recovery_center_tolerance_norm");
+  Nonnegative(c.ball.recovery_center_tolerance_px,
+       "ball.recovery_center_tolerance_px");
   Nonnegative(c.ball.recovery_settle_duration_sec,
               "ball.recovery_settle_duration_sec");
 
@@ -167,20 +175,16 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "hurdle.stable_min_hits", "hurdle.stable_window");
   PositiveInt(c.hurdle.lost_frames, "hurdle.lost_frames");
   Unit(c.hurdle.smooth_alpha, "hurdle.smooth_alpha");
-  Unit(c.hurdle.acquire_min_v_norm, "hurdle.acquire_min_v_norm");
-  Unit(c.hurdle.tilt_trigger_v_norm, "hurdle.tilt_trigger_v_norm");
-  HitsWithinWindow(c.hurdle.tilt_trigger_min_hits,
-                   c.hurdle.tilt_trigger_window,
-                   "hurdle.tilt_trigger_min_hits",
-                   "hurdle.tilt_trigger_window");
+  Nonnegative(c.hurdle.upper_acquire_v_px, "hurdle.upper_acquire_v_px");
+  Nonnegative(c.hurdle.approach_two_step_v_px, "hurdle.approach_two_step_v_px");
   Nonnegative(c.hurdle.hurdle_ignore_duration_sec,
               "hurdle.hurdle_ignore_duration_sec");
   PositiveInt(c.hurdle.recovery_reacquire_min_hits,
               "hurdle.recovery_reacquire_min_hits");
   Nonnegative(c.hurdle.recovery_timeout_sec,
               "hurdle.recovery_timeout_sec");
-  Unit(c.hurdle.recovery_center_tolerance_norm,
-       "hurdle.recovery_center_tolerance_norm");
+  Nonnegative(c.hurdle.recovery_center_tolerance_px,
+       "hurdle.recovery_center_tolerance_px");
   Nonnegative(c.hurdle.recovery_settle_duration_sec,
               "hurdle.recovery_settle_duration_sec");
 
@@ -189,8 +193,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.goal.lost_frames, "goal.lost_frames");
   Unit(c.goal.smooth_alpha, "goal.smooth_alpha");
   Nonnegative(c.goal.post_pickup_wait_sec, "goal.post_pickup_wait_sec");
-  Unit(c.goal.target_u_norm, "goal.target_u_norm");
-  Unit(c.goal.approach_u_deadband, "goal.approach_u_deadband");
+  Nonnegative(c.goal.target_u_px, "goal.target_u_px");
+  Nonnegative(c.goal.approach_u_deadband_px, "goal.approach_u_deadband_px");
   Nonnegative(c.goal.fine_adjust_start_z_m, "goal.fine_adjust_start_z_m");
   Nonnegative(c.goal.hoop_radius_m, "goal.hoop_radius_m");
   Positive(c.goal.throwing_range_m, "goal.throwing_range_m");
@@ -201,8 +205,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.goal.recovery_timeout_sec, "goal.recovery_timeout_sec");
   PositiveInt(c.goal.recovery_reacquire_min_hits,
               "goal.recovery_reacquire_min_hits");
-  Unit(c.goal.recovery_center_tolerance_norm,
-       "goal.recovery_center_tolerance_norm");
+  Nonnegative(c.goal.recovery_center_tolerance_px,
+       "goal.recovery_center_tolerance_px");
   Nonnegative(c.goal.recovery_settle_duration_sec,
               "goal.recovery_settle_duration_sec");
 
@@ -261,7 +265,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
 
   Positive(c.backboard_min_depth_m, "mission.backboard_min_depth_m");
   Nonnegative(c.camera_motion_timeout_sec, "mission.camera_motion_timeout_sec");
-  Nonnegative(c.post_motion_observation_sec,
+  Positive(c.post_motion_observation_sec,
               "mission.post_motion_observation_sec");
   Positive(c.backboard_max_depth_m, "mission.backboard_max_depth_m");
   if (c.backboard_min_depth_m > c.backboard_max_depth_m)
@@ -314,66 +318,63 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(lp, "recovery_turn_yaw_deg", c.line_p2p.recovery_turn_yaw_deg);
 
   const auto b = a["ball"];
-  Assign(b, "approach_short_v_norm", c.ball.approach_short_v_norm);
+  Assign(b, "down_one_step_v_px", c.ball.down_one_step_v_px);
+  Assign(b, "fine_mode_v_px", c.ball.fine_mode_v_px);
+  Assign(b, "approach_short_v_px", c.ball.approach_short_v_px);
   Assign(b, "down_search_timeout_sec", c.ball.down_search_timeout_sec);
   Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
   Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
-  Assign(b, "fine_one_step_v_error_norm", c.ball.fine_one_step_v_error_norm);
-  Assign(b, "fine_two_step_v_error_norm", c.ball.fine_two_step_v_error_norm);
   Assign(b, "post_pickup_back_steps", c.ball.post_pickup_back_steps);
 
   Assign(b, "stable_window", c.ball.stable_window);
   Assign(b, "stable_min_hits", c.ball.stable_min_hits);
   Assign(b, "lost_frames", c.ball.lost_frames);
   Assign(b, "smooth_alpha", c.ball.smooth_alpha);
-  Assign(b, "far_u_des_norm", c.ball.far_u_des_norm);
-  Assign(b, "approach_u_deadband", c.ball.approach_u_deadband);
-  Assign(b, "upper_acquire_v_norm", c.ball.upper_acquire_v_norm);
-  Assign(b, "tilt_down_v_norm", c.ball.tilt_down_v_norm);
-  Assign(b, "tilt_down_window", c.ball.tilt_down_window);
-  Assign(b, "tilt_down_min_hits", c.ball.tilt_down_min_hits);
+  Assign(b, "far_u_des_px", c.ball.far_u_des_px);
+  Assign(b, "approach_u_deadband_px", c.ball.approach_u_deadband_px);
+  Assign(b, "upper_acquire_v_px", c.ball.upper_acquire_v_px);
+  Assign(b, "approach_two_step_v_px", c.ball.approach_two_step_v_px);
   Assign(b, "pickup_max_attempts", c.ball.pickup_max_attempts);
   Assign(b, "ball_ignore_duration_sec", c.ball.ball_ignore_duration_sec);
-  Assign(b, "fine_target_u_norm", c.ball.fine_target_u_norm);
-  Assign(b, "fine_target_v_norm", c.ball.fine_target_v_norm);
-  Assign(b, "fine_u_deadband", c.ball.fine_u_deadband);
-  Assign(b, "fine_v_deadband", c.ball.fine_v_deadband);
+  Assign(b, "pickup_u1_px", c.ball.pickup_u1_px);
+  Assign(b, "pickup_u2_px", c.ball.pickup_u2_px);
+  Assign(b, "pickup_v1_px", c.ball.pickup_v1_px);
+  Assign(b, "pickup_v2_px", c.ball.pickup_v2_px);
   Assign(b, "fine_settle_duration_sec", c.ball.fine_settle_duration_sec);
   Assign(b, "recovery_timeout_sec", c.ball.recovery_timeout_sec);
   Assign(b, "recovery_reacquire_min_hits", c.ball.recovery_reacquire_min_hits);
-  Assign(b, "recovery_center_tolerance_norm", c.ball.recovery_center_tolerance_norm);
+  Assign(b, "recovery_center_tolerance_px", c.ball.recovery_center_tolerance_px);
   Assign(b, "recovery_settle_duration_sec", c.ball.recovery_settle_duration_sec);
 
   const auto h = a["hurdle"];
-  Assign(h, "approach_short_v_norm", c.hurdle.approach_short_v_norm);
+  Assign(h, "down_one_step_v_px", c.hurdle.down_one_step_v_px);
+  Assign(h, "fine_mode_v_px", c.hurdle.fine_mode_v_px);
+  Assign(h, "approach_short_v_px", c.hurdle.approach_short_v_px);
   Assign(h, "down_search_timeout_sec", c.hurdle.down_search_timeout_sec);
   Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
   Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);
-  Assign(h, "fine_one_step_v_error_norm", c.hurdle.fine_one_step_v_error_norm);
-  Assign(h, "fine_two_step_v_error_norm", c.hurdle.fine_two_step_v_error_norm);
-  Assign(h, "target_u_norm", c.hurdle.target_u_norm);
-  Assign(h, "u_deadband", c.hurdle.u_deadband);
-  Assign(h, "fine_target_v_norm", c.hurdle.fine_target_v_norm);
-  Assign(h, "contact_v_norm", c.hurdle.contact_v_norm);
+  Assign(h, "target_u_px", c.hurdle.target_u_px);
+  Assign(h, "u_deadband_px", c.hurdle.u_deadband_px);
+  Assign(h, "contact_v_px", c.hurdle.contact_v_px);
   Assign(h, "contact_steps", c.hurdle.contact_steps);
 
   Assign(h, "stable_window", c.hurdle.stable_window);
   Assign(h, "stable_min_hits", c.hurdle.stable_min_hits);
   Assign(h, "lost_frames", c.hurdle.lost_frames);
   Assign(h, "smooth_alpha", c.hurdle.smooth_alpha);
-  Assign(h, "acquire_min_v_norm", c.hurdle.acquire_min_v_norm);
-  Assign(h, "tilt_trigger_v_norm", c.hurdle.tilt_trigger_v_norm);
-  Assign(h, "tilt_trigger_window", c.hurdle.tilt_trigger_window);
-  Assign(h, "tilt_trigger_min_hits", c.hurdle.tilt_trigger_min_hits);
+  Assign(h, "upper_acquire_v_px", c.hurdle.upper_acquire_v_px);
+  Assign(h, "approach_two_step_v_px", c.hurdle.approach_two_step_v_px);
   Assign(h, "hurdle_ignore_duration_sec", c.hurdle.hurdle_ignore_duration_sec);
   Assign(h, "recovery_reacquire_min_hits", c.hurdle.recovery_reacquire_min_hits);
   Assign(h, "recovery_timeout_sec", c.hurdle.recovery_timeout_sec);
-  Assign(h, "recovery_center_tolerance_norm", c.hurdle.recovery_center_tolerance_norm);
+  Assign(h, "recovery_center_tolerance_px", c.hurdle.recovery_center_tolerance_px);
   Assign(h, "recovery_settle_duration_sec", c.hurdle.recovery_settle_duration_sec);
 
   const auto g = a["goal"];
   Assign(g,"fine_one_step_range_error_m",c.goal.fine_one_step_range_error_m);
   Assign(g,"fine_two_step_range_error_m",c.goal.fine_two_step_range_error_m);
+  Assign(g, "recovery_observation_sec", c.goal.recovery_observation_sec);
+  Assign(g, "recovery_max_observations", c.goal.recovery_max_observations);
   Assign(g, "approach_short_z_m", c.goal.approach_short_z_m);
   Assign(g, "camera_goal_start_z_m", c.goal.camera_goal_start_z_m);
   Assign(g, "post_shoot_back_steps", c.goal.post_shoot_back_steps);
@@ -383,8 +384,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "lost_frames", c.goal.lost_frames);
   Assign(g, "smooth_alpha", c.goal.smooth_alpha);
   Assign(g, "post_pickup_wait_sec", c.goal.post_pickup_wait_sec);
-  Assign(g, "target_u_norm", c.goal.target_u_norm);
-  Assign(g, "approach_u_deadband", c.goal.approach_u_deadband);
+  Assign(g, "target_u_px", c.goal.target_u_px);
+  Assign(g, "approach_u_deadband_px", c.goal.approach_u_deadband_px);
   Assign(g, "fine_adjust_start_z_m", c.goal.fine_adjust_start_z_m);
   Assign(g, "hoop_radius_m", c.goal.hoop_radius_m);
   Assign(g, "throwing_range_m", c.goal.throwing_range_m);
@@ -393,7 +394,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "shoot_yaw_limit_deg", c.goal.shoot_yaw_limit_deg);
   Assign(g, "recovery_timeout_sec", c.goal.recovery_timeout_sec);
   Assign(g, "recovery_reacquire_min_hits", c.goal.recovery_reacquire_min_hits);
-  Assign(g, "recovery_center_tolerance_norm", c.goal.recovery_center_tolerance_norm);
+  Assign(g, "recovery_center_tolerance_px", c.goal.recovery_center_tolerance_px);
   Assign(g, "recovery_settle_duration_sec", c.goal.recovery_settle_duration_sec);
 
   const auto ld = a["line_detection"];
@@ -425,6 +426,10 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(m, "goal_trial_start_forward", c.goal_trial_start_forward);
   Assign(m, "test_ball_mission_index", c.test_ball_mission_index);
   Assign(m, "test_goal_mission_index", c.test_goal_mission_index);
+  int test_mission=0;
+  Assign(m,"test_mission",test_mission); c.test_mission=static_cast<MissionType>(test_mission);
+  Assign(m,"test_stage",c.test_stage);
+  Assign(m,"backboard_depth_strip_width_px",c.backboard_depth_strip_width_px);
   Assign(m, "mission_recovery_max_turns", c.mission_recovery_max_turns);
   Assign(m, "mission_recovery_yaw_deg", c.mission_recovery_yaw_deg);
 
