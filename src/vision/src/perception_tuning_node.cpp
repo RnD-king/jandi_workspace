@@ -247,7 +247,8 @@ public:
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
     declare_parameter<double>("goal_fine_adjust_start_z_m", algorithm_defaults.goal.fine_adjust_start_z_m);
     declare_parameter<double>("goal_hoop_radius_m", algorithm_defaults.goal.hoop_radius_m);
-    declare_parameter<double>("goal_throwing_range_m", algorithm_defaults.goal.throwing_range_m);
+    declare_parameter<double>("goal_throw_landing_x_m", algorithm_defaults.goal.throw_landing_x_m);
+    declare_parameter<double>("goal_throw_landing_z_m", algorithm_defaults.goal.throw_landing_z_m);
     declare_parameter<double>("goal_position_tolerance_m", algorithm_defaults.goal.position_tolerance_m);
     declare_parameter<double>("goal_shoot_yaw_limit_deg", algorithm_defaults.goal.shoot_yaw_limit_deg);
     declare_parameter<double>("camera_motion_timeout_sec", algorithm_defaults.camera_motion_timeout_sec);
@@ -335,8 +336,10 @@ public:
         get_parameter("goal_fine_adjust_start_z_m").as_double();
     goal_cmd_cfg.hoop_radius_m =
         get_parameter("goal_hoop_radius_m").as_double();
-    goal_cmd_cfg.throwing_range_m =
-        get_parameter("goal_throwing_range_m").as_double();
+    goal_cmd_cfg.throw_landing_x_m =
+        get_parameter("goal_throw_landing_x_m").as_double();
+    goal_cmd_cfg.throw_landing_z_m =
+        get_parameter("goal_throw_landing_z_m").as_double();
     goal_cmd_cfg.position_tolerance_m =
         get_parameter("goal_position_tolerance_m").as_double();
     goal_cmd_cfg.shoot_yaw_limit_deg =
@@ -882,7 +885,8 @@ private:
       else if (name == "goal_target_u_px") target = &candidate.goal.target_u_px;
       else if (name == "goal_approach_u_deadband_px") target = &candidate.goal.approach_u_deadband_px;
       else if (name == "goal_fine_adjust_start_z_m") target = &candidate.goal.fine_adjust_start_z_m;
-      else if (name == "goal_throwing_range_m") target = &candidate.goal.throwing_range_m;
+      else if (name == "goal_throw_landing_x_m") target = &candidate.goal.throw_landing_x_m;
+      else if (name == "goal_throw_landing_z_m") target = &candidate.goal.throw_landing_z_m;
       else if (name == "goal_position_tolerance_m") target = &candidate.goal.position_tolerance_m;
       else if (name == "goal_hoop_radius_m") target = &candidate.goal.hoop_radius_m;
       else if (name == "goal_shoot_yaw_limit_deg") target = &candidate.goal.shoot_yaw_limit_deg;
@@ -1232,6 +1236,8 @@ private:
     case MissionAction::kStepForwardLeftTwo: return "STEP_FORWARD_LEFT_TWO";
     case MissionAction::kStepForwardRightTwo: return "STEP_FORWARD_RIGHT_TWO";
     case MissionAction::kStepForwardRightOne: return "STEP_FORWARD_RIGHT_ONE";
+    case MissionAction::kStepForwardLeftOne: return "STEP_FORWARD_LEFT_ONE";
+    case MissionAction::kStepForwardRightOneHurdle: return "STEP_FORWARD_RIGHT_ONE_HUDDLE";
     case MissionAction::kPickBall: return "PICK_BALL";
     case MissionAction::kRecatch: return "RECATCH";
     case MissionAction::kHurdle: return "HUDDLE";
