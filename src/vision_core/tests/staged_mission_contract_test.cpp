@@ -17,6 +17,10 @@ MissionControllerConfig Config(MissionType mission,int stage) {
   c.enable_ball=mission==MissionType::kBall;c.enable_goal=mission==MissionType::kGoal;
   c.enable_hurdle=mission==MissionType::kHurdle;
   c.ball.fine_settle_duration_sec=c.hurdle.recovery_settle_duration_sec=c.goal.fine_settle_duration_sec=0;
+  // Preserve the pre-tuning test geometry for pickup/contact assertions.
+  c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
+  c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
+  c.hurdle.contact_steps=3; c.hurdle.contact_v_px=408.0;
   return c;
 }
 struct Trial {
@@ -59,12 +63,38 @@ void FarStageStopsAfterCamera(MissionType mission) {
     assert(t.out.command.camera_request==CameraRequest::kDown);
     t.in.camera_feedback={CameraMode::kDown,true};
   } else {
+    // GOAL stage 1 first prepares GOAL camera, then approaches until CLOSE_WALK.
     assert(t.out.command.camera_request==CameraRequest::kGoal);
     t.in.camera_feedback={CameraMode::kGoal,true};
+    t.in.backboard_center_depth_m=1.5;
+    t.in.goal_pose={}; // Far approach requires valid center depth, not edge pose.
+    t.Tick(); // Camera/foot setup completed.
+    assert(!t.out.trial_complete);
+    t.Tick(); // GOAL_CAMERA -> GOAL_SEARCH (must not complete stage 1).
+    assert(t.out.goal.mode==GoalMode::kSearch && !t.out.trial_complete);
+    for(int i=0;i<7;++i)t.Tick();
+    assert(t.out.goal.mode==GoalMode::kApproach && !t.out.trial_complete);
+    assert(t.Preview().command.action==MissionAction::kStepForwardFour);
+    t.in.backboard_center_depth_m=.7;
+    t.Tick();
+    assert(t.out.goal.mode==GoalMode::kCoarseAdjust);
   }
   t.Tick();assert(t.out.trial_complete && t.out.command.action_id==0);
   assert(t.out.command.action==MissionAction::kNone);
   t.Tick();assert(t.out.trial_complete && t.out.command.action_id==0);
+}
+void GoalFarStageAlreadyInGoalCamera() {
+  Trial t(MissionType::kGoal,1);
+  t.TargetNow(MissionType::kGoal);
+  t.in.camera_feedback={CameraMode::kGoal,true};
+  t.in.backboard_center_depth_m=1.5;
+  t.in.goal_pose={};
+  t.Tick(); // No camera move and no body move required.
+  assert(t.out.command.camera_request==CameraRequest::kNone && !t.out.trial_complete);
+  t.Tick();
+  assert(t.out.goal.mode==GoalMode::kSearch && !t.out.trial_complete);
+  for(int i=0;i<7;++i)t.Tick();
+  assert(t.out.goal.mode==GoalMode::kApproach && !t.out.trial_complete);
 }
 void NearStageStopsBeforeMission(MissionType mission) {
   Trial t(mission,2);t.TargetNow(mission);
@@ -120,6 +150,8 @@ void WeightedCoordinatesUseHistory() {
 }
 void FineAdjustmentUsesFreshEqualMeans() {
   auto c=LoadDefaultAlgorithmConfig();
+  c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
+  c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
   BallController ball(c.ball,3);
   HurdleController hurdle(c.hurdle,3);
   GoalController goal(c.goal,3);
@@ -292,6 +324,7 @@ int main() {
     ExecuteStageNeedsRealPoseAndStableReadiness(mission);
     ExecuteStageCompletesRecovery(mission);
   }
+  GoalFarStageAlreadyInGoalCamera();
   WeightedCoordinatesUseHistory();FineAdjustmentUsesFreshEqualMeans();
   RecoveryUsesCompleteWindow();ManualCoreKeepsRecoveryLive();
   NearGoalWithoutPoseCannotStride();AutoPoseDonePrecedesFreshObservation();RejectZeroObservation();
