@@ -178,6 +178,31 @@ void TestVerificationSixHitsSucceeds() {
   assert(pipeline.result.mission.ball.mode==BallMode::kVerifyPickup);
   assert(pipeline.result.mission.command.action==MissionAction::kRecatch);
 }
+void TestBackboardValidDepthCanBeRetuned() {
+  auto c=LoadDefaultAlgorithmConfig();
+  c.enable_ball=c.enable_hurdle=c.enable_goal=false;
+  MissionController controller(c);
+  PerceptionFrameInput input;
+  input.image_width=640; input.image_height=480;
+  input.intrinsics={600,600,320,240};
+  PerceptionDetection board;
+  board.detection.class_id=c.object_targets.backboard_class_id;
+  board.detection.confidence=1.0;
+  board.detection.box={300.0,200.0,40.0,40.0};
+  board.center_depth_m=3.0;
+  input.detections={board};
+  const auto rejected=controller.StepPerception(input);
+  assert(!rejected.perception.targets.backboard); // Initially capped at 2.5 m.
+  c.backboard_max_depth_m=4.0;
+  assert(controller.UpdateTuning(c));
+  const auto accepted=controller.StepPerception(input);
+  assert(accepted.perception.targets.backboard);
+  c.backboard_min_depth_m=3.5;
+  assert(controller.UpdateTuning(c));
+  const auto rejected_again=controller.StepPerception(input);
+  assert(!rejected_again.perception.targets.backboard);
+}
+
 } // namespace
 
 int main() {
@@ -202,5 +227,6 @@ int main() {
   TestVerificationSixHitsSucceeds();
   TestGlobalPauseGateForBallAndCamera();
   TestPauseDoesNotAcquireNewMission();
+  TestBackboardValidDepthCanBeRetuned();
   return 0;
 }
