@@ -21,7 +21,7 @@ int main() {
   c.smooth_alpha=0; c.post_pickup_wait_sec=0;
   c.fine_one_step_range_error_m=c.fine_two_step_range_error_m=1.0; // Isolate near fine geometry.
   c.target_u_px=320; c.approach_u_deadband_px=32; c.fine_adjust_start_z_m=.8;
-  c.hoop_radius_m=.1; c.throwing_range_m=.5; c.position_tolerance_m=.05;
+  c.hoop_radius_m=.1; c.throw_landing_x_m=0; c.throw_landing_z_m=.5; c.position_tolerance_m=.05;
   c.fine_settle_duration_sec=0; c.shoot_yaw_limit_deg=30;
   c.recovery_timeout_sec=5; c.recovery_reacquire_min_hits=3;
   c.recovery_center_tolerance_px=76.8; c.recovery_settle_duration_sec=.6;
@@ -58,6 +58,25 @@ int main() {
   r=controller.Compute({},Board(),Pose(0,.6),640,480,.5,true,{CameraMode::kGoal,true},{});
   assert(r.action.action==MissionAction::kShoot);
   assert(std::abs(r.action.target_yaw_deg)<=30);
+
+  // Calibrated camera-frame landing point (-8cm,48cm):
+  // rim straight ahead at the measured radial range requires a NEGATIVE yaw.
+  GoalConfig calibrated_cfg = c;
+  calibrated_cfg.throw_landing_x_m = -.08;
+  calibrated_cfg.throw_landing_z_m = .48;
+  GoalController calibrated(calibrated_cfg,3.0);
+  calibrated.StartTestExecute();
+  const double radial_range=std::hypot(-.08,.48);
+  auto calibrated_shot=calibrated.Compute({},Board(),Pose(0,radial_range+.1),
+      640,480,1.0,true,{CameraMode::kGoal,true},{});
+  assert(calibrated_shot.action.action == MissionAction::kShoot);
+  assert(calibrated_shot.action.target_yaw_deg == -9);
+  // Offset/angle-limit violations must not accidentally fire.
+  GoalController off_axis(calibrated_cfg,3.0);
+  off_axis.StartTestExecute();
+  const auto off_axis_result=off_axis.Compute({},Board(),Pose(.3,radial_range+.1),
+      640,480,1.0,true,{CameraMode::kGoal,true},{});
+  assert(off_axis_result.action.action != MissionAction::kShoot);
 
   GoalController timeout_controller(c, 3.0);
   timeout_controller.StartAfterPickup(0);
