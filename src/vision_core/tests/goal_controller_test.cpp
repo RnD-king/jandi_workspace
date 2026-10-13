@@ -5,6 +5,8 @@
 #endif
 #include <cassert>
 #include <cmath>
+#include <vector>
+#include <utility>
 using namespace vision_core;
 static ObjectTarget Board(double u=.5) {
   ObjectTarget t; t.center_px={u*640,240}; t.box_px={u*640-10,230,20,20};
@@ -77,6 +79,23 @@ int main() {
   const auto off_axis_result=off_axis.Compute({},Board(),Pose(.3,radial_range+.1),
       640,480,1.0,true,{CameraMode::kGoal,true},{});
   assert(off_axis_result.action.action != MissionAction::kShoot);
+
+  // GOAL far approach: use WALK corrections 27/28, never LINE cruise 11/12/13.
+  for (const auto &scenario : std::vector<std::pair<double,MissionAction>>{
+      {.2,MissionAction::kStepForwardLeftOne},
+      {.5,MissionAction::kStepForwardFour},
+      {.8,MissionAction::kStepForwardRightOneHurdle}}) {
+    GoalController far(c,3.0);
+    far.StartForwardTrial();
+    const auto approach=far.Compute({},Board(scenario.first),{},640,480,
+                                   0,true,{CameraMode::kForward,true},{},true,1.8);
+    assert(approach.action.action==scenario.second);
+  }
+  GoalController mid(c,3.0);
+  mid.StartForwardTrial();
+  const auto middle=mid.Compute({},Board(.5),{},640,480,
+                                0,true,{CameraMode::kForward,true},{},true,1.0);
+  assert(middle.action.action==MissionAction::kStepForwardThree);
 
   GoalController timeout_controller(c, 3.0);
   timeout_controller.StartAfterPickup(0);
