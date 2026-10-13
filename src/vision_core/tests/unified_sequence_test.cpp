@@ -239,6 +239,8 @@ void TestHurdleSearchAndContact() {
   c.hurdle.upper_acquire_v_px=480;
   c.hurdle.recovery_settle_duration_sec=0;
   Trial t(c); t.in.hurdle_target=Target(.5,.85);
+  // HURDLE now aligns using LINE O/H, so supply a straight guide.
+  t.in.line_centers={{410,450},{410,400},{410,350},{410,300},{410,250}};
   for(int i=0;i<7;++i)t.Tick();
   assert(t.out.hurdle.mode==HurdleMode::kApproachTwoBeforeDown);
   t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardTwo);
