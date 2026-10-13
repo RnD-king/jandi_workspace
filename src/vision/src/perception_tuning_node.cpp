@@ -998,16 +998,15 @@ private:
   }
   static bool IsReadyWalk(vision_core::MissionAction action) {
     using vision_core::MissionAction;
-    // Keep long LINE 11/12/13, and object approaches: straight 3/4
-    // and directional approach 24/25 (both are two-step turning walks).
-    // Straight 1/2 (10/21) and short right-one (26) must observe after DONE.
+    // Eligible for 40%-to-READY observation averages, NOT the list of
+    // actions for which forward_walk actually emits READY.
+    // LINE 11/12/13 stays unchanged. Object 22/23 use moving means;
+    // turning 24/25 and straight 1/2-step 10/21 need fresh post-DONE views.
     return action == MissionAction::kStepForwardLeft ||
            action == MissionAction::kStepForwardFive ||
            action == MissionAction::kStepForwardRight ||
            action == MissionAction::kStepForwardThree ||
-           action == MissionAction::kStepForwardFour ||
-           action == MissionAction::kStepForwardLeftTwo ||
-           action == MissionAction::kStepForwardRightTwo;
+           action == MissionAction::kStepForwardFour;
   }
   static bool IsFixedSuccessor(vision_core::MissionType mission,
                               vision_core::MissionAction action) {
@@ -1293,7 +1292,14 @@ private:
   };
 
   bool IsSimulatedLongWalk(vision_core::MissionAction action) const {
-    return IsReadyWalk(action);
+    using vision_core::MissionAction;
+    // Mirror forward_walk READY capability (11/12/13, 21..26), independent
+    // of which actions are safe for moving-window perception.
+    return IsReadyWalk(action) ||
+           action == MissionAction::kStepForwardTwo ||
+           action == MissionAction::kStepForwardLeftTwo ||
+           action == MissionAction::kStepForwardRightTwo ||
+           action == MissionAction::kStepForwardRightOne;
   }
 
   void QueueSimulatedActionFeedback(std::uint64_t action_id,
