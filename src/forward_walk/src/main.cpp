@@ -292,6 +292,12 @@ private:
         case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE:
             return "missions/직진_우회전_1번.json";
 
+        case vision::msg::ActionCommand::STEP_FORWARD_LEFT_ONE:
+            return "missions/직진_좌회전_1번.json";
+
+        case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE_HUDDLE:
+            return "missions/직진_우회전_1번_huddle.json";
+
         case vision::msg::ActionCommand::STEP_FORWARD_FIVE:
             return "missions/연속걷기.json";
 
@@ -306,6 +312,12 @@ private:
             
         case vision::msg::ActionCommand::PICK_BALL:
             return "motions/공_줍고일어나기_최종.json";
+
+        case vision::msg::ActionCommand::PICK_BALL_RE:
+            return "motions/공_줍고일어나기_최종_재그립제외.json";
+
+        case vision::msg::ActionCommand::PICK_BALL_RE_STAND:
+            return "motions/공_줍고일어나기_최종_재그립제외_일어나기.json";
 
         case vision::msg::ActionCommand::RECATCH:
             return "motions/공_재그립.json";
@@ -356,6 +368,8 @@ private:
         using Command=vision::msg::ActionCommand;
         switch(action) {
         case Command::PICK_BALL:
+        case Command::PICK_BALL_RE:
+        case Command::PICK_BALL_RE_STAND:
         case Command::RECATCH:
         case Command::HUDDLE:
         case Command::SHOOT:
