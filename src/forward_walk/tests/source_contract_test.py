@@ -46,11 +46,39 @@ for action, filename in {
     'STEP_FORWARD_LEFT_TWO': 'missions/직진_좌회전_2번.json',
     'STEP_FORWARD_RIGHT_TWO': 'missions/직진_우회전_2번_ball.json',
     'STEP_FORWARD_RIGHT_ONE': 'missions/직진_우회전_1번.json',
+    'STEP_FORWARD_LEFT_ONE': 'missions/직진_좌회전_1번.json',
+    'STEP_FORWARD_RIGHT_ONE_HUDDLE': 'missions/직진_우회전_1번_huddle.json',
+    'PICK_BALL': 'motions/공_줍고일어나기_최종.json',
+    'PICK_BALL_RE': 'motions/공_줍고일어나기_최종_재그립제외.json',
+    'PICK_BALL_RE_STAND': 'motions/공_줍고일어나기_최종_재그립제외_일어나기.json',
     'STEP_FORWARD_FIVE': 'missions/연속걷기.json',
     'DEFAULT_POSITION': 'motions/초기자세_다소곳_.json',
 }.items():
     match = re.search(r'case vision::msg::ActionCommand::'+action+r':\s*return "([^"]+)";', main)
     checks[action+' mapping'] = match is not None and match.group(1)==filename and (root / filename).is_file()
+# Validate single-turn missions and preserve the specific hurdle-right variant.
+for manifest_name, expected_motion in {
+    '직진_좌회전_1번.json': '보행_좌회전전진_20도_최종_초기X.json',
+    '직진_우회전_1번_huddle.json': '보행_우회전전진_20도_최종_초기X.json',
+}.items():
+    manifest = root / 'missions' / manifest_name
+    entries = json.loads(manifest.read_text()).get('motions', [])
+    checks[manifest_name + ' single-turn reference'] = (
+        [entry.get('filename') for entry in entries] == [expected_motion]
+        and (root / 'motions' / expected_motion).is_file()
+    )
+
+pickup = json.loads((root / 'motions/공_줍고일어나기_최종.json').read_text())
+checks['pickup regrip opening speed 80 deg/s'] = (
+    pickup['keyframes'][7].get('name') == '재그립_벌리기'
+    and pickup['keyframes'][7].get('max_speed_deg_s') == 80
+)
+gripper_switch = main.split('static bool UsesFixedGripperPose', 1)[1].split('default:', 1)[0]
+checks['re-pick actions keep JSON gripper'] = all(
+    'case Command::' + action + ':' in gripper_switch
+    for action in ('PICK_BALL_RE', 'PICK_BALL_RE_STAND')
+)
+
 # Validate both 2x and 3x turn-forward manifests and real motion references.
 for side, motion in {
     '좌': '보행_좌회전전진_20도_최종_초기X.json',
