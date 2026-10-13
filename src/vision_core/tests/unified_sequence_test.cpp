@@ -7,6 +7,7 @@
 #include <cmath>
 
 using namespace vision_core;
+static CruiseDecision StraightLine() { CruiseDecision d; d.applicable=true; d.direction=CruiseDirection::kStraight; return d; }
 namespace {
 ObjectTarget Target(double u=.5,double v=.7) {
   ObjectTarget t; t.center_px={u*640,v*480};
@@ -86,10 +87,10 @@ void TestCameraLatchSurvivesLoss() {
   c.hurdle.stable_window=c.hurdle.stable_min_hits=1; c.hurdle.lost_frames=1;
   c.hurdle.upper_acquire_v_px=480;
   HurdleController hurdle(c.hurdle,3);
-  hurdle.Compute(Target(.5,.85),640,480,0,{},{});
-  hurdle.Compute(Target(.5,.85),640,480,.1,{},busy);
-  auto h=hurdle.Compute({},640,480,.2,{},busy); assert(h.mode==HurdleMode::kApproachTwoBeforeDown);
-  h=hurdle.Compute({},640,480,.3,{},done); assert(h.camera_request==CameraRequest::kDown);
+  hurdle.Compute(Target(.5,.85),640,480,0,{},{},StraightLine());
+  hurdle.Compute(Target(.5,.85),640,480,.1,{},busy,StraightLine());
+  auto h=hurdle.Compute({},640,480,.2,{},busy,StraightLine()); assert(h.mode==HurdleMode::kApproachTwoBeforeDown);
+  h=hurdle.Compute({},640,480,.3,{},done,StraightLine()); assert(h.camera_request==CameraRequest::kDown);
   c.goal.stable_window=c.goal.stable_min_hits=1;
   GoalController goal(c.goal,3); goal.StartForwardTrial();
   goal.Compute({},Target(),{},640,480,.1,true,{},busy,true,.7);
