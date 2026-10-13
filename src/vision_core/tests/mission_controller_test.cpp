@@ -764,6 +764,48 @@ int main() {
   assert(ready_result.command.action==MissionAction::kStepForwardTwo);
   assert(ready_result.command.action_id!=ball_ready_id);
 
+  // Directional object approaches are action 24/25 (turn + two steps),
+  // NOT straight two-step action 21. Both use moving READY evidence.
+  for (double lateral_u : {.05, .95}) {
+    MissionController directional(ready_cfg);
+    ready_frame=Frame(0.0);
+    ready_frame.ball_target=Ball(lateral_u,.2);
+    ready_result=directional.Step(ready_frame);
+    assert(ready_result.command.action==
+        (lateral_u<.5 ? MissionAction::kStepForwardLeftTwo
+                       : MissionAction::kStepForwardRightTwo));
+    const auto lateral_id=ready_result.command.action_id;
+    for (int i=1;i<=27;++i) {
+      ready_frame=Frame(i*.1);
+      ready_frame.ball_target=Ball(i>=12 ? .5 : lateral_u,i>=12 ? .8 : .2);
+      ready_frame.delivery_feedback={lateral_id,true,false,i==27};
+      ready_result=directional.Step(ready_frame);
+    }
+    ready_frame=Frame(3.0);
+    ready_frame.ball_target=Ball(lateral_u,.2);
+    ready_frame.delivery_feedback={lateral_id,true,true,false};
+    ready_result=directional.Step(ready_frame);
+    assert(ready_result.object_ready_mean_used);
+    assert(ready_result.command.action==MissionAction::kStepForwardTwo);
+  }
+
+  // Straight two-step is deliberately not a moving READY candidate.
+  MissionController straight_two(ready_cfg);
+  ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.85);
+  ready_result=straight_two.Step(ready_frame);
+  assert(ready_result.command.action==MissionAction::kStepForwardTwo);
+  const auto two_id=ready_result.command.action_id;
+  for (int i=1;i<=27;++i) {
+    ready_frame=Frame(i*.1); ready_frame.ball_target=Ball(.5,.85);
+    ready_frame.delivery_feedback={two_id,true,false,i==27};
+    ready_result=straight_two.Step(ready_frame);
+  }
+  ready_frame=Frame(3.0);
+  ready_frame.delivery_feedback={two_id,true,true,false};
+  ready_result=straight_two.Step(ready_frame);
+  assert(!ready_result.object_ready_mean_used);
+  assert(ready_result.command.camera_request==CameraRequest::kDown);
+
   // Missing READY: reject moving samples and retain stationary 1s gate.
   MissionController no_ready(ready_cfg);
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
