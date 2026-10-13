@@ -265,13 +265,10 @@ void MissionController::TrackMovingObjectReadyWindow(
     return;
   }
   const MissionAction action = last_command_.action;
-  // Object approaches only: straight 3/4 steps keep 40%-to-READY means.
-  // Turning walks (24/25) change camera heading throughout the motion;
-  // never average their unrectified pixel positions across turns.
-  // LINE 11/12/13 READY selection is implemented separately below.
-  const bool eligible_action =
-      action == MissionAction::kStepForwardThree ||
-      action == MissionAction::kStepForwardFour;
+  // Shared YAML allowlist, independent of LINE READY/queue eligibility.
+  // Turning walks can be enabled explicitly, but their changing camera
+  // heading can bias a moving pixel mean; default YAML excludes 24/25.
+  const bool eligible_action = config_.UsesObjectReadyMean(action);
   const bool object_mission =
       active_mission_ == MissionType::kBall ||
       active_mission_ == MissionType::kGoal ||
