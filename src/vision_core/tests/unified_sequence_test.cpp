@@ -207,7 +207,7 @@ void TestGoalForwardTrial() {
   t.in.backboard_center_depth_m=.7; t.Tick(true);
   assert(t.out.command.camera_request==CameraRequest::kGoal);
   t.in.camera_feedback={CameraMode::kGoal,true}; t.Tick();
-  t.in.goal_pose={true,0,.5,0,1};
+  t.in.goal_pose={true,0,.6,0,1};
   for(int i=0;i<8;++i)t.Tick();
   assert(t.out.goal.mode==GoalMode::kWaitFinePose);
   assert(t.Preview().command.action==MissionAction::kDefaultPoseMode);
