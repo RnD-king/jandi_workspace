@@ -357,8 +357,9 @@ void MissionController::TrackMovingObjectReadyWindow(
     total_weight += weight;
     const auto &t = *sample->target;
     sum_u += weight*t.center_px.u; sum_v += weight*t.center_px.v;
-    sum_ru += weight*t.rectified_center_px.u;
-    sum_rv += weight*t.rectified_center_px.v;
+    // Some frames may lack IMU rectification; never average unset (0,0).
+    const Point2 rect=t.center_rectified ? t.rectified_center_px : t.center_px;
+    sum_ru += weight*rect.u; sum_rv += weight*rect.v;
     sum_x += weight*t.box_px.x; sum_y += weight*t.box_px.y;
     sum_w += weight*t.box_px.width; sum_h += weight*t.box_px.height;
     sum_conf += weight*t.confidence;
