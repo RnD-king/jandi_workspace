@@ -956,6 +956,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                                     &line_reference_valid);
   };
 
+  const auto hurdle_line_decision = [&]() {
+    // Compute LINE O/H steering during HURDLE without advancing LINE FSM.
+    const LineGuide guide = input.line_decision_guide_override.value_or(
+        ComputeLineFeatures(input.line_centers, input.image_width,
+                            input.image_height, config_.line_features).guide);
+    return line_p2p_controller_.Compute(guide);
+  };
   switch (active_mission_) {
   case MissionType::kLine:
     compute_line(); ball_result_ = {}; hurdle_result_ = {}; goal_result_ = {};
@@ -983,6 +990,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         hurdle_result_ = hurdle_controller_.Compute(
             input.hurdle_target, input.image_width, input.image_height,
             input.now_sec, input.camera_feedback, action_feedback,
+            hurdle_line_decision(),
             input.allow_new_body_actions && input.allow_new_commands);
         if (hurdle_result_.mode != HurdleMode::kLineFollow) {
           EnterMission(MissionType::kHurdle); break;
@@ -1033,7 +1041,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     hurdle_result_ = hurdle_controller_.Compute(
         input.hurdle_target, input.image_width, input.image_height,
         input.now_sec, input.camera_feedback, action_feedback,
-            controller_allow);
+        hurdle_line_decision(), controller_allow);
     if (hurdle_result_.mode!=HurdleMode::kLineFollow) test_entry_pending_=false;
     if (before==HurdleMode::kDownSearch && hurdle_result_.mode==HurdleMode::kCoarseAdjust)
       fresh_after_search_=true;
@@ -1105,7 +1113,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   // All recovery turns and resumed normal walking obey the same stance contract.
   const int action_number=static_cast<int>(request.action);
   const bool wants_walk=action_number==9 || (action_number>=10 && action_number<=13) ||
-      (action_number>=21 && action_number<=26);
+      (action_number>=21 && action_number<=28);
   const bool wants_fine=(action_number>=1 && action_number<=8) ||
       (action_number>=14 && action_number<=17);
   const bool implicit_pose=request.action!=MissionAction::kDefaultPoseMode &&
