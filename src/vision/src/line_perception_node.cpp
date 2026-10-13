@@ -1457,6 +1457,12 @@ private:
     const auto t7 = std::chrono::steady_clock::now();
     const auto &mission_result = perception_result.mission;
     const auto &control_command = mission_result.command;
+    if (mission_result.object_ready_mean_used) {
+      RCLCPP_INFO(get_logger(),
+          "[OBJECT READY] 40%%-to-READY mean applied on DONE: mission=%u next_action=%u",
+          static_cast<unsigned>(mission_result.active_mission),
+          static_cast<unsigned>(control_command.action));
+    }
     if (mission_result.post_motion_observing) {
       RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
           "[OBS] HOLD after DONE: mission=%u elapsed=%.2fs frames=%zu valid=%d/%zu (object observation minimum 1s)",
