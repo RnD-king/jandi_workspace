@@ -7,6 +7,7 @@
 #include <cmath>
 
 using namespace vision_core;
+static CruiseDecision StraightLine() { CruiseDecision d; d.applicable=true; d.direction=CruiseDirection::kStraight; return d; }
 namespace {
 ObjectTarget Target(double u, double v) {
   ObjectTarget t; t.center_px={u*640,v*480}; t.rectified_center_px=t.center_px;
@@ -153,31 +154,31 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   assert(b.mode==BallMode::kFailed && ball.RecoveryObservationsCompleted()==5);
 
   HurdleController hurdle(c.hurdle,3); HurdleResult h; now=0;
-  for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,.62),640,480,now+=.1,forward,{},false);
+  for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,.62),640,480,now+=.1,forward,{},StraightLine(),false);
   assert(h.action.action==MissionAction::kStepForwardFour); // Strongly off-center still walks straight.
-  for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,.85),640,480,now+=.1,forward,{},false);
+  for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,.85),640,480,now+=.1,forward,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kApproachTwoBeforeDown);
-  h=hurdle.Compute(Target(.05,.85),640,480,now+=.1,forward,{},true);
-  h=hurdle.Compute({},640,480,now+=.1,forward,done,false);
+  h=hurdle.Compute(Target(.05,.85),640,480,now+=.1,forward,{},StraightLine(),true);
+  h=hurdle.Compute({},640,480,now+=.1,forward,done,StraightLine(),false);
   assert(h.mode==HurdleMode::kWaitCameraDown);
-  hurdle.Compute({},640,480,now+=.1,down,{},false);
-  for(int i=0;i<18;++i)h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},false);
+  hurdle.Compute({},640,480,now+=.1,down,{},StraightLine(),false);
+  for(int i=0;i<18;++i)h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kWaitFinePose);
-  h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},true);
-  h=hurdle.Compute({},640,480,now+=.1,down,done,false);
+  h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},StraightLine(),true);
+  h=hurdle.Compute({},640,480,now+=.1,down,done,StraightLine(),false);
   assert(h.mode==HurdleMode::kFineAdjust);
-  h=hurdle.Compute(Target(.05,.9),640,480,now+=.7,down,{},false);
+  h=hurdle.Compute(Target(.05,.9),640,480,now+=.7,down,{},StraightLine(),false);
   for(int i=1;i<10;++i)
-    h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},false);
+    h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},StraightLine(),false);
   assert(h.action.action==MissionAction::kStepForwardHalf);
-  for(int i=0;i<6;++i)h=hurdle.Compute({},640,480,now+=.1,down,{},false);
+  for(int i=0;i<6;++i)h=hurdle.Compute({},640,480,now+=.1,down,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kRecoveryDown);
-  for(int i=0;i<12;++i)h=hurdle.Compute(Target(.95,.7),640,480,now+=.1,down,{},false);
+  for(int i=0;i<12;++i)h=hurdle.Compute(Target(.95,.7),640,480,now+=.1,down,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kFineAdjust && hurdle.RecoveryObservationsCompleted()==1);
-  for(int i=0;i<10;++i)h=hurdle.Compute({},640,480,now+=.1,down,{},false);
+  for(int i=0;i<10;++i)h=hurdle.Compute({},640,480,now+=.1,down,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kRecoveryDown);
   for(int i=0;i<60 && h.mode!=HurdleMode::kFailed;++i) {
-    h=hurdle.Compute({},640,480,now+=.1,down,{},false);
+    h=hurdle.Compute({},640,480,now+=.1,down,{},StraightLine(),false);
     assert(h.action.action==MissionAction::kNone);
   }
   assert(h.mode==HurdleMode::kFailed && hurdle.RecoveryObservationsCompleted()==5);
