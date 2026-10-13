@@ -514,6 +514,8 @@ int main() {
 
   manual_config.ball.fine_settle_duration_sec=0;
   manual_config.ball.upper_acquire_v_px=480.0;
+  manual_config.ball.pickup_u1_px=281.6; manual_config.ball.pickup_u2_px=358.4;
+  manual_config.ball.pickup_v1_px=307.2; manual_config.ball.pickup_v2_px=364.8;
   manual_config.post_motion_observation_sec=1;
   MissionController manual(manual_config);
   auto mi=Frame(0);

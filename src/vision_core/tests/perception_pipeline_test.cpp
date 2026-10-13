@@ -22,6 +22,9 @@ MissionControllerConfig BallPipelineConfig() {
   c.enable_hurdle=c.enable_goal=false;
   c.ball.smooth_alpha=1.0; c.ball.fine_settle_duration_sec=.6;
   c.ball.upper_acquire_v_px=480.0;
+  // Exercise the historical pickup rectangle independently of YAML tuning.
+  c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
+  c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
   c.object_association.max_center_distance_norm=.1;
   return c;
 }
@@ -175,6 +178,31 @@ void TestVerificationSixHitsSucceeds() {
   assert(pipeline.result.mission.ball.mode==BallMode::kVerifyPickup);
   assert(pipeline.result.mission.command.action==MissionAction::kRecatch);
 }
+void TestBackboardValidDepthCanBeRetuned() {
+  auto c=LoadDefaultAlgorithmConfig();
+  c.enable_ball=c.enable_hurdle=c.enable_goal=false;
+  MissionController controller(c);
+  PerceptionFrameInput input;
+  input.image_width=640; input.image_height=480;
+  input.intrinsics={600,600,320,240};
+  PerceptionDetection board;
+  board.detection.class_id=c.object_targets.backboard_class_id;
+  board.detection.confidence=1.0;
+  board.detection.box={300.0,200.0,40.0,40.0};
+  board.center_depth_m=3.0;
+  input.detections={board};
+  const auto rejected=controller.StepPerception(input);
+  assert(!rejected.perception.targets.backboard); // Initially capped at 2.5 m.
+  c.backboard_max_depth_m=4.0;
+  assert(controller.UpdateTuning(c));
+  const auto accepted=controller.StepPerception(input);
+  assert(accepted.perception.targets.backboard);
+  c.backboard_min_depth_m=3.5;
+  assert(controller.UpdateTuning(c));
+  const auto rejected_again=controller.StepPerception(input);
+  assert(!rejected_again.perception.targets.backboard);
+}
+
 } // namespace
 
 int main() {
@@ -199,5 +227,6 @@ int main() {
   TestVerificationSixHitsSucceeds();
   TestGlobalPauseGateForBallAndCamera();
   TestPauseDoesNotAcquireNewMission();
+  TestBackboardValidDepthCanBeRetuned();
   return 0;
 }

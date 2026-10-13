@@ -55,6 +55,9 @@ MissionControllerConfig Config() {
 
   c.ball.fine_settle_duration_sec=0;
   c.goal.fine_settle_duration_sec=0;
+  c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
+  c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
+  c.hurdle.contact_steps=3;
   return c;
 }
 Trial BallSearch() {

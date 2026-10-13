@@ -101,7 +101,9 @@ PICK 실패 시 다시 미세 정렬하며 최대 10회다. 성공 판정은 기
 GOAL: 공 보유/라인 복귀 뒤 LINE 실행시간 5초 → 수락된 보행 DONE → GOAL 시야
 → 접근 → 림 거리 오차로 21/10 조정 → 2 → 3/4/5/6 미세 정렬 → 17 슛
 → 4 후진 2회 → FORWARD → 회전·라인 확인 → 9 → LINE.
-골대 단독 시험은 FORWARD 접근부터 시작한다. GOAL로 올렸는데 아직 골대를 못 본
+골대 단독 전체(0) 시험은 FORWARD 접근부터 시작한다. 골대 접근(1) 시험은
+GOAL 카메라를 먼저 준비하고 GOAL_CLOSE_WALK 진입 직전에 종료한다.
+GOAL로 올렸는데 아직 골대를 못 본
 상태에서는 의도대로 정지한다. 팔 전환을 포함한 실제 LINE 보행 시간만 5초에 포함한다.
 
 HURDLE: 접근 → DOWN → 검색 → 21/10 거리 조정 → 2 → 3 미세 접근
@@ -150,3 +152,16 @@ ros2 service call /goal_tuning_node/start std_srvs/srv/Trigger '{}'
 ros2 service call /goal_tuning_node/preview std_srvs/srv/Trigger '{}'
 ros2 service call /goal_tuning_node/commit std_srvs/srv/Trigger '{}'
 ```
+
+## GOAL 카메라 접근 및 실시간 조정 (2026-10-13)
+
+GOAL 단독 시험의 test_stage=1은 GOAL 카메라가 이미 settled여도 START할 수 있다.
+GOAL 시야에서 백보드 깊이와 가로 위치를 사용해 접근하며,
+`fine_adjust_start_z_m` 조건으로 GOAL_CLOSE_WALK에 진입할 때 종료한다.
+test_stage=0은 이전과 같이 FORWARD 접근부터 시작한다.
+
+기존 rqt 튜닝 항목을 유지하며 `goal_hoop_radius_m`,
+`goal_shoot_yaw_limit_deg`, `backboard_min_depth_m`,
+`backboard_max_depth_m`을 추가로 실시간 적용한다.
+백보드 유효 깊이 범위 또는 depth strip 폭을 바꾸면 새로운 PREVIEW를 요청한다.
+튜닝은 기존 WAIT_PREVIEW/WAIT_COMMIT 게이트에서만 가능하며, YAML 자동 저장은 하지 않는다.

@@ -487,7 +487,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     if (!camera_ready) camera_request=wanted==CameraMode::kGoal ? CameraRequest::kGoal : CameraRequest::kDown;
     else if (config_.test_stage==3 && foot_pose_!=FootPose::kFine)
       pose={MissionAction::kDefaultPoseMode,ActionCategory::kLocomotion,0,false};
-    else if (config_.test_stage==2 && foot_pose_!=FootPose::kWalk)
+    else if ((config_.test_stage==2 ||
+              (config_.test_stage==1 && config_.test_mission==MissionType::kGoal)) &&
+             foot_pose_!=FootPose::kWalk)
       pose={MissionAction::kWalkMode,ActionCategory::kLocomotion,0,false};
     else {
       test_setup_pending_=false; ClearObservationEvidence();
@@ -498,8 +500,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         if (config_.test_stage==2) hurdle_controller_.StartTestNear(); else hurdle_controller_.StartTestExecute();
         hurdle_result_.mode=config_.test_stage==2 ? HurdleMode::kWaitCameraDown : HurdleMode::kFineAdjust;
       } else {
-        if (config_.test_stage==2) goal_controller_.StartTestNear(); else goal_controller_.StartTestExecute();
-        goal_result_.mode=config_.test_stage==2 ? GoalMode::kWaitCameraGoal : GoalMode::kFineAdjust;
+        if (config_.test_stage<=2) goal_controller_.StartTestNear(); else goal_controller_.StartTestExecute();
+        goal_result_.mode=config_.test_stage<=2 ? GoalMode::kWaitCameraGoal : GoalMode::kFineAdjust;
       }
     }
     if (!input.allow_new_body_actions) pose={};
@@ -1305,9 +1307,14 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.ball=candidate.ball;
   updated.hurdle=candidate.hurdle;
   updated.goal=candidate.goal;
+  updated.backboard_min_depth_m=candidate.backboard_min_depth_m;
+  updated.backboard_max_depth_m=candidate.backboard_max_depth_m;
   updated.mission_recovery_max_turns=candidate.mission_recovery_max_turns;
   updated.backboard_depth_strip_width_px=candidate.backboard_depth_strip_width_px;
   ValidateAlgorithmConfig(updated);
+  const bool depth_filter_changed =
+      config_.backboard_min_depth_m != updated.backboard_min_depth_m ||
+      config_.backboard_max_depth_m != updated.backboard_max_depth_m;
   // All existing offset accumulators were measured relative to the OLD
   // reference. Rebase in normalized coordinates without altering heading.
   if (last_line_image_width_ > 1) {
@@ -1327,6 +1334,10 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   ball_controller_.UpdateTuning(config_.ball);
   goal_controller_.UpdateTuning(config_.goal);
   hurdle_controller_.UpdateTuning(config_.hurdle);
+  if (depth_filter_changed) {
+    backboard_association_tracker_.Reset();
+    goal_controller_.ClearObservationHistory();
+  }
   return true;
 }
 
@@ -1438,7 +1449,9 @@ void MissionController::InitializeTest() {
   active_mission_=config_.test_mission;
   ball_result_={}; hurdle_result_={}; goal_result_={};
   test_execution_started_=false;
-  test_setup_pending_=config_.test_stage>=2;
+  // GOAL stage 1 begins in the GOAL camera and approaches until close-walk entry.
+  test_setup_pending_=config_.test_stage>=2 ||
+      (config_.test_mission==MissionType::kGoal && config_.test_stage==1);
   test_entry_pending_=!test_setup_pending_ && active_mission_!=MissionType::kGoal;
   has_ball_=active_mission_==MissionType::kGoal;
   if (active_mission_==MissionType::kBall) ball_mission_index_=config_.test_ball_mission_index;
@@ -1474,7 +1487,7 @@ bool MissionController::TestBoundaryReached(const CameraFeedback& camera) const 
   if (config_.test_mission==MissionType::kHurdle)
     return camera.actual_mode==CameraMode::kDown && hurdle_result_.mode==HurdleMode::kDownSearch;
   return config_.test_mission==MissionType::kGoal && camera.actual_mode==CameraMode::kGoal &&
-      goal_result_.mode==GoalMode::kSearch;
+      goal_result_.mode==GoalMode::kCoarseAdjust;
 }
 ControlCommand MissionController::AcceptDeliveryFeedback(const CommandDeliveryFeedback& feedback,double now_sec) {
   // Keep last_command_ as the sensory FSM's matching edge until its next frame.
