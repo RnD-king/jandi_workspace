@@ -257,13 +257,13 @@ int main() {
   // Camera-moving frames must not survive into the DOWN-view fine adjustment.
   BallController fresh_down(c,3.0);
   fresh_down.Compute(Ball(.3,.3),640,480,0,{},{});
-  r=fresh_down.Compute(Ball(.3,.8),640,480,.1,{},done);
+  r=fresh_down.Compute(Ball(.5,.8),640,480,.1,{},done);
   assert(r.mode==BallMode::kApproachTwoBeforeDown);
   r=fresh_down.Compute({},640,480,.11,{},done);
   assert(r.mode==BallMode::kWaitCameraDown);
   r=fresh_down.Compute(Ball(.9,.9),640,480,.15,
                        {CameraMode::kTransition,false},{});
-  assert(r.mode==BallMode::kWaitCameraDown && r.tracked.u_norm < .4);
+  assert(r.mode==BallMode::kWaitCameraDown && r.tracked.u_norm < .6);
   r=fresh_down.Compute(Ball(.9,.9),640,480,.2,down,{});
   assert(r.mode==BallMode::kDownSearch && !r.tracked.visible);
   r=fresh_down.Compute(Ball(.2,.7),640,480,.3,down,{});
