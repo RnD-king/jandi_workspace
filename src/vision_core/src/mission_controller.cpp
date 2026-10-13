@@ -256,7 +256,9 @@ void MissionController::TrackMovingObjectReadyWindow(
     const MissionFrameInput &input) {
   // The interactive tuning adapter owns its own READY window; do not
   // double-apply the production moving-window policy in manual mode.
-  if (input.manual_observation_control || !input.command_transport_enabled) {
+  if (input.manual_observation_control || !input.command_transport_enabled ||
+      input.image_width <= 1 || input.image_height <= 1 ||
+      !std::isfinite(input.now_sec)) {
     moving_object_action_id_ = 0;
     moving_object_samples_.clear();
     moving_object_ready_mean_.reset();
@@ -584,6 +586,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   bool applied_object_ready_mean = false;
   if (moving_object_ready_mean_ &&
       input.delivery_feedback.done &&
+      last_command_.action_id == moving_object_ready_mean_->action_id &&
       input.delivery_feedback.action_id == moving_object_ready_mean_->action_id &&
       active_mission_ == moving_object_ready_mean_->mission &&
       input.camera_feedback.settled &&
