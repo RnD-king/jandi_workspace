@@ -7,6 +7,7 @@
 #include <cmath>
 #include <stdexcept>
 using namespace vision_core;
+static CruiseDecision StraightLine() { CruiseDecision d; d.applicable=true; d.direction=CruiseDirection::kStraight; return d; }
 namespace {
 ObjectTarget Target(double u=320,double v=336) {
   ObjectTarget t; t.center_px={u,v};t.box_px={u-10,v-10,20,20};
@@ -163,7 +164,7 @@ void FineAdjustmentUsesFreshEqualMeans() {
     const bool recent=i>=7;
     const double now=.12*(i+1);
     b=ball.Compute(Target(recent ? 380 : 280,336),640,480,now,down,{},false);
-    h=hurdle.Compute(Target(320,recent ? 450 : 390),640,480,now,down,{},false);
+    h=hurdle.Compute(Target(320,recent ? 450 : 390),640,480,now,down,{},StraightLine(),false);
     g=goal.Compute({},Target(),{true,0,recent ? .6 : .4,0,1},
                    640,480,now,false,goal_camera,{},false);
   }
@@ -189,11 +190,11 @@ void FineAdjustmentUsesFreshEqualMeans() {
 
   ActionExecutionFeedback done; done.action_done=true;
   ball.Compute(Target(600,336),640,480,1.3,down,done,false);
-  hurdle.Compute(Target(320,470),640,480,1.3,down,done,false);
+  hurdle.Compute(Target(320,470),640,480,1.3,down,done,StraightLine(),false);
   goal.Compute({},Target(),{true,0,1.0,0,1},640,480,1.3,false,
                goal_camera,done,false);
   b=ball.Compute(Target(300,336),640,480,1.4,down,{},false);
-  h=hurdle.Compute(Target(320,420),640,480,1.4,down,{},false);
+  h=hurdle.Compute(Target(320,420),640,480,1.4,down,{},StraightLine(),false);
   g=goal.Compute({},Target(),{true,0,.5,0,1},640,480,1.4,false,
                  goal_camera,{},false);
   assert(b.action.action==MissionAction::kNone);
@@ -255,12 +256,12 @@ void RecoveryUsesCompleteWindow() {
   auto c=LoadDefaultAlgorithmConfig();c.ball.lost_frames=c.hurdle.lost_frames=1;
   BallController ball(c.ball,3);HurdleController hurdle(c.hurdle,3);
   BallResult b;HurdleResult h;double now=0;
-  for(int i=0;i<7;++i){now+=.12;b=ball.Compute(Target(320,144),640,480,now,{}, {},false);h=hurdle.Compute(Target(320,200),640,480,now,{}, {},false);}
-  now+=.12;b=ball.Compute({},640,480,now,{}, {},false);h=hurdle.Compute({},640,480,now,{}, {},false);
+  for(int i=0;i<7;++i){now+=.12;b=ball.Compute(Target(320,144),640,480,now,{}, {},false);h=hurdle.Compute(Target(320,200),640,480,now,{}, {},StraightLine(),false);}
+  now+=.12;b=ball.Compute({},640,480,now,{}, {},false);h=hurdle.Compute({},640,480,now,{}, {},StraightLine(),false);
   assert(b.mode==BallMode::kBallRecoveryForward && h.mode==HurdleMode::kRecoveryForward);
   for(int i=0;i<10;++i) {
     now+=.12;const auto target=i==3 || i==4 || i==5 ? std::optional<ObjectTarget>{} : std::optional<ObjectTarget>{Target(320,200)};
-    b=ball.Compute(target,640,480,now,{}, {},false);h=hurdle.Compute(target,640,480,now,{}, {},false);
+    b=ball.Compute(target,640,480,now,{}, {},false);h=hurdle.Compute(target,640,480,now,{}, {},StraightLine(),false);
     assert(b.action.action==MissionAction::kNone && h.action.action==MissionAction::kNone);
     if(i<9)assert(b.mode==BallMode::kBallRecoveryForward && h.mode==HurdleMode::kRecoveryForward);
   }
