@@ -4,6 +4,8 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <utility>
+#include <vector>
 using namespace vision_core;
 static ObjectTarget H(double v) {
   ObjectTarget t; t.center_px = {320.0, v * 480.0}; t.box_px = {310, v*480-5, 20, 10};
