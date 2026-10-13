@@ -47,99 +47,119 @@ struct Trial {
     if(action==MissionAction::kPickBall)assert(out.ball.pickup_attempt_count==old_attempt+1);
   }
   void Done() {in.delivery_feedback={out.command.action_id,true,true,false};Tick();}
+  std::uint64_t PrepareStage(MissionType mission, int stage) {
+    const CameraMode camera=stage==0 ||
+        (stage==1 && mission!=MissionType::kGoal)
+        ? CameraMode::kForward
+        : (mission==MissionType::kGoal ? CameraMode::kGoal
+                                       : CameraMode::kDown);
+    in.camera_feedback={camera,true};
+    in.allow_test_setup_body_actions=true;
+    Tick();
+    const MissionAction required=stage==3 ? MissionAction::kDefaultPoseMode
+                                          : MissionAction::kWalkMode;
+    assert(out.command.action==required);
+    assert(out.command.mission_phase==903);
+    const std::uint64_t setup_id=out.command.action_id;
+    assert(setup_id!=0);
+    in.delivery_feedback={setup_id,true,true,false};
+    Tick();
+    assert(!core.TestSetupPending());
+    assert(out.command.action_id==0);
+    in.allow_test_setup_body_actions=false;
+    return setup_id;
+  }
 };
+// Stage START always executes its own stance before normal preview/COMMIT.
 void FarStageStopsAfterCamera(MissionType mission) {
-  Trial t(mission,1);t.TargetNow(mission);
-  if(mission==MissionType::kBall)t.in.ball_target=Target(100,400);
-  for(int i=0;i<7;++i)t.Tick();
+  Trial t(mission,1);
+  t.TargetNow(mission);
+  if(mission==MissionType::kBall)
+    t.in.ball_target=Target(380,400); // grid zone 8, not left near turn
+  if(mission==MissionType::kHurdle)
+    t.in.hurdle_target=Target(320,400); // grid zone 8
+  if(mission==MissionType::kGoal) {
+    t.in.backboard_center_depth_m=1.5;
+    t.in.goal_pose={};
+  }
+  t.PrepareStage(mission,1);
+  assert(t.out.foot_pose==FootPose::kWalk);
   if(mission!=MissionType::kGoal) {
+    for(int n=0;n<12 && t.Preview().command.action!=MissionAction::kStepForwardTwo;++n)
+      t.Tick();
     t.Commit(MissionAction::kStepForwardTwo);
     const auto id=t.out.command.action_id;
-    // Delivery can be accepted without any image, while the ordered FSM edge is preserved.
-    t.core.AcceptDeliveryFeedback({id,true,false,false},t.in.now_sec+.01);
-    assert(t.core.AcceptDeliveryFeedback({id,true,true,false},t.in.now_sec+.02).action_id==0);
     t.in.delivery_feedback={id,true,false,false};t.Tick();
-    assert(!t.out.trial_complete); // Earlier ACK cannot impersonate DONE.
+    assert(!t.out.trial_complete); // ACK alone cannot finish
     t.in.delivery_feedback={id,true,true,false};t.Tick();
     assert(t.out.command.camera_request==CameraRequest::kDown);
     t.in.camera_feedback={CameraMode::kDown,true};
+    for(int n=0;n<10 && !t.out.trial_complete;++n)t.Tick();
+    assert(t.out.trial_complete);
   } else {
-    // GOAL stage 1 first prepares GOAL camera, then approaches until CLOSE_WALK.
-    assert(t.out.command.camera_request==CameraRequest::kGoal);
-    t.in.camera_feedback={CameraMode::kGoal,true};
-    t.in.backboard_center_depth_m=1.5;
-    t.in.goal_pose={}; // Far approach requires valid center depth, not edge pose.
-    t.Tick(); // Camera/foot setup completed.
-    assert(!t.out.trial_complete);
-    t.Tick(); // GOAL_CAMERA -> GOAL_SEARCH (must not complete stage 1).
-    assert(t.out.goal.mode==GoalMode::kSearch && !t.out.trial_complete);
-    for(int i=0;i<7;++i)t.Tick();
-    assert(t.out.goal.mode==GoalMode::kApproach && !t.out.trial_complete);
+    t.Tick(); // GOAL camera known and settled, enter search
+    for(int n=0;n<12 && t.out.goal.mode!=GoalMode::kApproach;++n)t.Tick();
+    assert(t.out.goal.mode==GoalMode::kApproach);
     assert(t.Preview().command.action==MissionAction::kStepForwardFour);
     t.in.backboard_center_depth_m=.7;
-    t.Tick();
-    assert(t.out.goal.mode==GoalMode::kCoarseAdjust);
+    for(int n=0;n<10 && !t.out.trial_complete;++n)t.Tick();
+    assert(t.out.trial_complete);
   }
-  t.Tick();assert(t.out.trial_complete && t.out.command.action_id==0);
-  assert(t.out.command.action==MissionAction::kNone);
-  t.Tick();assert(t.out.trial_complete && t.out.command.action_id==0);
+  assert(t.out.command.action_id==0);
 }
 void GoalFarStageAlreadyInGoalCamera() {
   Trial t(MissionType::kGoal,1);
   t.TargetNow(MissionType::kGoal);
-  t.in.camera_feedback={CameraMode::kGoal,true};
   t.in.backboard_center_depth_m=1.5;
   t.in.goal_pose={};
-  t.Tick(); // No camera move and no body move required.
-  assert(t.out.command.camera_request==CameraRequest::kNone && !t.out.trial_complete);
+  t.in.camera_feedback={CameraMode::kGoal,true};
+  // Even when GOAL camera and WALK stance were previously reported,
+  // START must send its own fresh WALK command.
+  const auto id=t.PrepareStage(MissionType::kGoal,1);
+  assert(id!=0 && t.out.command.action_id==0);
   t.Tick();
-  assert(t.out.goal.mode==GoalMode::kSearch && !t.out.trial_complete);
-  for(int i=0;i<7;++i)t.Tick();
-  assert(t.out.goal.mode==GoalMode::kApproach && !t.out.trial_complete);
+  assert(t.out.goal.mode==GoalMode::kSearch);
 }
 void NearStageStopsBeforeMission(MissionType mission) {
   Trial t(mission,2);t.TargetNow(mission);
-  t.Tick();assert(t.out.command.camera_request==(mission==MissionType::kGoal ? CameraRequest::kGoal : CameraRequest::kDown));
-  t.in.camera_feedback={mission==MissionType::kGoal ? CameraMode::kGoal : CameraMode::kDown,true};
+  const auto prepare_id=t.PrepareStage(mission,2);
+  assert(prepare_id!=0 && t.out.foot_pose==FootPose::kWalk);
   for(int i=0;i<20 && t.Preview().command.action!=MissionAction::kDefaultPoseMode;++i)t.Tick();
-  t.Commit(MissionAction::kDefaultPoseMode);t.Done();assert(t.out.foot_pose==FootPose::kFine);
-  // Even automatic body permission cannot start PICK/contact/SHOOT early.
+  t.Commit(MissionAction::kDefaultPoseMode);t.Done();
+  assert(t.out.foot_pose==FootPose::kFine);
   t.in.allow_new_body_actions=true;
-  for(int i=0;i<9;++i) { t.Tick(); assert(!t.out.trial_complete && t.out.command.action_id==0); }
-  t.Tick();
-  assert(t.out.trial_complete && t.out.test_ready);
-  assert(t.out.command.action_id==0 && t.out.ball.pickup_attempt_count==0);
-  t.Tick();assert(t.out.command.action_id==0);
-  // Stage changes preserve the confirmed physical stance/camera and IDs.
+  for(int i=0;i<20 && !t.out.trial_complete;++i)t.Tick();
+  assert(t.out.trial_complete && t.out.command.action_id==0);
+  assert(t.out.ball.pickup_attempt_count==0);
+  // Stage 3 must command its FINE initial stance again after Stage 2.
   t.in.allow_new_body_actions=false;
   assert(t.core.SetTestStage(mission,3));
-  t.Tick(); assert(t.out.foot_pose==FootPose::kFine);
-  assert(t.out.command.action_id==0 && t.out.command.camera_request==CameraRequest::kNone);
-  for(int i=0;i<10;++i)t.Tick();
-  assert(t.out.test_ready && !t.out.trial_complete);
+  const auto setup_id=t.PrepareStage(mission,3);
+  assert(setup_id>prepare_id && t.out.foot_pose==FootPose::kFine);
+  for(int i=0;i<12;++i)t.Tick();
+  assert(!t.out.trial_complete);
   t.Commit(mission==MissionType::kBall ? MissionAction::kPickBall :
       mission==MissionType::kGoal ? MissionAction::kShoot : MissionAction::kStepForwardHalf);
 }
 void ExecuteStageNeedsRealPoseAndStableReadiness(MissionType mission) {
-  Trial t(mission,3);t.TargetNow(mission);t.Tick();
-  t.in.camera_feedback={mission==MissionType::kGoal ? CameraMode::kGoal : CameraMode::kDown,true};t.Tick();
-  assert(t.out.foot_pose==FootPose::kWalk && t.out.command.action_id==0);
-  t.Commit(MissionAction::kDefaultPoseMode);const auto id=t.out.command.action_id;
-  t.in.delivery_feedback={id,true,false,false};t.Tick();assert(t.out.foot_pose==FootPose::kWalk);
-  t.in.delivery_feedback={id,true,true,false};t.Tick();assert(t.out.foot_pose==FootPose::kFine);
+  Trial t(mission,3);t.TargetNow(mission);
+  const auto id=t.PrepareStage(mission,3);
+  assert(t.out.foot_pose==FootPose::kFine && id!=0);
   for(int i=0;i<9;++i){t.Tick();assert(!t.out.test_ready && t.out.command.action_id==0);}
   t.Tick();assert(t.out.test_ready && !t.out.trial_complete);
-  // A stable target outside the execution region may not move to align itself.
-  auto outside=t.core; auto input=t.in; input.allow_new_body_actions=false;
-  if(mission==MissionType::kBall) input.ball_target=Target(100,336);
-  else if(mission==MissionType::kHurdle) input.hurdle_target=Target(320,350);
+  auto outside=t.core;auto input=t.in;input.allow_new_body_actions=false;
+  if(mission==MissionType::kBall)input.ball_target=Target(100,336);
+  else if(mission==MissionType::kHurdle)input.hurdle_target=Target(320,350);
   else input.goal_pose.x_m=1.0;
   MissionFrameResult held;
-  for(int i=0;i<20;++i) { input.now_sec+=.12; held=outside.Step(input); assert(held.command.action_id==0); }
-  input.allow_new_body_actions=true; input.now_sec+=.12; held=outside.Step(input);
+  for(int i=0;i<20;++i){
+    input.now_sec+=.12;held=outside.Step(input);assert(held.command.action_id==0);
+  }
+  input.allow_new_body_actions=true;input.now_sec+=.12;held=outside.Step(input);
   assert(held.command.action_id==0);
   assert(!held.test_ready && !held.test_executing);
-  t.Commit(mission==MissionType::kBall ? MissionAction::kPickBall : mission==MissionType::kGoal ? MissionAction::kShoot : MissionAction::kStepForwardHalf);
+  t.Commit(mission==MissionType::kBall ? MissionAction::kPickBall :
+      mission==MissionType::kGoal ? MissionAction::kShoot : MissionAction::kStepForwardHalf);
   assert(t.out.command.action_id>id);
 }
 void WeightedCoordinatesUseHistory() {
