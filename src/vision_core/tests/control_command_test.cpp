@@ -50,6 +50,53 @@ int main() {
   out=c.Compute(MissionType::kLine,0,{},CameraRequest::kNone,done,.4);
   assert(out.action_id==2 && out.control_phase==ControlPhase::kWaitingActionDone);
 
+  // A's READY eligibility alone permits B (including a different mission
+  // and non-READY action); B's eligibility controls only B->C later.
+  ControlCommandCoordinator object({200,10});
+  ActionRequest object_a{MissionAction::kStepForwardFour,
+                         ActionCategory::kLocomotion,0,true};
+  auto obj=object.Compute(MissionType::kBall,4,object_a,CameraRequest::kNone,{},0);
+  assert(obj.action_id==200);
+  obj=object.Compute(MissionType::kBall,4,{},CameraRequest::kNone,
+                     {200,true,false,false},.1);
+  ActionRequest object_b{MissionAction::kStepForwardRightTwo,
+                         ActionCategory::kLocomotion,0,false};
+  obj=object.Compute(MissionType::kBall,4,object_b,CameraRequest::kNone,
+                     {200,true,false,true},.2);
+  assert(obj.command_type==CommandType::kAction && obj.action_id==201);
+  assert(obj.mission==MissionType::kBall &&
+         obj.action==MissionAction::kStepForwardRightTwo);
+  obj=object.Compute(MissionType::kBall,4,{},CameraRequest::kNone,
+                     {201,true,false,false},.25);
+  assert(obj.control_phase==ControlPhase::kWaitingQueuedActionStart);
+  obj=object.Compute(MissionType::kBall,4,{},CameraRequest::kNone,
+                     {200,true,true,false},.3);
+  assert(obj.action_id==201 && obj.mission==MissionType::kBall);
+  obj=object.Compute(MissionType::kBall,4,object_b,CameraRequest::kNone,
+                     {201,true,false,true},.4);
+  assert(obj.action_id==201); // B is not a queue source.
+  ControlCommandCoordinator cross_mission({400,10});
+  obj=cross_mission.Compute(MissionType::kLine,1,first,CameraRequest::kNone,{},0);
+  obj=cross_mission.Compute(MissionType::kLine,1,{},CameraRequest::kNone,
+                            {400,true,false,false},.1);
+  obj=cross_mission.Compute(MissionType::kGoal,2,object_b,CameraRequest::kNone,
+                            {400,true,false,true},.2);
+  assert(obj.action_id==401 && obj.mission==MissionType::kGoal);
+  obj=cross_mission.Compute(MissionType::kGoal,2,{},CameraRequest::kNone,
+                            {400,true,true,false},.3);
+  assert(obj.action_id==401 && obj.mission==MissionType::kGoal);
+
+  ControlCommandCoordinator missed_ready({500,10});
+  auto missed=missed_ready.Compute(MissionType::kBall,4,object_a,
+                                   CameraRequest::kNone,{},0);
+  assert(missed.action_id==500);
+  missed=missed_ready.Compute(MissionType::kBall,4,{},CameraRequest::kNone,
+                              {500,true,false,true},.25);
+  assert(missed.action_id==500);
+  missed=missed_ready.Compute(MissionType::kBall,4,object_b,CameraRequest::kNone,
+                              {},.3);
+  assert(missed.action_id==500); // No delayed reservation beyond A's READY edge.
+
   ControlCommandCoordinator wrong_id({10,1.0});
   out=wrong_id.Compute(MissionType::kLine,0,first,CameraRequest::kNone,{},0);
   assert(out.action_id==10);

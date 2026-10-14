@@ -15,7 +15,8 @@ using RawPositions = std::unordered_map<int, int32_t>;
 using Clock = std::chrono::steady_clock;
 inline constexpr std::chrono::milliseconds kPeriod{20};
 
-// READY is for actions 11/12/13 and 21..26 in every mission; queued execution is LINE -> LINE only.
+// READY is emitted for 11/12/13 and 21..26; the perception controller's
+// current-action allowlist determines whether it sends a queued successor.
 inline bool IsReadyWalkAction(uint16_t action)
 {
     return action == 11 || action == 12 || action == 13 || (action >= 21 && action <= 26);
@@ -83,8 +84,9 @@ public:
         if (id == queued_id) return Admission::QueuedDuplicate;
         if (completed.Contains(id)) return Admission::CompletedDuplicate;
         if (active_id == 0) return Admission::Start;
-        if (ready_sent && queued_id == 0 && IsLongLineAction(active_mission, active_action) &&
-            IsLongLineAction(mission, action)) return Admission::Queue;
+        // Only current A's READY and the empty one-slot queue govern admission.
+        // B may be any valid action or mission; full JSON validation precedes ACK.
+        if (ready_sent && queued_id == 0) return Admission::Queue;
         return Admission::Reject;
     }
     void Activate(uint64_t id, uint8_t mission, uint16_t action) {

@@ -580,10 +580,40 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     std::optional<double> line_image_center_u) {
   MissionFrameInput input = source;
   TrackMovingObjectReadyWindow(input);
+  // Compute B on a disposable DONE simulation. Never advance A's live FSM
+  // until its real DONE. Manual tuning keeps Preview/Commit as the only admission.
+  std::optional<ActionRequest> ready_object_successor;
+  std::optional<MissionType> ready_object_successor_mission;
+  if (!input.manual_observation_control && input.command_transport_enabled &&
+      input.delivery_feedback.ready && !input.delivery_feedback.done &&
+      moving_object_ready_mean_ &&
+      moving_object_ready_mean_->action_id == input.delivery_feedback.action_id &&
+      active_mission_ == moving_object_ready_mean_->mission &&
+      last_command_.action_id == moving_object_ready_mean_->action_id &&
+      input.allow_new_commands && input.allow_new_body_actions) {
+    MissionController speculative = *this;
+    MissionFrameInput complete = input;
+    complete.delivery_feedback = {input.delivery_feedback.action_id, true, true, false};
+    const MissionFrameResult proposed =
+        speculative.StepWithLineImageCenter(complete, line_image_center_u);
+    const ControlCommand &next = proposed.command;
+    if (next.command_type == CommandType::kAction &&
+        next.action_id != 0 &&
+        next.action != MissionAction::kNone &&
+        next.camera_request == CameraRequest::kNone) {
+      ActionRequest b;
+      b.action = next.action;
+      b.category = next.action_category;
+      b.target_yaw_deg = next.target_yaw_deg;
+      b.line_queue_eligible = next.mission == MissionType::kLine
+          ? IsLongLineAction(b.action) : config_.UsesObjectReadyMean(b.action);
+      ready_object_successor = b;
+      ready_object_successor_mission = next.mission;
+    }
+  }
   bool applied_object_ready_mean = false;
   if (moving_object_ready_mean_ &&
       input.delivery_feedback.done &&
-      last_command_.action_id == moving_object_ready_mean_->action_id &&
       input.delivery_feedback.action_id == moving_object_ready_mean_->action_id &&
       active_mission_ == moving_object_ready_mean_->mission &&
       input.camera_feedback.settled &&
@@ -1145,6 +1175,15 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
              ActionCategory::kLocomotion,0,false};
     camera_request=CameraRequest::kNone; phase=901;
   }
+  // Reserve B by A's READY mean without stepping the real mission FSM.
+  // Apply before permission gates so PAUSE and manual restrictions always win.
+  MissionType command_mission = active_mission_;
+  if (ready_object_successor && moving_object_ready_mean_ &&
+      !observation_hold && camera_request == CameraRequest::kNone &&
+      active_mission_ == moving_object_ready_mean_->mission) {
+    request = *ready_object_successor;
+    command_mission = ready_object_successor_mission.value_or(active_mission_);
+  }
   // one-shot tuning gate는 perception/FSM/feedback 처리를 막거나 기존
   // pending/queued action을 취소하지 않는다. coordinator 직전의 새 LINE
   // request만 제거하여 READY/DONE 조기 반환 경로까지 동일하게 막는다.
@@ -1165,9 +1204,25 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     request = {};
     camera_request = CameraRequest::kNone;
   }
+  if (command_mission != MissionType::kLine &&
+      request.category == ActionCategory::kLocomotion &&
+      config_.UsesObjectReadyMean(request.action))
+    request.line_queue_eligible = true;
+  // Transport can have consumed A DONE and even B DONE ahead of RGB processing.
+  // Once B was pre-booked, A's late sensory DONE must not dispatch B again.
+  const bool queued_parent_done = object_queued_parent_id_ != 0 &&
+      input.delivery_feedback.done &&
+      input.delivery_feedback.action_id == object_queued_parent_id_;
+  if (queued_parent_done) request = {};
   output.command = command_coordinator_.Compute(
-      active_mission_, phase, request, camera_request,
+      command_mission, phase, request, camera_request,
       input.delivery_feedback, input.now_sec);
+  if (ready_object_successor && moving_object_ready_mean_ &&
+      output.command.command_type == CommandType::kAction &&
+      output.command.control_phase == ControlPhase::kWaitingQueuedActionAck) {
+    object_queued_parent_id_ = moving_object_ready_mean_->action_id;
+    object_queued_successor_ = output.command;
+  }
   if (config_.test_mission!=MissionType::kNone && config_.test_stage==3 &&
       output.command.command_type==CommandType::kAction && TestExecutionReady())
     test_execution_started_=true;
@@ -1181,8 +1236,28 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     ready_line_action_id_ = 0;
   // The transport may already have accepted DONE while an earlier ACK/READY
   // still awaits sensory processing. Keep its FSM ID until that DONE edge.
-  if (output.command.action_id!=0 || action_feedback.action_done || last_command_.action_id==0)
+  // While B is reserved, last_command_ must still identify executing A.
+  // Otherwise A's real DONE would be lost by object tracking and mission FSM.
+  const bool object_queued_wait = object_queued_parent_id_ != 0 &&
+      !queued_parent_done &&
+      (output.command.control_phase == ControlPhase::kWaitingQueuedActionAck ||
+       output.command.control_phase == ControlPhase::kWaitingQueuedActionStart);
+  if (queued_parent_done && output.command.action_id == 0 &&
+      object_queued_successor_) {
+    // B's DONE may have been processed by transport already. Retain B's
+    // identity so the next sensory DONE edge still reaches its mission FSM.
+    last_command_ = *object_queued_successor_;
+    last_command_.command_type = CommandType::kHold;
+    last_command_.control_phase = ControlPhase::kWaitingActionDone;
+  } else if (!object_queued_wait &&
+             (output.command.action_id!=0 || action_feedback.action_done ||
+              last_command_.action_id==0)) {
     last_command_ = output.command;
+  }
+  if (queued_parent_done) object_queued_parent_id_ = 0;
+  if (object_queued_successor_ && input.delivery_feedback.done &&
+      input.delivery_feedback.action_id == object_queued_successor_->action_id)
+    object_queued_successor_.reset();
   output.active_mission = active_mission_;
   output.ball = ball_result_; output.hurdle = hurdle_result_;
   output.goal = goal_result_; output.has_ball = has_ball_;
@@ -1618,6 +1693,8 @@ void MissionController::Reset(bool preserve_action_ids) {
   moving_object_action_id_=0;
   moving_object_samples_.clear();
   moving_object_ready_mean_.reset();
+  object_queued_parent_id_ = 0;
+  object_queued_successor_.reset();
   last_ready_line_guide_.reset();
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;

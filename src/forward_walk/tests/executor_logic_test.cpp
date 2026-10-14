@@ -227,14 +227,14 @@ int main() {
                 ActionTransactions fresh;
                 fresh.Activate(6000,mission,code);
                 Require(fresh.MarkReady() && !fresh.MarkReady(),"new walk action READY not exactly once");
-                Require(fresh.Evaluate(6001,1,21)==(mission==1 ? Admission::Queue : Admission::Reject),
-                        "new walk action LINE-only queue policy mismatch");
+                Require(fresh.Evaluate(6001,1,21)==Admission::Queue,
+                        "new walk READY admission rejected a cross-mission successor");
             }
             ActionTransactions old_to_new;old_to_new.Activate(7000,1,11);old_to_new.MarkReady();
             Require(old_to_new.Evaluate(7001,1,code)==Admission::Queue,"old walk could not queue new action");
         }
         Require(!IsReadyWalkAction(20)&&!IsReadyWalkAction(27),"READY extended outside valid new action range");
-        pass("new action READY across missions and old/new LINE queue compatibility");
+        pass("new action READY and current-action queue policy");
         const auto held=InitialPose();
         auto transition_start=held;transition_start.at(15)=1379;transition_start.at(16)=2765;
         const auto transition=P2PMotionPlayer::PreparePoseTransition(held,{{15,1071},{16,3073}},1.0);
@@ -264,8 +264,8 @@ int main() {
         Require(actions.Evaluate(101,1,12) == Admission::Reject, "accepted before READY");
         Require(actions.MarkReady() && !actions.MarkReady(), "READY not exactly once");
         Require(actions.Evaluate(101,1,12) == Admission::Queue, "LINE queue rejected");
-        Require(actions.Evaluate(101,2,12) == Admission::Reject, "non-LINE mission queued");
-        Require(actions.Evaluate(101,1,18) == Admission::Reject, "18 queued");
+        Require(actions.Evaluate(101,2,12) == Admission::Queue, "cross-mission successor rejected");
+        Require(actions.Evaluate(101,1,18) == Admission::Queue, "non-READY successor rejected");
         actions.queued_id = 101;
         Require(actions.Evaluate(101,1,12) == Admission::QueuedDuplicate, "queued duplicate");
         Require(actions.Evaluate(102,1,13) == Admission::Reject, "queue overflow accepted");
@@ -279,18 +279,14 @@ int main() {
             actions.Activate(200,1,action);
             Require(!actions.MarkReady(), "READY on unsupported action");
         }
-        // Keep the Jandi cross-mission READY contract distinct from the LINE queue.
+        // Queue admission depends on the current action's READY, not B's mission or number.
         for (uint8_t mission : {uint8_t{1}, uint8_t{2}, uint8_t{3}, uint8_t{4}}) {
             for (uint16_t action : {uint16_t{11}, uint16_t{12}, uint16_t{13}}) {
                 actions.Activate(300 + mission*10 + action, mission, action);
                 Require(actions.MarkReady() && !actions.MarkReady(),
                         "READY missing or duplicated for long walk");
-                if (mission != 1)
-                    Require(actions.Evaluate(900, 1, 13)==Admission::Reject,
-                            "non-LINE READY erroneously allowed queue");
-                else
-                    Require(actions.Evaluate(900, 1, 13)==Admission::Queue,
-                            "LINE-to-LINE queue unexpectedly blocked");
+                Require(actions.Evaluate(900, 1, 13)==Admission::Queue,
+                        "READY admission unexpectedly restricted by mission");
                 actions.CompleteActive();
             }
         }

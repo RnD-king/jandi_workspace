@@ -33,7 +33,9 @@ struct MissionControllerConfig {
   double camera_motion_timeout_sec{};
   // Fresh, post-DONE observation interval for non-queued actions and camera turns.
   double post_motion_observation_sec{};
-  // YAML-only allowlist of READY-capable object-approach actions.
+  // YAML allowlist of currently executing object actions whose valid READY
+  // moving mean permits one successor ActionCommand to be queued in AUTO.
+  // MANUAL reuses the mean for Preview/Commit without reserving B.
   // Empty means all object walks use post-DONE stationary observation.
   std::vector<int> object_ready_mean_actions;
   bool UsesObjectReadyMean(MissionAction action) const {
@@ -355,6 +357,10 @@ private:
   CameraMode moving_object_camera_{CameraMode::kForward};
   std::vector<MovingObjectSample> moving_object_samples_;
   std::optional<MovingObjectReadyMean> moving_object_ready_mean_;
+  // Keep queued B's identity even if transport accepts both A DONE and
+  // B DONE before the next camera frame. Never dispatch B twice.
+  std::uint64_t object_queued_parent_id_{0};
+  std::optional<ControlCommand> object_queued_successor_;
   std::optional<LineGuide> last_ready_line_guide_;
   std::uint64_t ready_line_action_id_{0};
   bool line_failure_pending_done_{false};
