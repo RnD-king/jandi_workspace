@@ -357,6 +357,10 @@ private:
   CameraMode moving_object_camera_{CameraMode::kForward};
   std::vector<MovingObjectSample> moving_object_samples_;
   std::optional<MovingObjectReadyMean> moving_object_ready_mean_;
+  // Keep queued B's identity even if transport accepts both A DONE and
+  // B DONE before the next camera frame. Never dispatch B twice.
+  std::uint64_t object_queued_parent_id_{0};
+  std::optional<ControlCommand> object_queued_successor_;
   std::optional<LineGuide> last_ready_line_guide_;
   std::uint64_t ready_line_action_id_{0};
   bool line_failure_pending_done_{false};
