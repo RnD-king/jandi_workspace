@@ -220,7 +220,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "goal.stable_min_hits", "goal.stable_window");
   PositiveInt(c.goal.lost_frames, "goal.lost_frames");
   Unit(c.goal.smooth_alpha, "goal.smooth_alpha");
-  Nonnegative(c.goal.post_pickup_wait_sec, "goal.post_pickup_wait_sec");
+  NonnegativeInt(c.goal.post_pickup_walk_fallback_actions, "goal.post_pickup_walk_fallback_actions");
   Nonnegative(c.goal.target_u_px, "goal.target_u_px");
   Nonnegative(c.goal.approach_u_deadband_px, "goal.approach_u_deadband_px");
   Nonnegative(c.goal.fine_adjust_start_z_m, "goal.fine_adjust_start_z_m");
@@ -412,7 +412,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "stable_min_hits", c.goal.stable_min_hits);
   Assign(g, "lost_frames", c.goal.lost_frames);
   Assign(g, "smooth_alpha", c.goal.smooth_alpha);
-  Assign(g, "post_pickup_wait_sec", c.goal.post_pickup_wait_sec);
+  Assign(g, "post_pickup_walk_fallback_actions", c.goal.post_pickup_walk_fallback_actions);
   Assign(g, "target_u_px", c.goal.target_u_px);
   Assign(g, "approach_u_deadband_px", c.goal.approach_u_deadband_px);
   Assign(g, "fine_adjust_start_z_m", c.goal.fine_adjust_start_z_m);
