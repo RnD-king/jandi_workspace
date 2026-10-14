@@ -753,8 +753,18 @@ int main() {
     ready_frame.ball_target=Ball(.5,i>=12 ? .8 : .2);
     ready_frame.delivery_feedback={ball_ready_id,true,false,i==27};
     ready_result=ball_ready.Step(ready_frame);
-    assert(ready_result.command.action_id==ball_ready_id);
+    if (i<27) assert(ready_result.command.action_id==ball_ready_id);
   }
+  // A=23, B=21: READY must reserve B, not wait for A's DONE.
+  const auto ball_queued_id=ready_result.command.action_id;
+  assert(ball_queued_id!=0 && ball_queued_id!=ball_ready_id);
+  assert(ready_result.command.action==MissionAction::kStepForwardTwo);
+  assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
+  ready_frame=Frame(2.8); ready_frame.ball_target=Ball(.5,.2);
+  ready_frame.delivery_feedback={ball_queued_id,true,false,false};
+  ready_result=ball_ready.Step(ready_frame);
+  assert(ready_result.command.action_id==ball_queued_id);
+  assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionStart);
   ready_frame=Frame(3.0); ready_frame.ball_target=Ball(.5,.2);
   ready_frame.delivery_feedback={ball_ready_id,true,true,false};
   ready_result=ball_ready.Step(ready_frame);
@@ -762,7 +772,36 @@ int main() {
   assert(ready_result.object_ready_mean_used);
   assert(ready_result.ball.mode==BallMode::kApproachTwoBeforeDown);
   assert(ready_result.command.action==MissionAction::kStepForwardTwo);
-  assert(ready_result.command.action_id!=ball_ready_id);
+  assert(ready_result.command.action_id==ball_queued_id);
+  assert(ready_result.command.control_phase==ControlPhase::kWaitingActionDone);
+  // Duplicate completion cannot invent a third action.
+  ready_frame=Frame(3.1); ready_frame.ball_target=Ball(.5,.2);
+  ready_frame.delivery_feedback={ball_ready_id,true,true,false};
+  ready_result=ball_ready.Step(ready_frame);
+  assert(ready_result.command.action_id==ball_queued_id);
+
+  // A=23 can reserve B=25. B's number never restricts READY queue admission.
+  MissionController turn_successor(ready_cfg);
+  ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
+  ready_result=turn_successor.Step(ready_frame);
+  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  const auto turn_source_id=ready_result.command.action_id;
+  for (int i=1;i<=27;++i) {
+    ready_frame=Frame(i*.1);
+    ready_frame.ball_target=Ball(i>=12 ? .95 : .5,.2);
+    ready_frame.delivery_feedback={turn_source_id,true,false,i==27};
+    ready_result=turn_successor.Step(ready_frame);
+  }
+  assert(ready_result.command.command_type==CommandType::kAction);
+  assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
+  assert(ready_result.command.action==MissionAction::kStepForwardRightTwo);
+  const auto turn_successor_id=ready_result.command.action_id;
+  ready_frame=Frame(3.0); ready_frame.ball_target=Ball(.5,.2);
+  ready_frame.delivery_feedback={turn_source_id,true,true,false};
+  ready_result=turn_successor.Step(ready_frame);
+  assert(ready_result.object_ready_mean_used);
+  assert(ready_result.command.action_id==turn_successor_id);
+  assert(ready_result.command.action==MissionAction::kStepForwardRightTwo);
 
   // Directional object approaches (24/25) change the camera heading
   // during the motion. Even a fully valid READY 10/7 window must be
@@ -926,12 +965,16 @@ int main() {
     ready_frame.delivery_feedback={hurdle_ready_id,true,false,i==27};
     ready_result=hurdle_ready.Step(ready_frame);
   }
+  assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
+  const auto hurdle_queued_id=ready_result.command.action_id;
   ready_frame=Frame(3.0); ready_frame.hurdle_target=Ball(.5,.9);
   ready_frame.delivery_feedback={hurdle_ready_id,true,true,false};
   ready_result=hurdle_ready.Step(ready_frame);
   assert(!ready_result.post_motion_observing);
   assert(ready_result.object_ready_mean_used);
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
+  assert(ready_result.command.action_id==hurdle_queued_id);
 
   // GOAL: center-depth mean prevents premature camera transition at DONE.
   auto goal_ready_cfg=ready_cfg;
@@ -953,6 +996,9 @@ int main() {
     ready_frame.delivery_feedback={goal_ready_id,true,false,i==27};
     ready_result=goal_ready.Step(ready_frame);
   }
+  assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
+  const auto goal_queued_id=ready_result.command.action_id;
   ready_frame=Frame(3.0); ready_frame.backboard_target=Ball(.5,.3);
   ready_frame.backboard_center_depth_m=.5;
   ready_frame.delivery_feedback={goal_ready_id,true,true,false};
@@ -960,6 +1006,7 @@ int main() {
   assert(!ready_result.post_motion_observing);
   assert(ready_result.object_ready_mean_used);
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
+  assert(ready_result.command.action_id==goal_queued_id);
   // A physical RESET must publish a fresh camera FORWARD request even when
   // the last software camera feedback already claims FORWARD/settled.
   MissionController reset_probe(c);
