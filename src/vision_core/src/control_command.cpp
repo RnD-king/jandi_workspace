@@ -6,6 +6,13 @@
 #include <cmath>
 
 namespace vision_core {
+namespace {
+bool IsLongLineAction(MissionAction action) {
+  return action == MissionAction::kStepForwardFive ||
+         action == MissionAction::kStepForwardLeft ||
+         action == MissionAction::kStepForwardRight;
+}
+} // namespace
 ControlCommandCoordinator::ControlCommandCoordinator()
     : ControlCommandCoordinator(LoadDefaultAlgorithmConfig().command) {}
 
