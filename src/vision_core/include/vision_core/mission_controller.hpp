@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <deque>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include "vision_core/ball_controller.hpp"
@@ -139,7 +140,8 @@ struct MissionFrameResult {
   FootPose foot_pose{FootPose::kWalk};
   bool foot_transition{false};
   bool physical_reset_complete{false};
-  double goal_walk_elapsed_sec{0.0}, goal_walk_remaining_sec{0.0};
+  int goal_walk_actions_completed{0}, goal_walk_actions_remaining{0};
+  bool goal_five_step_completed{false};
   bool goal_walk_gate_active{false};
   BallResult ball;
   HurdleResult hurdle;
@@ -332,7 +334,11 @@ private:
   bool mission_recovery_found_{false};
   bool mission_recovery_verifying_{false};
   double mission_recovery_verify_start_sec_{0.0};
-  double goal_walk_baseline_sec_{0.0};
+  bool post_pickup_goal_line_gate_active_{false};
+  int post_pickup_line_actions_issued_{0};
+  int post_pickup_line_actions_completed_{0};
+  bool post_pickup_five_step_completed_{false};
+  std::unordered_map<std::uint64_t, MissionAction> post_pickup_line_actions_;
   std::deque<bool> mission_recovery_hits_;
   double decision_object_weight_{0.0};
   // Width for renormalizing cached LINE offsets after optical reference edits.
