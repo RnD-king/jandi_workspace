@@ -1212,5 +1212,31 @@ int main() {
   assert(turn_result.active_mission==MissionType::kLine);
   assert(turn_result.command.camera_request==CameraRequest::kNone);
 
+  // Switching GOAL trial start mode only changes the next explicit Reset.
+  {
+    auto trial_cfg=LoadDefaultAlgorithmConfig();
+    trial_cfg.enable_ball=false;
+    trial_cfg.enable_hurdle=false;
+    trial_cfg.enable_goal=true;
+    trial_cfg.initial_has_ball=true;
+    MissionController trial_toggle(trial_cfg);
+    auto trial_line=trial_toggle.Step(Frame(0.));
+    assert(trial_line.active_mission==MissionType::kLine);
+    const auto original_id=trial_line.command.action_id;
+    assert(original_id!=0);
+    trial_toggle.SetGoalTrialStartForward(true);
+    // Setter itself must never interrupt the ongoing LINE mission.
+    assert(trial_toggle.Step(Frame(.1)).active_mission==MissionType::kLine);
+    trial_toggle.Reset(true);
+    const auto near_start=trial_toggle.Step(Frame(1.));
+    assert(near_start.active_mission==MissionType::kGoal);
+    assert(near_start.goal.mode==GoalMode::kForwardApproach);
+    trial_toggle.SetGoalTrialStartForward(false);
+    trial_toggle.Reset(true);
+    const auto line_again=trial_toggle.Step(Frame(2.));
+    assert(line_again.active_mission==MissionType::kLine);
+    assert(line_again.command.action_id>original_id);
+  }
+
   return 0;
 }
