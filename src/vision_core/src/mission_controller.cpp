@@ -1175,6 +1175,15 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
              ActionCategory::kLocomotion,0,false};
     camera_request=CameraRequest::kNone; phase=901;
   }
+  // Reserve B by A's READY mean without stepping the real mission FSM.
+  // Apply before permission gates so PAUSE and manual restrictions always win.
+  MissionType command_mission = active_mission_;
+  if (ready_object_successor && moving_object_ready_mean_ &&
+      !observation_hold && camera_request == CameraRequest::kNone &&
+      active_mission_ == moving_object_ready_mean_->mission) {
+    request = *ready_object_successor;
+    command_mission = ready_object_successor_mission.value_or(active_mission_);
+  }
   // one-shot tuning gate는 perception/FSM/feedback 처리를 막거나 기존
   // pending/queued action을 취소하지 않는다. coordinator 직전의 새 LINE
   // request만 제거하여 READY/DONE 조기 반환 경로까지 동일하게 막는다.
@@ -1195,20 +1204,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     request = {};
     camera_request = CameraRequest::kNone;
   }
-  // Queue B only at A's READY, using the validated 40%-READY average.
-  // The decision uses a DONE simulation above; the real FSM still sees A
-  // as active, and transitions only on the genuine A DONE.
-  if (ready_object_successor && !observation_hold &&
-      active_mission_ == moving_object_ready_mean_->mission &&
-      camera_request == CameraRequest::kNone)
-    request = *ready_object_successor;
-  if (active_mission_ != MissionType::kLine &&
+  if (command_mission != MissionType::kLine &&
       request.category == ActionCategory::kLocomotion &&
       config_.UsesObjectReadyMean(request.action))
     request.line_queue_eligible = true;
   output.command = command_coordinator_.Compute(
-      ready_object_successor_mission.value_or(active_mission_), phase,
-      request, camera_request, input.delivery_feedback, input.now_sec);
+      command_mission, phase, request, camera_request,
+      input.delivery_feedback, input.now_sec);
   if (config_.test_mission!=MissionType::kNone && config_.test_stage==3 &&
       output.command.command_type==CommandType::kAction && TestExecutionReady())
     test_execution_started_=true;
