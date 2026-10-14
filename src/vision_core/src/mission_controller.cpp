@@ -580,10 +580,37 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     std::optional<double> line_image_center_u) {
   MissionFrameInput input = source;
   TrackMovingObjectReadyWindow(input);
+  // Compute B on a disposable DONE simulation. Never advance A's live FSM
+  // until its real DONE. Manual tuning keeps Preview/Commit as the only admission.
+  std::optional<ActionRequest> ready_object_successor;
+  if (!input.manual_observation_control && input.command_transport_enabled &&
+      input.delivery_feedback.ready && !input.delivery_feedback.done &&
+      moving_object_ready_mean_ &&
+      moving_object_ready_mean_->action_id == input.delivery_feedback.action_id &&
+      active_mission_ == moving_object_ready_mean_->mission &&
+      last_command_.action_id == moving_object_ready_mean_->action_id &&
+      input.allow_new_commands && input.allow_new_body_actions) {
+    MissionController speculative = *this;
+    MissionFrameInput complete = input;
+    complete.delivery_feedback = {input.delivery_feedback.action_id, true, true, false};
+    const MissionFrameResult proposed =
+        speculative.StepWithLineImageCenter(complete, line_image_center_u);
+    const ControlCommand &next = proposed.command;
+    if (next.command_type == CommandType::kAction &&
+        next.action_id != 0 && next.mission == active_mission_ &&
+        next.action != MissionAction::kNone &&
+        next.camera_request == CameraRequest::kNone) {
+      ActionRequest b;
+      b.action = next.action;
+      b.category = next.action_category;
+      b.target_yaw_deg = next.target_yaw_deg;
+      b.line_queue_eligible = config_.UsesObjectReadyMean(b.action);
+      ready_object_successor = b;
+    }
+  }
   bool applied_object_ready_mean = false;
   if (moving_object_ready_mean_ &&
       input.delivery_feedback.done &&
-      last_command_.action_id == moving_object_ready_mean_->action_id &&
       input.delivery_feedback.action_id == moving_object_ready_mean_->action_id &&
       active_mission_ == moving_object_ready_mean_->mission &&
       input.camera_feedback.settled &&
@@ -1165,6 +1192,17 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     request = {};
     camera_request = CameraRequest::kNone;
   }
+  // Queue B only at A's READY, using the validated 40%-READY average.
+  // The decision uses a DONE simulation above; the real FSM still sees A
+  // as active, and transitions only on the genuine A DONE.
+  if (ready_object_successor && !observation_hold &&
+      active_mission_ == moving_object_ready_mean_->mission &&
+      camera_request == CameraRequest::kNone)
+    request = *ready_object_successor;
+  if (active_mission_ != MissionType::kLine &&
+      request.category == ActionCategory::kLocomotion &&
+      config_.UsesObjectReadyMean(request.action))
+    request.line_queue_eligible = true;
   output.command = command_coordinator_.Compute(
       active_mission_, phase, request, camera_request,
       input.delivery_feedback, input.now_sec);
@@ -1181,7 +1219,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     ready_line_action_id_ = 0;
   // The transport may already have accepted DONE while an earlier ACK/READY
   // still awaits sensory processing. Keep its FSM ID until that DONE edge.
-  if (output.command.action_id!=0 || action_feedback.action_done || last_command_.action_id==0)
+  // While B is reserved, last_command_ must still identify executing A.
+  // Otherwise A's real DONE would be lost by object tracking and mission FSM.
+  const bool object_queued_wait =
+      active_mission_ != MissionType::kLine &&
+      (output.command.control_phase == ControlPhase::kWaitingQueuedActionAck ||
+       output.command.control_phase == ControlPhase::kWaitingQueuedActionStart);
+  if (!object_queued_wait &&
+      (output.command.action_id!=0 || action_feedback.action_done || last_command_.action_id==0))
     last_command_ = output.command;
   output.active_mission = active_mission_;
   output.ball = ball_result_; output.hurdle = hurdle_result_;
