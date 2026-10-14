@@ -6,14 +6,6 @@
 #include <cmath>
 
 namespace vision_core {
-namespace {
-bool IsLongLineAction(MissionAction action) {
-  return action == MissionAction::kStepForwardFive ||
-         action == MissionAction::kStepForwardLeft ||
-         action == MissionAction::kStepForwardRight;
-}
-} // namespace
-
 ControlCommandCoordinator::ControlCommandCoordinator()
     : ControlCommandCoordinator(LoadDefaultAlgorithmConfig().command) {}
 
@@ -41,11 +33,12 @@ ControlCommand ControlCommandCoordinator::BeginAction(
   return command;
 }
 
-ControlCommand ControlCommandCoordinator::BeginQueuedLineAction(
+ControlCommand ControlCommandCoordinator::BeginQueuedAction(
     ControlCommand command, const ActionRequest &request) {
   queued_action_id_ = next_action_id_++;
   if (next_action_id_ == 0) next_action_id_ = 1;
   queued_request_ = request;
+  queued_mission_ = command.mission;
   queued_issued_sec_ = now_sec_;
   queued_acknowledged_ = false;
   command.command_type = CommandType::kAction;
@@ -60,7 +53,7 @@ ControlCommand ControlCommandCoordinator::BeginQueuedLineAction(
 ControlCommand ControlCommandCoordinator::PendingCommand(
     ControlCommand command) const {
   if (queued_action_id_ != 0) {
-    command.mission = MissionType::kLine;
+    command.mission = queued_mission_;
     command.action_id = queued_action_id_;
     command.action = queued_request_.action;
     command.action_category = queued_request_.category;
@@ -120,13 +113,14 @@ ControlCommand ControlCommandCoordinator::Compute(
         suppressed_mission_action_ = pending_request_.action;
       if (queued_action_id_ != 0) {
         pending_action_id_ = queued_action_id_;
-        pending_mission_ = MissionType::kLine;
+        pending_mission_ = queued_mission_;
         pending_request_ = queued_request_;
         pending_issued_sec_ = queued_issued_sec_;
         pending_acknowledged_ = queued_acknowledged_;
         pending_ready_ = false;
         queued_action_id_ = 0;
         queued_request_ = {};
+        queued_mission_ = MissionType::kLine;
         queued_issued_sec_ = 0.0;
         queued_acknowledged_ = false;
         ObserveExecutionTime({}, now_sec); // Queued execution begins at current DONE.
@@ -160,13 +154,15 @@ ControlCommand ControlCommandCoordinator::Compute(
   }
 
   if (pending_action_id_ != 0) {
+    // READY admission is governed by the currently executing action A.
+    // The successor B may be any valid ActionCommand, including a different
+    // action number or mission; the executor performs full preparation before ACK.
     if (queued_action_id_ == 0 && pending_ready_ &&
-        pending_mission_ == MissionType::kLine &&
-        pending_request_.category == ActionCategory::kLocomotion &&
-        IsLongLineAction(pending_request_.action) &&
-        mission == MissionType::kLine && request.line_queue_eligible &&
-        request.action != MissionAction::kNone) {
-      return BeginQueuedLineAction(command, request);
+        pending_request_.line_queue_eligible &&
+        request.action != MissionAction::kNone &&
+        request.category != ActionCategory::kNone &&
+        camera_request == CameraRequest::kNone) {
+      return BeginQueuedAction(command, request);
     }
     return PendingCommand(command);
   }
@@ -193,6 +189,7 @@ void ControlCommandCoordinator::Reset(bool preserve_action_ids) {
   pending_ready_ = false;
   queued_action_id_ = 0;
   queued_request_ = {};
+  queued_mission_ = MissionType::kLine;
   queued_issued_sec_ = 0.0;
   queued_acknowledged_ = false;
   action_ack_timed_out_ = false;
