@@ -171,6 +171,8 @@ public:
     declare_parameter<bool>("enable_goal_controller", algorithm_defaults.enable_goal);
     // all은 위 enable_* 값을 따르고, 나머지는 지정한 알고리즘 하나만 실행한다.
     declare_parameter<std::string>("algorithm_mode", "all");
+    // rqt may select GOAL's starting phase, but only while disarmed.
+    declare_parameter<bool>("goal_trial_start_forward", algorithm_defaults.goal_trial_start_forward);
     // 실제 카메라 대신 endpoint 도달 feedback을 모사하는 시험 옵션이다.
     declare_parameter<bool>("simulate_camera_feedback", false);
     // 실제 executor 없이 ACK/READY/DONE lifecycle을 시험하는 명시적
@@ -317,6 +319,9 @@ public:
     // Goal 단독 실행만 공 집기 과정을 생략한다. 통합 모드는 반드시 Ball
     // 성공 결과를 통해서만 has_ball이 켜진다.
     mission_config.initial_has_ball = algorithm_mode_ == "goal";
+    goal_trial_start_forward_pending_ = algorithm_mode_ == "goal" &&
+        get_parameter("goal_trial_start_forward").as_bool();
+    mission_config.goal_trial_start_forward = goal_trial_start_forward_pending_;
     // ROS override가 shared YAML validation을 우회하지 못하게 하고, 무거운
     // TensorRT engine을 만들기 전에 fail-fast한다.
     vision_core::ValidateAlgorithmConfig(mission_config);
@@ -324,6 +329,30 @@ public:
                                             conf_thres_);
     mission_controller_ =
         std::make_unique<vision_core::MissionController>(mission_config);
+    // No change to an already running mission: only the next START resets
+    // the controller with this selected trial starting mode.
+    goal_trial_parameter_handle_ = add_on_set_parameters_callback(
+        [this](const std::vector<rclcpp::Parameter>& parameters) {
+          rcl_interfaces::msg::SetParametersResult response;
+          response.successful=true;
+          std::optional<bool> proposed;
+          for (const auto &parameter : parameters) {
+            if (parameter.get_name() != "goal_trial_start_forward") continue;
+            if (parameter.get_type() != rclcpp::ParameterType::PARAMETER_BOOL) {
+              response.successful=false;
+              response.reason="goal_trial_start_forward must be a bool";
+              return response;
+            }
+            if (run_state_ != RunState::kWaitStart || algorithm_mode_ != "goal") {
+              response.successful=false;
+              response.reason="goal_trial_start_forward requires GOAL mode and WAIT_START (RESET first)";
+              return response;
+            }
+            proposed=parameter.as_bool();
+          }
+          if (proposed) goal_trial_start_forward_pending_=*proposed;
+          return response;
+        });
 
     camera_intrinsics_ = {fx, fy, cx, cy};
 
@@ -367,6 +396,7 @@ public:
             response->message = "START requires WAIT_START (RESET when PAUSED)";
             return;
           }
+          mission_controller_->SetGoalTrialStartForward(goal_trial_start_forward_pending_);
           mission_controller_->Reset(true);  // Preserve all issued action IDs.
           BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
@@ -1888,6 +1918,9 @@ private:
   int backboard_depth_strip_width_px_{};
   double max_depth_age_sec_{0.20};
   std::string algorithm_mode_{"all"};
+  bool goal_trial_start_forward_pending_{false};
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
+      goal_trial_parameter_handle_;
 
   // 디버그 카운터
   size_t frames_count_{0};

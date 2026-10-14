@@ -73,13 +73,14 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.ball.down_search_timeout_sec, "ball.down_search_timeout_sec");
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
+  NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
   NonnegativeInt(c.ball.post_pickup_back_steps, "ball.post_pickup_back_steps");
   Nonnegative(c.hurdle.down_one_step_v_px, "hurdle.down_one_step_v_px");
   Nonnegative(c.hurdle.fine_mode_v_px, "hurdle.fine_mode_v_px");
   if (c.hurdle.down_one_step_v_px >= c.hurdle.fine_mode_v_px)
     throw std::runtime_error("hurdle DOWN thresholds must be ordered");
   Nonnegative(c.hurdle.approach_short_v_px, "hurdle.approach_short_v_px");
-  Positive(c.hurdle.down_search_timeout_sec, "hurdle.down_search_timeout_sec");
+  PositiveInt(c.hurdle.down_search_max_steps, "hurdle.down_search_max_steps");
   Positive(c.hurdle.recovery_observation_sec, "hurdle.recovery_observation_sec");
   PositiveInt(c.hurdle.recovery_max_observations, "hurdle.recovery_max_observations");
   Nonnegative(c.hurdle.target_u_px, "hurdle.target_u_px");
@@ -353,6 +354,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "down_search_timeout_sec", c.ball.down_search_timeout_sec);
   Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
   Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
+  Assign(b, "recovery_walk_turn_max", c.ball.recovery_walk_turn_max);
   Assign(b, "post_pickup_back_steps", c.ball.post_pickup_back_steps);
 
   Assign(b, "stable_window", c.ball.stable_window);
@@ -379,7 +381,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "down_one_step_v_px", c.hurdle.down_one_step_v_px);
   Assign(h, "fine_mode_v_px", c.hurdle.fine_mode_v_px);
   Assign(h, "approach_short_v_px", c.hurdle.approach_short_v_px);
-  Assign(h, "down_search_timeout_sec", c.hurdle.down_search_timeout_sec);
+  Assign(h, "down_search_max_steps", c.hurdle.down_search_max_steps);
   Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
   Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);
   Assign(h, "target_u_px", c.hurdle.target_u_px);

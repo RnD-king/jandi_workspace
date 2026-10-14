@@ -27,6 +27,7 @@ enum class BallMode {
   kApproachTwoBeforeDown,
   kCoarseAdjust,
   kWaitFinePose,
+  kBallRecoveryWalkTurn, // WALK-stance 27/28 search before stationary fallback
 };
 
 struct BallConfig {
@@ -34,6 +35,7 @@ struct BallConfig {
   double down_search_timeout_sec{};
   double recovery_observation_sec{};
   int recovery_max_observations{};
+  int recovery_walk_turn_max{5};
   int post_pickup_back_steps{};
 
   int stable_window{};
@@ -116,6 +118,7 @@ public:
         hit_history_.size()>=static_cast<std::size_t>(config_.stable_window);
   }
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
+  int RecoveryWalkTurnsCompleted() const { return recovery_walk_turns_completed_; }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   double DownSearchRemaining(double now) const {
     return std::max(0.0, config_.down_search_timeout_sec -
@@ -137,6 +140,7 @@ private:
   BallMode mode_{BallMode::kLineFollow};
   std::deque<bool> hit_history_;
   std::deque<bool> upper_acquire_history_;
+  std::deque<std::optional<double>> recent_ball_u_;
   int last_approach_steps_{0};
   bool fine_pose_entered_{false};
   bool approach_two_issued_{false};
@@ -152,6 +156,11 @@ private:
   int completed_contact_steps_{0};
   TrackedBall tracked_;
   double last_seen_u_px_{0.0};
+  std::optional<double> last_stable_ball_u_;
+  std::optional<bool> recovery_turn_left_;
+  int recovery_walk_turns_completed_{0};
+  bool recovery_walk_turn_pending_{false};
+  bool recovery_turn_search_exhausted_{false};
   double state_enter_sec_{0.0};
   double settle_until_sec_{0.0};
   double ignore_ball_until_sec_{0.0};

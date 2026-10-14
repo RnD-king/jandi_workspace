@@ -81,5 +81,55 @@ int main() {
   r=fresh_down.Compute(H(.8),640,480,.2,
                        {CameraMode::kDown,true},{}, straight);
   assert(r.mode==HurdleMode::kDownSearch && !r.tracked.visible);
+  // Identical 27/28 JSON, but mid-row 4/6 must DOWN on post-DONE
+  // loss whereas bottom-row 7/9 must use forward stationary recovery.
+  for(const auto direction : {CruiseDirection::kLeft,CruiseDirection::kRight}) {
+    CruiseDecision steering=straight; steering.direction=direction;
+    for(const auto pair : std::vector<std::pair<double,bool>>{
+        {.5,true}, {.7,true}, {.8,false}}) {
+      HurdleController zone(c,3.0);
+      const auto selected=zone.Compute(H(pair.first),640,480,4.0,{}, {},steering);
+      assert(selected.action.action!=MissionAction::kNone);
+      auto missing_done=zone.Compute({},640,480,4.1,{}, done,steering);
+      assert(missing_done.camera_request==CameraRequest::kNone);
+      ActionExecutionFeedback post_done; post_done.observation_complete=true;
+      auto settled=zone.Compute({},640,480,5.2,{}, post_done,steering);
+      if(pair.second) {
+        assert(settled.mode==HurdleMode::kWaitCameraDown);
+        assert(settled.camera_request==CameraRequest::kDown);
+      } else {
+        assert(settled.mode==HurdleMode::kRecoveryForward);
+        assert(settled.camera_request==CameraRequest::kNone);
+      }
+    }
+  }
+  // Ten completed 1-step motions in DOWN search, never eleven; no time limit.
+  HurdleConfig count_cfg=c;
+  count_cfg.down_search_max_steps=10;
+  HurdleController step_search(count_cfg,3.0);
+  step_search.StartTestNear();
+  auto step_result=step_search.Compute({},640,480,100.,{CameraMode::kDown,true},{},straight);
+  assert(step_result.mode==HurdleMode::kDownSearch);
+  for(int n=1;n<=10;++n) {
+    step_result=step_search.Compute({},640,480,100.+10.*n, {CameraMode::kDown,true},{},straight);
+    assert(step_result.action.action==MissionAction::kStepForwardOne);
+    step_result=step_search.Compute({},640,480,100.+10.*n+.1,
+        {CameraMode::kDown,true},done,straight);
+    assert(step_search.DownSearchStepsRemaining()==10-n);
+    if(n<10) assert(step_result.mode==HurdleMode::kDownSearch);
+  }
+  assert(step_result.mode==HurdleMode::kFailed);
+  assert(step_result.action.action==MissionAction::kNone);
+  // Seeing the obstacle after step ten wins over exhausted counter.
+  HurdleController final_found(count_cfg,3.0);
+  final_found.StartTestNear();
+  final_found.Compute({},640,480,0,{CameraMode::kDown,true},{},straight);
+  for(int n=1;n<=10;++n) {
+    final_found.Compute({},640,480,n*2.,{CameraMode::kDown,true},{},straight);
+    step_result=final_found.Compute(n==10 ? std::optional<ObjectTarget>(H(.8)) : std::nullopt,
+        640,480,n*2.+.1,{CameraMode::kDown,true},done,straight);
+  }
+  assert(step_result.mode==HurdleMode::kCoarseAdjust);
+
   return 0;
 }

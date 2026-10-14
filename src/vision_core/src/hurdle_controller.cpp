@@ -128,12 +128,15 @@ HurdleResult HurdleController::Compute(
     return result;
   case HurdleMode::kApproach: {
     if (feedback.action_active && !feedback.action_done) return result;
-    if (feedback.action_done && last_approach_steps_!=0) awaiting_approach_observation_=true;
+    if (feedback.action_done && last_approach_pending_) {
+      last_approach_pending_=false;
+      awaiting_approach_observation_=true;
+    }
     if (awaiting_approach_observation_) {
       if (!feedback.observation_complete) return result;
       awaiting_approach_observation_=false;
       if (!tracked_.visible || !tracked_.stable) {
-        if (last_approach_steps_==3) {
+        if (last_approach_zone_ >= 1 && last_approach_zone_ <= 6) {
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
@@ -145,7 +148,7 @@ HurdleResult HurdleController::Compute(
     }
     if (!tracked_.visible) {
       if (lost_count_ >= config_.lost_frames || feedback.action_done) {
-        if (last_approach_steps_ == 3) {
+        if (last_approach_zone_ >= 1 && last_approach_zone_ <= 6) {
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
@@ -170,12 +173,21 @@ HurdleResult HurdleController::Compute(
                   : MissionAction::kStepForwardRightTwo)
           : (left ? MissionAction::kStepForwardLeftOne
                   : MissionAction::kStepForwardRightOneHurdle));
-      if (allow_new_body_actions) last_approach_steps_=0;
+      if (allow_new_body_actions) {
+        last_approach_steps_=steps;
+        last_approach_pending_=true;
+        last_approach_zone_=left ? (steps==4 ? 1 : steps==3 ? 4 : 7)
+                                 : (steps==4 ? 3 : steps==3 ? 6 : 9);
+      }
       return result;
     }
     result.action=Locomotion(steps==2 ? MissionAction::kStepForwardTwo :
         steps==3 ? MissionAction::kStepForwardThree : MissionAction::kStepForwardFour);
-    if (allow_new_body_actions) last_approach_steps_=steps;
+    if (allow_new_body_actions) {
+      last_approach_steps_=steps;
+      last_approach_pending_=true;
+      last_approach_zone_=steps==4 ? 2 : steps==3 ? 5 : 8;
+    }
     if (steps==2) {
       mode_=HurdleMode::kApproachTwoBeforeDown; approach_two_issued_=allow_new_body_actions;
       result.mode=mode_;
@@ -199,6 +211,8 @@ HurdleResult HurdleController::Compute(
       last_seen_u_px_ = config_.target_u_px;
       mode_ = HurdleMode::kDownSearch;
       down_search_started_ = down_search_found_ = false;
+      down_search_steps_completed_=0;
+      down_search_step_pending_=false;
       result.mode = mode_;
       result.tracked = {};
       result.camera_request = CameraRequest::kNone;
@@ -212,20 +226,26 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kDownSearch: {
     down_search_found_=down_search_found_ || (tracked_.visible && tracked_.stable);
     if (feedback.action_active && !feedback.action_done) return result;
+    if (feedback.action_done && down_search_step_pending_) {
+      ++down_search_steps_completed_;
+      down_search_step_pending_=false;
+    }
+    // A target found after the final step remains eligible for COARSE.
     if (down_search_found_) {
       mode_=HurdleMode::kCoarseAdjust; ClearTracking();
       settle_until_sec_=now_sec+config_.recovery_settle_duration_sec;
       result.mode=mode_; result.action={}; return result;
     }
-    if (!down_search_started_) {
-      result.action=Locomotion(MissionAction::kStepForwardOne);
-      if (!allow_new_body_actions) return result;
-      down_search_started_=true; state_enter_sec_=now_sec;
+    if (down_search_steps_completed_ >= config_.down_search_max_steps) {
+      mode_=HurdleMode::kFailed;
+      result.mode=mode_; result.action={}; return result;
     }
-    if (now_sec-state_enter_sec_ >= config_.down_search_timeout_sec) {
-      mode_=HurdleMode::kFailed; result.mode=mode_; result.action={}; return result;
+    result.action=Locomotion(MissionAction::kStepForwardOne);
+    if (allow_new_body_actions && !down_search_step_pending_) {
+      down_search_step_pending_=true;
+      down_search_started_=true;
     }
-    result.action=Locomotion(MissionAction::kStepForwardOne); return result;
+    return result;
   }
   case HurdleMode::kCoarseAdjust:
     if (feedback.action_active && !feedback.action_done) return result;
@@ -350,13 +370,18 @@ void HurdleController::ClearTracking() {
 void HurdleController::ResetToLine(bool clear_ignore) {
   mode_ = HurdleMode::kLineFollow;
   down_search_started_=down_search_found_=false;
+  down_search_steps_completed_=0;
+  down_search_step_pending_=false;
   stationary_recovery_.Begin(0.0);
   completed_contact_steps_=0;
   ClearTracking();
   last_seen_u_px_ = config_.target_u_px;
   state_enter_sec_ = 0.0;
   settle_until_sec_ = 0.0;
-  test_camera_pending_=false; fine_pose_entered_=false; approach_two_issued_=false; last_approach_steps_=0; awaiting_approach_observation_=false;
+  test_camera_pending_=false; fine_pose_entered_=false; approach_two_issued_=false;
+  last_approach_steps_=0; awaiting_approach_observation_=false;
+  last_approach_pending_=false;
+  last_approach_zone_=0;
   if (clear_ignore) ignore_until_sec_ = 0.0;
 }
 

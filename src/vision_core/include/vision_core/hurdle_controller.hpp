@@ -28,7 +28,7 @@ enum class HurdleMode {
 
 struct HurdleConfig {
   double approach_short_v_px{};
-  double down_search_timeout_sec{};
+  int down_search_max_steps{10};
   double recovery_observation_sec{};
   int recovery_max_observations{};
   double target_u_px{};
@@ -65,7 +65,7 @@ struct TrackedHurdle {
 struct HurdleResult {
   int recovery_observations_completed{0};
   double recovery_observation_elapsed_sec{0.0};
-  double down_search_remaining_sec{0.0};
+  int down_search_steps_remaining{0};
   bool active{false};
   CameraRequest camera_request{CameraRequest::kNone};
   HurdleMode mode{HurdleMode::kLineFollow};
@@ -101,9 +101,8 @@ public:
   }
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
-  double DownSearchRemaining(double now) const {
-    return std::max(0.0, config_.down_search_timeout_sec -
-        (down_search_started_ ? now - state_enter_sec_ : 0.0));
+  int DownSearchStepsRemaining() const {
+    return std::max(0, config_.down_search_max_steps - down_search_steps_completed_);
   }
 
 private:
@@ -120,6 +119,8 @@ private:
   std::deque<bool> hit_history_;
   std::deque<bool> acquire_history_;
   bool awaiting_approach_observation_{false};
+  bool last_approach_pending_{false};
+  int last_approach_zone_{0};
   int last_approach_steps_{0};
   bool fine_pose_entered_{false};
   bool approach_two_issued_{false};
@@ -129,6 +130,8 @@ private:
   bool has_smoothed_{false};
   ObjectObservationWindow observation_window_;
   bool down_search_started_{false};
+  int down_search_steps_completed_{0};
+  bool down_search_step_pending_{false};
   bool down_search_found_{false};
   StationaryObjectRecovery stationary_recovery_;
   int completed_back_steps_{0};

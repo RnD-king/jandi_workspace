@@ -1358,7 +1358,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output, double n
   output.ball.down_search_remaining_sec = ball_controller_.DownSearchRemaining(now);
   output.hurdle.recovery_observations_completed = hurdle_controller_.RecoveryObservationsCompleted();
   output.hurdle.recovery_observation_elapsed_sec = hurdle_controller_.RecoveryObservationElapsed(now);
-  output.hurdle.down_search_remaining_sec = hurdle_controller_.DownSearchRemaining(now);
+  output.hurdle.down_search_steps_remaining = hurdle_controller_.DownSearchStepsRemaining();
 }
 
 PerceptionMissionFrameResult MissionController::StepPerception(

@@ -265,6 +265,8 @@ public:
   // 진행 중 action/짧은 동작 후 관측이 없을 때만 LINE direct selector
   // gain/deadband를 상태 손실 없이 교체한다.
   bool UpdateLineP2pTuning(const LineP2pConfig &line_p2p);
+  // Apply on the next START Reset; action IDs must not be recycled.
+  void SetGoalTrialStartForward(bool enabled) { config_.goal_trial_start_forward = enabled; }
   // Discard stale line/object evidence without resetting mission progress.
   void ClearObservationEvidence();
   void Reset(); // Retain the original public ABI for existing clients.
