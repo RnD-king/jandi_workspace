@@ -48,8 +48,7 @@ void HurdlePostWalkPolicy(int steps) {
   assert(r.camera_request==CameraRequest::kNone);
   ActionExecutionFeedback observed; observed.observation_complete=true;
   r=hurdle.Compute({},640,480,.2,{},observed,StraightLine());
-  if (steps==3) assert(r.camera_request==CameraRequest::kDown);
-  else assert(r.mode==HurdleMode::kRecoveryForward && r.camera_request==CameraRequest::kNone);
+  assert(r.mode==HurdleMode::kWaitCameraDown && r.camera_request==CameraRequest::kDown);
 }
 void ResetWaitsForBoth() {
   MissionController core; core.BeginPhysicalReset();
