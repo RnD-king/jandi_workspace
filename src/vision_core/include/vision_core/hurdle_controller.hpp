@@ -120,7 +120,6 @@ private:
   std::deque<bool> acquire_history_;
   bool awaiting_approach_observation_{false};
   bool last_approach_pending_{false};
-  bool last_approach_down_on_loss_{false}; // issued zone 1-6, not action number
   int last_approach_zone_{0};
   int last_approach_steps_{0};
   bool fine_pose_entered_{false};
