@@ -780,6 +780,34 @@ int main() {
   ready_result=ball_ready.Step(ready_frame);
   assert(ready_result.command.action_id==ball_queued_id);
 
+  // Feedback callbacks can accept A DONE and B DONE before the next image.
+  // A's late sensory DONE must NOT create a second B with a fresh ID.
+  MissionController early_done(ready_cfg);
+  ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
+  ready_result=early_done.Step(ready_frame);
+  const auto early_a=ready_result.command.action_id;
+  for (int i=1;i<=27;++i) {
+    ready_frame=Frame(i*.1);
+    ready_frame.ball_target=Ball(.5,i>=12 ? .8 : .2);
+    ready_frame.delivery_feedback={early_a,true,false,i==27};
+    ready_result=early_done.Step(ready_frame);
+  }
+  const auto early_b=ready_result.command.action_id;
+  assert(early_b!=early_a && early_b!=0);
+  early_done.AcceptDeliveryFeedback({early_b,true,false,false},2.8);
+  early_done.AcceptDeliveryFeedback({early_a,true,true,false},2.9);
+  early_done.AcceptDeliveryFeedback({early_b,true,true,false},2.95);
+  ready_frame=Frame(3.0); ready_frame.ball_target=Ball(.5,.2);
+  ready_frame.delivery_feedback={early_a,true,true,false};
+  ready_result=early_done.Step(ready_frame);
+  assert(ready_result.object_ready_mean_used);
+  assert(ready_result.command.action_id==0);
+  ready_frame=Frame(3.1);
+  ready_frame.delivery_feedback={early_b,true,true,false};
+  ready_result=early_done.Step(ready_frame);
+  assert(ready_result.command.action_id==0);
+  assert(ready_result.command.camera_request==CameraRequest::kDown);
+
   // A=23 can reserve B=25. B's number never restricts READY queue admission.
   MissionController turn_successor(ready_cfg);
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
@@ -802,6 +830,16 @@ int main() {
   assert(ready_result.object_ready_mean_used);
   assert(ready_result.command.action_id==turn_successor_id);
   assert(ready_result.command.action==MissionAction::kStepForwardRightTwo);
+  // B=25 gets READY from the executor, but no B->C reservation: 25 is not
+  // in the object's YAML current-action allowlist.
+  for (int i=31;i<=40;++i) {
+    ready_frame=Frame(i*.1);
+    ready_frame.ball_target=Ball(.5,.2);
+    ready_frame.delivery_feedback={turn_successor_id,true,false,i==40};
+    ready_result=turn_successor.Step(ready_frame);
+    assert(ready_result.command.action_id==turn_successor_id);
+    assert(ready_result.command.control_phase!=ControlPhase::kWaitingQueuedActionAck);
+  }
 
   // Directional object approaches (24/25) change the camera heading
   // during the motion. Even a fully valid READY 10/7 window must be
