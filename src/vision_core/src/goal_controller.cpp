@@ -621,9 +621,14 @@ GoalResult GoalController::Compute(
     if (feedback.action_done) {
       has_ball_ = false;
       ball_consumed_ = true;
-      mode_ = GoalMode::kPostShootBackAway;
-      completed_back_steps_ = 0;
-      back_away_issued_ = false;
+      if (config_.post_shoot_back_steps > 0) {
+        mode_ = GoalMode::kPostShootBackAway;
+        completed_back_steps_ = 0;
+        back_away_issued_ = false;
+      } else {
+        mode_ = GoalMode::kReturnCameraToLine;
+        result.camera_request = CameraRequest::kForward;
+      }
       result.mode = mode_;
       result.action = {};
     }
