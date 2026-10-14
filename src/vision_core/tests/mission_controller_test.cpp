@@ -1193,9 +1193,9 @@ int main() {
   turn_frame=Frame(2.3); turn_frame.line_centers.clear();
   turn_result=rotation_only.Step(turn_frame);
   assert(turn_result.command.action==MissionAction::kDefaultPoseMode);
-  const auto recovery_pose_id=turn_result.command.action_id;
+  const auto goal_recovery_pose_id=turn_result.command.action_id;
   turn_frame=Frame(2.4); turn_frame.line_centers.clear();
-  turn_frame.delivery_feedback={recovery_pose_id,true,true,false};
+  turn_frame.delivery_feedback={goal_recovery_pose_id,true,true,false};
   turn_result=rotation_only.Step(turn_frame);
   turn_frame=Frame(2.5); turn_frame.line_centers.clear();
   turn_result=rotation_only.Step(turn_frame);
