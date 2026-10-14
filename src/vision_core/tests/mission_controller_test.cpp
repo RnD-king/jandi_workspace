@@ -1198,11 +1198,14 @@ int main() {
   turn_frame.delivery_feedback={goal_recovery_pose_id,true,true,false};
   turn_result=rotation_only.Step(turn_frame);
   turn_frame=Frame(2.5); turn_frame.line_centers.clear();
+  turn_result=rotation_only.Step(turn_frame); // pose DONE starts normal 1s observation
+  assert(turn_result.command.action_id==0);
+  turn_frame=Frame(3.6); turn_frame.line_centers.clear();
   turn_result=rotation_only.Step(turn_frame);
   assert(turn_result.command.action==MissionAction::kTurnRight ||
          turn_result.command.action==MissionAction::kTurnLeft);
   const auto recovery_turn_id=turn_result.command.action_id;
-  turn_frame=Frame(2.8); turn_frame.line_centers.clear();
+  turn_frame=Frame(3.9); turn_frame.line_centers.clear();
   turn_frame.delivery_feedback={recovery_turn_id,true,true,false};
   turn_result=rotation_only.Step(turn_frame);
   assert(turn_result.goal_walk_actions_completed==1);
