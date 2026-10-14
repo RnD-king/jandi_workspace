@@ -94,7 +94,19 @@ for side, motion in {
         )
 state = (root / 'include/motion_executor_state.hpp').read_text()
 checks['all-mission READY'] = 'IsReadyWalkAction(active_action)' in state
-checks['LINE-only queue'] = 'IsLongLineAction(active_mission, active_action)' in state
+# The executor only admits one successor B after the CURRENT action A sent
+# READY. B's mission and action number must not restrict queue admission.
+admission = state.split('Admission Evaluate(uint64_t id, uint8_t mission, uint16_t action) const {', 1)[1].split('void Activate(', 1)[0]
+checks['READY one-slot queue (current A only)'] = all((
+    'if (id == 0) return Admission::Reject;' in admission,
+    'if (active_id == 0) return Admission::Start;' in admission,
+    'if (ready_sent && queued_id == 0) return Admission::Queue;' in admission,
+    'return Admission::Reject;' in admission,
+    'IsLongLineAction(' not in admission,
+    'IsReadyWalkAction(' not in admission,
+    'mission ==' not in admission,
+    'action ==' not in admission,
+))
 checks['preserved camera calibration'] = all(
     needle in main for needle in (
         '"camera_forward_yaw_tick", 2077', '"camera_forward_pitch_tick", 1537',
