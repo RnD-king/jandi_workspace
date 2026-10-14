@@ -73,7 +73,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.ball.down_search_timeout_sec, "ball.down_search_timeout_sec");
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
-  PositiveInt(c.ball.post_pickup_back_steps, "ball.post_pickup_back_steps");
+  NonnegativeInt(c.ball.post_pickup_back_steps, "ball.post_pickup_back_steps");
   Nonnegative(c.hurdle.down_one_step_v_px, "hurdle.down_one_step_v_px");
   Nonnegative(c.hurdle.fine_mode_v_px, "hurdle.fine_mode_v_px");
   if (c.hurdle.down_one_step_v_px >= c.hurdle.fine_mode_v_px)
@@ -92,7 +92,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.goal.recovery_max_observations, "goal.recovery_max_observations");
   Positive(c.goal.approach_short_z_m, "goal.approach_short_z_m");
   Positive(c.goal.camera_goal_start_z_m, "goal.camera_goal_start_z_m");
-  PositiveInt(c.goal.post_shoot_back_steps, "goal.post_shoot_back_steps");
+  NonnegativeInt(c.goal.post_shoot_back_steps, "goal.post_shoot_back_steps");
   if (c.ball.approach_short_v_px >= c.ball.approach_two_step_v_px ||
       c.hurdle.approach_short_v_px >= c.hurdle.approach_two_step_v_px ||
       c.goal.camera_goal_start_z_m > c.goal.approach_short_z_m ||

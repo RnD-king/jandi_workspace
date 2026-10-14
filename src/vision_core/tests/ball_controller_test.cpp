@@ -128,20 +128,22 @@ int main() {
   assert(r.action.action == MissionAction::kNone);
   assert(r.camera_request == CameraRequest::kNone);
 
-  // pickup 성공 뒤 STEP_BACK 완료 시 즉시 camera-forward 단계로 넘어가며
-  // 같은 back-away action을 다시 발행하지 않는다.
+  // Default post-pickup recovery skips all backward steps and requests FORWARD
+  // camera immediately on the completed stand-up action.
+  assert(c.post_pickup_back_steps == 0);
   r = controller.Compute(std::nullopt, 640,480, .9, down, {});
   assert(r.action.action == MissionAction::kDefaultPosition);
   assert(r.mode == BallMode::kStandUpAfterPickup && r.has_ball);
   r = controller.Compute(std::nullopt, 640,480, 1.0, down, done);
-  assert(r.action.action == MissionAction::kStepBack);
-  r = controller.Compute(std::nullopt, 640,480, 1.1, down, done);
-  assert(r.action.action==MissionAction::kStepBack);
-  r = controller.Compute(std::nullopt,640,480,1.2,down,done);
-  assert(r.action.action==MissionAction::kStepBack);
-  r = controller.Compute(std::nullopt,640,480,1.3,down,done);
+  assert(r.mode == BallMode::kReturnCameraToLine);
   assert(r.action.action == MissionAction::kNone);
   assert(r.camera_request == CameraRequest::kForward);
+  r = controller.Compute(std::nullopt, 640,480, 1.1, down, {});
+  assert(r.action.action == MissionAction::kNone);
+  assert(r.camera_request == CameraRequest::kForward);
+  r = controller.Compute(std::nullopt, 640,480, 1.2, {CameraMode::kForward, true}, {});
+  assert(r.mode == BallMode::kPostPickupLineRecovery);
+  assert(r.action.action == MissionAction::kNone);
 
   BallConfig verify_config = c;
   verify_config.stable_window = 10;

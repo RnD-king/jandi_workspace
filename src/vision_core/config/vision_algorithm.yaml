@@ -30,7 +30,7 @@ vision_algorithm:
     down_search_timeout_sec: 10.0
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
-    post_pickup_back_steps: 3
+    post_pickup_back_steps: 0   # 0: no backing away after pickup; return camera and reacquire line
     stable_window: 10
     stable_min_hits: 7
     lost_frames: 5
@@ -129,7 +129,7 @@ vision_algorithm:
     shoot_yaw_limit_deg: 30.0   # 투척 허용 각도 (±30도)
 
     # 투척 후
-    post_shoot_back_steps: 2    # 투척 완료 후 후진 횟수
+    post_shoot_back_steps: 0    # 0: 투척 후 후진 없이 카메라 FORWARD 및 라인 복귀
 
     # 모션 후 관측 대기
     fine_settle_duration_sec: 0.60

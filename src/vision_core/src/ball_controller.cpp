@@ -353,7 +353,7 @@ BallResult BallController::Compute(
   case BallMode::kStandUpAfterPickup:
     result.action = Mission(MissionAction::kDefaultPosition);
     if (feedback.action_done) {
-      if (has_ball_) {
+      if (has_ball_ && config_.post_pickup_back_steps > 0) {
         mode_ = BallMode::kPostPickupBackAway;
         back_away_issued_ = false;
         completed_back_steps_ = 0;
