@@ -4,6 +4,7 @@ on:
     paths:
       - 'src/vision_core/**'
       - 'src/vision/**'
+      - 'src/forward_walk/**'
       - '.github/workflows/vision-core-regression.yml'
   workflow_dispatch:
 jobs:
@@ -27,3 +28,5 @@ jobs:
           /tmp/vision_backboard_depth_regions_test
       - name: Test mock executor protocol
         run: python3 src/vision/tests/mock_executor_protocol_test.py
+      - name: Test forward_walk source contracts
+        run: python3 src/forward_walk/tests/source_contract_test.py
