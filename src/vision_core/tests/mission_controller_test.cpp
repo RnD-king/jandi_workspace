@@ -504,7 +504,7 @@ int main() {
   in.backboard_target = Ball(.8, .3);
   r = camera_gate.Step(in);
   assert(r.active_mission == MissionType::kGoal);
-  assert(r.command.action == MissionAction::kStepForwardRightOneHurdle);
+  assert(r.command.action == MissionAction::kStepForwardRightOne);
   assert(r.command.action_id != 0);
   // The next OBJECT action must use 10 NEW frames after this actual Action DONE.
   // Its camera remained GOAL throughout, so only the Action event resets evidence.

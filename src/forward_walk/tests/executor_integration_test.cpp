@@ -73,6 +73,7 @@ int main() {
     const auto left=directory/"motions/보행_좌회전전진_20도_최종_초기X.json";
     const auto right=directory/"motions/보행_우회전전진_20도_최종_초기X.json";
     WriteMotion(startup,true);WriteMotion(left);WriteMotion(right);
+    WriteMotion(directory/"motions/우회전_최종.json");
     WriteMotion(directory/"motions/공_재그립.json",false,1968);
     WriteTripleMission(directory/"missions/직진_좌회전_3번.json", left.filename().string());
     WriteTripleMission(directory/"missions/직진_우회전_3번.json", right.filename().string());
@@ -198,7 +199,7 @@ int main() {
             Check(!node->queued_action_,"non-LINE READY erroneously queued another action");
         }
         for(uint16_t code:{14,15,16,17,29,30}) Check(!MainNode::UsesFixedGripperPose(code),"task gripper exclusion missing");
-        for(uint16_t code:{1,2,3,7,11,13,18,21,22,23,24,25,26,27,28})
+        for(uint16_t code:{1,2,3,7,11,13,18,21,22,23,24,25,26,27,28,31})
             Check(MainNode::UsesFixedGripperPose(code),"normal action gripper override missing");
         // 공을 향해 걷기 → 공 잡기 → 다시 걷기에서 action별 팔 목표 전환을 검증한다.
         WriteMotion(directory/"motions/공_줍고일어나기_최종.json");
@@ -276,8 +277,17 @@ int main() {
             Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"new queued walk lost symmetric arms");
         }
         std::cout<<"PASS all six new action ACK/READY/queue/DONE and arm targets\n";
-        // 단일 좌회전/허들 우회전은 JSON을 실행하지만 기존 READY 대상에는 포함되지 않는다.
-        for(uint16_t code:{27,28}) {
+        // A missing action-31 asset must not ACK or move.
+        const auto left_in_place=directory/node->ProgramFileForAction(31);
+        Check(left_in_place==directory/"motions/좌회전_최종.json", "action 31 asset path mismatch");
+        action(35031,31);flush();
+        Check(Count(actions,35031,Status::ACK)==0 &&
+              Count(actions,35031,Status::DONE)==0 &&
+              node->action_transactions_.active_id==0 && !node->motion_in_progress_,
+              "missing action 31 asset was accepted or started");
+        WriteMotion(left_in_place);
+        // Single turns execute once and do not extend the READY action set.
+        for(uint16_t code:{27,28,31}) {
             const uint64_t id=35000+code;
             action(id,code);
             Check(node->action_transactions_.active_id==id,
@@ -287,7 +297,17 @@ int main() {
                   Count(actions,id,Status::READY)==0, "single-turn action lifecycle mismatch");
             Check(Dxl::current.at(19)==1968, "single-turn action lost normal gripper override");
         }
-        std::cout<<"PASS single-turn 27/28 JSON actions without new READY behavior\n";
+        std::cout<<"PASS single-turn 27/28/31 JSON actions and missing-asset rejection\n";
+
+        action(36000,21);
+        pump([&]{return node->action_transactions_.ready_sent;});
+        action(36001,31);
+        Check(node->queued_action_.has_value(),"action 31 could not reserve the READY slot");
+        pump([&]{return node->action_transactions_.completed.Contains(36001);});flush();
+        Check(Count(actions,36001,Status::ACK)==1 &&
+              Count(actions,36001,Status::DONE)==1 &&
+              Count(actions,36001,Status::READY)==0,
+              "queued action 31 lifecycle mismatch");
 
         // 시작 시 읽은 고정값과 다른 RECATCH fixture로 제외 규칙을 검증한다.
         WriteMotion(directory/"motions/공_재그립.json",false,2168);

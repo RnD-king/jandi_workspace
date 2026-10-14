@@ -80,16 +80,30 @@ int main() {
       640,480,1.0,true,{CameraMode::kGoal,true},{});
   assert(off_axis_result.action.action != MissionAction::kShoot);
 
-  // GOAL far approach: use WALK corrections 27/28, never LINE cruise 11/12/13.
-  for (const auto &scenario : std::vector<std::pair<double,MissionAction>>{
-      {.2,MissionAction::kStepForwardLeftOne},
-      {.5,MissionAction::kStepForwardFour},
-      {.8,MissionAction::kStepForwardRightOneHurdle}}) {
-    GoalController far(c,3.0);
-    far.StartForwardTrial();
-    const auto approach=far.Compute({},Board(scenario.first),{},640,480,
-                                   0,true,{CameraMode::kForward,true},{},true,1.8);
-    assert(approach.action.action==scenario.second);
+  // All six approach cells use the same mapping in FORWARD and GOAL views.
+  c.approach_short_z_m=1.2;
+  for (double depth : {1.8,1.2,1.0}) {
+    const bool near=depth<=c.approach_short_z_m;
+    for (const auto &scenario : std::vector<std::pair<double,MissionAction>>{
+        {.2,near ? MissionAction::kTurnLeftInPlace : MissionAction::kStepForwardLeftOne},
+        {.5,near ? MissionAction::kStepForwardThree : MissionAction::kStepForwardFour},
+        {.8,near ? MissionAction::kStepForwardRightOneHurdle : MissionAction::kStepForwardRightOne}}) {
+      GoalController far(c,3.0);
+      far.StartForwardTrial();
+      const auto approach=far.Compute({},Board(scenario.first),{},640,480,
+                                     0,true,{CameraMode::kForward,true},{},true,depth);
+      assert(approach.action.action==scenario.second);
+      assert(approach.action.category==ActionCategory::kLocomotion);
+      assert(approach.camera_request==CameraRequest::kNone);
+      GoalController goal_view(c,3.0);
+      goal_view.StartAfterPickup(0);
+      goal_view.UpdateBallState(carrying);
+      goal_view.Compute({},Board(),{},640,480,0,true,{},{});
+      goal_view.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
+      const auto goal_approach=goal_view.Compute({},Board(scenario.first),{},640,480,
+          .2,true,{CameraMode::kGoal,true},{},true,depth);
+      assert(goal_approach.action.action==scenario.second);
+    }
   }
   GoalController mid(c,3.0);
   mid.StartForwardTrial();

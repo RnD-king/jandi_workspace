@@ -1239,7 +1239,8 @@ private:
     case MissionAction::kStepForwardRightTwo: return "STEP_FORWARD_RIGHT_TWO";
     case MissionAction::kStepForwardRightOne: return "STEP_FORWARD_RIGHT_ONE";
     case MissionAction::kStepForwardLeftOne: return "STEP_FORWARD_LEFT_ONE";
-    case MissionAction::kStepForwardRightOneHurdle: return "STEP_FORWARD_RIGHT_ONE_HUDDLE";
+    case MissionAction::kStepForwardRightOneHurdle: return "TURN_RIGHT_IN_PLACE";
+    case MissionAction::kTurnLeftInPlace: return "TURN_LEFT_IN_PLACE";
     case MissionAction::kPickBall: return "PICK_BALL";
     case MissionAction::kRecatch: return "RECATCH";
     case MissionAction::kHurdle: return "HUDDLE";

@@ -47,7 +47,8 @@ for action, filename in {
     'STEP_FORWARD_RIGHT_TWO': 'missions/직진_우회전_2번_ball.json',
     'STEP_FORWARD_RIGHT_ONE': 'missions/직진_우회전_1번.json',
     'STEP_FORWARD_LEFT_ONE': 'missions/직진_좌회전_1번.json',
-    'STEP_FORWARD_RIGHT_ONE_HUDDLE': 'missions/직진_우회전_1번_huddle.json',
+    'STEP_FORWARD_RIGHT_ONE_HUDDLE': 'motions/우회전_최종.json',
+    'TURN_LEFT_IN_PLACE': 'motions/좌회전_최종.json',
     'PICK_BALL': 'motions/공_줍고일어나기_최종.json',
     'PICK_BALL_RE': 'motions/공_줍고일어나기_최종_재그립제외.json',
     'PICK_BALL_RE_STAND': 'motions/공_줍고일어나기_최종_재그립제외_일어나기.json',
@@ -56,6 +57,8 @@ for action, filename in {
 }.items():
     match = re.search(r'case vision::msg::ActionCommand::'+action+r':\s*return "([^"]+)";', main)
     checks[action+' mapping'] = match is not None and match.group(1)==filename and (root / filename).is_file()
+checks['TURN_LEFT_IN_PLACE action number'] = 'uint16 TURN_LEFT_IN_PLACE=31' in (
+    root.parent / 'vision/msg/ActionCommand.msg').read_text()
 # Validate single-turn missions and preserve the specific hurdle-right variant.
 for manifest_name, expected_motion in {
     '직진_좌회전_1번.json': '보행_좌회전전진_20도_최종_초기X.json',

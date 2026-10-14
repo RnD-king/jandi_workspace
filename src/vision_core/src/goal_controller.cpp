@@ -22,8 +22,12 @@ ActionRequest Mission(MissionAction action, std::int16_t yaw = 0) {
 MissionAction GoalApproachWalk(CruiseDirection direction, bool short_distance) {
   // Keep normal LINE cruise IDs 11/12/13 out of GOAL approach.
   switch (direction) {
-  case CruiseDirection::kLeft: return MissionAction::kStepForwardLeftOne;
-  case CruiseDirection::kRight: return MissionAction::kStepForwardRightOneHurdle;
+  case CruiseDirection::kLeft:
+    return short_distance ? MissionAction::kTurnLeftInPlace
+                          : MissionAction::kStepForwardLeftOne;
+  case CruiseDirection::kRight:
+    return short_distance ? MissionAction::kStepForwardRightOneHurdle
+                          : MissionAction::kStepForwardRightOne;
   case CruiseDirection::kStraight:
     return short_distance ? MissionAction::kStepForwardThree
                           : MissionAction::kStepForwardFour;

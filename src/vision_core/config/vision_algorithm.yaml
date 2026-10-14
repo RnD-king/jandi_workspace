@@ -40,15 +40,15 @@ vision_algorithm:
     upper_acquire_v_px: 470.0 # 공이 있을 조건
 
     # forward
-    far_u_des_px: 380.0 # 세로선 중심
-    approach_u_deadband_px: 160 # 세로선 반폭    
+    far_u_des_px: 360.0 # 세로선 중심
+    approach_u_deadband_px: 130 # 세로선 반폭
     
-    approach_short_v_px: 288.0 # 위 가로선 (4걸음)
-    approach_two_step_v_px: 320.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
+    approach_short_v_px: 120.0 # 위 가로선 (4걸음)
+    approach_two_step_v_px: 220.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
 
     # down
-    down_one_step_v_px: 10.0 # 위 가로선 (2걸음)
-    fine_mode_v_px: 80 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
+    down_one_step_v_px: 1.0 # 위 가로선 (2걸음)
+    fine_mode_v_px: 10 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
 
     pickup_u1_px: 310
     pickup_u2_px: 385 # ㅇㅋ
@@ -76,20 +76,20 @@ vision_algorithm:
     upper_acquire_v_px: 470.0 # 허들이 있을 조건
 
     # forward
-    approach_two_step_v_px: 360.0 # 아래 가로선
-    approach_short_v_px: 312.0    # 위 가로선
+    approach_short_v_px: 250.0    # 위 가로선 (4걸음)
+    approach_two_step_v_px: 330.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
 
-    # 가로 정렬 (현재는 미사용)
+    # 가로 정렬 (라인 기준임. 이거 의미 없을 듯)
     target_u_px: 380 # 세로선 중심
     u_deadband_px: 160 # 세로선 반폭
 
     # DOWN 카메라 세로 3구역
-    down_one_step_v_px: 120.0 # 위 가로선 (2걸음)
-    fine_mode_v_px: 210     # 아래 가로선 (1걸음)
+    down_one_step_v_px: 100.0 # 위 가로선 (2걸음)
+    fine_mode_v_px: 180     # 아래 가로선 (1걸음)
 
     # 허들 접촉 및 넘기
     contact_v_px: 260 # 접촉 선 (반걸음)
-    contact_steps: 5     # 접촉 보행 반 걸음 횟수
+    contact_steps: 3     # 접촉 보행 반 걸음 횟수
 
     hurdle_ignore_duration_sec: 5.0
     recovery_reacquire_min_hits: 3
@@ -109,7 +109,7 @@ vision_algorithm:
     post_pickup_walk_fallback_actions: 3 # 라인 복귀 후 13번(5걸음) DONE 우선; 없으면 보행 3회 DONE 후 GOAL 카메라
 
     # forward
-    target_u_px: 380.0          # 중앙 세로 구역의 중심
+    target_u_px: 360.0          # 중앙 세로 구역의 중심
     approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
 
     # 거리 기반 접근 (단위 m)

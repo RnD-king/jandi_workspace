@@ -171,8 +171,11 @@ HurdleResult HurdleController::Compute(
       result.action = Locomotion(steps==4
           ? (left ? MissionAction::kStepForwardLeftTwo
                   : MissionAction::kStepForwardRightTwo)
-          : (left ? MissionAction::kStepForwardLeftOne
-                  : MissionAction::kStepForwardRightOneHurdle));
+          : steps==3
+              ? (left ? MissionAction::kStepForwardLeftOne
+                      : MissionAction::kStepForwardRightOne)
+              : (left ? MissionAction::kTurnLeftInPlace
+                      : MissionAction::kStepForwardRightOneHurdle));
       if (allow_new_body_actions) {
         last_approach_steps_=steps;
         last_approach_pending_=true;

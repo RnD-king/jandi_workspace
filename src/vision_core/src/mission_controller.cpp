@@ -1194,7 +1194,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   // All recovery turns and resumed normal walking obey the same stance contract.
   const int action_number=static_cast<int>(request.action);
   const bool wants_walk=action_number==9 || (action_number>=10 && action_number<=13) ||
-      (action_number>=21 && action_number<=28);
+      (action_number>=21 && action_number<=28) ||
+      request.action==MissionAction::kTurnLeftInPlace;
   const bool wants_fine=(action_number>=1 && action_number<=8) ||
       (action_number>=14 && action_number<=17);
   const bool implicit_pose=request.action!=MissionAction::kDefaultPoseMode &&

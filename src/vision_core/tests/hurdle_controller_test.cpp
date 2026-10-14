@@ -15,19 +15,31 @@ int main() {
   HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle; c.recovery_settle_duration_sec=0; c.contact_steps=1; c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2; c.smooth_alpha = 1; c.upper_acquire_v_px=480;
   c.approach_two_step_v_px = 360.0;
+  c.approach_short_v_px = 312.0;
   CruiseDecision straight; straight.applicable=true;
   straight.direction=CruiseDirection::kStraight;
   CruiseDecision left = straight, right = straight, missing = straight;
   left.direction=CruiseDirection::kLeft;
   right.direction=CruiseDirection::kRight;
   missing.direction=CruiseDirection::kNone;
-  for (const auto& scenario : std::vector<std::pair<double,MissionAction>>{
-      {.5,MissionAction::kStepForwardLeftTwo},
-      {.7,MissionAction::kStepForwardLeftOne},
-      {.8,MissionAction::kStepForwardLeftOne}}) {
+  struct GridCase { double v; CruiseDirection direction; MissionAction action; };
+  for (const auto& scenario : std::vector<GridCase>{
+      {.5,CruiseDirection::kLeft,MissionAction::kStepForwardLeftTwo},
+      {.5,CruiseDirection::kStraight,MissionAction::kStepForwardFour},
+      {.5,CruiseDirection::kRight,MissionAction::kStepForwardRightTwo},
+      {.7,CruiseDirection::kLeft,MissionAction::kStepForwardLeftOne},
+      {.7,CruiseDirection::kStraight,MissionAction::kStepForwardThree},
+      {.7,CruiseDirection::kRight,MissionAction::kStepForwardRightOne},
+      {.8,CruiseDirection::kLeft,MissionAction::kTurnLeftInPlace},
+      {.8,CruiseDirection::kStraight,MissionAction::kStepForwardTwo},
+      {.8,CruiseDirection::kRight,MissionAction::kStepForwardRightOneHurdle},
+      {312.0/480,CruiseDirection::kRight,MissionAction::kStepForwardRightOne},
+      {360.0/480,CruiseDirection::kLeft,MissionAction::kTurnLeftInPlace}}) {
     HurdleController grid(c,3.0);
-    const auto v=grid.Compute(H(scenario.first),640,480,0,{}, {},left);
-    assert(v.action.action==scenario.second);
+    auto steering=straight; steering.direction=scenario.direction;
+    const auto v=grid.Compute(H(scenario.v),640,480,0,{}, {},steering);
+    assert(v.action.action==scenario.action);
+    assert(v.action.category==ActionCategory::kLocomotion);
     assert(v.camera_request==CameraRequest::kNone);
   }
   HurdleController right_near(c,3.0);
@@ -81,8 +93,8 @@ int main() {
   r=fresh_down.Compute(H(.8),640,480,.2,
                        {CameraMode::kDown,true},{}, straight);
   assert(r.mode==HurdleMode::kDownSearch && !r.tracked.visible);
-  // Identical 27/28 JSON, but mid-row 4/6 must DOWN on post-DONE
-  // loss whereas bottom-row 7/9 must use forward stationary recovery.
+  // Camera fallback follows the original region, independently of action ID:
+  // mid-row 4/6 DOWN on loss; bottom-row 7/9 use forward stationary recovery.
   for(const auto direction : {CruiseDirection::kLeft,CruiseDirection::kRight}) {
     CruiseDecision steering=straight; steering.direction=direction;
     for(const auto pair : std::vector<std::pair<double,bool>>{

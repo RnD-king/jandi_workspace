@@ -49,6 +49,7 @@ int main() {
   BallConfig c=LoadDefaultAlgorithmConfig().ball; c.fine_settle_duration_sec=0; c.recovery_settle_duration_sec=0; c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2; c.smooth_alpha = 1.0; c.far_u_des_px = 320.0;
   c.approach_u_deadband_px = 32.0; c.upper_acquire_v_px = 480.0;
+  c.approach_short_v_px = 300.0;
   c.approach_two_step_v_px = 336.0;
   c.pickup_u1_px=288; c.pickup_u2_px=352;
   c.pickup_v1_px=312; c.pickup_v2_px=360;
@@ -60,14 +61,22 @@ int main() {
       {Ball(.5,.3),MissionAction::kStepForwardFour},    // zone 2
       {Ball(.5,.65),MissionAction::kStepForwardThree},  // zone 5
       {Ball(.5,.8),MissionAction::kStepForwardTwo},     // zone 8
-      {Ball(.3,.8),MissionAction::kStepForwardLeftOne}, // zone 7
+      {Ball(.3,.8),MissionAction::kTurnLeftInPlace}, // zone 7
       {Ball(.7,.8),MissionAction::kStepForwardRightOneHurdle}, // zone 9
-      {Ball(.3,.3),MissionAction::kStepForwardLeftTwo},
-      {Ball(.7,.3),MissionAction::kStepForwardRightTwo}}) {
+      {Ball(.3,.3),MissionAction::kStepForwardLeftTwo}, // zone 1
+      {Ball(.7,.3),MissionAction::kStepForwardRightTwo}, // zone 3
+      {Ball(.3,.65),MissionAction::kStepForwardLeftOne}, // zone 4
+      {Ball(.7,.65),MissionAction::kStepForwardRightOne}, // zone 6
+      {Ball(.3,300.0/480),MissionAction::kStepForwardLeftOne}, // row boundary
+      {Ball(.3,336.0/480),MissionAction::kTurnLeftInPlace}, // near boundary
+      {Ball(.45,.8),MissionAction::kStepForwardTwo}, // inclusive left center edge
+      {Ball(.55,.8),MissionAction::kStepForwardTwo}}) { // inclusive right center edge
     BallController grid(c,3.0);
     const auto v=grid.Compute(scenario.first,640,480,0,{}, {});
     assert(v.action.action==scenario.second);
+    assert(v.action.category==ActionCategory::kLocomotion);
     if (scenario.second==MissionAction::kStepForwardLeftOne ||
+        scenario.second==MissionAction::kTurnLeftInPlace ||
         scenario.second==MissionAction::kStepForwardRightOneHurdle)
       assert(v.camera_request==CameraRequest::kNone);
   }

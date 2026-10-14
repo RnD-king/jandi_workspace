@@ -33,7 +33,8 @@ static_assert(vision::msg::ActionCommand::STEP_FORWARD_TWO == 21 &&
               vision::msg::ActionCommand::STEP_FORWARD_FOUR == 23 &&
               vision::msg::ActionCommand::STEP_FORWARD_LEFT_TWO == 24 &&
               vision::msg::ActionCommand::STEP_FORWARD_RIGHT_TWO == 25 &&
-              vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE == 26);
+              vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE == 26 &&
+              vision::msg::ActionCommand::TURN_LEFT_IN_PLACE == 31);
 static_assert(vision::msg::CommandStatus::READY == 3 &&
               vision::msg::CameraCommand::DOWN == 1 &&
               vision::msg::CameraCommand::FORWARD == 2 &&
@@ -296,7 +297,12 @@ private:
             return "missions/직진_좌회전_1번.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE_HUDDLE:
-            return "missions/직진_우회전_1번_huddle.json";
+            return "motions/우회전_최종.json";
+
+        // A dedicated WALK-stance motion, played once without yaw repetition.
+        // Missing/invalid assets are rejected by PrepareProgram before ACK.
+        case vision::msg::ActionCommand::TURN_LEFT_IN_PLACE:
+            return "motions/좌회전_최종.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_FIVE:
             return "missions/연속걷기.json";

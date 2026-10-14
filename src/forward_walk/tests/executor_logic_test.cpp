@@ -40,7 +40,10 @@ int main() {
         const auto five = assets / "missions/연속걷기.json";
         const auto left_three = assets / "missions/직진_좌회전_3번.json";
         const auto right_three = assets / "missions/직진_우회전_3번.json";
-        for (const auto& path : {left, right, five, left_three, right_three}) {
+        const auto left_in_place = assets / "motions/좌회전_최종.json";
+        const auto right_in_place = assets / "motions/우회전_최종.json";
+        for (const auto& path : {left, right, five, left_three, right_three,
+                                left_in_place, right_in_place}) {
             const auto program = player.PrepareProgram(path.string(), (assets / "motions").string(), {});
             Require(player.StartPrepared(program, InitialPose(), Clock::time_point{}), player.Error());
             player.Stop();
