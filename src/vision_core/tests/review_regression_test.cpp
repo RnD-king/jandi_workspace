@@ -22,30 +22,37 @@ MissionFrameInput Frame(double now) {
 void TestClockAndGoalReservationDrain() {
   auto cfg=LoadDefaultAlgorithmConfig(); cfg.initial_has_ball=true;
   cfg.enable_ball=cfg.enable_hurdle=false;
+  cfg.goal.post_pickup_walk_fallback_actions=3;
+  cfg.line_features.image_center_u=320;
+  cfg.line.line_stable_window=cfg.line.line_stable_min_hits=1;
   MissionController core(cfg);
-  auto f=Frame(0); auto r=core.Step(f); const auto a=r.command.action_id;
-  assert(a!=0 && r.goal_walk_remaining_sec==5);
-  f=Frame(20); f.delivery_feedback={a,true,false,false}; r=core.Step(f);
-  assert(r.goal_walk_elapsed_sec==0); // Dispatch/ACK wait is not execution.
-  for(int i=1;i<=24;++i) { f=Frame(20+.1*i); r=core.Step(f); }
-  f=Frame(22.5); f.delivery_feedback={a,true,false,true}; r=core.Step(f);
-  const auto b=r.command.action_id; assert(b!=a && b!=0);
-  f=Frame(22.6); f.delivery_feedback={b,true,false,false}; r=core.Step(f);
-  assert(std::abs(r.goal_walk_elapsed_sec-2.6)<1e-8); // No queued-ACK double count.
-  f=Frame(23); f.delivery_feedback={a,true,true,false}; r=core.Step(f);
-  assert(r.command.action_id==b);
-  for(int i=1;i<20;++i) { f=Frame(23+.1*i); r=core.Step(f); }
-  f=Frame(25); r=core.Step(f);
+  auto f=Frame(0);
+  f.line_centers={{320,450},{320,350},{320,250}};
+  auto r=core.Step(f);
+  const auto a=r.command.action_id;
+  assert(a!=0 && r.command.action==MissionAction::kStepForwardFive);
+  assert(r.goal_walk_actions_completed==0);
+  // Elapsed wall time without a DONE is not walking progress.
+  f.now_sec=20; f.delivery_feedback={a,true,false,false}; r=core.Step(f);
+  assert(r.goal_walk_actions_completed==0 && r.active_mission==MissionType::kLine);
+  for(int i=1;i<=24;++i) {
+    f.now_sec=20+.1*i; f.delivery_feedback={}; r=core.Step(f);
+  }
+  f.now_sec=22.5; f.delivery_feedback={a,true,false,true}; r=core.Step(f);
+  assert(r.command.action_id==a && r.command.camera_request==CameraRequest::kNone);
+  assert(r.goal_walk_actions_completed==0);
+  f.now_sec=23; f.delivery_feedback={a,true,true,false}; r=core.Step(f);
+  assert(r.goal_walk_actions_completed==1 && r.goal_five_step_completed);
   assert(r.active_mission==MissionType::kGoal && r.goal.mode==GoalMode::kWaitCameraGoal);
-  assert(r.goal_walk_remaining_sec==0 && r.command.camera_request==CameraRequest::kNone);
-  f=Frame(25.1); f.delivery_feedback={b,true,false,true}; r=core.Step(f);
-  assert(r.command.action_id==b); // READY cannot reserve a third walk after threshold.
-  f=Frame(25.3); f.delivery_feedback={b,true,true,false}; r=core.Step(f);
   assert(r.command.action_id==0 && r.command.camera_request==CameraRequest::kGoal);
-  f=Frame(25.4); f.camera_feedback={CameraMode::kGoal,true}; r=core.Step(f);
-  for(int i=0;i<30;++i) { f=Frame(25.5+.1*i); f.camera_feedback={CameraMode::kGoal,true}; r=core.Step(f); }
-  assert(r.command.action_id==0 && r.goal.mode==GoalMode::kSearch); // Missing GOAL intentionally holds.
-  assert(std::abs(r.goal_walk_elapsed_sec-5.3)<1e-8); // No camera/observation time.
+  f.now_sec=23.1; f.delivery_feedback={};
+  f.camera_feedback={CameraMode::kGoal,true}; r=core.Step(f);
+  for(int i=0;i<30;++i) {
+    f.now_sec=23.2+.1*i; f.camera_feedback={CameraMode::kGoal,true};
+    r=core.Step(f);
+  }
+  assert(r.command.action_id==0 && r.goal.mode==GoalMode::kSearch);
+  assert(r.goal_walk_actions_completed==1); // Camera/observation time excluded.
 }
 void TestCommonLineEvidence() {
   LineGuide g; g.valid=true;
