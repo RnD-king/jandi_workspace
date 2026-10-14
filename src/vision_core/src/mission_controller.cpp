@@ -583,6 +583,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   // Compute B on a disposable DONE simulation. Never advance A's live FSM
   // until its real DONE. Manual tuning keeps Preview/Commit as the only admission.
   std::optional<ActionRequest> ready_object_successor;
+  std::optional<MissionType> ready_object_successor_mission;
   if (!input.manual_observation_control && input.command_transport_enabled &&
       input.delivery_feedback.ready && !input.delivery_feedback.done &&
       moving_object_ready_mean_ &&
@@ -597,15 +598,17 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         speculative.StepWithLineImageCenter(complete, line_image_center_u);
     const ControlCommand &next = proposed.command;
     if (next.command_type == CommandType::kAction &&
-        next.action_id != 0 && next.mission == active_mission_ &&
+        next.action_id != 0 &&
         next.action != MissionAction::kNone &&
         next.camera_request == CameraRequest::kNone) {
       ActionRequest b;
       b.action = next.action;
       b.category = next.action_category;
       b.target_yaw_deg = next.target_yaw_deg;
-      b.line_queue_eligible = config_.UsesObjectReadyMean(b.action);
+      b.line_queue_eligible = next.mission == MissionType::kLine
+          ? IsLongLineAction(b.action) : config_.UsesObjectReadyMean(b.action);
       ready_object_successor = b;
+      ready_object_successor_mission = next.mission;
     }
   }
   bool applied_object_ready_mean = false;
@@ -1204,8 +1207,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       config_.UsesObjectReadyMean(request.action))
     request.line_queue_eligible = true;
   output.command = command_coordinator_.Compute(
-      active_mission_, phase, request, camera_request,
-      input.delivery_feedback, input.now_sec);
+      ready_object_successor_mission.value_or(active_mission_), phase,
+      request, camera_request, input.delivery_feedback, input.now_sec);
   if (config_.test_mission!=MissionType::kNone && config_.test_stage==3 &&
       output.command.command_type==CommandType::kAction && TestExecutionReady())
     test_execution_started_=true;
