@@ -1176,5 +1176,38 @@ int main() {
   three_result=send_three(8.5,current_walk,true,true,false); // duplicate DONE
   assert(three_result.goal_walk_actions_completed==3);
 
+  // A recovery-only in-place turn and the preceding FINE pose transition
+  // must not count as a post-pickup LINE walking action.
+  MissionController rotation_only(post_pickup_cfg);
+  auto turn_frame=Frame(0.0); ShiftLine(turn_frame,500);
+  auto turn_result=rotation_only.Step(turn_frame);
+  assert(turn_result.command.action==MissionAction::kStepForwardRight);
+  const auto first_walk_id=turn_result.command.action_id;
+  turn_frame=Frame(.1); turn_frame.line_centers.clear();
+  turn_frame.delivery_feedback={first_walk_id,true,false,false};
+  turn_result=rotation_only.Step(turn_frame);
+  turn_frame=Frame(.2); turn_frame.line_centers.clear();
+  turn_frame.delivery_feedback={first_walk_id,true,true,false};
+  turn_result=rotation_only.Step(turn_frame);
+  assert(turn_result.goal_walk_actions_completed==1);
+  turn_frame=Frame(2.3); turn_frame.line_centers.clear();
+  turn_result=rotation_only.Step(turn_frame);
+  assert(turn_result.command.action==MissionAction::kDefaultPoseMode);
+  const auto recovery_pose_id=turn_result.command.action_id;
+  turn_frame=Frame(2.4); turn_frame.line_centers.clear();
+  turn_frame.delivery_feedback={recovery_pose_id,true,true,false};
+  turn_result=rotation_only.Step(turn_frame);
+  turn_frame=Frame(2.5); turn_frame.line_centers.clear();
+  turn_result=rotation_only.Step(turn_frame);
+  assert(turn_result.command.action==MissionAction::kTurnRight ||
+         turn_result.command.action==MissionAction::kTurnLeft);
+  const auto recovery_turn_id=turn_result.command.action_id;
+  turn_frame=Frame(2.8); turn_frame.line_centers.clear();
+  turn_frame.delivery_feedback={recovery_turn_id,true,true,false};
+  turn_result=rotation_only.Step(turn_frame);
+  assert(turn_result.goal_walk_actions_completed==1);
+  assert(turn_result.active_mission==MissionType::kLine);
+  assert(turn_result.command.camera_request==CameraRequest::kNone);
+
   return 0;
 }
