@@ -33,7 +33,9 @@ struct MissionControllerConfig {
   double camera_motion_timeout_sec{};
   // Fresh, post-DONE observation interval for non-queued actions and camera turns.
   double post_motion_observation_sec{};
-  // YAML-only allowlist of READY-capable object-approach actions.
+  // YAML allowlist of currently executing object actions whose valid READY
+  // moving mean permits one successor ActionCommand to be queued in AUTO.
+  // MANUAL reuses the mean for Preview/Commit without reserving B.
   // Empty means all object walks use post-DONE stationary observation.
   std::vector<int> object_ready_mean_actions;
   bool UsesObjectReadyMean(MissionAction action) const {
