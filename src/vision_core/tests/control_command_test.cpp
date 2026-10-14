@@ -86,6 +86,17 @@ int main() {
                             {400,true,true,false},.3);
   assert(obj.action_id==401 && obj.mission==MissionType::kGoal);
 
+  ControlCommandCoordinator missed_ready({500,10});
+  auto missed=missed_ready.Compute(MissionType::kBall,4,object_a,
+                                   CameraRequest::kNone,{},0);
+  assert(missed.action_id==500);
+  missed=missed_ready.Compute(MissionType::kBall,4,{},CameraRequest::kNone,
+                              {500,true,false,true},.25);
+  assert(missed.action_id==500);
+  missed=missed_ready.Compute(MissionType::kBall,4,object_b,CameraRequest::kNone,
+                              {},.3);
+  assert(missed.action_id==500); // No delayed reservation beyond A's READY edge.
+
   ControlCommandCoordinator wrong_id({10,1.0});
   out=wrong_id.Compute(MissionType::kLine,0,first,CameraRequest::kNone,{},0);
   assert(out.action_id==10);
