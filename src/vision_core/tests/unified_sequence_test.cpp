@@ -116,7 +116,7 @@ void TestWindowAndDeadline() {
   t.in.ball_target=Target(); for(int i=0;i<10;++i)t.Tick();
   assert(t.out.ball.mode==BallMode::kFailed && t.out.command.action_id==0);
 }
-Trial PickAndBack() {
+Trial PickAndReturn() {
   auto t=BallSearch(); t.Commit();
   std::uint64_t old_id=0;
   for(int i=0;i<7;++i) {
@@ -144,21 +144,17 @@ Trial PickAndBack() {
   assert(t.out.ball.has_ball && t.out.command.action_id==0);
   assert(t.Preview().command.action==MissionAction::kDefaultPosition);
   t.Commit(); t.Tick(true);
-  assert(t.out.ball.mode==BallMode::kPostPickupBackAway && t.permit==0);
-  t.Commit(); assert(t.out.command.action==MissionAction::kStepBack);
-  old_id=t.out.command.action_id;
-  t.Tick(true); assert(t.out.command.action==MissionAction::kStepBack);
-  const auto second=t.out.command.action_id; assert(second!=old_id);
-  t.Tick(false,old_id); assert(t.out.command.action_id==second);
-  t.Tick(true); assert(t.out.command.action==MissionAction::kStepBack);
-  t.Tick(true); assert(t.out.command.action_id==0 && t.permit==0);
+  assert(t.out.ball.mode==BallMode::kReturnCameraToLine && t.permit==0);
+  assert(t.out.command.action_id==0);
   assert(t.out.command.camera_request==CameraRequest::kForward);
+  // Stale DONE may not start a backward command.
+  t.Tick(false,old_id); assert(t.out.command.action_id==0);
   t.in.camera_feedback={CameraMode::kForward,true}; t.Tick();
   assert(t.out.ball.mode==BallMode::kPostPickupLineRecovery);
   return t;
 }
 void TestAlternatingBoundedRecovery() {
-  auto right=PickAndBack(); auto left=right;
+  auto right=PickAndReturn(); auto left=right;
   assert(left.core.SetTestMissionIndices(2,1));
   left.Commit(); assert(left.out.command.action==MissionAction::kTurnLeft);
   right.Commit(); assert(right.out.command.action==MissionAction::kTurnRight);
@@ -216,10 +212,9 @@ void TestGoalForwardTrial() {
   assert(t.out.goal.mode==GoalMode::kFineAdjust);
   assert(t.Preview().command.action==MissionAction::kShoot);
   t.Commit(); t.Tick(true); assert(t.out.command.action_id==0);
-  t.Commit(); assert(t.out.command.action==MissionAction::kStepBack);
-  t.Tick(true); assert(t.out.command.action==MissionAction::kStepBack);
-  t.Tick(true); assert(t.out.command.action_id==0 && t.permit==0);
+  assert(t.out.goal.mode==GoalMode::kReturnCameraToLine);
   assert(t.out.command.camera_request==CameraRequest::kForward);
+  assert(t.out.command.action==MissionAction::kNone);
   t.in.camera_feedback={CameraMode::kForward,true}; t.Tick();
   t.Commit(); assert(t.out.command.action==MissionAction::kTurnLeft);
   t.in.line_centers={{420,450},{420,350},{420,250}};
