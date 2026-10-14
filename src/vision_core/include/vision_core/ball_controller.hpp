@@ -160,6 +160,7 @@ private:
   std::optional<bool> recovery_turn_left_;
   int recovery_walk_turns_completed_{0};
   bool recovery_walk_turn_pending_{false};
+  bool recovery_turn_search_exhausted_{false};
   double state_enter_sec_{0.0};
   double settle_until_sec_{0.0};
   double ignore_ball_until_sec_{0.0};
