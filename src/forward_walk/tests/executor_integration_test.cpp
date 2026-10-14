@@ -253,6 +253,9 @@ int main() {
         Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"queued LINE program lost arm targets");
         action(1001,11);camera(1001,3);flush();
         Check(Count(actions,1001,Status::DONE)==2&&Count(cameras,1001,Status::DONE)==2,"old completed IDs restarted");
+        // The prepared-program check is complete; restore the shared fixture
+        // before later missions read this motion from disk again.
+        WriteMotion(right);
         std::cout<<"PASS real MainNode A/READY/queue/B lifecycle, duplicates, rejection, prepared-file persistence\n";
 
         // 신규 6 action은 준비된 JSON/팔 목표를 큐에 저장하고 DONE 직후 자동 실행한다.
@@ -277,6 +280,8 @@ int main() {
         for(uint16_t code:{27,28}) {
             const uint64_t id=35000+code;
             action(id,code);
+            Check(node->action_transactions_.active_id==id,
+                  "single-turn action was not accepted; check mission/motion fixtures");
             pump([&]{return node->action_transactions_.completed.Contains(id);});flush();
             Check(Count(actions,id,Status::ACK)==1&&Count(actions,id,Status::DONE)==1&&
                   Count(actions,id,Status::READY)==0, "single-turn action lifecycle mismatch");
