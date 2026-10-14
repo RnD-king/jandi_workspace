@@ -48,6 +48,8 @@ MissionController::MissionController(const MissionControllerConfig &config)
   ball_mission_index_=config_.test_ball_mission_index-1;
   goal_mission_index_=config_.test_goal_mission_index-1;
   if (has_ball_) goal_controller_.StartAfterPickup(0.0);
+  post_pickup_goal_line_gate_active_ =
+      has_ball_ && config_.enable_goal && !config_.goal_trial_start_forward;
   if (config_.goal_trial_start_forward) {
     active_mission_=MissionType::kGoal; has_ball_=true;
     goal_mission_index_=config_.test_goal_mission_index;
@@ -242,8 +244,15 @@ void MissionController::EnterMission(MissionType mission) {
 
 void MissionController::FinishMission() {
   if (foot_pose_ != FootPose::kWalk) { mission_finish_pending_=true; return; }
-  if (active_mission_ == MissionType::kBall)
-    goal_walk_baseline_sec_ = command_coordinator_.LineExecutionSeconds();
+  if (active_mission_ == MissionType::kBall && has_ball_ && config_.enable_goal) {
+    // Start counting only after the BALL mission's confirmed line recovery,
+    // not while rotating in place or restoring WALK/FINE foot stance.
+    post_pickup_goal_line_gate_active_ = true;
+    post_pickup_line_actions_issued_ = 0;
+    post_pickup_line_actions_completed_ = 0;
+    post_pickup_five_step_completed_ = false;
+    post_pickup_line_actions_.clear();
+  }
   if (config_.test_mission!=MissionType::kNone ||
       (active_mission_==MissionType::kGoal && config_.goal_trial_start_forward)) goal_trial_complete_=true;
   active_mission_ = MissionType::kLine;
@@ -579,6 +588,17 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     const MissionFrameInput &source,
     std::optional<double> line_image_center_u) {
   MissionFrameInput input = source;
+  if (post_pickup_goal_line_gate_active_ &&
+      input.delivery_feedback.done && input.delivery_feedback.action_id != 0) {
+    const auto it = post_pickup_line_actions_.find(input.delivery_feedback.action_id);
+    if (it != post_pickup_line_actions_.end()) {
+      // The unique action ID is counted exactly once, only at physical DONE.
+      ++post_pickup_line_actions_completed_;
+      if (it->second == MissionAction::kStepForwardFive)
+        post_pickup_five_step_completed_ = true;
+      post_pickup_line_actions_.erase(it);
+    }
+  }
   TrackMovingObjectReadyWindow(input);
   // Compute B on a disposable DONE simulation. Never advance A's live FSM
   // until its real DONE. Manual tuning keeps Preview/Commit as the only admission.
@@ -1028,8 +1048,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
             input.goal_target, input.backboard_target, input.goal_pose,
             input.image_width, input.image_height, input.now_sec,
             line_reference_valid, input.camera_feedback, action_feedback,
-            input.allow_new_body_actions && input.allow_new_commands, input.backboard_center_depth_m,
-            std::max(0.0, command_coordinator_.LineExecutionSeconds() - goal_walk_baseline_sec_));
+            input.allow_new_body_actions && input.allow_new_commands,
+            input.backboard_center_depth_m,
+            post_pickup_goal_line_gate_active_ && line_reference_valid &&
+            line_state_ == LineState::kNormal &&
+            (post_pickup_five_step_completed_ ||
+             post_pickup_line_actions_completed_ >=
+                 config_.goal.post_pickup_walk_fallback_actions));
         if (goal_result_.mode != GoalMode::kLineFollow)
           EnterMission(MissionType::kGoal);
       }
@@ -1190,6 +1215,19 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   if (active_mission_ == MissionType::kLine &&
       !input.allow_new_line_action)
     request = {};
+  // Stop booking another cruise once the current 13 (five-step) or the
+  // third post-pickup LINE walk is committed. GOAL camera follows its DONE.
+  // Recovery turns remain available if the line itself becomes invalid.
+  if (active_mission_ == MissionType::kLine &&
+      post_pickup_goal_line_gate_active_ &&
+      request.category == ActionCategory::kLocomotion &&
+      IsLongLineAction(request.action) &&
+      (post_pickup_line_actions_issued_ >=
+           config_.goal.post_pickup_walk_fallback_actions ||
+       (last_command_.mission == MissionType::kLine &&
+        last_command_.action_id != 0 &&
+        last_command_.action == MissionAction::kStepForwardFive)))
+    request = {};
   // Manual tuning freezes NEW body actions but permits automatic camera
   // requests; unlike allow_new_commands, feedback still advances.
   if (!input.allow_new_body_actions ||
@@ -1217,6 +1255,15 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   output.command = command_coordinator_.Compute(
       command_mission, phase, request, camera_request,
       input.delivery_feedback, input.now_sec);
+  if (active_mission_ == MissionType::kLine &&
+      post_pickup_goal_line_gate_active_ &&
+      output.command.command_type == CommandType::kAction &&
+      output.command.action_id != 0 &&
+      output.command.action_category == ActionCategory::kLocomotion &&
+      IsLongLineAction(output.command.action) &&
+      post_pickup_line_actions_.emplace(output.command.action_id,
+                                        output.command.action).second)
+    ++post_pickup_line_actions_issued_;
   if (ready_object_successor && moving_object_ready_mean_ &&
       output.command.command_type == CommandType::kAction &&
       output.command.control_phase == ControlPhase::kWaitingQueuedActionAck) {
@@ -1288,12 +1335,13 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output, double n
   output.recovery_turns_completed = mission_recovery_turns_;
   output.recovery_failed = mission_recovery_failed_;
   output.recovery_verifying = mission_recovery_verifying_;
-  output.goal_walk_elapsed_sec = std::max(0.0,
-      command_coordinator_.LineExecutionSeconds() - goal_walk_baseline_sec_);
-  output.goal_walk_remaining_sec = std::max(0.0,
-      config_.goal.post_pickup_wait_sec - output.goal_walk_elapsed_sec);
+  output.goal_walk_actions_completed = post_pickup_line_actions_completed_;
+  output.goal_walk_actions_remaining = std::max(0,
+      config_.goal.post_pickup_walk_fallback_actions -
+          post_pickup_line_actions_completed_);
+  output.goal_five_step_completed = post_pickup_five_step_completed_;
   output.goal_walk_gate_active = has_ball_ && config_.enable_goal &&
-      !config_.goal_trial_start_forward && (active_mission_ == MissionType::kLine ||
+      !config_.goal_trial_start_forward && (post_pickup_goal_line_gate_active_ ||
       (active_mission_ == MissionType::kGoal && goal_result_.mode == GoalMode::kWaitCameraGoal));
   output.goal.recovery_observations_completed=goal_controller_.RecoveryObservationsCompleted();
   output.goal.recovery_observation_elapsed_sec=goal_controller_.RecoveryObservationElapsed(now);
@@ -1681,7 +1729,11 @@ void MissionController::Reset(bool preserve_action_ids) {
   goal_mission_index_=config_.test_goal_mission_index-1;
   mission_recovery_turns_=0; mission_recovery_issued_=false;
   mission_recovery_failed_=mission_recovery_found_=false; mission_recovery_hits_.clear();
-  mission_recovery_verifying_ = false; goal_walk_baseline_sec_ = 0.0;
+  mission_recovery_verifying_ = false;
+  post_pickup_goal_line_gate_active_ = false;
+  post_pickup_line_actions_issued_ = post_pickup_line_actions_completed_ = 0;
+  post_pickup_five_step_completed_ = false;
+  post_pickup_line_actions_.clear();
   active_mission_ = MissionType::kLine;
   has_ball_ = config_.initial_has_ball;
   line_state_ = LineState::kNormal;
@@ -1726,6 +1778,8 @@ void MissionController::Reset(bool preserve_action_ids) {
   backboard_association_tracker_.Reset(); hurdle_association_tracker_.Reset();
   ball_result_ = {}; hurdle_result_ = {}; goal_result_ = {}; last_command_ = {};
   if (has_ball_) goal_controller_.StartAfterPickup(0.0);
+  post_pickup_goal_line_gate_active_ =
+      has_ball_ && config_.enable_goal && !config_.goal_trial_start_forward;
   if (config_.goal_trial_start_forward) {
     active_mission_=MissionType::kGoal; has_ball_=true;
     goal_mission_index_=config_.test_goal_mission_index;
