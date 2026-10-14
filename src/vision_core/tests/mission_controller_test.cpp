@@ -447,7 +447,7 @@ int main() {
 
   camera_config.enable_hurdle=false; camera_config.enable_goal=true;
   camera_config.initial_has_ball=true;
-  camera_config.goal.post_pickup_wait_sec=0;
+  camera_config.goal.post_pickup_walk_fallback_actions=0;
   camera_config.line.line_stable_window=camera_config.line.line_stable_min_hits=1;
   camera_config.goal.stable_window=camera_config.goal.stable_min_hits=1;
   MissionController goal_timeout(camera_config);
@@ -464,7 +464,7 @@ int main() {
   camera_gate_cfg.enable_ball = camera_gate_cfg.enable_hurdle = false;
   camera_gate_cfg.enable_goal = true;
   camera_gate_cfg.initial_has_ball = true;
-  camera_gate_cfg.goal.post_pickup_wait_sec = 0.0;
+  camera_gate_cfg.goal.post_pickup_walk_fallback_actions = 0;
   camera_gate_cfg.post_motion_observation_sec = 1.0;
   camera_gate_cfg.goal.stable_window = 10;
   camera_gate_cfg.goal.stable_min_hits = 7;
