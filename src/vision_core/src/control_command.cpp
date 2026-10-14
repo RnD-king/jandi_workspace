@@ -165,6 +165,7 @@ ControlCommand ControlCommandCoordinator::Compute(
     // The successor B may be any valid ActionCommand, including a different
     // action number or mission; the executor performs full preparation before ACK.
     if (queued_action_id_ == 0 && pending_ready_ &&
+        feedback.ready && !feedback.done &&
         pending_request_.line_queue_eligible &&
         request.action != MissionAction::kNone &&
         request.category != ActionCategory::kNone &&
