@@ -136,7 +136,7 @@ HurdleResult HurdleController::Compute(
       if (!feedback.observation_complete) return result;
       awaiting_approach_observation_=false;
       if (!tracked_.visible || !tracked_.stable) {
-        if (last_approach_down_on_loss_) {
+        if (last_approach_zone_ >= 1 && last_approach_zone_ <= 6) {
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
@@ -148,7 +148,7 @@ HurdleResult HurdleController::Compute(
     }
     if (!tracked_.visible) {
       if (lost_count_ >= config_.lost_frames || feedback.action_done) {
-        if (last_approach_down_on_loss_) {
+        if (last_approach_zone_ >= 1 && last_approach_zone_ <= 6) {
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
@@ -176,7 +176,6 @@ HurdleResult HurdleController::Compute(
       if (allow_new_body_actions) {
         last_approach_steps_=steps;
         last_approach_pending_=true;
-        last_approach_down_on_loss_=steps!=2;
         last_approach_zone_=left ? (steps==4 ? 1 : steps==3 ? 4 : 7)
                                  : (steps==4 ? 3 : steps==3 ? 6 : 9);
       }
@@ -187,7 +186,6 @@ HurdleResult HurdleController::Compute(
     if (allow_new_body_actions) {
       last_approach_steps_=steps;
       last_approach_pending_=true;
-      last_approach_down_on_loss_=steps!=2;
       last_approach_zone_=steps==4 ? 2 : steps==3 ? 5 : 8;
     }
     if (steps==2) {
@@ -382,7 +380,7 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   settle_until_sec_ = 0.0;
   test_camera_pending_=false; fine_pose_entered_=false; approach_two_issued_=false;
   last_approach_steps_=0; awaiting_approach_observation_=false;
-  last_approach_pending_=false; last_approach_down_on_loss_=false;
+  last_approach_pending_=false;
   last_approach_zone_=0;
   if (clear_ignore) ignore_until_sec_ = 0.0;
 }
