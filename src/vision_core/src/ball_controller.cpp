@@ -91,7 +91,7 @@ void BallController::UpdateTracker(const std::optional<ObjectTarget> &target,
   tracked_.stable = hits >= std::max(1, config_.stable_min_hits);
   // Freeze a stable multi-frame estimate, not the final moving-camera frame.
   if (tracked_.stable && tracked_.visible &&
-      recent_ball_u_.size() >= static_cast<std::size_t>(config_.stable_window)) {
+      recent_ball_u_.size() >= static_cast<std::size_t>(config_.stable_min_hits)) {
     double sum=0.0; int n=0;
     for (const auto &u : recent_ball_u_)
       if (u && std::isfinite(*u)) { sum+=*u; ++n; }
