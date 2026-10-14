@@ -454,7 +454,7 @@ private:
             return;
         }
         if (admission == Admission::Reject) {
-            RCLCPP_WARN(get_logger(), "Action rejected (zero ID, busy before READY, queue full, or non-LINE): id=%llu",
+            RCLCPP_WARN(get_logger(), "Action rejected (zero ID, busy before READY, or queue full): id=%llu",
                         static_cast<unsigned long long>(message->action_id));
             return;
         }
@@ -745,7 +745,7 @@ private:
             }
         }
         // 11/12/13 및 21~26은 미션과 무관하게 READY(관측 종료 이정표)를 보낸다.
-        // READY 이후 한 슬롯 선예약은 LINE→LINE인 경우만 허용한다.
+        // Queue admission depends only on the currently executing READY action.
         if (motion_in_progress_ && !arm_transition_in_progress_ && !action_transactions_.ready_sent &&
             p2p_player_->IsNearCompletion(ready_lead_sec_, std::chrono::steady_clock::now()) &&
             action_transactions_.MarkReady()) {
