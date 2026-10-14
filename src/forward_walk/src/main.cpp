@@ -480,11 +480,12 @@ private:
                 CalculateTurnCount(requested_target_yaw_deg);
             if (turn_count == 0 &&
                 !IsTurnAndStepAction(message->action)) {
-                // 0도 회전도 미션이 바뀌면 팔 전환을 먼저 완료해야 한다.
-                if (NeedsMissionArmTransition(message->mission)) {
-                    zero_turn=true;
-                } else {
-                    // 같은 팔 상태에서는 기존처럼 모터를 움직이지 않고 정상 완료한다.
+                // QUEUE의 0도 회전은 A DONE 이전에 완료시킬 수 없다.
+                // A가 끝나기 전에는 준비/ACK만 하고, 이후 실제 팔 상태로 판정한다.
+                zero_turn=true;
+                if (!NeedsMissionArmTransition(message->mission) &&
+                    admission != Admission::Queue) {
+                    // 유휴 실행에서의 0도 회전은 기존 즉시 ACK/DONE 유지.
                     PublishActionStatus(message->action_id,
                                         vision::msg::CommandStatus::ACK);
                     action_transactions_.completed.Remember(message->action_id);
@@ -790,7 +791,13 @@ private:
                     current_action_ = queued.action;
                     active_target_yaw_deg_ = queued.effective_target_yaw_deg;
                     try {
-                        if (!StartMissionProgram(queued.program,queued.mission,queued.action)) {
+                        if (!queued.program && !NeedsMissionArmTransition(queued.mission)) {
+                            // Deferred zero-degree turn: never send B DONE before A DONE.
+                            PublishActionStatus(queued.id, vision::msg::CommandStatus::DONE);
+                            action_transactions_.CompleteActive();
+                            current_action_ = 0;
+                            active_target_yaw_deg_ = 0;
+                        } else if (!StartMissionProgram(queued.program,queued.mission,queued.action)) {
                             AbortPlayback("Queued action start failed: " + p2p_player_->Error());
                             return;
                         }
@@ -798,7 +805,7 @@ private:
                         AbortPlayback("Queued action transition failed: "+std::string(e.what()));
                         return;
                     }
-                    motion_in_progress_ = true;
+                    motion_in_progress_ = action_transactions_.active_id != 0;
                     // B는 대기열 저장 시 ACK했으므로 여기서는 다시 ACK하지 않는다.
                     RCLCPP_INFO(get_logger(), "Queued action started automatically: id=%llu",
                                 static_cast<unsigned long long>(queued.id));
@@ -937,7 +944,7 @@ private:
         std::uint8_t mission;                         // 미션 종류: LINE 등 접수 조건 판단용
         std::uint16_t action;                         // 동작 종류: JSON 매핑과 READY 지원 여부 판단용
         int effective_target_yaw_deg;                 // 제한/반복 계산 뒤 계획한 각도(도)
-        P2PMotionPlayer::PreparedProgram program;     // 접수 시 검증해 둔 모션 데이터
+        std::optional<P2PMotionPlayer::PreparedProgram> program; // 0도 회전은 null, 실제 모션은 검증된 JSON
     };
     // 몸의 활성 ID, 대기 ID, READY 전송 여부, 최근 완료 ID 32개를 관리한다.
     // ID 중복이면 재실행하지 않고 진행 중 명령에는 ACK, 완료 명령에는 DONE을 다시 보낸다.
