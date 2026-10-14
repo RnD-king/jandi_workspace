@@ -2758,10 +2758,11 @@ private:
           tune_line(822,mission_result.recovery_failed ? "LINE SEARCH LIMIT: HOLD / RESET" :
               std::string("Approved: ")+RepeatLabel(authorized_repeat_scope_),text_color);
           if (mission_result.goal_walk_gate_active) {
-            std::snprintf(buf, sizeof(buf), "GOAL walk %.2f / %.2fs | remaining %.2fs | %s",
-                mission_result.goal_walk_elapsed_sec, gc.post_pickup_wait_sec,
-                mission_result.goal_walk_remaining_sec,
-                mission_result.goal_walk_remaining_sec <= 0.0 ? "DRAIN / CAMERA" : "WALKING TIME ONLY");
+            std::snprintf(buf, sizeof(buf), "GOAL LINE walks %d / %d | 5-step DONE=%s | %s",
+                mission_result.goal_walk_actions_completed, gc.post_pickup_walk_fallback_actions,
+                mission_result.goal_five_step_completed ? "YES" : "NO",
+                mission_result.goal_walk_actions_remaining == 0 ||
+                mission_result.goal_five_step_completed ? "CAMERA NEXT" : "WAITING WALK DONE");
             tune_line(850, buf, goal_color);
           }
           if (ball_cmd.mode == vision_core::BallMode::kDownSearch ||
