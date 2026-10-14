@@ -281,5 +281,72 @@ int main() {
   assert(r.mode == BallMode::kStandUpAfterPickup);
   assert(r.pickup_attempt_count == 3);
   assert(r.action.action != MissionAction::kPickBall);
+  // A 7/10 stable left detection is averaged before the 5 lost frames.
+  BallConfig walk_c=verify_config;
+  walk_c.lost_frames=5;
+  walk_c.recovery_observation_sec=1.0;
+  walk_c.recovery_max_observations=2;
+  walk_c.recovery_walk_turn_max=5;
+  walk_c.recovery_center_tolerance_px=40;
+  BallController walk_recovery(walk_c,3.0);
+  double walk_time=50.0;
+  for(int i=0;i<7;++i) {
+    const double u=i==6 ? .45 : .20; // last raw frame drifts towards center
+    r=walk_recovery.Compute(Ball(u,.3),640,480,walk_time,{}, {});
+    walk_time+=.1;
+  }
+  assert(r.mode==BallMode::kApproachBall);
+  for(int i=0;i<5;++i) {
+    r=walk_recovery.Compute({},640,480,walk_time,{}, {});
+    walk_time+=.1;
+  }
+  assert(r.mode==BallMode::kBallRecoveryForward);
+  for(int i=0;i<12;++i) {
+    r=walk_recovery.Compute({},640,480,walk_time,{}, {});
+    walk_time+=.1;
+  }
+  assert(r.mode==BallMode::kBallRecoveryWalkTurn);
+  for(int turn=0;turn<5;++turn) {
+    r=walk_recovery.Compute({},640,480,walk_time,{}, {});
+    assert(r.action.action==MissionAction::kStepForwardLeftOne); // action 27
+    walk_time+=.1;
+    ActionExecutionFeedback moving; moving.action_active=true;
+    r=walk_recovery.Compute({},640,480,walk_time,{},moving);
+    assert(r.action.action==MissionAction::kNone);
+    walk_time+=.1;
+    ActionExecutionFeedback completed; completed.action_done=true;
+    completed.observation_complete=true;
+    r=walk_recovery.Compute({},640,480,walk_time,{},completed);
+    assert(r.action.action==MissionAction::kNone);
+    assert(walk_recovery.RecoveryWalkTurnsCompleted()==turn+1);
+    walk_time+=.1;
+  }
+  assert(r.mode==BallMode::kBallRecoveryForward);
+  for(int i=0;i<24 && r.mode!=BallMode::kFailed;++i) {
+    r=walk_recovery.Compute({},640,480,walk_time,{}, {});
+    walk_time+=.1;
+  }
+  assert(r.mode==BallMode::kFailed); // original 2 stationary attempts preserved
+
+  BallController found_after_turn(walk_c,3.0);
+  double find_time=80.0;
+  for(int i=0;i<7;++i)
+    found_after_turn.Compute(Ball(.8,.3),640,480,find_time+=.1,{},{});
+  for(int i=0;i<5;++i)
+    r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
+  for(int i=0;i<12;++i)
+    r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
+  assert(r.mode==BallMode::kBallRecoveryWalkTurn);
+  r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
+  assert(r.action.action==MissionAction::kStepForwardRightOneHurdle); // 28
+  ActionExecutionFeedback moving2; moving2.action_active=true;
+  for(int i=0;i<10;++i)
+    r=found_after_turn.Compute(Ball(.8,.3),640,480,find_time+=.1,{},moving2);
+  ActionExecutionFeedback completed2; completed2.action_done=true;
+  completed2.observation_complete=true;
+  r=found_after_turn.Compute(Ball(.8,.3),640,480,find_time+=.1,{},completed2);
+  assert(r.mode==BallMode::kApproachBall);
+  assert(found_after_turn.RecoveryWalkTurnsCompleted()==1);
+
   return 0;
 }
