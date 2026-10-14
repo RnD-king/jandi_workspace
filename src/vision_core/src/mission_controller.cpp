@@ -1208,9 +1208,21 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       request.category == ActionCategory::kLocomotion &&
       config_.UsesObjectReadyMean(request.action))
     request.line_queue_eligible = true;
+  // Transport can have consumed A DONE and even B DONE ahead of RGB processing.
+  // Once B was pre-booked, A's late sensory DONE must not dispatch B again.
+  const bool queued_parent_done = object_queued_parent_id_ != 0 &&
+      input.delivery_feedback.done &&
+      input.delivery_feedback.action_id == object_queued_parent_id_;
+  if (queued_parent_done) request = {};
   output.command = command_coordinator_.Compute(
       command_mission, phase, request, camera_request,
       input.delivery_feedback, input.now_sec);
+  if (ready_object_successor && moving_object_ready_mean_ &&
+      output.command.command_type == CommandType::kAction &&
+      output.command.control_phase == ControlPhase::kWaitingQueuedActionAck) {
+    object_queued_parent_id_ = moving_object_ready_mean_->action_id;
+    object_queued_successor_ = output.command;
+  }
   if (config_.test_mission!=MissionType::kNone && config_.test_stage==3 &&
       output.command.command_type==CommandType::kAction && TestExecutionReady())
     test_execution_started_=true;
@@ -1226,13 +1238,26 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   // still awaits sensory processing. Keep its FSM ID until that DONE edge.
   // While B is reserved, last_command_ must still identify executing A.
   // Otherwise A's real DONE would be lost by object tracking and mission FSM.
-  const bool object_queued_wait =
-      active_mission_ != MissionType::kLine &&
+  const bool object_queued_wait = object_queued_parent_id_ != 0 &&
+      !queued_parent_done &&
       (output.command.control_phase == ControlPhase::kWaitingQueuedActionAck ||
        output.command.control_phase == ControlPhase::kWaitingQueuedActionStart);
-  if (!object_queued_wait &&
-      (output.command.action_id!=0 || action_feedback.action_done || last_command_.action_id==0))
+  if (queued_parent_done && output.command.action_id == 0 &&
+      object_queued_successor_) {
+    // B's DONE may have been processed by transport already. Retain B's
+    // identity so the next sensory DONE edge still reaches its mission FSM.
+    last_command_ = *object_queued_successor_;
+    last_command_.command_type = CommandType::kHold;
+    last_command_.control_phase = ControlPhase::kWaitingActionDone;
+  } else if (!object_queued_wait &&
+             (output.command.action_id!=0 || action_feedback.action_done ||
+              last_command_.action_id==0)) {
     last_command_ = output.command;
+  }
+  if (queued_parent_done) object_queued_parent_id_ = 0;
+  if (object_queued_successor_ && input.delivery_feedback.done &&
+      input.delivery_feedback.action_id == object_queued_successor_->action_id)
+    object_queued_successor_.reset();
   output.active_mission = active_mission_;
   output.ball = ball_result_; output.hurdle = hurdle_result_;
   output.goal = goal_result_; output.has_ball = has_ball_;
@@ -1668,6 +1693,8 @@ void MissionController::Reset(bool preserve_action_ids) {
   moving_object_action_id_=0;
   moving_object_samples_.clear();
   moving_object_ready_mean_.reset();
+  object_queued_parent_id_ = 0;
+  object_queued_successor_.reset();
   last_ready_line_guide_.reset();
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;
