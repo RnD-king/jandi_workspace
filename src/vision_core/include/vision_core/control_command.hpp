@@ -35,7 +35,7 @@ public:
 private:
   ControlCommand BeginAction(ControlCommand command,
                              const ActionRequest &request);
-  ControlCommand BeginQueuedLineAction(ControlCommand command,
+  ControlCommand BeginQueuedAction(ControlCommand command,
                                        const ActionRequest &request);
   ControlCommand PendingCommand(ControlCommand command) const;
 
@@ -49,6 +49,7 @@ private:
   bool pending_ready_{false};
   std::uint64_t queued_action_id_{0};
   ActionRequest queued_request_;
+  MissionType queued_mission_{MissionType::kLine};
   double queued_issued_sec_{0.0};
   bool queued_acknowledged_{false};
   bool action_ack_timed_out_{false};
