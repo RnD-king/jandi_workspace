@@ -39,7 +39,7 @@ struct GoalConfig {
   int stable_min_hits{};
   int lost_frames{};
   double smooth_alpha{};
-  double post_pickup_wait_sec{};
+  int post_pickup_walk_fallback_actions{}; // after three completed LINE walks if no 5-step DONE
   double target_u_px{};
   double approach_u_deadband_px{};
   double fine_adjust_start_z_m{};
@@ -134,7 +134,7 @@ public:
                      const ActionExecutionFeedback &action_feedback,
                      bool allow_new_body_actions = true,
                      std::optional<double> center_depth_m = std::nullopt,
-                     double post_pickup_walk_sec = 0.0);
+                     bool post_pickup_line_gate_satisfied = false);
   static const char *ModeName(GoalMode mode);
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.

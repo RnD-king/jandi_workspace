@@ -361,7 +361,7 @@ GoalResult GoalController::Compute(
     const GoalPoseObservation &pose, int image_width, int image_height,
     double now_sec, bool line_reference_valid, const CameraFeedback &camera,
     const ActionExecutionFeedback &feedback, bool allow_new_body_actions,
-    std::optional<double> center_depth_m, double post_pickup_walk_sec) {
+    std::optional<double> center_depth_m, bool post_pickup_line_gate_satisfied) {
   const bool pose_valid = pose.valid && std::isfinite(pose.x_m) &&
                           std::isfinite(pose.z_m) && pose.z_m > 0.0 &&
                           std::isfinite(pose.yaw_rad);
@@ -378,8 +378,10 @@ GoalResult GoalController::Compute(
   }
 
   if (mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_ &&
-      post_pickup_walk_sec + kEpsilon >= config_.post_pickup_wait_sec) {
-    // Lock GOAL now to stop new LINE reservations; drain accepted walks first.
+      (post_pickup_line_gate_satisfied ||
+       config_.post_pickup_walk_fallback_actions == 0)) {
+    // Enter GOAL only after the qualifying LINE motion's actual DONE.
+    // A zero fallback is an explicit immediate-entry override (used by tests).
     mode_ = GoalMode::kWaitCameraGoal;
     camera_request_started_ = false;
   }

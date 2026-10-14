@@ -105,7 +105,7 @@ vision_algorithm:
     smooth_alpha: 0.45
 
     # 공을 주운 후 GOAL 미션 진입
-    post_pickup_wait_sec: 5.0 # 공을 주운 후 LINE 보행 누적 5초
+    post_pickup_walk_fallback_actions: 3 # 라인 복귀 후 13번(5걸음) DONE 우선; 없으면 보행 3회 DONE 후 GOAL 카메라
 
     # forward
     target_u_px: 380.0          # 중앙 세로 구역의 중심

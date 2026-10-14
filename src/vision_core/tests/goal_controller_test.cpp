@@ -20,7 +20,7 @@ int main() {
   const auto p = EstimateGoalPoseFromBackboardDepths(50,1,40,1.1,60,.9,k);
   assert(p.valid && std::abs(p.x_m) < 1e-12);
   GoalConfig c=LoadDefaultAlgorithmConfig().goal; c.stable_window=c.stable_min_hits=1; c.lost_frames=2;
-  c.smooth_alpha=0; c.post_pickup_wait_sec=0;
+  c.smooth_alpha=0; c.post_pickup_walk_fallback_actions=0;
   c.fine_one_step_range_error_m=c.fine_two_step_range_error_m=1.0; // Isolate near fine geometry.
   c.target_u_px=320; c.approach_u_deadband_px=32; c.fine_adjust_start_z_m=.8;
   c.hoop_radius_m=.1; c.throw_landing_x_m=0; c.throw_landing_z_m=.5; c.position_tolerance_m=.05;
