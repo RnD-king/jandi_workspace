@@ -97,5 +97,21 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(self.events(), [StatusEvent('body', 1, ACK)])
 
 
+
+class GoalTrialParameterWiringTests(unittest.TestCase):
+    """The ROS adapter is not built by this standalone CI: catch miswiring."""
+    def test_rqt_trial_setting_commits_only_at_next_start(self):
+        src = (Path(__file__).resolve().parents[1] /
+               'src' / 'line_perception_node.cpp').read_text()
+        self.assertIn('declare_parameter<bool>("goal_trial_start_forward"', src)
+        self.assertIn('add_on_set_parameters_callback(', src)
+        self.assertIn('run_state_ != RunState::kWaitStart || algorithm_mode_ != "goal"', src)
+        self.assertIn('if (proposed) goal_trial_start_forward_pending_=*proposed;', src)
+        self.assertIn(
+            'mission_controller_->SetGoalTrialStartForward(goal_trial_start_forward_pending_);' +
+            '\n          mission_controller_->Reset(true);', src)
+        self.assertIn('mission_config.goal_trial_start_forward = goal_trial_start_forward_pending_;', src)
+
+
 if __name__ == '__main__':
     unittest.main()
