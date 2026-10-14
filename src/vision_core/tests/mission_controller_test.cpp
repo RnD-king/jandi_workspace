@@ -1095,5 +1095,86 @@ int main() {
   assert(gated_stage_result.command.action_id==0);
   assert(gated_stage.TestSetupPending());
 
+  // GOAL camera after pickup: wall time and READY alone cannot trigger it.
+  // A completed five-step LINE cruise (13) triggers GOAL, without queuing B.
+  auto post_pickup_cfg = LoadDefaultAlgorithmConfig();
+  post_pickup_cfg.enable_ball=post_pickup_cfg.enable_hurdle=false;
+  post_pickup_cfg.enable_goal=true;
+  post_pickup_cfg.initial_has_ball=true; // stands in for confirmed BALL recovery
+  post_pickup_cfg.goal.post_pickup_walk_fallback_actions=3;
+  post_pickup_cfg.line_features.image_center_u=320;
+  post_pickup_cfg.line.line_stable_window=post_pickup_cfg.line.line_stable_min_hits=1;
+  MissionController five_step_goal(post_pickup_cfg);
+  auto goal_frame=Frame(0.0);
+  auto goal_step=five_step_goal.Step(goal_frame);
+  assert(goal_step.command.action==MissionAction::kStepForwardFive);
+  const auto five_id=goal_step.command.action_id;
+  goal_frame=Frame(.1); goal_frame.delivery_feedback={five_id,true,false,false};
+  goal_step=five_step_goal.Step(goal_frame);
+  assert(goal_step.active_mission==MissionType::kLine);
+  for (double time : {0.8,1.4,1.6,1.8,2.0,2.2}) {
+    goal_frame=Frame(time); goal_step=five_step_goal.Step(goal_frame);
+  }
+  goal_frame=Frame(2.55);
+  goal_frame.delivery_feedback={five_id,true,false,true};
+  goal_step=five_step_goal.Step(goal_frame);
+  assert(goal_step.command.action_id==five_id); // no B reserved at 13 READY
+  assert(goal_step.command.camera_request==CameraRequest::kNone);
+  goal_frame=Frame(2.8);
+  goal_frame.delivery_feedback={five_id,true,true,false};
+  goal_step=five_step_goal.Step(goal_frame);
+  assert(goal_step.goal_five_step_completed);
+  assert(goal_step.goal_walk_actions_completed==1);
+  assert(goal_step.active_mission==MissionType::kGoal);
+  assert(goal_step.goal.mode==GoalMode::kWaitCameraGoal);
+  assert(goal_step.command.camera_request==CameraRequest::kGoal);
+
+  // No straight-five choice: three finished turning-forward (12) walks
+  // trigger GOAL. The first two may queue their successors, but the third
+  // READY must not book a fourth action.
+  MissionController three_walk_goal(post_pickup_cfg);
+  auto three_frame=Frame(0.0); ShiftLine(three_frame,500);
+  auto three_result=three_walk_goal.Step(three_frame);
+  assert(three_result.command.action==MissionAction::kStepForwardRight);
+  std::uint64_t current_walk=three_result.command.action_id;
+  const auto send_three = [&](double at, std::uint64_t id,
+                              bool ack, bool done, bool ready) {
+    auto frame=Frame(at); ShiftLine(frame,500);
+    frame.delivery_feedback={id,ack,done,ready};
+    return three_walk_goal.Step(frame);
+  };
+  three_result=send_three(.1,current_walk,true,false,false);
+  for (double t : {.8,1.4,1.6,1.8,2.,2.2})
+    three_result=send_three(t,0,false,false,false);
+  three_result=send_three(2.55,current_walk,true,false,true);
+  assert(three_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
+  std::uint64_t second_walk=three_result.command.action_id;
+  assert(second_walk!=current_walk);
+  three_result=send_three(2.6,second_walk,true,false,false);
+  three_result=send_three(2.8,current_walk,true,true,false);
+  assert(three_result.goal_walk_actions_completed==1);
+  current_walk=second_walk;
+  for(double t : {2.9,3.3,3.9,4.2,4.4,4.6,4.8,5.0,5.1})
+    three_result=send_three(t,0,false,false,false);
+  three_result=send_three(5.35,current_walk,true,false,true);
+  assert(three_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
+  const auto third_walk=three_result.command.action_id;
+  three_result=send_three(5.4,third_walk,true,false,false);
+  three_result=send_three(5.6,current_walk,true,true,false);
+  assert(three_result.goal_walk_actions_completed==2);
+  current_walk=third_walk;
+  for(double t : {5.7,6.1,6.7,7.0,7.2,7.4,7.6,7.8,8.0})
+    three_result=send_three(t,0,false,false,false);
+  three_result=send_three(8.15,current_walk,true,false,true);
+  assert(three_result.command.action_id==current_walk); // no fourth queue
+  assert(three_result.command.camera_request==CameraRequest::kNone);
+  three_result=send_three(8.4,current_walk,true,true,false);
+  assert(three_result.goal_walk_actions_completed==3);
+  assert(!three_result.goal_five_step_completed);
+  assert(three_result.active_mission==MissionType::kGoal);
+  assert(three_result.command.camera_request==CameraRequest::kGoal);
+  three_result=send_three(8.5,current_walk,true,true,false); // duplicate DONE
+  assert(three_result.goal_walk_actions_completed==3);
+
   return 0;
 }
