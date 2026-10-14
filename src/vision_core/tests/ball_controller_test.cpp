@@ -4,6 +4,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cstdio>
 #include <utility>
 #include <vector>
 
@@ -308,6 +309,8 @@ int main() {
   assert(r.mode==BallMode::kBallRecoveryWalkTurn);
   for(int turn=0;turn<5;++turn) {
     r=walk_recovery.Compute({},640,480,walk_time,{}, {});
+    std::fprintf(stderr, "RECOVERY turn=%d action=%d mode=%d count=%d\n", turn,
+        int(r.action.action), int(r.mode), walk_recovery.RecoveryWalkTurnsCompleted());
     assert(r.action.action==MissionAction::kStepForwardLeftOne); // action 27
     walk_time+=.1;
     ActionExecutionFeedback moving; moving.action_active=true;
