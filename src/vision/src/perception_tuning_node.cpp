@@ -991,8 +991,10 @@ private:
 
   std::string RepeatLabel(int scope) const {
     using vision_core::BallMode; using vision_core::GoalMode; using vision_core::HurdleMode;
-    if (scope==200+static_cast<int>(BallMode::kDownSearch) ||
-        scope==400+static_cast<int>(HurdleMode::kDownSearch)) return "SEARCH <="+std::to_string(scope==200+static_cast<int>(BallMode::kDownSearch) ? tuning_config_.ball.down_search_timeout_sec : tuning_config_.hurdle.down_search_timeout_sec)+"s";
+    if (scope==200+static_cast<int>(BallMode::kDownSearch))
+      return "SEARCH <="+std::to_string(tuning_config_.ball.down_search_timeout_sec)+"s";
+    if (scope==400+static_cast<int>(HurdleMode::kDownSearch))
+      return "SEARCH <="+std::to_string(tuning_config_.hurdle.down_search_max_steps)+" steps";
     if (scope==200+static_cast<int>(BallMode::kPostPickupBackAway)) return "BACK x"+std::to_string(tuning_config_.ball.post_pickup_back_steps);
     if (scope==300+static_cast<int>(GoalMode::kPostShootBackAway)) return "BACK x"+std::to_string(tuning_config_.goal.post_shoot_back_steps);
     if (scope==200+static_cast<int>(BallMode::kPostPickupLineRecovery) ||
@@ -2767,8 +2769,12 @@ private:
           }
           if (ball_cmd.mode == vision_core::BallMode::kDownSearch ||
               hurdle_cmd.mode == vision_core::HurdleMode::kDownSearch) {
-            std::snprintf(buf, sizeof(buf), "INITIAL DOWN SEARCH | remaining %.2fs",
-                selected_ball ? ball_cmd.down_search_remaining_sec : hurdle_cmd.down_search_remaining_sec);
+            if (selected_ball)
+              std::snprintf(buf, sizeof(buf), "BALL DOWN SEARCH | remaining %.2fs",
+                  ball_cmd.down_search_remaining_sec);
+            else
+              std::snprintf(buf, sizeof(buf), "HURDLE DOWN SEARCH | remaining %d steps",
+                  hurdle_cmd.down_search_steps_remaining);
             tune_line(878, buf, text_color);
           }
           if (ball_cmd.mode == vision_core::BallMode::kBallRecoveryForward ||
