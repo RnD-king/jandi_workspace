@@ -230,6 +230,11 @@ void MissionController::EnterMission(MissionType mission) {
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;
   if (mission == MissionType::kBall) {
+    // A new pickup starts a fresh GOAL walk gate only after line reacquisition.
+    post_pickup_goal_line_gate_active_ = false;
+    post_pickup_line_actions_issued_ = post_pickup_line_actions_completed_ = 0;
+    post_pickup_five_step_completed_ = false;
+    post_pickup_line_actions_.clear();
     ++ball_mission_index_;
     hurdle_controller_.Reset(); goal_controller_.Reset();
     hurdle_result_ = {}; goal_result_ = {};
@@ -237,6 +242,9 @@ void MissionController::EnterMission(MissionType mission) {
     goal_controller_.Reset(); ball_result_ = {}; goal_result_ = {};
     has_ball_ = false;
   } else if (mission == MissionType::kGoal) {
+    // Do not carry post-pickup booking limits into LINE after the later shot.
+    post_pickup_goal_line_gate_active_ = false;
+    post_pickup_line_actions_.clear();
     ++goal_mission_index_;
     hurdle_controller_.Reset(); hurdle_result_ = {};
   }
