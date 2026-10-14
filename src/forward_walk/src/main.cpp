@@ -576,7 +576,7 @@ private:
             if (admission == Admission::Queue) {
                 // 대기열은 한 칸이다. 검증된 데이터까지 저장한 뒤 ACK하므로 나중에 다시 읽지 않는다.
                 queued_action_.emplace(QueuedAction{message->action_id, message->mission,
-                    message->action, effective_target_yaw_deg, std::move(*program)});
+                    message->action, effective_target_yaw_deg, std::move(program)});
                 action_transactions_.queued_id = message->action_id;
                 PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
                 return;
