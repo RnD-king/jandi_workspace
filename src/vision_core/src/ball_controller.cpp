@@ -304,6 +304,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       ClearTracking(); // Start fine control with fresh DOWN-view evidence.
       last_seen_u_px_ = config_.far_u_des_px;
       mode_ = BallMode::kDownSearch;
+      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
       down_search_started_ = down_search_found_ = false;
       result.tracked = {};
       result.mode = mode_;
@@ -315,14 +316,14 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     }
     return result;
   case BallMode::kDownSearch: {
+    if (now_sec < settle_until_sec_) return result; // Camera transition settle.
     down_search_found_ =
         down_search_found_ || (tracked_.visible && tracked_.stable);
     if (feedback.action_active && !feedback.action_done)
       return result;
     if (down_search_found_) {
       mode_ = BallMode::kCoarseAdjust;
-      ClearTracking();
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
+      ClearTracking(); // Camera already settled; no extra COARSE timer.
       result.mode = mode_;
       result.action = {};
       return result;
@@ -349,7 +350,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     if (feedback.action_active && !feedback.action_done)
       return result;
     if (feedback.action_done) {
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
+      settle_until_sec_ = now_sec; // Shared 1 s DONE observation is sufficient here.
       return result;
     }
     if (now_sec < settle_until_sec_)
@@ -390,7 +391,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     if (feedback.action_active && !feedback.action_done)
       return result;
     if (feedback.action_done) {
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
+      settle_until_sec_ = now_sec + config_.fine_motion_settle_duration_sec;
       return result;
     }
     if (now_sec + kEpsilon < settle_until_sec_)
