@@ -131,14 +131,18 @@ int main(int argc, char **argv) {
   Reject(text.str(), "pickup_v1_px: 80", "pickup_v1_px: 131.0");
   Reject(text.str(), "pickup_v2_px: 130", "pickup_v2_px: .inf");
   Reject(text.str(), "smooth_alpha: 0.45", "smooth_alpha: .nan");
-  Reject(text.str(), "approach_two_step_v_px: 360.0", "approach_two_step_v_px: .nan");
+  Reject(text.str(), "approach_two_step_v_px: 330.0", "approach_two_step_v_px: .nan");
   Reject(text.str(), "pickup_max_attempts: 100", "pickup_max_attempts: 0");
   Reject(text.str(), "upper_acquire_v_px: 470.0", "upper_acquire_v_px: -0.1");
-  Reject(text.str(), "target_u_px: 380.0", "target_u_px: .inf");
+  Reject(text.str(), "target_u_px: 360.0", "target_u_px: .inf");
   Reject(text.str(), "throw_landing_z_m: 0.48", "throw_landing_z_m: 0.0");
   Reject(text.str(), "throw_landing_x_m: -0.08", "throw_landing_x_m: .nan");
   Reject(text.str(), "fine_settle_duration_sec: 0.60",
          "fine_settle_duration_sec: -0.1");
+  Reject(text.str(), "fine_motion_settle_duration_sec: 0.0",
+         "fine_motion_settle_duration_sec: -0.1");
+  Reject(text.str(), "recovery_walk_turn_max: 3",
+         "recovery_walk_turn_max: -1");
   Reject(text.str(), "action_ack_timeout_sec: 10.0",
          "action_ack_timeout_sec: .nan");
   Reject(text.str(), "backboard_min_depth_m: 0.20",
