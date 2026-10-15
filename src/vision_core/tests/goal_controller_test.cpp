@@ -276,5 +276,22 @@ int main() {
   assert(r.action.action==MissionAction::kNone);
   r=timed_fine.Compute({},Board(),Pose(0,.8),640,480,.31,true,{CameraMode::kGoal,true},{});
   assert(r.action.action==MissionAction::kStepForwardHalf);
+
+  // SHOOT waits for the transition/mission settle before moving the camera.
+  GoalConfig shot_cfg=c; shot_cfg.fine_settle_duration_sec=.6;
+  GoalController after_shoot(shot_cfg,3.0); after_shoot.StartTestExecute();
+  r=after_shoot.Compute({},Board(),Pose(0,.6),640,480,0,true,
+                        {CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kShoot);
+  r=after_shoot.Compute({}, {}, {},640,480,.1,true,
+                        {CameraMode::kGoal,true},fine_done);
+  assert(r.camera_request==CameraRequest::kNone);
+  r=after_shoot.Compute({}, {}, {},640,480,.3,true,
+                        {CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kShoot && r.camera_request==CameraRequest::kNone);
+  r=after_shoot.Compute({}, {}, {},640,480,.71,true,
+                        {CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kReturnCameraToLine &&
+         r.camera_request==CameraRequest::kForward);
   return 0;
 }
