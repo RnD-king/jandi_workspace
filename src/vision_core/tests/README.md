@@ -91,3 +91,31 @@ After the first completed common window, a missing board searches with existing
 31/28 turns and goal.recovery_turn_max; missing/central direction falls back to
 bounded stationary recovery. A visible board with failed Depth never requests
 an entry search turn. Normal COARSE/FINE criteria and the 10/7 observer remain.
+
+
+2026-10-16 regression coverage (`shared_vision_core_mission_oct16_regression_test`):
+BALL zone-8 one-step/DONE-then-DOWN boundary (inclusive center edges, side turns
+unchanged, uncommitted previews cannot consume DONE, chosen step count retained
+until completion, no interruption of an active two-step motion, live/tuning application),
+BALL middle row loss (4/6: one WALK turn, then forward recovery; 5: camera DOWN),
+HURDLE bottom side loss (7/9: camera DOWN), search-only five rolling hits across
+clock boundaries without stopping an active motion, unchanged FINE seven hits,
+per-class bbox filters and actual runtime application, LINE score boundaries,
+READY one-slot reservation, post-turn observation and bounded actual-DONE turns.
+New fixed-fixture keys retain the historical search threshold (7) and set the
+LINE guard to 10.0; focused tests explicitly select 5 hits and score 0.5.
+Production YAML provides 5 hits and score 0.5. Runtime config readback checks all
+new keys against the chosen YAML instead of hardcoding operator tuning values.
+These source changes have not been built or executed by the editing agent.
+
+
+Follow-up: BALL and HURDLE now share DownSearchWalk. Both limit the number of
+actual completed STEP_FORWARD_ONE actions through down_search_max_steps (10 in
+production); elapsed time never consumes search attempts. Tests cover long time
+gaps, no DONE, duplicate completion without a pending action, the final-step
+found/exhausted priority and Reset for both missions.
+LINE excessive-score turns now have an explicit score-recovery phase and DONE
+counter in the shared debug result. The phase still uses the existing post-DONE
+observation and READY one-slot queue. Object-wide bbox fallback fields were
+removed; LINE uses its existing line_detection dimensions, including live updates.
+LineBoxFilters checks the real perception pipeline after both live update APIs.

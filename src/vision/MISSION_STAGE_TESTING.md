@@ -184,3 +184,32 @@ ros2 run vision line_perception_node --ros-args \
   -p goal_trial_start_goal:=true \
   -p show_debug_view:=true
 ```
+
+## 2026-10-16: 격자 유실·탐색·bbox·LINE 방어
+
+BALL 5는 접근 DONE 뒤 관측 실패 시 DOWN, 4/6은 좌31/우28 1회 DONE 후 FORWARD
+정지 복구다. HURDLE 7/9는 회전 뒤 관측 실패 시 추가 전진 없이 DOWN이다.
+
+DOWN 탐색만 `ball_down_search_min_hits`, `hurdle_down_search_min_hits`로 분리했다.
+운영값은 5 (최근 stable_window=10), FINE/복구 stable_min_hits 및 공통 10/7은 유지한다.
+LINE `line_p2p_in_place_turn_score` 운영값은 0.5다. 초과 시 좌31/우28 1회 후 새 관측,
+기존 line_p2p.recovery_max_turns의 실제 DONE 한도에 닿아도 점수가 크면 FINAL HOLD다.
+
+객체별 `ball|hurdle|goal|backboard_min_box_width` / `_height` (double, 기본 2.0px)를
+추가했다. 위 새 파라미터 모두 실전·튜닝 노드에서 시작값과 변경값이 core로 반영된다.
+실전은 WAIT_START/PAUSED + 몸/카메라 DONE, 튜닝은 idle WAIT_PREVIEW/WAIT_COMMIT에서
+변경한다. bbox 필터 변경은 frozen preview/이전 관측을 무효화하되 실제 DONE을 보존한다.
+공통 상태 패널에도 새 탐색/점수/bbox 기준이 표시된다. 빌드·실기 검증은 별도다.
+
+
+### 추가 정리: 탐색 횟수 통일·LINE 복구·라인 bbox
+
+공과 허들은 같은 DownSearchWalk를 사용하며 각각 down_search_max_steps=10회,
+10번 모션의 실제 DONE 기준으로 종료한다. 공의 down_search_timeout_sec는 제거했다.
+ROS/rqt: ball_down_search_max_steps / hurdle_down_search_max_steps (positive integer).
+마지막 걸음에서 검출 조건을 채우면 실패보다 접근 복귀가 우선한다.
+LINE 큰 점수 회전은 SCORE RECOVERY 상태로 표시하며 실제 DONE 카운터와
+line_p2p.recovery_max_turns(기본 5)를 표시한다. 5회 뒤에도 다음 회전이 필요하면 HOLD다.
+object_targets의 공통 min_box_width/height 및 object_min_box_width/height ROS
+파라미터는 제거했다. 라인은 기존 line_detection.min_box_width/height=1.0px를 유지하며,
+line_min_box_width / line_min_box_height (double)로 다른 객체와 같이 rqt 반영한다.

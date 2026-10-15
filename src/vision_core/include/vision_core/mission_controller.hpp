@@ -129,6 +129,8 @@ struct MissionFrameResult {
   std::optional<LineGuide> line_decision_guide;
   std::optional<LineWindowStats> line_window_stats;
   bool line_in_recovery{true};
+  bool line_score_recovery{false};
+  int line_score_recovery_turns_completed{0};
   bool has_ball{false};
   // Diagnostics of post-DONE observations, never counting pre-DONE history.
   bool post_motion_observing{false};
@@ -257,6 +259,7 @@ public:
   // A sensory DONE may still be waiting for RESUME; preserve that pending edge.
   void SetGoalEdgeMargin(double margin_px);
   void SetBallFineSideTwoStepMargin(double margin_px);
+  void SetLivePerceptionTuning(const MissionControllerConfig& candidate);
   bool SetTestStage(MissionType mission,int stage);
   bool TestSetupPending() const { return test_setup_pending_; }
   int MissionStateKey() const {
@@ -302,6 +305,7 @@ private:
     kRecoveryTurn,
     kRecoveryObserve,
     kFinalHold,
+    kScoreRecovery, // WALK 31/28 recovery for an excessive valid O/H score.
   };
   enum class DirectionEvidence { kNone, kLeft, kRight };
 
@@ -341,6 +345,8 @@ private:
   bool goal_trial_complete_{false}; // Shared trial completion, retained name for compatibility.
   bool test_entry_pending_{false}, test_setup_pending_{false}, test_execution_started_{false};
   bool fresh_after_search_{false};
+  bool decision_observation_restart_pending_{false};
+  int line_guard_turns_completed_{0};
   bool test_setup_camera_started_{false}, test_failed_{false};
   bool test_setup_pose_done_{false};
   bool goal_start_camera_pending_{false};

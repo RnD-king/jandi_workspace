@@ -12,11 +12,13 @@ int main(int argc,char** argv) {
     base.transition_settle_sec=.6;base.fine_motion_settle_sec=0;
     base.ball.recovery_walk_turn_max=3;base.goal.recovery_turn_max=3;
     base.goal.edge_margin_px=50;
+    base.ball.approach_direct_down_v_px=355;
     rclcpp::NodeOptions options;
     options.parameter_overrides({
         rclcpp::Parameter("ball_recovery_walk_turn_max",5),
         rclcpp::Parameter("goal_recovery_turn_max",2),
-        rclcpp::Parameter("goal_edge_margin_px",75.0)});
+        rclcpp::Parameter("goal_edge_margin_px",75.0),
+        rclcpp::Parameter("ball_approach_direct_down_v_px",370.0)});
     auto node=std::make_shared<rclcpp::Node>("mission_parameter_test",options);
     vision::DeclareMissionParameters(*node,base);
     auto applied=base;
@@ -27,6 +29,15 @@ int main(int argc,char** argv) {
     Check(applied.ball.recovery_walk_turn_max==5,"BALL startup override was lost");
     Check(applied.goal.recovery_turn_max==2,"GOAL startup override was lost");
     Check(applied.goal.edge_margin_px==75,"edge margin startup override was lost");
+    Check(applied.ball.approach_direct_down_v_px==370,"BALL direct DOWN startup override was lost");
+    Check(vision::ApplyLivePerceptionParameter(
+        rclcpp::Parameter("ball_approach_direct_down_v_px",390.0),applied) &&
+        applied.ball.approach_direct_down_v_px==390,"BALL direct DOWN live setting was not applied");
+    bool bad_type=false;
+    try {vision::ApplyLivePerceptionParameter(
+        rclcpp::Parameter("ball_approach_direct_down_v_px",390),applied);}
+    catch(const std::invalid_argument&) {bad_type=true;}
+    Check(bad_type,"BALL direct DOWN must reject an integer parameter");
     Check(node->set_parameter(rclcpp::Parameter("goal_edge_margin_px",20.0)).successful,
           "double edge margin update rejected");
     vision::ReadMissionParameters(*node,applied);

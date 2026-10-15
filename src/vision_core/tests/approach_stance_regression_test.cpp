@@ -12,7 +12,7 @@ ObjectTarget Target(double u,double v) {
 }
 void BallStages() {
   auto c=LoadDefaultAlgorithmConfig().ball;
-  c.entry_min_hits=1; c.stable_window=c.stable_min_hits=1;
+  c.entry_min_hits=1; c.down_search_min_hits=1; c.stable_window=c.stable_min_hits=1;
   c.lost_frames=1;
   // Isolate legacy two-step / one-step / fine transitions from live tuning values.
   c.down_one_step_v_px=216.0; c.fine_mode_v_px=278.4;
@@ -36,7 +36,7 @@ void BallStages() {
 }
 void HurdlePostWalkPolicy(int steps) {
   auto c=LoadDefaultAlgorithmConfig().hurdle;
-  c.stable_window=c.stable_min_hits=1; c.lost_frames=1;
+  c.down_search_min_hits=1; c.stable_window=c.stable_min_hits=1; c.lost_frames=1;
   HurdleController hurdle(c,3);
   const double v=steps==4 ? c.approach_short_v_px-20 :
       steps==3 ? (c.approach_short_v_px+c.approach_two_step_v_px)/2 : c.approach_two_step_v_px+20;

@@ -13,6 +13,8 @@ int main() {
     throw std::runtime_error("HURDLE WALK/FINE guide count mismatch");
   if(fine.at<cv::Vec3b>(260,400)==fine.at<cv::Vec3b>(180,400))
     throw std::runtime_error("CONTACT guide must have a different color");
+  if(cv::norm(fine(cv::Rect(5,235,150,22)),cv::NORM_INF)!=0)
+    throw std::runtime_error("CONTACT label must be hidden above the retained line");
   // Tuning values must drive the exact same helper as live display values.
   config.contact_v_px=300;
   cv::Mat tuned=cv::Mat::zeros(480,640,CV_8UC3);

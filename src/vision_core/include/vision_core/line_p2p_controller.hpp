@@ -15,6 +15,7 @@ struct LineP2pConfig {
   double offset_gain{};
   double heading_gain{};
   double steering_deadband{};
+  double in_place_turn_score{}; // Above this absolute O/H score, turn once in WALK.
   double ready_lead_sec{}; // Matches the motion executor's READY remaining time.
   // 판단 실패 또는 recovery 회전 뒤 stationary re-observation 시간이다.
   double failure_observation_sec{};

@@ -95,6 +95,23 @@ int main(int argc, char **argv) {
   assert(side_pos!=std::string::npos);
   side_yaml.replace(side_pos,std::string("fine_side_two_step_margin_px: 100.0").size(),"fine_side_two_step_margin_px: 75.0");
   assert(LoadText(side_yaml).ball.fine_side_two_step_margin_px==75.0);
+  for (const auto* key : {"ball_min_box_width","ball_min_box_height",
+      "goal_min_box_width","goal_min_box_height","backboard_min_box_width",
+      "backboard_min_box_height","hurdle_min_box_width","hurdle_min_box_height"}) {
+    const std::string original=std::string(key)+": 2.0";
+    Reject(text.str(),original,"");
+    Reject(text.str(),original,std::string(key)+": -1.0");
+    Reject(text.str(),original,std::string(key)+": .nan");
+  }
+  Reject(text.str(),"down_search_max_steps: 10","down_search_max_steps: 0");
+  Reject(text.str(),"down_search_max_steps: 10","down_search_max_steps: -1");
+  Reject(text.str(),"down_search_max_steps: 10","");
+  for (const auto* value : {"0","11","not_a_number"})
+    Reject(text.str(),"down_search_min_hits: 7",std::string("down_search_min_hits: ")+value);
+  Reject(text.str(),"down_search_min_hits: 7","");
+  Reject(text.str(),"in_place_turn_score: 10.0","");
+  Reject(text.str(),"in_place_turn_score: 10.0","in_place_turn_score: .nan");
+  Reject(text.str(),"in_place_turn_score: 10.0","in_place_turn_score: 0.10");
   // Future opt-in only edits YAML; AUTO and tuning use the same parser.
   const auto replaced = [&text](const std::string &value) {
     std::string modified = text.str();
@@ -162,6 +179,16 @@ int main(int argc, char **argv) {
   Reject(text.str(), "pickup_v2_px: 130", "pickup_v2_px: .inf");
   Reject(text.str(), "smooth_alpha: 0.45", "smooth_alpha: .nan");
   Reject(text.str(), "approach_two_step_v_px: 240.0", "approach_two_step_v_px: .nan");
+  for (const auto* value : {"-1", ".nan", ".inf", "240.0", "239.0"})
+    Reject(text.str(),"approach_direct_down_v_px: 480.0",
+        std::string("approach_direct_down_v_px: ")+value);
+  Reject(text.str(),"approach_direct_down_v_px: 480.0","");
+  auto direct_yaml=text.str();
+  const auto direct_pos=direct_yaml.find("approach_direct_down_v_px: 480.0");
+  assert(direct_pos!=std::string::npos);
+  direct_yaml.replace(direct_pos,std::string("approach_direct_down_v_px: 480.0").size(),
+      "approach_direct_down_v_px: 355.0");
+  assert(LoadText(direct_yaml).ball.approach_direct_down_v_px==355.0);
   Reject(text.str(), "pickup_max_attempts: 100", "pickup_max_attempts: 0");
   Reject(text.str(), "upper_acquire_v_px: 470.0", "upper_acquire_v_px: -0.1");
   Reject(text.str(), "target_u_px: 380", "target_u_px: .inf");

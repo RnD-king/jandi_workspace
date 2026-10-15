@@ -33,6 +33,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(line_p2p, offset_gain);
   FIELD(line_p2p, heading_gain);
   FIELD(line_p2p, steering_deadband);
+  FIELD(line_p2p, in_place_turn_score);
   FIELD(line_p2p, ready_lead_sec);
   FIELD(line_p2p, failure_observation_sec);
   FIELD(line_p2p, recovery_observation_sec);
@@ -40,13 +41,14 @@ void CheckConfiguration(const std::string& path) {
   FIELD(line_p2p, no_evidence_max_retries);
   FIELD(line_p2p, recovery_max_turns);
   FIELD(line_p2p, recovery_turn_yaw_deg);
-  FIELD(ball, down_search_timeout_sec);
+  FIELD(ball, down_search_max_steps);
   FIELD(ball, recovery_observation_sec);
   FIELD(ball, recovery_max_observations);
   FIELD(ball, recovery_walk_turn_max);
   FIELD(ball, post_pickup_back_steps);
   FIELD(ball, stable_window);
   FIELD(ball, stable_min_hits);
+  FIELD(ball, down_search_min_hits);
   FIELD(ball, entry_min_hits);
   FIELD(ball, fine_side_two_step_margin_px);
   FIELD(ball, lost_frames);
@@ -56,6 +58,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, approach_u_deadband_px);
   FIELD(ball, approach_short_v_px);
   FIELD(ball, approach_two_step_v_px);
+  FIELD(ball, approach_direct_down_v_px);
   FIELD(ball, down_one_step_v_px);
   FIELD(ball, fine_mode_v_px);
   FIELD(ball, pickup_u1_px);
@@ -72,6 +75,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(hurdle, recovery_max_observations);
   FIELD(hurdle, stable_window);
   FIELD(hurdle, stable_min_hits);
+  FIELD(hurdle, down_search_min_hits);
   FIELD(hurdle, lost_frames);
   FIELD(hurdle, smooth_alpha);
   FIELD(hurdle, upper_acquire_v_px);
@@ -124,8 +128,15 @@ void CheckConfiguration(const std::string& path) {
   FIELD(object_targets, goal_confidence);
   FIELD(object_targets, backboard_confidence);
   FIELD(object_targets, hurdle_confidence);
-  FIELD(object_targets, min_box_width);
-  FIELD(object_targets, min_box_height);
+  FIELD(object_targets, ball_min_box_width);
+  FIELD(object_targets, ball_min_box_height);
+  FIELD(object_targets, goal_min_box_width);
+  FIELD(object_targets, goal_min_box_height);
+  FIELD(object_targets, backboard_min_box_width);
+  FIELD(object_targets, backboard_min_box_height);
+  FIELD(object_targets, hurdle_min_box_width);
+  FIELD(object_targets, hurdle_min_box_height);
+
   FIELD(object_association, missing_frame_limit);
   FIELD(object_association, max_center_distance_norm);
   FIELD(object_association, max_size_log_ratio);

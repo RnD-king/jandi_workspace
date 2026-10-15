@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "vision_core/types.hpp"
+#include "vision_core/down_search_walk.hpp"
 #include "vision_core/object_observation_window.hpp"
 #include "vision_core/stationary_object_recovery.hpp"
 
@@ -38,6 +39,7 @@ struct HurdleConfig {
 
   int stable_window{};
   int stable_min_hits{};
+  int down_search_min_hits{}; // DOWN search only, within stable_window.
   int lost_frames{};
   double smooth_alpha{}; // Legacy config key; position uses the bounded 1->3 window.
   double upper_acquire_v_px{};
@@ -86,11 +88,17 @@ public:
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
+  // A changed bbox filter invalidates the latched search detection as well.
+  void InvalidateDetectionEvidence() { ClearObservationHistory(); down_search_.InvalidateDetection(); }
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
   void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
       const std::deque<bool>& hits, int width, int height);
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
-  void UpdateTuning(const HurdleConfig &config) { config_ = config; }
+  void UpdateTuning(const HurdleConfig &config) {
+    if (mode_==HurdleMode::kDownSearch && config_.down_search_min_hits!=config.down_search_min_hits)
+      down_search_.InvalidateDetection();
+    config_ = config;
+  }
   void ShiftTimers(double duration) { state_enter_sec_+=duration; }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
   void StartTestNear() { Reset(); mode_=HurdleMode::kWaitCameraDown; test_camera_pending_=true; }
@@ -103,7 +111,7 @@ public:
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   int DownSearchStepsRemaining() const {
-    return std::max(0, config_.down_search_max_steps - down_search_steps_completed_);
+    return down_search_.Remaining(config_.down_search_max_steps);
   }
 
 private:
@@ -131,10 +139,7 @@ private:
   bool has_smoothed_{false};
   bool verified_observation_pending_{false};
   ObjectObservationWindow observation_window_;
-  bool down_search_started_{false};
-  int down_search_steps_completed_{0};
-  bool down_search_step_pending_{false};
-  bool down_search_found_{false};
+  DownSearchWalk down_search_;
   StationaryObjectRecovery stationary_recovery_;
   int completed_back_steps_{0};
   int completed_contact_steps_{0};

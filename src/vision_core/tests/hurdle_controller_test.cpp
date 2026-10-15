@@ -12,7 +12,7 @@ static ObjectTarget H(double v) {
   t.height_px = 10; t.confidence = 1; return t;
 }
 int main() {
-  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle;  c.contact_steps=1; c.stable_window = c.stable_min_hits = 1;
+  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle;  c.contact_steps=1; c.down_search_min_hits=1; c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2; c.smooth_alpha = 1; c.upper_acquire_v_px=480;
   c.approach_two_step_v_px = 360.0;
   c.approach_short_v_px = 312.0;
@@ -94,11 +94,11 @@ int main() {
                        {CameraMode::kDown,true},{}, straight);
   assert(r.mode==HurdleMode::kDownSearch && !r.tracked.visible);
   // Camera fallback follows the original region, independently of action ID:
-  // mid-row 4/6 DOWN on loss; bottom-row 7/9 use forward stationary recovery.
+  // all recorded regions, including bottom-row 7/9, go DOWN on loss.
   for(const auto direction : {CruiseDirection::kLeft,CruiseDirection::kRight}) {
     CruiseDecision steering=straight; steering.direction=direction;
     for(const auto pair : std::vector<std::pair<double,bool>>{
-        {.5,true}, {.7,true}, {.8,false}}) {
+        {.5,true}, {.7,true}, {.8,true}}) {
       HurdleController zone(c,3.0);
       const auto selected=zone.Compute(H(pair.first),640,480,4.0,{}, {},steering);
       assert(selected.action.action!=MissionAction::kNone);

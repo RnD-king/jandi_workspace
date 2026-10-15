@@ -138,7 +138,7 @@ HurdleResult HurdleController::Compute(
       if (!feedback.observation_complete) return result;
       awaiting_approach_observation_=false;
       if (!tracked_.visible || !tracked_.stable) {
-        if (last_approach_zone_ >= 1 && last_approach_zone_ <= 6) {
+        if (last_approach_zone_ >= 1 && last_approach_zone_ <= 9) {
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
@@ -150,7 +150,7 @@ HurdleResult HurdleController::Compute(
     }
     if (!tracked_.visible) {
       if (lost_count_ >= config_.lost_frames || feedback.action_done) {
-        if (last_approach_zone_ >= 1 && last_approach_zone_ <= 6) {
+        if (last_approach_zone_ >= 1 && last_approach_zone_ <= 9) {
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
@@ -215,9 +215,7 @@ HurdleResult HurdleController::Compute(
       ClearTracking();  // Intermediate camera observations are discarded.
       last_seen_u_px_ = config_.target_u_px;
       mode_ = HurdleMode::kDownSearch;
-      down_search_started_ = down_search_found_ = false;
-      down_search_steps_completed_=0;
-      down_search_step_pending_=false;
+      down_search_.Reset();
       result.mode = mode_;
       result.tracked = {};
       result.camera_request = CameraRequest::kNone;
@@ -229,27 +227,24 @@ HurdleResult HurdleController::Compute(
     }
     return result;
   case HurdleMode::kDownSearch: {
-    down_search_found_=down_search_found_ || (tracked_.visible && tracked_.stable);
-    if (feedback.action_active && !feedback.action_done) return result;
-    if (feedback.action_done && down_search_step_pending_) {
-      ++down_search_steps_completed_;
-      down_search_step_pending_=false;
+    const int hits=static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true));
+    const auto decision=down_search_.Observe(tracked_.visible,hits,
+        config_.down_search_min_hits,config_.down_search_max_steps,
+        feedback.action_active,feedback.action_done);
+    if (decision==DownSearchWalk::Decision::kMoving) return result;
+    if (decision==DownSearchWalk::Decision::kFound) {
+      mode_=HurdleMode::kCoarseAdjust;
+      ClearTracking();
+      result.mode=mode_;
+      return result;
     }
-    // A target found after the final step remains eligible for COARSE.
-    if (down_search_found_) {
-      mode_=HurdleMode::kCoarseAdjust; ClearTracking();
-
-      result.mode=mode_; result.action={}; return result;
-    }
-    if (down_search_steps_completed_ >= config_.down_search_max_steps) {
+    if (decision==DownSearchWalk::Decision::kExhausted) {
       mode_=HurdleMode::kFailed;
-      result.mode=mode_; result.action={}; return result;
+      result.mode=mode_;
+      return result;
     }
     result.action=Locomotion(MissionAction::kStepForwardOne);
-    if (allow_new_body_actions && !down_search_step_pending_) {
-      down_search_step_pending_=true;
-      down_search_started_=true;
-    }
+    if (allow_new_body_actions) down_search_.Issued();
     return result;
   }
   case HurdleMode::kCoarseAdjust:
@@ -387,9 +382,7 @@ void HurdleController::ClearTracking() {
 
 void HurdleController::ResetToLine(bool clear_ignore) {
   mode_ = HurdleMode::kLineFollow;
-  down_search_started_=down_search_found_=false;
-  down_search_steps_completed_=0;
-  down_search_step_pending_=false;
+  down_search_.Reset();
   stationary_recovery_.Begin(0.0);
   completed_contact_steps_=0;
   ClearTracking();

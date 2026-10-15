@@ -34,7 +34,7 @@ static void TestNearBallTurnThenDown() {
   config.enable_ball=true;
   config.enable_goal=config.enable_hurdle=false;
   config.post_motion_observation_sec=1.0;
-  config.ball.entry_min_hits=1; config.ball.stable_window=config.ball.stable_min_hits=1;
+  config.ball.entry_min_hits=1; config.ball.down_search_min_hits=1; config.ball.stable_window=config.ball.stable_min_hits=1;
   config.ball.upper_acquire_v_px=480;
   config.ball.far_u_des_px=320;
   config.ball.approach_u_deadband_px=32;
@@ -259,7 +259,7 @@ int main() {
   terminal_config.line_p2p.no_evidence_max_retries=0;
   terminal_config.enable_ball=true;
   terminal_config.enable_hurdle=false;
-  terminal_config.ball.entry_min_hits=1; terminal_config.ball.stable_window=1;
+  terminal_config.ball.entry_min_hits=1; terminal_config.ball.down_search_min_hits=1; terminal_config.ball.stable_window=1;
   terminal_config.ball.stable_min_hits=1;
   MissionController terminal(terminal_config);
   in=Frame(0); in.line_centers.clear(); r=terminal.Step(in);
@@ -456,7 +456,7 @@ int main() {
   auto camera_config=c;
   camera_config.camera_motion_timeout_sec=.5;
   camera_config.enable_ball=true;
-  camera_config.ball.entry_min_hits=1; camera_config.ball.stable_window=camera_config.ball.stable_min_hits=1;
+  camera_config.ball.entry_min_hits=1; camera_config.ball.down_search_min_hits=1; camera_config.ball.stable_window=camera_config.ball.stable_min_hits=1;
   camera_config.ball.smooth_alpha=1;
   camera_config.ball.upper_acquire_v_px=480.0;
 
@@ -474,7 +474,7 @@ int main() {
   assert(r.ball.mode==BallMode::kFailed);
 
   camera_config.enable_ball=false; camera_config.enable_hurdle=true;
-  camera_config.hurdle.stable_window=camera_config.hurdle.stable_min_hits=1;
+  camera_config.hurdle.down_search_min_hits=1; camera_config.hurdle.stable_window=camera_config.hurdle.stable_min_hits=1;
   camera_config.hurdle.smooth_alpha=1;
   camera_config.hurdle.upper_acquire_v_px=480;
 
@@ -615,7 +615,7 @@ int main() {
   // but previewing PICK must not increment attempts or change the real FSM.
   auto manual_config=c;
   manual_config.enable_ball=true;
-  manual_config.ball.entry_min_hits=1; manual_config.ball.stable_window=manual_config.ball.stable_min_hits=1;
+  manual_config.ball.entry_min_hits=1; manual_config.ball.down_search_min_hits=1; manual_config.ball.stable_window=manual_config.ball.stable_min_hits=1;
 
 
   manual_config.ball.upper_acquire_v_px=480.0;
@@ -812,7 +812,7 @@ int main() {
   auto ready_cfg=LoadDefaultAlgorithmConfig(); ready_cfg.transition_settle_sec=0;
   ready_cfg.enable_ball=true;
   ready_cfg.enable_goal=ready_cfg.enable_hurdle=false;
-  ready_cfg.ball.entry_min_hits=1; ready_cfg.ball.stable_window=ready_cfg.ball.stable_min_hits=1;
+  ready_cfg.ball.entry_min_hits=1; ready_cfg.ball.down_search_min_hits=1; ready_cfg.ball.stable_window=ready_cfg.ball.stable_min_hits=1;
   ready_cfg.ball.upper_acquire_v_px=480;
   MissionController ball_ready(ready_cfg);
   auto ready_frame=Frame(0.0);
@@ -1062,7 +1062,7 @@ int main() {
   // must be set when consuming verified READY evidence at DONE.
   auto hurdle_ready_cfg=ready_cfg;
   hurdle_ready_cfg.enable_ball=false; hurdle_ready_cfg.enable_hurdle=true;
-  hurdle_ready_cfg.hurdle.stable_window=hurdle_ready_cfg.hurdle.stable_min_hits=1;
+  hurdle_ready_cfg.hurdle.down_search_min_hits=1; hurdle_ready_cfg.hurdle.stable_window=hurdle_ready_cfg.hurdle.stable_min_hits=1;
   hurdle_ready_cfg.hurdle.upper_acquire_v_px=480;
   MissionController hurdle_ready(hurdle_ready_cfg);
   ready_frame=Frame(0.0); ready_frame.hurdle_target=Ball(.5,.3);

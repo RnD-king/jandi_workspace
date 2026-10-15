@@ -18,6 +18,6 @@ inline void DrawHurdleDownGuides(cv::Mat& image,
   };
   line(config.down_one_step_v_px,cv::Scalar(255,120,255),nullptr);
   line(config.fine_mode_v_px,cv::Scalar(200,0,200),nullptr);
-  if (fine_stance) line(config.contact_v_px,cv::Scalar(0,255,255),"CONTACT");
+  if (fine_stance) line(config.contact_v_px,cv::Scalar(0,255,255),nullptr);
 }
 }

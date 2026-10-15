@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <optional>
 #include <vector>
+#include <utility>
+#include <limits>
 
 #include "vision_core/types.hpp"
 
@@ -17,8 +19,32 @@ struct ObjectTargetConfig {
   double goal_confidence{};
   double backboard_confidence{};
   double hurdle_confidence{};
-  double min_box_width{};
-  double min_box_height{};
+  double ball_min_box_width{};
+  double ball_min_box_height{};
+  double goal_min_box_width{};
+  double goal_min_box_height{};
+  double backboard_min_box_width{};
+  double backboard_min_box_height{};
+  double hurdle_min_box_width{};
+  double hurdle_min_box_height{};
+
+  std::pair<double,double> MinimumBoxSize(int class_id) const {
+    if (class_id == ball_class_id) return {ball_min_box_width,ball_min_box_height};
+    if (class_id == goal_class_id) return {goal_min_box_width,goal_min_box_height};
+    if (class_id == backboard_class_id) return {backboard_min_box_width,backboard_min_box_height};
+    if (class_id == hurdle_class_id) return {hurdle_min_box_width,hurdle_min_box_height};
+    return {std::numeric_limits<double>::infinity(),std::numeric_limits<double>::infinity()};
+  }
+  bool SameBoxFilters(const ObjectTargetConfig& other) const {
+    return ball_min_box_width == other.ball_min_box_width &&
+        ball_min_box_height == other.ball_min_box_height &&
+        goal_min_box_width == other.goal_min_box_width &&
+        goal_min_box_height == other.goal_min_box_height &&
+        backboard_min_box_width == other.backboard_min_box_width &&
+        backboard_min_box_height == other.backboard_min_box_height &&
+        hurdle_min_box_width == other.hurdle_min_box_width &&
+        hurdle_min_box_height == other.hurdle_min_box_height;
+  }
 };
 
 struct ObjectTargets {

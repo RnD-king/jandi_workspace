@@ -1,4 +1,5 @@
 #include "vision/mission_debug_view.hpp"
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -53,4 +54,70 @@ int main() {
   edge=vision::RenderMissionDebug(image,empty,{},c,{},m,camera,{},state);
   Check(edge.image.at<cv::Vec3b>(400,40)==cv::Vec3b(0,0,0) &&
         edge.image.at<cv::Vec3b>(400,90)!=cv::Vec3b(0,0,0),"edge guide ignored new tuning");
+
+  c.ball.far_u_des_px=380;c.ball.approach_u_deadband_px=90;
+  c.ball.approach_short_v_px=100;c.ball.approach_two_step_v_px=240;
+  c.ball.approach_direct_down_v_px=355;
+  m.active_mission=vision_core::MissionType::kBall;
+  m.ball.mode=vision_core::BallMode::kApproachBall;
+  const vision_core::CameraFeedback forward{vision_core::CameraMode::kForward,true};
+  auto direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  Check(direct.image.at<cv::Vec3b>(355,380)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(355,200)==cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(355,550)==cv::Vec3b(0,0,0),
+        "direct DOWN boundary must split only the center column");
+  c.ball.approach_direct_down_v_px=390;
+  m.ball.mode=vision_core::BallMode::kWaitCameraDown;
+  direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  Check(direct.image.at<cv::Vec3b>(355,380)==cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(390,380)!=cv::Vec3b(0,0,0),
+        "direct DOWN guide must update while waiting for the camera");
+  direct=vision::RenderMissionDebug(image,empty,{},c,{},m,camera,{},state);
+  Check(direct.image.at<cv::Vec3b>(390,380)==cv::Vec3b(0,0,0),
+        "FORWARD direct DOWN boundary leaked into the DOWN view");
+  m.active_mission=vision_core::MissionType::kGoal;
+
+  // Fixed calibration exercises the displayed geometry without pinning YAML.
+  c.goal.throw_landing_x_m=-.08;c.goal.throw_landing_z_m=.48;
+  c.goal.hoop_radius_m=.1;
+  m.goal.mode=vision_core::GoalMode::kFineAdjust;
+  m.goal.fine_decision_pose_used=true;
+  m.goal.fine_decision_pose={true,-.08,.58,0,1};
+  auto landing=vision::ComputeGoalLandingDebug(c.goal,m);
+  Check(landing.valid && landing.rim_valid && !landing.commanded &&
+        std::abs(landing.x_m+.08)<1e-12 && std::abs(landing.z_m-.48)<1e-12 &&
+        landing.position_error_m<1e-12,"zero-yaw landing/rim coordinates mismatch");
+
+  m.goal.mode=vision_core::GoalMode::kShoot;
+  m.command.mission=vision_core::MissionType::kGoal;
+  m.command.action=vision_core::MissionAction::kShoot;
+  m.command.target_yaw_deg=-10;
+  m.goal.shoot_yaw_rad=1; // Live tracking yaw must not override the command.
+  landing=vision::ComputeGoalLandingDebug(c.goal,m);
+  const double angle=-10*vision::kDebugPi/180;
+  Check(landing.commanded && landing.yaw_deg==-10 &&
+        std::abs(landing.x_m-(-.08*std::cos(angle)-.48*std::sin(angle)))<1e-12 &&
+        std::abs(landing.z_m-(-.08*std::sin(angle)+.48*std::cos(angle)))<1e-12,
+        "landing must use the actual signed integer SHOOT angle");
+  const auto shot=vision::RenderMissionDebug(image,empty,{},c,{},m,camera,{},state);
+  m.goal.fine_decision_pose_used=false;
+  landing=vision::ComputeGoalLandingDebug(c.goal,m);
+  Check(landing.valid && landing.commanded && !landing.rim_valid && landing.yaw_deg==-10,
+        "SHOOT landing disappeared when the decision pose expired");
+  m.command={};m.goal.action={};
+  Check(!vision::ComputeGoalLandingDebug(c.goal,m).valid,
+        "missing decision/command produced a fabricated landing");
+  const auto missing=vision::RenderMissionDebug(image,empty,{},c,{},m,camera,{},state);
+  Check(cv::norm(shot.image(cv::Rect(0,54,640,100)),
+                 missing.image(cv::Rect(0,54,640,100)),cv::NORM_INF)>0,
+        "camera overlay did not reflect shot coordinates");
+  m.goal.fine_decision_pose_used=true;
+  m.goal.fine_decision_pose.x_m=std::numeric_limits<double>::quiet_NaN();
+  Check(!vision::ComputeGoalLandingDebug(c.goal,m).valid,
+        "invalid depth pose produced landing coordinates");
+  m.active_mission=vision_core::MissionType::kBall;
+  m.command.action=vision_core::MissionAction::kShoot;
+  Check(!vision::ComputeGoalLandingDebug(c.goal,m).valid,
+        "previous GOAL landing leaked into a different mission");
+  Check(cv::norm(image,cv::NORM_INF)==0,"GOAL overlay changed the source RGB frame");
 }

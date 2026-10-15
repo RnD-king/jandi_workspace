@@ -75,6 +75,11 @@ install(FILES
 if(BUILD_TESTING)
   # Fixed scenario data keeps logic tests independent of operator tuning.
   set(VISION_CORE_TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
+  add_executable(shared_vision_core_mission_oct16_regression_test tests/mission_oct16_regression_test.cpp)
+  target_link_libraries(shared_vision_core_mission_oct16_regression_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_mission_oct16_regression_test COMMAND shared_vision_core_mission_oct16_regression_test)
+  set_tests_properties(shared_vision_core_mission_oct16_regression_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_mission_revision_test tests/mission_revision_test.cpp)
   target_link_libraries(shared_vision_core_mission_revision_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_mission_revision_test COMMAND shared_vision_core_mission_revision_test)

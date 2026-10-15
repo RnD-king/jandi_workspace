@@ -125,7 +125,7 @@ void TestVerificationBypassesAssociationAndFineReacquires() {
 
 void TestPauseDoesNotAcquireNewMission() {
   auto config=BallPipelineConfig();
-  config.ball.entry_min_hits=1; config.ball.stable_window=1;
+  config.ball.entry_min_hits=1; config.ball.down_search_min_hits=1; config.ball.stable_window=1;
   config.ball.stable_min_hits=1;
   config.line.line_stable_window=1;
   config.line.line_stable_min_hits=1;

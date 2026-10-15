@@ -21,6 +21,62 @@ struct MissionDebugContext {
   double roll_rad{0},pitch_rad{0};
 };
 struct MissionDebugImages { cv::Mat image,panel; };
+struct GoalLandingDebug {
+  bool valid{false},rim_valid{false},commanded{false};
+  double x_m{0},z_m{0},yaw_deg{0},rim_x_m{0},rim_z_m{0};
+  double position_error_m{0},range_error_m{0};
+};
+inline GoalLandingDebug ComputeGoalLandingDebug(
+    const vision_core::GoalConfig& config,
+    const vision_core::MissionFrameResult& result) {
+  GoalLandingDebug landing;
+  if (result.active_mission!=vision_core::MissionType::kGoal ||
+      !std::isfinite(config.throw_landing_x_m) ||
+      !std::isfinite(config.throw_landing_z_m)) return landing;
+  const auto& goal=result.goal;
+  const auto& fine=goal.fine_decision_pose;
+  if (goal.fine_decision_pose_used && fine.valid &&
+      std::isfinite(fine.x_m) && std::isfinite(fine.z_m) && fine.z_m>0 &&
+      std::isfinite(fine.yaw_rad) && std::isfinite(config.hoop_radius_m)) {
+    landing.rim_x_m=fine.x_m+config.hoop_radius_m*std::sin(fine.yaw_rad);
+    landing.rim_z_m=fine.z_m-config.hoop_radius_m*std::cos(fine.yaw_rad);
+    const double distance=std::hypot(landing.rim_x_m,landing.rim_z_m);
+    if (std::isfinite(distance)) {
+      landing.rim_valid=true;
+      double angle=distance>1e-9
+          ? std::atan2(config.throw_landing_x_m,config.throw_landing_z_m)
+              -std::atan2(landing.rim_x_m,landing.rim_z_m) : 0.0;
+      while (angle>kDebugPi) angle-=2*kDebugPi;
+      while (angle<-kDebugPi) angle+=2*kDebugPi;
+      // FineAction checks the landing error at this integer command angle.
+      landing.yaw_deg=static_cast<double>(std::lround(angle*180/kDebugPi));
+      landing.valid=true;
+      landing.range_error_m=distance-std::hypot(
+          config.throw_landing_x_m,config.throw_landing_z_m);
+    }
+  }
+  // During SHOOT, keep using the issued angle even if live depth changes or
+  // no new stationary decision pose is available. Do not invent a rim pose.
+  if (result.command.mission==vision_core::MissionType::kGoal &&
+      result.command.action==vision_core::MissionAction::kShoot) {
+    landing.yaw_deg=result.command.target_yaw_deg;
+    landing.valid=landing.commanded=true;
+  } else if (goal.action.action==vision_core::MissionAction::kShoot) {
+    landing.yaw_deg=goal.action.target_yaw_deg;
+    landing.valid=true;
+    landing.commanded=goal.mode==vision_core::GoalMode::kShoot;
+  }
+  if (landing.valid) {
+    const double angle=landing.yaw_deg*kDebugPi/180;
+    landing.x_m=std::cos(angle)*config.throw_landing_x_m
+        -std::sin(angle)*config.throw_landing_z_m;
+    landing.z_m=std::sin(angle)*config.throw_landing_x_m
+        +std::cos(angle)*config.throw_landing_z_m;
+    if (landing.rim_valid) landing.position_error_m=std::hypot(
+        landing.rim_x_m-landing.x_m,landing.rim_z_m-landing.z_m);
+  }
+  return landing;
+}
 inline const char* DebugClassLabel(int id,const vision_core::MissionControllerConfig& c) {
   if(id==c.line_detection.class_id)return "line";
   if(id==c.object_targets.ball_class_id)return "ball";
@@ -78,12 +134,13 @@ inline const char *DebugMissionName(vision_core::MissionType mission) {
 inline std::string DebugRepeatLabel(int scope, const vision_core::MissionControllerConfig& config) {
   using vision_core::BallMode; using vision_core::GoalMode; using vision_core::HurdleMode;
   if (scope==200+static_cast<int>(BallMode::kDownSearch))
-    return "SEARCH <="+std::to_string(config.ball.down_search_timeout_sec)+"s";
+    return "SEARCH <="+std::to_string(config.ball.down_search_max_steps)+" steps";
   if (scope==400+static_cast<int>(HurdleMode::kDownSearch))
     return "SEARCH <="+std::to_string(config.hurdle.down_search_max_steps)+" steps";
   if (scope==200+static_cast<int>(BallMode::kPostPickupBackAway)) return "BACK x"+std::to_string(config.ball.post_pickup_back_steps);
   if (scope==300+static_cast<int>(GoalMode::kPostShootBackAway)) return "BACK x"+std::to_string(config.goal.post_shoot_back_steps);
   if (scope==300+static_cast<int>(GoalMode::kEdgeTurn)) return "EDGE TURN x2";
+  if (scope==200+static_cast<int>(BallMode::kMidTurnBeforeRecovery)) return "TURN x1 -> FORWARD RECOVERY";
   if (scope==200+static_cast<int>(BallMode::kFineSidePair)) return "SIDE STEP x2";
   if (scope==200+static_cast<int>(BallMode::kPostPickupLineRecovery) ||
       scope==300+static_cast<int>(GoalMode::kHeadingRecovery)) return "LINE SEARCH <="+std::to_string(config.mission_recovery_max_turns)+" turns";
@@ -203,7 +260,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   const bool selected_ball=mission_result.active_mission==vision_core::MissionType::kBall;
   const bool selected_goal=mission_result.active_mission==vision_core::MissionType::kGoal;
   const bool selected_hurdle=mission_result.active_mission==vision_core::MissionType::kHurdle;
-  const bool line_confirmed=mission_result.line_computed && feats.guide.valid && !mission_result.line_in_recovery;
+  const bool line_confirmed=mission_result.line_computed && feats.guide.valid && (!mission_result.line_in_recovery || mission_result.line_score_recovery);
   cv::Mat vis = bgr.clone();
   for (const auto& detection:dets) if (detection.class_id==config.object_targets.backboard_class_id)
     vision::DrawDepthRegions(vis,cv::Rect(static_cast<int>(std::lround(detection.box.x)), static_cast<int>(std::lround(detection.box.y)), static_cast<int>(std::lround(detection.box.width)), static_cast<int>(std::lround(detection.box.height))),config.backboard_depth_strip_width_px,aligned_depth);
@@ -241,7 +298,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   // but no unique 2D object center. Do not invent a vertical point.
   if (mission_result.active_mission ==
           vision_core::MissionType::kLine &&
-      !mission_result.line_in_recovery) {
+      (!mission_result.line_in_recovery || mission_result.line_score_recovery)) {
     const auto &guide = mission_result.line_decision_guide
         ? *mission_result.line_decision_guide : feats.guide;
     if (guide.valid && std::isfinite(guide.offset) && vis.cols > 1) {
@@ -303,11 +360,25 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     if (camera.actual_mode==vision_core::CameraMode::kForward &&
         (ball_cmd.mode==vision_core::BallMode::kApproachBall ||
          ball_cmd.mode==vision_core::BallMode::kApproachTwoBeforeDown ||
+         ball_cmd.mode==vision_core::BallMode::kWaitCameraDown ||
          ball_cmd.mode==vision_core::BallMode::kBallRecoveryForward)) {
       draw_u_line(c.far_u_des_px-c.approach_u_deadband_px,cv::Scalar(0,100,255));
       draw_u_line(c.far_u_des_px+c.approach_u_deadband_px,cv::Scalar(0,100,255));
       draw_v_line(c.approach_short_v_px,cv::Scalar(0,200,255));
       draw_v_line(c.approach_two_step_v_px,cv::Scalar(0,100,255));
+      // The extra boundary belongs only to the center column (zone 8).
+      if (std::isfinite(c.approach_direct_down_v_px) &&
+          c.approach_direct_down_v_px>=0 && c.approach_direct_down_v_px<vis.rows) {
+        const int left=std::max(0,static_cast<int>(std::ceil(c.far_u_des_px-c.approach_u_deadband_px)));
+        const int right=std::min(vis.cols-1,static_cast<int>(std::floor(c.far_u_des_px+c.approach_u_deadband_px)));
+        const int y=std::clamp(static_cast<int>(std::lround(c.approach_direct_down_v_px)),0,vis.rows-1);
+        if (left<=right) {
+          const cv::Scalar color(0,230,255);
+          cv::line(vis,{left,y},{right,y},color,2,cv::LINE_AA);
+          cv::putText(vis,"1 STEP -> DOWN",{left+4,std::max(14,y-6)},
+              cv::FONT_HERSHEY_SIMPLEX,0.45,color,1,cv::LINE_AA);
+        }
+      }
     } else if (camera.actual_mode==vision_core::CameraMode::kDown) {
       draw_v_line(c.down_one_step_v_px,cv::Scalar(0,200,255));
       draw_v_line(std::min(c.fine_mode_v_px,c.pickup_v1_px),cv::Scalar(0,100,255));
@@ -391,9 +462,9 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   const auto &lc = config.line_p2p;
   add_row(line_rows,"LINE",line_color);
   std::snprintf(buf, sizeof(buf),
-      "reference=%.1fpx  Ko=%.3f  Kh=%.3f  deadband=%.4f",
+      "reference=%.1fpx  Ko=%.3f  Kh=%.3f  deadband=%.4f  turn>%.3f",
       config.line_features.image_center_u,
-      lc.offset_gain, lc.heading_gain, lc.steering_deadband);
+      lc.offset_gain, lc.heading_gain, lc.steering_deadband, lc.in_place_turn_score);
   add_row(line_rows,buf,line_color);
   const auto &decision_line = mission_result.line_decision_guide
       ? *mission_result.line_decision_guide : feats.guide;
@@ -410,9 +481,11 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         decision_line.heading_rad, lc.heading_gain, heading_term);
     add_row(line_rows,buf,line_color);
     // Recovery is selected by the FSM, not by this steering score.
-    const char *direction = mission_result.line_in_recovery
-        ? "RECOVERY_FSM" : (score < -lc.steering_deadband ? "LEFT" :
-            (score > lc.steering_deadband ? "RIGHT" : "STRAIGHT"));
+    const char *direction = mission_result.line_in_recovery && !mission_result.line_score_recovery
+        ? "RECOVERY_FSM" : (score < -lc.in_place_turn_score ? "TURN_LEFT_IN_PLACE" :
+            score > lc.in_place_turn_score ? "TURN_RIGHT_IN_PLACE" :
+            score < -lc.steering_deadband ? "LEFT" :
+            score > lc.steering_deadband ? "RIGHT" : "STRAIGHT");
     std::snprintf(buf, sizeof(buf),
         "SCORE=%+.4f  |  band=[%+.4f,%+.4f]  |  %s",
         score, -lc.steering_deadband, lc.steering_deadband, direction);
@@ -423,13 +496,26 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     add_row(line_rows,"SCORE: -- (no valid LINE decision)",line_color);
   }
 
+  std::snprintf(buf,sizeof(buf),"LINE BBOX MIN: width=%.1fpx height=%.1fpx",
+      config.line_detection.min_box_width,config.line_detection.min_box_height);
+  add_row(line_rows,buf,line_color);
+  std::snprintf(buf,sizeof(buf),"SCORE RECOVERY: %s | turns=%d/%d DONE",
+      mission_result.line_score_recovery ? (mission_result.terminal_hold ? "HOLD / RESET" : "ACTIVE") : "IDLE",
+      mission_result.line_score_recovery_turns_completed,lc.recovery_max_turns);
+  add_row(line_rows,buf,line_color);
+
   const auto &bc = config.ball;
   add_row(ball_rows,std::string("BALL  |  ") +
       vision_core::BallController::ModeName(ball_cmd.mode),ball_color);
   std::snprintf(buf,sizeof(buf),"BALL #%d %s",ball_index,ball_index%2 ? "RIGHT" : "LEFT");
   add_row(ball_rows,buf,ball_color);
-  std::snprintf(buf, sizeof(buf), "target u=%.1fpx band=%.1fpx | 2-step then DOWN v>=%.1fpx",
-      bc.far_u_des_px, bc.approach_u_deadband_px, bc.approach_two_step_v_px);
+  std::snprintf(buf, sizeof(buf), "target u=%.1fpx band=%.1fpx | ZONE 8: 2-step v=[%.1f,%.1f)",
+      bc.far_u_des_px, bc.approach_u_deadband_px, bc.approach_two_step_v_px,bc.approach_direct_down_v_px);
+  add_row(ball_approach_rows,buf,ball_color);
+  std::snprintf(buf,sizeof(buf),"ZONE 8: v>=%.1fpx -> 1-step DONE then DOWN",bc.approach_direct_down_v_px);
+  add_row(ball_approach_rows,buf,ball_color);
+  std::snprintf(buf,sizeof(buf),"DOWN SEARCH: need=%d/%d (FINE stable=%d)",
+      bc.down_search_min_hits,bc.stable_window,bc.stable_min_hits);
   add_row(ball_approach_rows,buf,ball_color);
   if (selected_ball && ball_cmd.mode == vision_core::BallMode::kApproachBall &&
       ball_cmd.tracked.visible) {
@@ -480,59 +566,46 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   } else {
     add_row(goal_approach_rows,"far u-target: --",goal_color);
   }
-  std::snprintf(buf, sizeof(buf), "SHOOT 0deg landing=(%+.1f,%.1f)cm  tol=%.1fcm  limit=%.0fdeg",
-      100.0*gc.throw_landing_x_m, 100.0*gc.throw_landing_z_m,
+  std::snprintf(buf, sizeof(buf), "SHOOT tol=%.1fcm  limit=%.0fdeg",
       100.0*gc.position_tolerance_m, gc.shoot_yaw_limit_deg);
   add_row(goal_fine_rows,buf,goal_color);
-  const auto &fine = goal_cmd.fine_decision_pose;
-  if (selected_goal && goal_cmd.fine_decision_pose_used && fine.valid &&
-      std::isfinite(fine.x_m) && std::isfinite(fine.z_m) &&
-      fine.z_m > 0.0 && std::isfinite(fine.yaw_rad)) {
-    // Diagnostic geometry matches GoalController::FineAction's input;
-    // this display never selects or publishes an action.
-    const double rim_x = fine.x_m + gc.hoop_radius_m * std::sin(fine.yaw_rad);
-    const double rim_z = fine.z_m - gc.hoop_radius_m * std::cos(fine.yaw_rad);
-    const double distance = std::hypot(rim_x, rim_z);
-    const double throw_range = std::hypot(gc.throw_landing_x_m, gc.throw_landing_z_m);
-    const double range_error = distance - throw_range;
-    const double shoot_yaw_rad = distance > 1e-9
-        ? std::atan2(gc.throw_landing_x_m, gc.throw_landing_z_m)
-            - std::atan2(rim_x, rim_z) : 0.0;
-    const double shoot_yaw_deg = shoot_yaw_rad * 180.0 / kDebugPi;
-    const double cosine = std::cos(shoot_yaw_rad), sine = std::sin(shoot_yaw_rad);
-    const double land_x = cosine*gc.throw_landing_x_m-sine*gc.throw_landing_z_m;
-    const double land_z = sine*gc.throw_landing_x_m+cosine*gc.throw_landing_z_m;
-    const double position_error = std::hypot(rim_x-land_x, rim_z-land_z);
-    std::snprintf(buf, sizeof(buf),
-        "board=(%+.1f,%.1f)cm yaw=%+.1fdeg  rim=(%+.1f,%.1f)cm",
-        100.0*fine.x_m,100.0*fine.z_m,fine.yaw_rad*180.0/kDebugPi,
-        100.0*rim_x,100.0*rim_z);
+  const auto landing=ComputeGoalLandingDebug(gc,mission_result);
+  const auto &fine=goal_cmd.fine_decision_pose;
+  if (landing.rim_valid) {
+    std::snprintf(buf,sizeof(buf),"board=(%+.1f,%.1f)cm yaw=%+.1fdeg",
+        100*fine.x_m,100*fine.z_m,fine.yaw_rad*180/kDebugPi);
     add_row(goal_fine_rows,buf,goal_color);
-    std::snprintf(buf, sizeof(buf),
-        "land=(%+.1f,%.1f)cm  2D err=%.2fcm  radial err=%+.2fcm",
-        100.0*land_x,100.0*land_z,100.0*position_error,100.0*range_error);
+    std::snprintf(buf,sizeof(buf),"radial err=%+.2fcm",100*landing.range_error_m);
     add_row(goal_fine_rows,buf,goal_color);
-    std::snprintf(buf, sizeof(buf), "shoot yaw=%+.2fdeg  |  limit=[%+.1f,%+.1f]deg",
-        shoot_yaw_deg, -gc.shoot_yaw_limit_deg, gc.shoot_yaw_limit_deg);
+  } else if (selected_goal && prepared.backboard_center_depth_m &&
+      std::isfinite(*prepared.backboard_center_depth_m)) {
+    std::snprintf(buf,sizeof(buf),"backboard center depth=%.4fm | fine z<=%.3fm",
+        *prepared.backboard_center_depth_m,gc.fine_adjust_start_z_m);
     add_row(goal_fine_rows,buf,goal_color);
   } else {
-    if (selected_goal && prepared.backboard_center_depth_m &&
-        std::isfinite(*prepared.backboard_center_depth_m)) {
-      std::snprintf(buf, sizeof(buf), "backboard center depth=%.4fm  |  fine z<=%.3fm",
-          *prepared.backboard_center_depth_m, gc.fine_adjust_start_z_m);
-      add_row(goal_fine_rows,buf,goal_color);
-    } else {
-      add_row(goal_fine_rows,"fine input x/z/yaw: --",goal_color);
-    }
-    add_row(goal_fine_rows,"predicted landing / 2D error: --",goal_color);
-    add_row(goal_fine_rows,"shoot yaw: --",goal_color);
+    add_row(goal_fine_rows,"fine input x/z/yaw: --",goal_color);
   }
+  // Share the exact coordinate strings between the panel and camera overlay.
+  std::vector<std::string> landing_rows;
+  std::snprintf(buf,sizeof(buf),"REF 0deg X/Z=(%+.1f,%.1f)cm",
+      100*gc.throw_landing_x_m,100*gc.throw_landing_z_m);
+  landing_rows.emplace_back(buf);
+  if (landing.valid) {
+    std::snprintf(buf,sizeof(buf),"PRED LAND %s X/Z=(%+.1f,%.1f)cm yaw=%+.0fdeg",
+        landing.commanded ? "CMD" : "PLAN",
+        100*landing.x_m,100*landing.z_m,landing.yaw_deg);
+    landing_rows.emplace_back(buf);
+  } else landing_rows.push_back("PRED LAND X/Z: -- (no shot command / decision pose)");
+  for (const auto& text:landing_rows) add_row(goal_fine_rows,text,goal_color);
 
   const auto &hc = config.hurdle;
   add_row(hurdle_rows,std::string("HURDLE  |  ") +
       vision_core::HurdleController::ModeName(hurdle_cmd.mode),hurdle_color);
   std::snprintf(buf, sizeof(buf), "entry v<=%.1fpx | 2-step then DOWN v>=%.1fpx",
       hc.upper_acquire_v_px, hc.approach_two_step_v_px);
+  add_row(hurdle_approach_rows,buf,hurdle_color);
+  std::snprintf(buf,sizeof(buf),"DOWN SEARCH: need=%d/%d (FINE stable=%d)",
+      hc.down_search_min_hits,hc.stable_window,hc.stable_min_hits);
   add_row(hurdle_approach_rows,buf,hurdle_color);
   if (selected_hurdle && hurdle_cmd.mode == vision_core::HurdleMode::kApproach &&
       hurdle_target && vis.rows > 1) {
@@ -570,8 +643,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   if (ball_cmd.mode == vision_core::BallMode::kDownSearch ||
       hurdle_cmd.mode == vision_core::HurdleMode::kDownSearch) {
     if (selected_ball)
-      std::snprintf(buf, sizeof(buf), "BALL DOWN SEARCH | remaining %.2fs",
-          ball_cmd.down_search_remaining_sec);
+      std::snprintf(buf, sizeof(buf), "BALL DOWN SEARCH | remaining %d steps",
+          ball_cmd.down_search_steps_remaining);
     else
       std::snprintf(buf, sizeof(buf), "HURDLE DOWN SEARCH | remaining %d steps",
           hurdle_cmd.down_search_steps_remaining);
@@ -629,6 +702,27 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   summary(ball_rows,"BALL BBOX",ball_target,ball_color);
   summary(hurdle_rows,"HURDLE BBOX",hurdle_target,hurdle_color);
   summary(goal_rows,"BACKBOARD BBOX",backboard_target,goal_color);
+  {
+    const auto minimum=config.object_targets.MinimumBoxSize(config.object_targets.ball_class_id);
+    std::snprintf(buf,sizeof(buf),"BALL BBOX MIN: width=%.1fpx height=%.1fpx",minimum.first,minimum.second);
+    add_row(ball_rows,buf,ball_color);
+  }
+  {
+    const auto minimum=config.object_targets.MinimumBoxSize(config.object_targets.hurdle_class_id);
+    std::snprintf(buf,sizeof(buf),"HURDLE BBOX MIN: width=%.1fpx height=%.1fpx",minimum.first,minimum.second);
+    add_row(hurdle_rows,buf,hurdle_color);
+  }
+  {
+    const auto minimum=config.object_targets.MinimumBoxSize(config.object_targets.goal_class_id);
+    std::snprintf(buf,sizeof(buf),"GOAL BBOX MIN: width=%.1fpx height=%.1fpx",minimum.first,minimum.second);
+    add_row(goal_rows,buf,goal_color);
+  }
+  {
+    const auto minimum=config.object_targets.MinimumBoxSize(config.object_targets.backboard_class_id);
+    std::snprintf(buf,sizeof(buf),"BACKBOARD BBOX MIN: width=%.1fpx height=%.1fpx",minimum.first,minimum.second);
+    add_row(goal_rows,buf,goal_color);
+  }
+
   std::snprintf(buf,sizeof(buf),"BALL TRACKING: stable=%d visible=%d",
       ball_cmd.tracked.stable,ball_cmd.tracked.visible);
   add_row(ball_rows,buf,ball_color);
@@ -644,8 +738,9 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         goal_cmd.pose.x_m,goal_cmd.pose.z_m,goal_cmd.pose.yaw_rad*180/kDebugPi,goal_cmd.pose.stable);
     add_row(goal_fine_rows,buf,goal_color);
   } else add_row(goal_fine_rows,"GOAL POSE: --",goal_color);
-  if(goal_cmd.pose.visible || goal_cmd.mode==vision_core::GoalMode::kShoot) {
-    std::snprintf(buf,sizeof(buf),"SHOOT ROTATION YAW: %+.1fdeg",goal_cmd.shoot_yaw_rad*180/kDebugPi);
+  if(landing.valid || goal_cmd.pose.visible || goal_cmd.mode==vision_core::GoalMode::kShoot) {
+    std::snprintf(buf,sizeof(buf),"SHOOT ROTATION YAW: %+.1fdeg",
+        landing.valid ? landing.yaw_deg : goal_cmd.shoot_yaw_rad*180/kDebugPi);
     add_row(goal_fine_rows,buf,goal_color);
   } else add_row(goal_fine_rows,"SHOOT ROTATION YAW: --",goal_color);
   PanelRows left_rows,right_rows;
@@ -724,6 +819,19 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   cv::putText(vis,view.performance,{10,24},cv::FONT_HERSHEY_SIMPLEX,0.7,{0,255,0},2);
   cv::putText(vis,std::string(DebugMissionName(mission_result.active_mission))+" | "+DebugActionName(mission_result.command.action),
       {10,48},cv::FONT_HERSHEY_SIMPLEX,0.55,{0,200,255},2);
+  if (selected_goal) {
+    int y=72;
+    for (const auto& text:landing_rows) {
+      int baseline=0;
+      const auto size=cv::getTextSize(text,cv::FONT_HERSHEY_SIMPLEX,0.5,1,&baseline);
+      const double scale=0.5*std::min(1.0,
+          static_cast<double>(std::max(1,vis.cols-20))/std::max(1,size.width));
+      // An outline keeps coordinates readable over bright camera pixels.
+      cv::putText(vis,text,{10,y},cv::FONT_HERSHEY_SIMPLEX,scale,{0,0,0},3,cv::LINE_AA);
+      cv::putText(vis,text,{10,y},cv::FONT_HERSHEY_SIMPLEX,scale,goal_color,1,cv::LINE_AA);
+      y+=22;
+    }
+  }
   return {std::move(vis),std::move(state_panel)};
 }
 } // namespace vision

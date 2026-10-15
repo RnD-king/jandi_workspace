@@ -70,7 +70,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.ball.down_one_step_v_px >= c.ball.fine_mode_v_px)
     throw std::runtime_error("ball DOWN thresholds must be ordered");
   Nonnegative(c.ball.approach_short_v_px, "ball.approach_short_v_px");
-  Positive(c.ball.down_search_timeout_sec, "ball.down_search_timeout_sec");
+  PositiveInt(c.ball.down_search_max_steps, "ball.down_search_max_steps");
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
   NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
@@ -160,6 +160,9 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.line_p2p.offset_gain, "line_p2p.offset_gain");
   Nonnegative(c.line_p2p.heading_gain, "line_p2p.heading_gain");
   Nonnegative(c.line_p2p.steering_deadband, "line_p2p.steering_deadband");
+  Positive(c.line_p2p.in_place_turn_score,"line_p2p.in_place_turn_score");
+  if (c.line_p2p.in_place_turn_score <= c.line_p2p.steering_deadband)
+    throw std::runtime_error("line_p2p.in_place_turn_score must exceed steering_deadband");
   Nonnegative(c.line_p2p.ready_lead_sec, "line_p2p.ready_lead_sec");
   Nonnegative(c.line_p2p.failure_observation_sec,
               "line_p2p.failure_observation_sec");
@@ -179,6 +182,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
 
   HitsWithinWindow(c.ball.entry_min_hits, c.ball.stable_window,
                    "ball.entry_min_hits", "ball.stable_window");
+  HitsWithinWindow(c.ball.down_search_min_hits,c.ball.stable_window,
+                   "ball.down_search_min_hits","ball.stable_window");
   HitsWithinWindow(c.ball.stable_min_hits, c.ball.stable_window,
                    "ball.stable_min_hits", "ball.stable_window");
   PositiveInt(c.ball.lost_frames, "ball.lost_frames");
@@ -188,6 +193,9 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.ball.upper_acquire_v_px, "ball.upper_acquire_v_px");
   Nonnegative(c.ball.fine_side_two_step_margin_px, "ball.fine_side_two_step_margin_px");
   Nonnegative(c.ball.approach_two_step_v_px, "ball.approach_two_step_v_px");
+  Nonnegative(c.ball.approach_direct_down_v_px, "ball.approach_direct_down_v_px");
+  if (c.ball.approach_direct_down_v_px <= c.ball.approach_two_step_v_px)
+    throw std::runtime_error("ball.approach_direct_down_v_px must exceed ball.approach_two_step_v_px");
   PositiveInt(c.ball.pickup_max_attempts, "ball.pickup_max_attempts");
   Nonnegative(c.ball.ball_ignore_duration_sec,
               "ball.ball_ignore_duration_sec");
@@ -204,6 +212,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.ball.recovery_center_tolerance_px,
        "ball.recovery_center_tolerance_px");
 
+  HitsWithinWindow(c.hurdle.down_search_min_hits,c.hurdle.stable_window,
+                   "hurdle.down_search_min_hits","hurdle.stable_window");
   HitsWithinWindow(c.hurdle.stable_min_hits, c.hurdle.stable_window,
                    "hurdle.stable_min_hits", "hurdle.stable_window");
   PositiveInt(c.hurdle.lost_frames, "hurdle.lost_frames");
@@ -267,10 +277,15 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
        "object_targets.backboard_confidence");
   Unit(c.object_targets.hurdle_confidence,
        "object_targets.hurdle_confidence");
-  Nonnegative(c.object_targets.min_box_width,
-              "object_targets.min_box_width");
-  Nonnegative(c.object_targets.min_box_height,
-              "object_targets.min_box_height");
+  Nonnegative(c.object_targets.ball_min_box_width,"object_targets.ball_min_box_width");
+  Nonnegative(c.object_targets.ball_min_box_height,"object_targets.ball_min_box_height");
+  Nonnegative(c.object_targets.goal_min_box_width,"object_targets.goal_min_box_width");
+  Nonnegative(c.object_targets.goal_min_box_height,"object_targets.goal_min_box_height");
+  Nonnegative(c.object_targets.backboard_min_box_width,"object_targets.backboard_min_box_width");
+  Nonnegative(c.object_targets.backboard_min_box_height,"object_targets.backboard_min_box_height");
+  Nonnegative(c.object_targets.hurdle_min_box_width,"object_targets.hurdle_min_box_width");
+  Nonnegative(c.object_targets.hurdle_min_box_height,"object_targets.hurdle_min_box_height");
+
 
   NonnegativeInt(c.object_association.missing_frame_limit,
                  "object_association.missing_frame_limit");
@@ -337,6 +352,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(lp, "offset_gain", c.line_p2p.offset_gain);
   Assign(lp, "heading_gain", c.line_p2p.heading_gain);
   Assign(lp, "steering_deadband", c.line_p2p.steering_deadband);
+  Assign(lp,"in_place_turn_score",c.line_p2p.in_place_turn_score);
   Assign(lp, "ready_lead_sec", c.line_p2p.ready_lead_sec);
   Assign(lp, "failure_observation_sec", c.line_p2p.failure_observation_sec);
   Assign(lp, "recovery_observation_sec", c.line_p2p.recovery_observation_sec);
@@ -350,7 +366,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "down_one_step_v_px", c.ball.down_one_step_v_px);
   Assign(b, "fine_mode_v_px", c.ball.fine_mode_v_px);
   Assign(b, "approach_short_v_px", c.ball.approach_short_v_px);
-  Assign(b, "down_search_timeout_sec", c.ball.down_search_timeout_sec);
+  Assign(b, "down_search_max_steps", c.ball.down_search_max_steps);
   Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
   Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
   Assign(b, "recovery_walk_turn_max", c.ball.recovery_walk_turn_max);
@@ -358,6 +374,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   Assign(b, "stable_window", c.ball.stable_window);
   Assign(b, "stable_min_hits", c.ball.stable_min_hits);
+  Assign(b,"down_search_min_hits",c.ball.down_search_min_hits);
   Assign(b, "entry_min_hits", c.ball.entry_min_hits);
   Assign(b, "lost_frames", c.ball.lost_frames);
   Assign(b, "smooth_alpha", c.ball.smooth_alpha);
@@ -366,6 +383,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "upper_acquire_v_px", c.ball.upper_acquire_v_px);
   Assign(b, "fine_side_two_step_margin_px", c.ball.fine_side_two_step_margin_px);
   Assign(b, "approach_two_step_v_px", c.ball.approach_two_step_v_px);
+  Assign(b, "approach_direct_down_v_px", c.ball.approach_direct_down_v_px);
   Assign(b, "pickup_max_attempts", c.ball.pickup_max_attempts);
   Assign(b, "ball_ignore_duration_sec", c.ball.ball_ignore_duration_sec);
   Assign(b, "pickup_u1_px", c.ball.pickup_u1_px);
@@ -390,6 +408,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   Assign(h, "stable_window", c.hurdle.stable_window);
   Assign(h, "stable_min_hits", c.hurdle.stable_min_hits);
+  Assign(h,"down_search_min_hits",c.hurdle.down_search_min_hits);
   Assign(h, "lost_frames", c.hurdle.lost_frames);
   Assign(h, "smooth_alpha", c.hurdle.smooth_alpha);
   Assign(h, "upper_acquire_v_px", c.hurdle.upper_acquire_v_px);
@@ -446,8 +465,15 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(t, "goal_confidence", c.object_targets.goal_confidence);
   Assign(t, "backboard_confidence", c.object_targets.backboard_confidence);
   Assign(t, "hurdle_confidence", c.object_targets.hurdle_confidence);
-  Assign(t, "min_box_width", c.object_targets.min_box_width);
-  Assign(t, "min_box_height", c.object_targets.min_box_height);
+  Assign(t,"ball_min_box_width",c.object_targets.ball_min_box_width);
+  Assign(t,"ball_min_box_height",c.object_targets.ball_min_box_height);
+  Assign(t,"goal_min_box_width",c.object_targets.goal_min_box_width);
+  Assign(t,"goal_min_box_height",c.object_targets.goal_min_box_height);
+  Assign(t,"backboard_min_box_width",c.object_targets.backboard_min_box_width);
+  Assign(t,"backboard_min_box_height",c.object_targets.backboard_min_box_height);
+  Assign(t,"hurdle_min_box_width",c.object_targets.hurdle_min_box_width);
+  Assign(t,"hurdle_min_box_height",c.object_targets.hurdle_min_box_height);
+
   const auto oa = a["object_association"];
   Assign(oa, "missing_frame_limit", c.object_association.missing_frame_limit);
   Assign(oa, "max_center_distance_norm", c.object_association.max_center_distance_norm);

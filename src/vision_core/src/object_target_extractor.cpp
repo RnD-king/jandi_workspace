@@ -34,12 +34,13 @@ IndexedTarget ExtractBest(
     const std::vector<Detection> &detections, int class_id,
     double confidence_threshold, const ObjectTargetConfig &config) {
   IndexedTarget best;
+  const auto minimum = config.MinimumBoxSize(class_id);
   for (std::size_t index = 0; index < detections.size(); ++index) {
     const auto &detection = detections[index];
     if (detection.class_id != class_id ||
         detection.confidence < confidence_threshold ||
-        detection.box.width < config.min_box_width ||
-        detection.box.height < config.min_box_height) {
+        detection.box.width < minimum.first ||
+        detection.box.height < minimum.second) {
       continue;
     }
     const ObjectTarget candidate = MakeTarget(detection);
@@ -59,6 +60,7 @@ std::vector<ObjectTargetCandidate> ExtractObjectTargetCandidates(
     const std::vector<Detection> &detections, int class_id,
     double confidence_threshold, const ObjectTargetConfig &config) {
   std::vector<ObjectTargetCandidate> candidates;
+  const auto minimum = config.MinimumBoxSize(class_id);
   for (std::size_t index = 0; index < detections.size(); ++index) {
     const auto &detection = detections[index];
     if (detection.class_id != class_id ||
@@ -68,8 +70,8 @@ std::vector<ObjectTargetCandidate> ExtractObjectTargetCandidates(
         !std::isfinite(detection.box.y) ||
         !std::isfinite(detection.box.width) ||
         !std::isfinite(detection.box.height) ||
-        detection.box.width < config.min_box_width ||
-        detection.box.height < config.min_box_height) {
+        detection.box.width < minimum.first ||
+        detection.box.height < minimum.second) {
       continue;
     }
     candidates.push_back({MakeTarget(detection), index});

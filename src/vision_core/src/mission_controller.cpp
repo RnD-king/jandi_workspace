@@ -63,6 +63,21 @@ ActionRequest MissionController::CruiseAction(const LineGuide &guide,
                                                bool queue_eligible) {
   const CruiseDecision decision = line_p2p_controller_.Compute(guide);
   MissionAction action = MissionAction::kNone;
+  if (decision.direction != CruiseDirection::kNone &&
+      std::abs(decision.error) > config_.line_p2p.in_place_turn_score) {
+    if (line_guard_turns_completed_ >= config_.line_p2p.recovery_max_turns) {
+      line_state_ = LineState::kFinalHold;
+      return {};
+    }
+    line_state_=LineState::kScoreRecovery;
+    // B may be reserved using A's existing READY mean. B itself has no READY.
+    return LineLocomotion(decision.error < 0 ? MissionAction::kTurnLeftInPlace
+                                            : MissionAction::kStepForwardRightOneHurdle,false);
+  }
+  if (decision.direction != CruiseDirection::kNone) {
+    line_guard_turns_completed_=0;
+    if (line_state_==LineState::kScoreRecovery) line_state_=LineState::kNormal;
+  }
   if (decision.direction == CruiseDirection::kLeft)
     action = MissionAction::kStepForwardLeft;
   else if (decision.direction == CruiseDirection::kStraight)
@@ -211,6 +226,7 @@ ActionRequest MissionController::ComputeLineAction(
 }
 
 void MissionController::BeginLineReacquisition() {
+  line_guard_turns_completed_=0;
   mission_recovery_turns_=0; mission_recovery_issued_=false;
   mission_recovery_failed_=false; mission_recovery_found_=false;
   mission_recovery_verifying_=false;
@@ -441,7 +457,8 @@ bool MissionController::ShouldDeferDone(
   // Long LINE READY skips the gate ONLY while the active mission remains LINE.
   // An object entered during that walk must still collect fresh post-DONE data.
   if (mission == MissionType::kLine && active_mission_ == MissionType::kLine &&
-      (IsLongLineAction(action) || line_state_ != LineState::kNormal))
+      (IsLongLineAction(action) ||
+       (line_state_ != LineState::kNormal && line_state_ != LineState::kScoreRecovery)))
     return false;
   // If the mission has already committed to moving the camera, let the
   // camera command run; its DONE starts the fresh 1 s object-view window.
@@ -607,6 +624,12 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     const MissionFrameInput &source,
     std::optional<double> line_image_center_u) {
   MissionFrameInput input = source;
+  if (decision_observation_restart_pending_) {
+    decision_observation_restart_pending_ = false;
+    if (decision_observation_active_)
+      BeginDecisionObservation(input.now_sec,decision_observation_mission_,
+                               decision_observation_camera_only_,deferred_done_);
+  }
   if (post_pickup_goal_line_gate_active_ &&
       input.delivery_feedback.done && input.delivery_feedback.action_id != 0) {
     const auto it = post_pickup_line_actions_.find(input.delivery_feedback.action_id);
@@ -700,6 +723,10 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       last_settle_done_id_ != input.delivery_feedback.action_id;
   if (timing_done) {
     last_settle_done_id_ = input.delivery_feedback.action_id;
+    if (last_command_.mission == MissionType::kLine &&
+        (last_command_.action == MissionAction::kTurnLeftInPlace ||
+         last_command_.action == MissionAction::kStepForwardRightOneHurdle))
+      ++line_guard_turns_completed_;
     const auto action = last_command_.action;
     const int number = static_cast<int>(action);
     const bool transition = action == MissionAction::kDefaultPoseMode ||
@@ -1405,6 +1432,10 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 }
 
 void MissionController::PopulateDiagnostics(MissionFrameResult &output, double now) const {
+  output.line_score_recovery=line_state_==LineState::kScoreRecovery ||
+      (line_state_==LineState::kFinalHold && line_guard_turns_completed_>0 &&
+       line_guard_turns_completed_>=config_.line_p2p.recovery_max_turns);
+  output.line_score_recovery_turns_completed=line_guard_turns_completed_;
   output.test_stage=config_.test_stage; output.test_ready=TestExecutionReady(); output.test_executing=test_execution_started_;
   output.terminal_hold=IsTerminalHold();
   output.foot_pose=foot_pose_;
@@ -1432,7 +1463,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output, double n
   output.goal.recovery_observation_elapsed_sec=goal_controller_.RecoveryObservationElapsed(now);
   output.ball.recovery_observations_completed = ball_controller_.RecoveryObservationsCompleted();
   output.ball.recovery_observation_elapsed_sec = ball_controller_.RecoveryObservationElapsed(now);
-  output.ball.down_search_remaining_sec = ball_controller_.DownSearchRemaining(now);
+  output.ball.down_search_steps_remaining = ball_controller_.DownSearchStepsRemaining();
   output.hurdle.recovery_observations_completed = hurdle_controller_.RecoveryObservationsCompleted();
   output.hurdle.recovery_observation_elapsed_sec = hurdle_controller_.RecoveryObservationElapsed(now);
   output.hurdle.down_search_steps_remaining = hurdle_controller_.DownSearchStepsRemaining();
@@ -1652,7 +1683,8 @@ PerceptionMissionFrameResult MissionController::PreviewPerception(
 int MissionController::RepeatScope() const {
   if (mission_recovery_failed_ || mission_finish_pending_ || pose_change_pending_) return 0;
   if (active_mission_==MissionType::kBall) {
-    if (ball_result_.mode==BallMode::kFineSidePair ||
+    if (ball_result_.mode==BallMode::kMidTurnBeforeRecovery ||
+        ball_result_.mode==BallMode::kFineSidePair ||
         ball_result_.mode==BallMode::kDownSearch ||
         ball_result_.mode==BallMode::kPostPickupBackAway ||
         ball_result_.mode==BallMode::kPostPickupLineRecovery)
@@ -1766,6 +1798,39 @@ void MissionController::SetBallFineSideTwoStepMargin(double margin_px) {
   ball_controller_.UpdateTuning(config_.ball);
 }
 
+void MissionController::SetLivePerceptionTuning(const MissionControllerConfig& candidate) {
+  auto updated=config_;
+  updated.ball.approach_direct_down_v_px=candidate.ball.approach_direct_down_v_px;
+  updated.ball.down_search_max_steps=candidate.ball.down_search_max_steps;
+  updated.hurdle.down_search_max_steps=candidate.hurdle.down_search_max_steps;
+  updated.ball.down_search_min_hits=candidate.ball.down_search_min_hits;
+  updated.hurdle.down_search_min_hits=candidate.hurdle.down_search_min_hits;
+  updated.line_p2p.in_place_turn_score=candidate.line_p2p.in_place_turn_score;
+  updated.line_detection.min_box_width=candidate.line_detection.min_box_width;
+  updated.line_detection.min_box_height=candidate.line_detection.min_box_height;
+  updated.object_targets.ball_min_box_width=candidate.object_targets.ball_min_box_width;
+  updated.object_targets.ball_min_box_height=candidate.object_targets.ball_min_box_height;
+  updated.object_targets.goal_min_box_width=candidate.object_targets.goal_min_box_width;
+  updated.object_targets.goal_min_box_height=candidate.object_targets.goal_min_box_height;
+  updated.object_targets.backboard_min_box_width=candidate.object_targets.backboard_min_box_width;
+  updated.object_targets.backboard_min_box_height=candidate.object_targets.backboard_min_box_height;
+  updated.object_targets.hurdle_min_box_width=candidate.object_targets.hurdle_min_box_width;
+  updated.object_targets.hurdle_min_box_height=candidate.object_targets.hurdle_min_box_height;
+  ValidateAlgorithmConfig(updated);
+  const bool changed=!config_.object_targets.SameBoxFilters(updated.object_targets) ||
+      config_.line_detection.min_box_width!=updated.line_detection.min_box_width ||
+      config_.line_detection.min_box_height!=updated.line_detection.min_box_height;
+  config_=updated;
+  ball_controller_.UpdateTuning(config_.ball);
+  hurdle_controller_.UpdateTuning(config_.hurdle);
+  if (changed) {
+    ClearObservationEvidence();
+    ball_controller_.InvalidateDetectionEvidence();
+    hurdle_controller_.InvalidateDetectionEvidence();
+    decision_observation_restart_pending_=decision_observation_active_;
+  }
+}
+
 void MissionController::SetGoalEdgeMargin(double margin_px) {
   auto candidate=config_;
   candidate.goal.edge_margin_px=margin_px;
@@ -1786,11 +1851,17 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.ball=candidate.ball;
   updated.hurdle=candidate.hurdle;
   updated.goal=candidate.goal;
+  updated.object_targets=candidate.object_targets;
+  updated.line_detection.min_box_width=candidate.line_detection.min_box_width;
+  updated.line_detection.min_box_height=candidate.line_detection.min_box_height;
   updated.backboard_min_depth_m=candidate.backboard_min_depth_m;
   updated.backboard_max_depth_m=candidate.backboard_max_depth_m;
   updated.mission_recovery_max_turns=candidate.mission_recovery_max_turns;
   updated.backboard_depth_strip_width_px=candidate.backboard_depth_strip_width_px;
   ValidateAlgorithmConfig(updated);
+  const bool box_filter_changed = !config_.object_targets.SameBoxFilters(updated.object_targets) ||
+      config_.line_detection.min_box_width!=updated.line_detection.min_box_width ||
+      config_.line_detection.min_box_height!=updated.line_detection.min_box_height;
   const bool depth_filter_changed =
       config_.backboard_min_depth_m != updated.backboard_min_depth_m ||
       config_.backboard_max_depth_m != updated.backboard_max_depth_m;
@@ -1813,6 +1884,12 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   ball_controller_.UpdateTuning(config_.ball);
   goal_controller_.UpdateTuning(config_.goal);
   hurdle_controller_.UpdateTuning(config_.hurdle);
+  if (box_filter_changed) {
+    ClearObservationEvidence();
+    ball_controller_.InvalidateDetectionEvidence();
+    hurdle_controller_.InvalidateDetectionEvidence();
+    decision_observation_restart_pending_=decision_observation_active_;
+  }
   if (depth_filter_changed) {
     backboard_association_tracker_.Reset();
     goal_controller_.ClearObservationHistory();
@@ -1883,6 +1960,8 @@ void MissionController::Reset(bool preserve_action_ids) {
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;
   decision_observation_active_ = false;
+  decision_observation_restart_pending_=false;
+  line_guard_turns_completed_=0;
   settle_until_sec_ = 0.0;
   last_settle_done_id_ = 0;
   decision_observation_camera_only_ = false;

@@ -40,8 +40,8 @@ void TestConfidenceFiltersOnlyAndDoesNotRankAssociation() {
   ObjectTargetConfig filter;
   filter.ball_class_id = 1;
   filter.ball_confidence = 0.60;
-  filter.min_box_width = 1.0;
-  filter.min_box_height = 1.0;
+  filter.ball_min_box_width = 1.0;
+  filter.ball_min_box_height = 1.0;
   const std::vector<Detection> detections{
       {{40.0, 40.0, 20.0, 20.0}, 0.59, 1},
       {{42.0, 40.0, 20.0, 20.0}, 0.61, 1},

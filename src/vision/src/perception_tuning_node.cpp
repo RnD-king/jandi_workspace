@@ -166,8 +166,6 @@ public:
     declare_parameter<double>("goal_conf_thres", algorithm_defaults.object_targets.goal_confidence); // goal target 2차 confidence threshold
     declare_parameter<double>("backboard_conf_thres", algorithm_defaults.object_targets.backboard_confidence); // backboard target 2차 confidence threshold
     declare_parameter<double>("hurdle_conf_thres", algorithm_defaults.object_targets.hurdle_confidence); // hurdle target 2차 confidence threshold
-    declare_parameter<int>("object_min_box_width", static_cast<int>(algorithm_defaults.object_targets.min_box_width));
-    declare_parameter<int>("object_min_box_height", static_cast<int>(algorithm_defaults.object_targets.min_box_height));
     declare_parameter<double>("fx", 600.0);                      // camera intrinsic fx
     declare_parameter<double>("fy", 600.0);                      // camera intrinsic fy
     declare_parameter<double>("cx", 320.0);                      // camera intrinsic cx
@@ -385,10 +383,6 @@ public:
     mission_config.object_targets.backboard_confidence =
         backboard_conf_thres_;
     mission_config.object_targets.hurdle_confidence = hurdle_conf_thres_;
-    mission_config.object_targets.min_box_width =
-        get_parameter("object_min_box_width").as_int();
-    mission_config.object_targets.min_box_height =
-        get_parameter("object_min_box_height").as_int();
     mission_config.backboard_min_depth_m =
         get_parameter("backboard_min_depth_m").as_double();
     mission_config.backboard_max_depth_m =
@@ -865,6 +859,14 @@ private:
     for (const auto &parameter : parameters) {
       double *target = nullptr;
       const std::string &name = parameter.get_name();
+      try {
+        if (vision::ApplyLivePerceptionParameter(parameter,candidate)) {
+          touched=true;
+          continue;
+        }
+      } catch(const std::exception& error) {
+        response.successful=false; response.reason=error.what(); return response;
+      }
       if (name=="ball_recovery_walk_turn_max" || name=="goal_recovery_turn_max") {
         if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || parameter.as_int()<0 || parameter.as_int()>1000000) {
           response.successful=false; response.reason="recovery turn maximum must be a nonnegative integer"; return response;
@@ -984,6 +986,9 @@ private:
       // speculative FSM on a zero-dimension/default PerceptionFrameInput.
       std::optional<vision_core::PerceptionMissionFrameResult> updated;
       const bool depth_observation_changed =
+          !candidate.object_targets.SameBoxFilters(tuning_config_.object_targets) ||
+          candidate.line_detection.min_box_width != tuning_config_.line_detection.min_box_width ||
+          candidate.line_detection.min_box_height != tuning_config_.line_detection.min_box_height ||
           candidate.backboard_depth_strip_width_px != backboard_depth_strip_width_px_ ||
           candidate.backboard_min_depth_m != tuning_config_.backboard_min_depth_m ||
           candidate.backboard_max_depth_m != tuning_config_.backboard_max_depth_m;
@@ -996,7 +1001,7 @@ private:
         LeaveWaitCommit(get_clock()->now().seconds());
         preview_ready_=false; preview_command_={}; preview_image_.release();
         EnterWaitPreview(get_clock()->now().seconds());
-        RCLCPP_INFO(get_logger(),"Depth sampling/filter changed: fresh PREVIEW required");
+        RCLCPP_INFO(get_logger(),"Detection/Depth sampling or filter changed: fresh PREVIEW required");
       } else if (preview_ready_) {
         preview_input_ = std::move(trial_input);
         preview_result_ = *updated;
