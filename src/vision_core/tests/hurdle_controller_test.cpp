@@ -103,7 +103,7 @@ int main() {
   struct GridCase { double v; CruiseDirection direction; MissionAction action; };
   for (const auto& scenario : std::vector<GridCase>{
       {.5,CruiseDirection::kLeft,MissionAction::kStepForwardLeftTwo},
-      {.5,CruiseDirection::kStraight,MissionAction::kStepForwardFour},
+      {.5,CruiseDirection::kStraight,MissionAction::kStepForwardThree},
       {.5,CruiseDirection::kRight,MissionAction::kStepForwardRightTwo},
       {.7,CruiseDirection::kLeft,MissionAction::kStepForwardLeftOne},
       {.7,CruiseDirection::kStraight,MissionAction::kStepForwardThree},
@@ -129,7 +129,7 @@ int main() {
   HurdleController controller(c, 3.0);
   auto r = controller.Compute(H(0.5), 640,480, 0, {}, {}, straight);
   assert(r.mode == HurdleMode::kApproach);
-  assert(r.action.action == MissionAction::kStepForwardFour);
+  assert(r.action.action == MissionAction::kStepForwardThree);
   ActionExecutionFeedback active; active.action_active = true;
   r = controller.Compute(H(0.8), 640,480, .1, {}, active, straight);
   assert(r.camera_request == CameraRequest::kNone);

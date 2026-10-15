@@ -41,8 +41,7 @@ void HurdlePostWalkPolicy(int steps) {
   const double v=steps==4 ? c.approach_short_v_px-20 :
       steps==3 ? (c.approach_short_v_px+c.approach_two_step_v_px)/2 : c.approach_two_step_v_px+20;
   auto r=hurdle.Compute(Target(100,v),640,480,0,{},{},StraightLine());
-  assert(r.action.action==(steps==4 ? MissionAction::kStepForwardFour :
-      steps==3 ? MissionAction::kStepForwardThree : MissionAction::kStepForwardTwo));
+  assert(r.action.action==(steps==2 ? MissionAction::kStepForwardTwo : MissionAction::kStepForwardThree));
   ActionExecutionFeedback done; done.action_done=true;
   r=hurdle.Compute({},640,480,.1,{},done,StraightLine());
   if (steps==2) { assert(r.camera_request==CameraRequest::kDown); return; }

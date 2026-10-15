@@ -231,7 +231,7 @@ int main() {
         Require(!player.IsNearCompletion(100, t0), "READY allowed before final motion");
         pass("READY remaining steps/hold and final-program-only condition");
 
-        for(uint16_t code=21;code<=26;++code) {
+        for(uint16_t code=21;code<=25;++code) {
             for(uint8_t mission:{1,2,3,4}) {
                 ActionTransactions fresh;
                 fresh.Activate(6000,mission,code);
@@ -242,7 +242,7 @@ int main() {
             ActionTransactions old_to_new;old_to_new.Activate(7000,1,11);old_to_new.MarkReady();
             Require(old_to_new.Evaluate(7001,1,code)==Admission::Queue,"old walk could not queue new action");
         }
-        Require(!IsReadyWalkAction(20)&&!IsReadyWalkAction(27),"READY extended outside valid new action range");
+        Require(!IsReadyWalkAction(20)&&!IsReadyWalkAction(26)&&!IsReadyWalkAction(27),"READY extended outside valid new action range");
         pass("new action READY and current-action queue policy");
         const auto held=InitialPose();
         auto transition_start=held;transition_start.at(15)=1379;transition_start.at(16)=2765;

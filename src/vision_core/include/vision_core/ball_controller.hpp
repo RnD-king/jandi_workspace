@@ -28,7 +28,7 @@ enum class BallMode {
   kApproachTwoBeforeDown, // Final one/two-step walk; retain the existing phase ID.
   kCoarseAdjust,
   kWaitFinePose,
-  kBallRecoveryWalkTurn, // WALK-stance 27/28 search before stationary fallback
+  kBallRecoveryWalkTurn, // WALK-stance 31/28 search before stationary fallback
   kNearTurnBeforeDown, // One extra zone-7/9 turn, reobserve, then DOWN if still lost
   kFineSidePair, // Fixed pair of existing 5/6 actions; append to preserve phase IDs.
   kMidTurnBeforeRecovery, // One WALK turn after zone-4/6 loss, then stationary recovery.
@@ -39,7 +39,8 @@ struct BallConfig {
   int down_search_max_steps{};
   double recovery_observation_sec{};
   int recovery_max_observations{};
-  int recovery_walk_turn_max{3};
+  int recovery_walk_turn_max{3}; // General approach loss only.
+  int entry_recovery_walk_turn_max{10}; // First post-entry observation loss only.
   int post_pickup_back_steps{};
 
   int stable_window{};
@@ -197,6 +198,7 @@ private:
   std::optional<double> last_stable_ball_u_;
   std::optional<bool> recovery_turn_left_;
   int recovery_walk_turns_completed_{0};
+  int recovery_walk_turn_limit_{3}; // Fixed per loss episode.
   bool recovery_walk_turn_pending_{false};
   bool recovery_walk_turn_done_{false};
   bool recovery_turn_search_exhausted_{false};

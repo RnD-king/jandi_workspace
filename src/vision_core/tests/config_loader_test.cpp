@@ -60,6 +60,7 @@ int main(int argc, char **argv) {
   assert(c.goal.recovery_timeout_sec == 5.0);
   assert(c.goal.recovery_reacquire_min_hits == 3);
   assert(c.goal.recovery_center_tolerance_px == 76.8);
+  assert(c.ball.entry_recovery_walk_turn_max == 10);
   assert(c.ball.pickup_u1_px == 310);
   assert(c.ball.pickup_u2_px == 385);
   assert(c.ball.pickup_v1_px == 80);
@@ -139,6 +140,7 @@ int main(int argc, char **argv) {
   Reject(text.str(), "object_ready_mean_actions: [22, 23]",
          "object_ready_mean_actions: 22");
   Reject(text.str(), "object_ready_mean_actions: [22, 23]", "");
+  Reject(text.str(), "entry_recovery_walk_turn_max: 10", "entry_recovery_walk_turn_max: -1");
   Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: -1.0");
   Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: .nan");
   Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: .inf");

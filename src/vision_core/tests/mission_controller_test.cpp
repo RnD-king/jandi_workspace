@@ -1058,7 +1058,7 @@ int main() {
   assert(ready_result.command.action==MissionAction::kStepForwardTwo);
   assert(ready_result.command.action_id!=no_ready_id);
 
-  // HURDLE: four-step mean leads to three-step, observation_complete
+  // HURDLE: far-center three-step mean leads to three-step, observation_complete
   // must be set when consuming verified READY evidence at DONE.
   auto hurdle_ready_cfg=ready_cfg;
   hurdle_ready_cfg.enable_ball=false; hurdle_ready_cfg.enable_hurdle=true;
@@ -1067,7 +1067,7 @@ int main() {
   MissionController hurdle_ready(hurdle_ready_cfg);
   ready_frame=Frame(0.0); ready_frame.hurdle_target=Ball(.5,.3);
   ready_result=hurdle_ready.Step(ready_frame);
-  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
   const auto hurdle_ready_id=ready_result.command.action_id;
   for (int i=1;i<=27;++i) {
     ready_frame=Frame(i*.1);
@@ -1105,7 +1105,7 @@ int main() {
   ready_frame.camera_feedback={CameraMode::kGoal,true};
   ready_frame.backboard_center_depth_m=1.8;
   ready_result=goal_ready.Step(ready_frame);
-  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
   const auto goal_ready_id=ready_result.command.action_id;
   for (int i=1;i<=27;++i) {
     ready_frame=Frame(2.0+i*.1);

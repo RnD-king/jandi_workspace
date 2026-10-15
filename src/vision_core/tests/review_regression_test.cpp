@@ -162,7 +162,7 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
 
   HurdleController hurdle(c.hurdle,3); HurdleResult h; now=0;
   for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,(c.hurdle.approach_short_v_px-10)/480.0),640,480,now+=.1,forward,{},StraightLine(),false);
-  assert(h.action.action==MissionAction::kStepForwardFour); // Strongly off-center still walks straight.
+  assert(h.action.action==MissionAction::kStepForwardThree); // Strongly off-center still walks straight.
   for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,.85),640,480,now+=.1,forward,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kApproachTwoBeforeDown);
   h=hurdle.Compute(Target(.05,.85),640,480,now+=.1,forward,{},StraightLine(),true);

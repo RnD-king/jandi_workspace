@@ -577,7 +577,8 @@ void FineSidePairTransport(bool left, bool manual) {
 void EntryDirectionRecovery(bool left, bool reacquire) {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.entry_min_hits=6;c.stable_min_hits=7;c.stable_window=10;
-  c.recovery_walk_turn_max=3;c.recovery_center_tolerance_px=50;
+  c.recovery_walk_turn_max=3;c.entry_recovery_walk_turn_max=10;
+  c.recovery_center_tolerance_px=50;
   c.recovery_observation_sec=1;c.recovery_max_observations=5;
   BallController ball(c,3);
   const auto target=Target(c.far_u_des_px+(left?-120:120),100);
@@ -603,12 +604,12 @@ void EntryDirectionRecovery(bool left, bool reacquire) {
     return;
   }
   double now=2.1;
-  for(int n=1;n<=3;++n) {
+  for(int n=1;n<=10;++n) {
     b=ball.Compute({},640,480,now,forward,{false,true,false});
     assert(ball.RecoveryWalkTurnsCompleted()==n-1);
     now+=.1;b=ball.Compute({},640,480,now,forward,{true,false,true});
     assert(ball.RecoveryWalkTurnsCompleted()==n);
-    if(n<3) {now+=.1;b=ball.Compute({},640,480,now,forward,{});assert(b.action.action==turn);}
+    if(n<10) {now+=.1;b=ball.Compute({},640,480,now,forward,{});assert(b.action.action==turn);}
   }
   assert(b.mode==BallMode::kBallRecoveryForward);
   for(int i=0;i<100 && b.mode!=BallMode::kFailed;++i) {
@@ -822,7 +823,7 @@ void Defaults() {
   assert(CruiseAction(CruiseDirection::kStraight)==MissionAction::kStepForwardFour);
   assert(c.transition_settle_sec==.6 && c.fine_motion_settle_sec==0 && c.walk_inter_action_hold_sec==0);
   assert(c.ball.down_one_step_v_px==0 && c.ball.fine_mode_v_px==10);
-  assert(c.ball.recovery_walk_turn_max==3 && c.goal.recovery_turn_max==3);
+  assert(c.ball.recovery_walk_turn_max==3 && c.ball.entry_recovery_walk_turn_max==10 && c.goal.recovery_turn_max==3);
   for(int field=0;field<4;++field) {
     auto bad=c;
     if(field==0)bad.transition_settle_sec=-1;

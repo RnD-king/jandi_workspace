@@ -45,6 +45,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, recovery_observation_sec);
   FIELD(ball, recovery_max_observations);
   FIELD(ball, recovery_walk_turn_max);
+  FIELD(ball, entry_recovery_walk_turn_max);
   FIELD(ball, post_pickup_back_steps);
   FIELD(ball, stable_window);
   FIELD(ball, stable_min_hits);

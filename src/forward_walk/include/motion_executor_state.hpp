@@ -15,11 +15,11 @@ using RawPositions = std::unordered_map<int, int32_t>;
 using Clock = std::chrono::steady_clock;
 inline constexpr std::chrono::milliseconds kPeriod{20};
 
-// READY is emitted for 11/12/13 and 21..26; the perception controller's
+// READY is emitted for 11/12/13 and 21..25; the perception controller's
 // current-action allowlist determines whether it sends a queued successor.
 inline bool IsReadyWalkAction(uint16_t action)
 {
-    return action == 11 || action == 12 || action == 13 || (action >= 21 && action <= 26);
+    return action == 11 || action == 12 || action == 13 || (action >= 21 && action <= 25);
 }
 inline bool IsLongLineAction(uint8_t mission, uint16_t action)
 {

@@ -38,7 +38,8 @@ vision_algorithm:
     down_search_max_steps: 10
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
-    recovery_walk_turn_max: 3 # 복구 회전
+    recovery_walk_turn_max: 3 # 일반 접근 중 유실 복구 회전 한도
+    entry_recovery_walk_turn_max: 10 # BALL 최초 진입 후 첫 정지 관측 실패 시에만 적용
     post_pickup_back_steps: 0   # 0: no backing away after pickup; return camera and reacquire line
 
     stable_window: 10
@@ -218,12 +219,11 @@ vision_algorithm:
     #                             3, 4, 5, 6, 7, 8, 18, 19
     post_motion_observation_sec: 1.0 # DONE 후 공통 관측 최소 시간 (초, 10/7 검사와 동시 진행)
 
-    # Current-action eligibility: AUTO 40%-READY observation AND queue.
-    # 22=straight 3 steps, 23=straight 4 steps. Successor ID is unrestricted.
-    # MANUAL retains READY Preview/Commit (no automatic reservation).
-    # Use [] for normal post-DONE observation of all object walks.
-    # LINE 11/12/13 remains permanently eligible. Node restart required.
-    object_ready_mean_actions: [22, 23]
+    # 객체 접근 READY 관측 + 자동 선예약 예외 목록 (현재는 비활성).
+    # 예: [22, 23]이면 해당 동작은 40%-READY 평균으로 다음 동작 예약 가능.
+    # 기본 DONE 후 1초 관측; 즉시 DOWN/고정 시퀀스는 유지.
+    # LINE READY와 수동 PREVIEW/COMMIT은 별도 정책. 재시작 후 반영.
+    object_ready_mean_actions: []
 
     # 사용할 미션과 시작 상태
     enable_ball: true # 공 미션 사용

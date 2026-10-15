@@ -210,6 +210,8 @@ void BallController::BeginForwardRecovery(double now, std::optional<double> u,
   stationary_recovery_.Begin(now);
   state_enter_sec_ = now;
   recovery_walk_turns_completed_ = 0;
+  recovery_walk_turn_limit_ = immediate_turn ? config_.entry_recovery_walk_turn_max
+                                            : config_.recovery_walk_turn_max;
   recovery_walk_turn_pending_ = recovery_walk_turn_done_ = false;
   recovery_turn_search_exhausted_ = false;
   recovery_turn_left_.reset();
@@ -218,7 +220,7 @@ void BallController::BeginForwardRecovery(double now, std::optional<double> u,
     if (std::abs(offset) > config_.recovery_center_tolerance_px)
       recovery_turn_left_ = offset < 0.0;
   }
-  mode_ = immediate_turn && recovery_turn_left_ && config_.recovery_walk_turn_max > 0
+  mode_ = immediate_turn && recovery_turn_left_ && recovery_walk_turn_limit_ > 0
       ? BallMode::kBallRecoveryWalkTurn : BallMode::kBallRecoveryForward;
 }
 
@@ -704,7 +706,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       return result;
     const bool can_turn = !recovery_turn_search_exhausted_ &&
                           recovery_turn_left_.has_value() &&
-                          recovery_walk_turns_completed_ < config_.recovery_walk_turn_max;
+                          recovery_walk_turns_completed_ < recovery_walk_turn_limit_;
     const auto status = stationary_recovery_.Observe(
         target.has_value(), now_sec, config_.stable_window,
         config_.stable_min_hits, config_.recovery_observation_sec,
@@ -753,7 +755,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       recovery_walk_turn_done_ = false;
       ++recovery_walk_turns_completed_;
       ClearTracking();
-      if (recovery_walk_turns_completed_ >= config_.recovery_walk_turn_max) {
+      if (recovery_walk_turns_completed_ >= recovery_walk_turn_limit_) {
         recovery_turn_search_exhausted_ = true;
         stationary_recovery_.Begin(now_sec);
         mode_ = BallMode::kBallRecoveryForward;
@@ -763,7 +765,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       return result;
     }
     // Retuning at a manual WAIT_PREVIEW boundary must respect the new budget.
-    if (recovery_walk_turns_completed_ >= config_.recovery_walk_turn_max) {
+    if (recovery_walk_turns_completed_ >= recovery_walk_turn_limit_) {
       recovery_turn_search_exhausted_ = true;
       stationary_recovery_.Begin(now_sec);
       mode_ = BallMode::kBallRecoveryForward;
@@ -835,6 +837,7 @@ void BallController::ResetToLine(bool clear_ignore) {
   last_stable_ball_u_.reset();
   recovery_turn_left_.reset();
   recovery_walk_turns_completed_ = 0;
+  recovery_walk_turn_limit_ = config_.recovery_walk_turn_max;
   recovery_walk_turn_pending_ = false;
   recovery_walk_turn_done_ = false;
   recovery_turn_search_exhausted_ = false;

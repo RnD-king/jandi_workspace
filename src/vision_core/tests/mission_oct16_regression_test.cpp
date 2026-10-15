@@ -159,7 +159,7 @@ void BallTurnDisabled() {
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
   c.far_u_des_px=380;c.approach_u_deadband_px=90;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
-  c.recovery_walk_turn_max=0;
+  c.recovery_walk_turn_max=0;c.entry_recovery_walk_turn_max=0;
   BallController ball(c,3);
   ball.Compute(Target(200,150),640,480,0,{},{});
   ActionExecutionFeedback done;done.action_done=done.observation_complete=true;
@@ -328,7 +328,7 @@ MissionFrameInput LineFrame(double now,double score) {
   return f;
 }
 void InvalidNewSettings() {
-  for(int i=0;i<6;++i) {
+  for(int i=0;i<7;++i) {
     auto c=LineConfig();
     if(i==0)c.ball.down_search_min_hits=0;
     if(i==1)c.hurdle.down_search_min_hits=c.hurdle.stable_window+1;
@@ -336,6 +336,7 @@ void InvalidNewSettings() {
     if(i==3)c.line_p2p.in_place_turn_score=std::numeric_limits<double>::infinity();
     if(i==4)c.ball.down_search_max_steps=0;
     if(i==5)c.hurdle.down_search_max_steps=-1;
+    if(i==6)c.ball.entry_recovery_walk_turn_max=-1;
     bool rejected=false;
     try {ValidateAlgorithmConfig(c);}catch(...){rejected=true;}
     assert(rejected);

@@ -29,8 +29,8 @@ MissionAction GoalApproachWalk(CruiseDirection direction, bool short_distance) {
     return short_distance ? MissionAction::kStepForwardRightOneHurdle
                           : MissionAction::kStepForwardRightOne;
   case CruiseDirection::kStraight:
-    return short_distance ? MissionAction::kStepForwardThree
-                          : MissionAction::kStepForwardFour;
+    // Both far and middle CENTER use three straight steps.
+    return MissionAction::kStepForwardThree;
   case CruiseDirection::kNone: return MissionAction::kNone;
   }
   return MissionAction::kNone;

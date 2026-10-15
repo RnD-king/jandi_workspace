@@ -37,6 +37,7 @@ vision_algorithm:
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
     recovery_walk_turn_max: 3
+    entry_recovery_walk_turn_max: 10
     post_pickup_back_steps: 0
     stable_window: 10
     stable_min_hits: 7

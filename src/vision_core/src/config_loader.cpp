@@ -74,6 +74,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
   NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
+  NonnegativeInt(c.ball.entry_recovery_walk_turn_max, "ball.entry_recovery_walk_turn_max");
   NonnegativeInt(c.goal.recovery_turn_max, "goal.recovery_turn_max");
   Nonnegative(c.goal.edge_margin_px, "goal.edge_margin_px");
   Nonnegative(c.transition_settle_sec, "mission.transition_settle_sec");
@@ -116,7 +117,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.mission_recovery_yaw_deg>180) throw std::runtime_error("recovery yaw exceeds 180 degrees");
   // An invalid ID would never receive READY from forward_walk. Reject such
   // YAML errors at startup rather than silently doing a post-DONE fallback.
-  const std::array<int, 9> ready_capable_actions = {
+  const std::array<int, 8> ready_capable_actions = {
       static_cast<int>(MissionAction::kStepForwardLeft),
       static_cast<int>(MissionAction::kStepForwardRight),
       static_cast<int>(MissionAction::kStepForwardFive),
@@ -124,8 +125,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
       static_cast<int>(MissionAction::kStepForwardThree),
       static_cast<int>(MissionAction::kStepForwardFour),
       static_cast<int>(MissionAction::kStepForwardLeftTwo),
-      static_cast<int>(MissionAction::kStepForwardRightTwo),
-      static_cast<int>(MissionAction::kStepForwardRightOne)};
+      static_cast<int>(MissionAction::kStepForwardRightTwo)};
   for (std::size_t i = 0; i < c.object_ready_mean_actions.size(); ++i) {
     const int action = c.object_ready_mean_actions[i];
     if (std::find(ready_capable_actions.begin(), ready_capable_actions.end(),
@@ -371,6 +371,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
   Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
   Assign(b, "recovery_walk_turn_max", c.ball.recovery_walk_turn_max);
+  Assign(b, "entry_recovery_walk_turn_max", c.ball.entry_recovery_walk_turn_max);
   Assign(b, "post_pickup_back_steps", c.ball.post_pickup_back_steps);
 
   Assign(b, "stable_window", c.ball.stable_window);

@@ -674,9 +674,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     }
   }
   bool applied_object_ready_mean = false;
+  // A READY mean alone is not a reserved successor. Without B in the
+  // one-slot queue, retain the fresh 1s post-DONE observation gate.
   if (moving_object_ready_mean_ &&
       input.delivery_feedback.done &&
       input.delivery_feedback.action_id == moving_object_ready_mean_->action_id &&
+      object_queued_parent_id_ == input.delivery_feedback.action_id &&
+      object_queued_successor_.has_value() &&
       active_mission_ == moving_object_ready_mean_->mission &&
       input.camera_feedback.settled &&
       input.camera_feedback.actual_mode == moving_object_ready_mean_->camera) {

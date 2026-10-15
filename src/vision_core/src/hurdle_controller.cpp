@@ -186,10 +186,11 @@ HurdleResult HurdleController::Compute(
       }
       return result;
     }
+    // Far-center also uses three straight steps; LEFT/RIGHT mappings unchanged.
     result.action=Locomotion(steps==2 ? MissionAction::kStepForwardTwo :
-        steps==3 ? MissionAction::kStepForwardThree : MissionAction::kStepForwardFour);
+        MissionAction::kStepForwardThree);
     if (allow_new_body_actions) {
-      last_approach_steps_=steps;
+      last_approach_steps_=steps==4 ? 3 : steps;
       last_approach_pending_=true;
       last_approach_zone_=steps==4 ? 2 : steps==3 ? 5 : 8;
     }

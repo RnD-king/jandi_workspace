@@ -168,7 +168,7 @@ int main() {
     const bool near=depth<=c.approach_short_z_m;
     for (const auto &scenario : std::vector<std::pair<double,MissionAction>>{
         {.2,near ? MissionAction::kTurnLeftInPlace : MissionAction::kStepForwardLeftOne},
-        {.5,near ? MissionAction::kStepForwardThree : MissionAction::kStepForwardFour},
+        {.5,MissionAction::kStepForwardThree},
         {.8,near ? MissionAction::kStepForwardRightOneHurdle : MissionAction::kStepForwardRightOne}}) {
       GoalController far(c,3.0);
       far.StartForwardTrial();
