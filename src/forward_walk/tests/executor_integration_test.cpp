@@ -176,27 +176,16 @@ int main() {
         Check(cameras.empty(),"automatic FORWARD hold emitted a camera command status");
         std::cout<<"PASS real MainNode startup FORWARD transmission/hold and ordinary P2P override\n";
 
-        Check(MainNode::UsesLineMissionArmPose(1),"LINE mission must override arms");
-        for(uint8_t mission:{2,3,4})
-            Check(!MainNode::UsesLineMissionArmPose(mission),"non-LINE mission must retain JSON arms");
+        for(uint16_t code=1;code<=31;++code) {
+            const bool excluded=code==14||code==15||code==16||code==17||code==29||code==30;
+            Check(MainNode::UsesOutwardArmPose(code)==!excluded,"action arm exclusion mismatch");
+        }
         for(uint8_t mission:{2,3,4}) {
             const uint64_t id=9100+mission;
-            const auto held=Dxl::current;
-            const auto packet_start=Dxl::packets.size();
             action(id,11,mission);
-            if (mission==2) {
-                Check(node->arm_transition_in_progress_,"LINE exit did not start arm transition");
-                action(id,11,mission); // active duplicate during transition must not restart it
-                pump([&]{return !node->arm_transition_in_progress_;});
-                Check(Count(actions,id,Status::DONE)==0&&Count(actions,id,Status::READY)==0,
-                      "arm-only transition emitted premature DONE/READY");
-                Check(Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,"restoration did not precede action");
-                for(std::size_t index=packet_start;index<Dxl::packets.size();++index)
-                    for(int motor:Dxl::ids) if(motor!=15&&motor!=16)
-                        Check(Dxl::packets[index].at(motor)==held.at(motor),"arm transition moved another joint");
-            } else Check(!node->arm_transition_in_progress_,"non-LINE to non-LINE unnecessarily changed arms");
+            Check(!node->arm_transition_in_progress_,"mission change unnecessarily changed arm pose");
             pump([&]{return node->action_transactions_.completed.Contains(id);});flush();
-            Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048,"non-LINE walking did not retain JSON arm pose");
+            Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"non-LINE walking missed outward arm pose");
             Check(Count(actions,id,Status::READY)==1,"non-LINE long walk must send READY once");
             Check(!node->queued_action_,"non-LINE READY erroneously queued another action");
         }
@@ -205,28 +194,50 @@ int main() {
             Check(MainNode::UsesFixedGripperPose(code),"normal action gripper override missing");
         // 공을 향해 걷기 → 공 잡기 → 다시 걷기에서 action별 팔 목표 전환을 검증한다.
         WriteMotion(directory/"motions/공_줍고일어나기_최종.json");
+        const auto held=Dxl::current;
+        const auto packet_start=Dxl::packets.size();
         action(9190,14,2);
+        Check(node->arm_transition_in_progress_,"PICK_BALL did not start restoration");
+        action(9190,14,2); // 전환 중 같은 명령 재수신은 전환을 다시 시작하지 않는다.
+        pump([&]{return !node->arm_transition_in_progress_;});
+        Check(Count(actions,9190,Status::DONE)==0&&Count(actions,9190,Status::READY)==0,
+              "arm-only transition emitted premature DONE/READY");
+        Check(Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,"restoration did not precede PICK_BALL");
+        for(std::size_t index=packet_start;index<Dxl::packets.size();++index)
+            for(int motor:Dxl::ids) if(motor!=15&&motor!=16)
+                Check(Dxl::packets[index].at(motor)==held.at(motor),"arm transition moved another joint");
         pump([&]{return node->action_transactions_.completed.Contains(9190);});flush();
         Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048,"PICK_BALL did not restore JSON arm pose");
         Check(Dxl::current.at(19)==2048,"PICK_BALL gripper was overridden");
         action(9191,11,2);
+        Check(node->arm_transition_in_progress_,"BALL walking did not reopen arms");
+        pump([&]{return !node->arm_transition_in_progress_;});
+        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"BALL walking began before arms opened");
+        Check(Count(actions,9191,Status::DONE)==0&&Count(actions,9191,Status::READY)==0,
+              "arm opening completed the action prematurely");
         pump([&]{return node->action_transactions_.completed.Contains(9191);});flush();
-        Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048,"BALL walking incorrectly overrode arms");
+        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"BALL walking missed arm override");
         Check(Dxl::current.at(19)==1968,"non-LINE walking missed gripper override");
         action(9200,11);
-        Check(node->arm_transition_in_progress_,"return to LINE missed arm opening transition");
-        pump([&]{return !node->arm_transition_in_progress_;});
-        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"LINE action began before arms opened");
-        Check(Count(actions,9200,Status::DONE)==0&&Count(actions,9200,Status::READY)==0,
-              "LINE arm opening completed the action prematurely");
+        Check(!node->arm_transition_in_progress_,"BALL to LINE walking unnecessarily changed arms");
         pump([&]{return node->action_transactions_.completed.Contains(9200);});flush();
-        // mission만으로 판별하므로 LINE의 PICK_BALL action도 팔 목표를 유지한다.
+        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"return to LINE lost arm pose");
+        // LINE mission으로 들어와도 제외 action은 JSON 팔 자세를 사용한다.
         action(9201,14,1);pump([&]{return node->action_transactions_.completed.Contains(9201);});flush();
-        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"LINE arm pose still depends on action type");
+        Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048,"LINE PICK_BALL did not retain JSON arms");
         Check(Count(actions,9200,Status::READY)==1,"LINE READY missing after non-LINE walks");
-        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"return to LINE did not reapply arm pose");
         Check(Dxl::current.at(19)==2048,"LINE task action incorrectly overrode gripper");
-        std::cout<<"PASS mission-only arm scope, restoration/opening before action, duplicate ACK and LINE task action\n";
+        for(uint16_t code:{15,16,17,29,30}) {
+            WriteMotion(directory/node->ProgramFileForAction(code));
+            const uint64_t id=9300+code;
+            action(id,code,2);
+            Check(!node->arm_transition_in_progress_,"consecutive excluded actions unnecessarily changed arms");
+            pump([&]{return node->action_transactions_.completed.Contains(id);});flush();
+            Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048,"excluded action lost JSON arm pose");
+        }
+        // 뒤의 기존 테스트에서 사용할 재그립 기준값을 복구한다.
+        WriteMotion(directory/"motions/공_재그립.json",false,1968);
+        std::cout<<"PASS action-only arm scope, six exclusions, same-mission transitions and duplicate ACK\n";
 
         action(1001,11);action(1001,11);action(1002,12);action(0,11);
         camera(1001,3);camera(1001,3);camera(2002,2);camera(0,2);camera(9000,9);
@@ -329,6 +340,24 @@ int main() {
               Count(actions,36001,Status::READY)==0,
               "queued action 31 lifecycle mismatch");
 
+        // BALL 보행의 READY에 공 줍기를 예약해도 A가 끝난 후에만 팔을 복구한다.
+        action(36100,21,2);
+        pump([&]{return node->action_transactions_.ready_sent;});
+        const int reads_before_pick=Dxl::reads;
+        action(36101,14,2);
+        Check(node->queued_action_ && Dxl::reads==reads_before_pick && !node->arm_transition_in_progress_,
+              "queued PICK_BALL changed arms before active walk finished");
+        pump([&]{return node->arm_transition_in_progress_;});
+        Check(node->action_transactions_.completed.Contains(36100)&&node->action_transactions_.active_id==36101,
+              "queued PICK_BALL restoration did not follow walk DONE");
+        pump([&]{return node->action_transactions_.completed.Contains(36101);});flush();
+        Check(Dxl::current.at(15)==2048&&Dxl::current.at(16)==2048&&
+              Count(actions,36101,Status::ACK)==1&&Count(actions,36101,Status::DONE)==1,
+              "queued PICK_BALL lost JSON arms or lifecycle");
+        action(36102,21,2);
+        pump([&]{return node->action_transactions_.completed.Contains(36102);});flush();
+        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"BALL walking after queued pick missed arm opening");
+
         // 시작 시 읽은 고정값과 다른 RECATCH fixture로 제외 규칙을 검증한다.
         WriteMotion(directory/"motions/공_재그립.json",false,2168);
         // 새 공 줍기 동작 역시 JSON의 집게손 값을 보존해야 한다.
@@ -403,13 +432,15 @@ int main() {
             Check(Dxl::packet_times[i]-Dxl::packet_times[i-1]>=19ms,"body/camera writer compressed packets");
         std::cout<<"PASS body/camera simultaneous execution and idle camera single-writer spacing\n";
 
-        // 0도 회전도 미션 경계에서는 팔 전환을 생략하지 않는다.
+        // 같은 BALL 미션에서도 제외 action 다음의 0도 회전은 팔을 다시 벌린다.
+        action(2800,14,2);
+        pump([&]{return node->action_transactions_.completed.Contains(2800);});flush();
         action(2801,7,2);
-        Check(node->arm_transition_in_progress_,"zero-turn LINE exit skipped restoration");
+        Check(node->arm_transition_in_progress_,"zero-turn BALL action skipped arm opening");
         pump([&]{return node->action_transactions_.completed.Contains(2801);});flush();
-        Check(Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073&&
+        Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765&&
               Count(actions,2801,Status::ACK)==1&&Count(actions,2801,Status::DONE)==1,
-              "zero-turn restoration lifecycle mismatch");
+              "zero-turn opening lifecycle mismatch");
         action(2802,8,1);
         pump([&]{return node->action_transactions_.completed.Contains(2802);});flush();
         Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"zero-turn return to LINE skipped opening");

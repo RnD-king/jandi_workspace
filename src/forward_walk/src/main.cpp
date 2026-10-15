@@ -84,7 +84,8 @@ public:
         startup_pose_duration_sec_ =
             declare_parameter<double>("startup_pose_duration_sec", 3.0);
 
-        // 미션과 관계없이 미세보행/걷기/회전 action에서 15·16번 팔을 벌린다. 15번 측정 각도를 양쪽에 대칭 적용.
+        // 미션과 관계없이 14/15/16/17/29/30 외의 action에서 15·16번 팔을 벌린다.
+        // 15번 측정 각도를 양쪽에 대칭 적용한다.
         // 기준 tick과 바깥 부호는 실제 로봇 측정값이다(15:1071→1379, 16 기준:3073).
         line_arm_config_.enabled = declare_parameter<bool>("line_arm_override_enabled", true);
         line_arm_config_.angle_deg = declare_parameter<double>("line_arm_outward_angle_deg", 308.0 * 360.0 / 4096.0);
@@ -387,13 +388,24 @@ private:
                action == vision::msg::ActionCommand::TURN_RIGHT_AND_STEP;
     }
 
-    // LINE에서는 action 종류와 관계없이 팔을 벌린다. 그 외 미션은 JSON 팔 자세를 사용한다.
-    static bool UsesLineMissionArmPose(std::uint8_t mission)
+    // mission과 관계없이 팔을 벌린다. 공 줍기/재그립/허들/슈팅은 JSON 팔 자세를 사용한다.
+    static bool UsesOutwardArmPose(std::uint16_t action)
     {
-        return mission==vision::msg::ActionCommand::MISSION_LINE;
+        using Command=vision::msg::ActionCommand;
+        switch(action) {
+        case Command::PICK_BALL:          // 14
+        case Command::RECATCH:            // 15
+        case Command::HUDDLE:             // 16
+        case Command::SHOOT:              // 17
+        case Command::PICK_BALL_RE:       // 29
+        case Command::PICK_BALL_RE_STAND:  // 30
+            return false;
+        default:
+            return true;
+        }
     }
 
-    // 집게손 덮어쓰기는 mission과 관계없이 이 네 action만 제외한다.
+    // 집게손 덮어쓰기는 mission과 관계없이 이 여섯 action만 제외한다.
     static bool UsesFixedGripperPose(std::uint16_t action)
     {
         using Command=vision::msg::ActionCommand;
@@ -410,21 +422,21 @@ private:
         }
     }
 
-    bool NeedsMissionArmTransition(std::uint8_t mission) const
+    bool NeedsArmTransition(std::uint16_t action) const
     {
         return line_arm_config_.enabled && (arm_pose_uncertain_ ||
-               arm_line_pose_ != UsesLineMissionArmPose(mission));
+               arm_outward_pose_ != UsesOutwardArmPose(action));
     }
 
     // 실제 action은 먼저 검증하여 저장한다. 전환 중 몸 목표를 유지하며 팔/선택된 집게손만 이동한다.
     bool StartMissionProgram(const std::optional<P2PMotionPlayer::PreparedProgram>& program,
                              std::uint8_t mission, std::uint16_t action)
     {
-        if (!NeedsMissionArmTransition(mission)) {
+        if (!NeedsArmTransition(action)) {
             return program && p2p_player_->StartPrepared(*program);
         }
-        const bool to_line=UsesLineMissionArmPose(mission);
-        P2PMotionPlayer::RawPositions targets=to_line ? line_arm_config_.Targets() :
+        const bool to_outward=UsesOutwardArmPose(action);
+        P2PMotionPlayer::RawPositions targets=to_outward ? line_arm_config_.Targets() :
             P2PMotionPlayer::RawPositions{{15,line_arm_config_.reference_15},{16,line_arm_config_.reference_16}};
         // 팔 출발점은 실제 encoder, 다른 관절은 직전 목표를 사용하여 몸 자세를 유지한다.
         if (UsesFixedGripperPose(action)) targets[19]=gripper_tick_;
@@ -436,9 +448,9 @@ private:
         if (!p2p_player_->StartPrepared(transition,initial,std::chrono::steady_clock::now())) return false;
         pending_mission_program_=program;
         arm_transition_in_progress_=true;
-        arm_transition_to_line_=to_line;
-        RCLCPP_INFO(get_logger(), "Mission arm transition: mission=%u pose=%s ID15=%d ID16=%d duration=%.2fs before action",
-                    unsigned(mission),to_line ? "LINE" : "RESTORED",targets.at(15),targets.at(16),arm_transition_sec_);
+        arm_transition_to_outward_=to_outward;
+        RCLCPP_INFO(get_logger(), "Action arm transition: mission=%u action=%u pose=%s ID15=%d ID16=%d duration=%.2fs before action",
+                    unsigned(mission),unsigned(action),to_outward ? "OUTWARD" : "RESTORED",targets.at(15),targets.at(16),arm_transition_sec_);
         return true;
     }
 
@@ -514,7 +526,7 @@ private:
                 // QUEUE의 0도 회전은 A DONE 이전에 완료시킬 수 없다.
                 // A가 끝나기 전에는 준비/ACK만 하고, 이후 실제 팔 상태로 판정한다.
                 zero_turn=true;
-                if (!NeedsMissionArmTransition(message->mission) &&
+                if (!NeedsArmTransition(message->action) &&
                     admission != Admission::Queue &&
                     !walk_hold_.Waiting(std::chrono::steady_clock::now())) {
                     // 유휴 실행에서의 0도 회전은 기존 즉시 ACK/DONE 유지.
@@ -594,9 +606,9 @@ private:
                 start_options.repeat_count);
         }
         const std::filesystem::path path = asset_root / relative_path;  // 실제로 읽을 전체 경로
-        // 팔 목표는 mission으로만 선택한다. LINE의 모든 action에 적용한다.
+        // 팔 목표는 action으로만 선택한다. 14/15/16/17/29/30은 JSON 팔 자세를 보존한다.
         // 대기 명령도 이 옵션을 포함해 미리 검증·저장하므로 자동 시작 시 같은 팔 자세를 사용한다.
-        if (line_arm_config_.enabled && UsesLineMissionArmPose(message->mission)) {
+        if (line_arm_config_.enabled && UsesOutwardArmPose(message->action)) {
             start_options.position_overrides = line_arm_config_.Targets();
         }
         if (UsesFixedGripperPose(message->action)) start_options.position_overrides[19]=gripper_tick_;
@@ -728,7 +740,7 @@ private:
         current_action_ = queued.action;
         active_target_yaw_deg_ = queued.effective_target_yaw_deg;
         try {
-            if (!queued.program && !NeedsMissionArmTransition(queued.mission)) {
+            if (!queued.program && !NeedsArmTransition(queued.action)) {
                 if (!already_acknowledged) PublishActionStatus(queued.id, vision::msg::CommandStatus::ACK);
                 PublishActionStatus(queued.id, vision::msg::CommandStatus::DONE);
                 action_transactions_.CompleteActive();
@@ -833,9 +845,9 @@ private:
             } else {
                 if (arm_transition_in_progress_) {
                     arm_transition_in_progress_=false;
-                    arm_line_pose_=arm_transition_to_line_;
+                    arm_outward_pose_=arm_transition_to_outward_;
                     arm_pose_uncertain_=false;
-                    RCLCPP_INFO(get_logger(), "Mission arm transition complete; starting requested action=%u id=%llu",
+                    RCLCPP_INFO(get_logger(), "Action arm transition complete; starting requested action=%u id=%llu",
                                 unsigned(current_action_),static_cast<unsigned long long>(action_transactions_.active_id));
                     if (pending_mission_program_) {
                         auto program=std::move(*pending_mission_program_);
@@ -966,11 +978,11 @@ private:
     std::ofstream torque_log_stream_;                 // 전류/추정 토크 CSV 출력 스트림
     std::string asset_directory_;                     // motions/와 missions/가 들어 있는 기준 폴더
     int32_t gripper_tick_{0}; // RECATCH 마지막 키프레임의 19번 목표
-    motion_executor::LineArmConfig line_arm_config_;   // LINE 미션에서만 유지할 팔 목표
+    motion_executor::LineArmConfig line_arm_config_;   // 제외 action 외에 유지할 팔 목표 (기존 파라미터명 유지)
     double arm_transition_sec_{1.0};
-    bool arm_line_pose_{true}; // startup은 기존대로 벌린 팔 자세로 시작한다.
+    bool arm_outward_pose_{true}; // startup은 기존대로 벌린 팔 자세로 시작한다.
     bool arm_pose_uncertain_{false};
-    bool arm_transition_in_progress_{false}, arm_transition_to_line_{false};
+    bool arm_transition_in_progress_{false}, arm_transition_to_outward_{false};
     std::optional<P2PMotionPlayer::PreparedProgram> pending_mission_program_;
     double turn_step_deg_{15.0};                      // 회전 JSON 1회당 계획상 회전각(도)
     int max_turn_repetitions_{12};                     // 한 회전 요청의 최대 JSON 반복 횟수
