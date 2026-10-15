@@ -136,6 +136,9 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   // settling time. With a 10/7 observation window, the remaining frames
   // otherwise end before the settle deadline and never reach kWaitFinePose.
   c.ball.fine_settle_duration_sec=0.0;
+  // Legacy control-flow expectations must not depend on the live grid YAML.
+  c.hurdle.approach_short_v_px=312.0;
+  c.hurdle.approach_two_step_v_px=360.0;
   BallController ball(c.ball,3);
   CameraFeedback forward{}, down{CameraMode::kDown,true};
   double now=0; BallResult b;
