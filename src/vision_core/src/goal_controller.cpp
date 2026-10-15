@@ -465,8 +465,7 @@ GoalResult GoalController::Compute(
     // No past GOAL-view sighting, or a centered last sighting: wait in place.
     if (!tracked_.visible && seen_after_camera_goal_ &&
         lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = GoalMode::kRecoverySearch;
-      stationary_recovery_.Begin(now_sec);
+      BeginTurnOrStationaryRecovery(GoalMode::kApproach, now_sec);
       state_enter_sec_ = now_sec;
       recovery_visible_count_ = 0;
       settle_until_sec_ = now_sec;
