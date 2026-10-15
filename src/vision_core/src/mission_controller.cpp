@@ -1062,7 +1062,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
             line_state_ == LineState::kNormal &&
             (post_pickup_five_step_completed_ ||
              post_pickup_line_actions_completed_ >=
-                 config_.goal.post_pickup_walk_fallback_actions));
+                 config_.goal.post_pickup_walk_fallback_actions),
+            foot_pose_ == FootPose::kWalk);
         if (goal_result_.mode != GoalMode::kLineFollow)
           EnterMission(MissionType::kGoal);
       }
@@ -1142,7 +1143,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         input.goal_target, input.backboard_target, input.goal_pose,
         input.image_width, input.image_height, input.now_sec,
         line_reference_valid, input.camera_feedback, action_feedback,
-            controller_allow, input.backboard_center_depth_m);
+            controller_allow, input.backboard_center_depth_m, false,
+            foot_pose_ == FootPose::kWalk);
     if (goal_result_.mode==GoalMode::kHeadingRecovery) goal_result_.action=line_action;
     has_ball_ = goal_controller_.HasBall();
     ball_controller_.SetHasBall(has_ball_);
