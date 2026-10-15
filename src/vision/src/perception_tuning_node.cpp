@@ -1,3 +1,5 @@
+#include "vision/debug_guides.hpp"
+#include "vision/mission_parameters.hpp"
 #include "vision/backboard_depth.hpp"
 // vision/src/perception_tuning_node.cpp
 //
@@ -142,6 +144,7 @@ public:
   ) {
     const vision_core::MissionControllerConfig algorithm_defaults =
         LoadSharedAlgorithmDefaults();
+    vision::DeclareMissionParameters(*this,algorithm_defaults);
     declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw"); // 입력 이미지 토픽
     declare_parameter<std::string>("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw");
     declare_parameter<std::string>("camera_info_topic", "/camera/camera/color/camera_info");
@@ -357,6 +360,7 @@ public:
     hurdle_cmd_cfg.upper_acquire_v_px = get_parameter("hurdle_upper_acquire_v_px").as_double();
     hurdle_cmd_cfg.approach_two_step_v_px = get_parameter("hurdle_approach_two_step_v_px").as_double();
     vision_core::MissionControllerConfig mission_config = algorithm_defaults;
+    vision::ReadMissionParameters(*this,mission_config);
     mission_config.line_p2p.offset_gain = get_parameter("line_p2p_offset_gain").as_double();
     mission_config.line_p2p.heading_gain = get_parameter("line_p2p_heading_gain").as_double();
     mission_config.line_p2p.steering_deadband =
@@ -839,6 +843,14 @@ private:
     for (const auto &parameter : parameters) {
       double *target = nullptr;
       const std::string &name = parameter.get_name();
+      if (name=="ball_recovery_walk_turn_max" || name=="goal_recovery_turn_max") {
+        if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || parameter.as_int()<0 || parameter.as_int()>1000000) {
+          response.successful=false; response.reason="recovery turn maximum must be a nonnegative integer"; return response;
+        }
+        if (name=="ball_recovery_walk_turn_max") candidate.ball.recovery_walk_turn_max=parameter.as_int();
+        else candidate.goal.recovery_turn_max=parameter.as_int();
+        touched=true; continue;
+      }
       if (name=="backboard_depth_strip_width_px") {
         if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || parameter.as_int()<1 || parameter.as_int()>640) {
           response.successful=false; response.reason="depth strip width must be an integer in [1,640]"; return response;
@@ -857,7 +869,9 @@ private:
         }
         candidate.hurdle.contact_steps=static_cast<int>(parameter.as_int()); touched=true; continue;
       }
-      if (name == "goal_fine_one_step_range_error_m") target=&candidate.goal.fine_one_step_range_error_m;
+      if (name == "transition_settle_sec") target=&candidate.transition_settle_sec;
+      else if (name == "fine_motion_settle_sec") target=&candidate.fine_motion_settle_sec;
+      else if (name == "goal_fine_one_step_range_error_m") target=&candidate.goal.fine_one_step_range_error_m;
       else if (name == "goal_fine_two_step_range_error_m") target=&candidate.goal.fine_two_step_range_error_m;
       else if (name == "ball_down_one_step_v_px") target=&candidate.ball.down_one_step_v_px;
       else if (name == "ball_fine_mode_v_px") target=&candidate.ball.fine_mode_v_px;
@@ -1099,6 +1113,18 @@ private:
     for (std::size_t j = window.size() - 10; j < window.size(); ++j)
       if (target_of(*window[j])) ++last_ten_hits;
     if (last_ten_hits < 7) return std::nullopt;
+    result.manual_object_hits.clear();
+    result.manual_pose_hits.clear();
+    result.manual_near_hits.clear();
+    for (std::size_t j = window.size()-10; j < window.size(); ++j) {
+      result.manual_object_hits.push_back(target_of(*window[j]).has_value());
+      const auto& pose=window[j]->prepared.goal_pose;
+      result.manual_pose_hits.push_back(target_of(*window[j]) && pose.valid &&
+          std::isfinite(pose.x_m) && std::isfinite(pose.z_m) && pose.z_m>0 &&
+          std::isfinite(pose.yaw_rad));
+      result.manual_near_hits.push_back(result.manual_pose_hits.back() && pose.z_m<=tuning_config_.goal.fine_adjust_start_z_m);
+    }
+
     double sx=0, sy=0, sw=0, sh=0, confidence=0;
     double center_depth=0, left_depth=0, right_depth=0, left_u=0, right_u=0;
     int hits=0, center_hits=0, left_hits=0, right_hits=0;
@@ -2026,7 +2052,7 @@ private:
     const bool finishing_observation =
         run_state_ == RunState::kObserving &&
         frame_now_sec - observation_start_sec_ >= observation_required_sec_ &&
-        (!manual_observation_session_ || mission_controller_->ManualObservationHasEnoughFrames());
+        (!manual_observation_session_ || mission_controller_->ManualObservationCanFinish(perception_input.now_sec));
     perception_input.allow_new_commands =
         run_state_ == RunState::kRunning || finishing_observation;
     const bool continuing_repeat=authorized_repeat_scope_!=0 &&
@@ -2524,8 +2550,8 @@ private:
               draw_v_line(c.approach_short_v_px,cv::Scalar(255,120,255));
               draw_v_line(c.approach_two_step_v_px,cv::Scalar(200,0,200));
             } else if (camera_feedback_.actual_mode==vision_core::CameraMode::kDown) {
-              draw_v_line(c.down_one_step_v_px,cv::Scalar(255,120,255));
-              draw_v_line(c.fine_mode_v_px,cv::Scalar(200,0,200));
+              vision::DrawHurdleDownGuides(vis,c,
+                  mission_result.foot_pose==vision_core::FootPose::kFine);
             }
           }
 

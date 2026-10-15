@@ -29,8 +29,80 @@ static ObjectTarget Ball(double u_norm, double v_norm) {
   target.confidence = 1.0;
   return target;
 }
+static void TestNearBallTurnThenDown() {
+  auto config=LoadDefaultAlgorithmConfig(); config.transition_settle_sec=0;
+  config.enable_ball=true;
+  config.enable_goal=config.enable_hurdle=false;
+  config.post_motion_observation_sec=1.0;
+  config.ball.stable_window=config.ball.stable_min_hits=1;
+  config.ball.upper_acquire_v_px=480;
+  config.ball.far_u_des_px=320;
+  config.ball.approach_u_deadband_px=32;
+  config.ball.approach_short_v_px=300;
+  config.ball.approach_two_step_v_px=336;
+  for (double u : {.3,.7}) for (bool found : {false,true}) {
+    MissionController controller(config);
+    auto input=Frame(0);
+    input.ball_target=Ball(u,.8);
+    auto result=controller.Step(input);
+    const auto turn=u < .5 ? MissionAction::kTurnLeftInPlace
+                           : MissionAction::kStepForwardRightOneHurdle;
+    assert(result.command.action==turn);
+    const auto first_id=result.command.action_id;
+    assert(first_id!=0);
+    input=Frame(.1);input.delivery_feedback={first_id,true,false,false};
+    result=controller.Step(input);
+    assert(result.command.camera_request==CameraRequest::kNone);
+    input=Frame(.2);input.delivery_feedback={first_id,true,true,false};
+    result=controller.Step(input);
+    assert(result.post_motion_observing);
+    for (int i=1;i<=9;++i) {
+      input=Frame(.2+.1*i);
+      result=controller.Step(input);
+      assert(result.post_motion_observing);
+      assert(result.command.camera_request==CameraRequest::kNone);
+    }
+    input=Frame(1.21);
+    result=controller.Step(input);
+    assert(!result.post_motion_observing);
+    assert(result.ball.mode==BallMode::kNearTurnBeforeDown);
+    assert(result.command.action==turn);
+    const auto retry_id=result.command.action_id;
+    assert(retry_id!=0 && retry_id!=first_id);
+    assert(result.command.camera_request==CameraRequest::kNone);
+    input=Frame(1.3);input.delivery_feedback={retry_id,true,false,false};
+    result=controller.Step(input);
+    assert(result.command.camera_request==CameraRequest::kNone);
+    input=Frame(1.4);input.delivery_feedback={retry_id,true,true,false};
+    result=controller.Step(input);
+    // Retry DONE also starts the existing stationary observation window.
+    assert(result.post_motion_observing);
+    assert(result.command.camera_request==CameraRequest::kNone);
+    for (int i=1;i<=9;++i) {
+      input=Frame(1.4+.1*i);
+      if (found) input.ball_target=Ball(.5,.8);
+      result=controller.Step(input);
+      assert(result.post_motion_observing);
+      assert(result.command.camera_request==CameraRequest::kNone);
+    }
+    input=Frame(2.41);
+    if (found) input.ball_target=Ball(.5,.8);
+    result=controller.Step(input);
+    assert(!result.post_motion_observing);
+    assert(result.ball.mode==(found ? BallMode::kApproachBall : BallMode::kWaitCameraDown));
+    assert(result.command.camera_request==(found ? CameraRequest::kNone : CameraRequest::kDown));
+    assert(result.command.action==MissionAction::kNone);
+    input=Frame(2.5);
+    if (found) input.ball_target=Ball(.5,.8);
+    else input.camera_feedback={CameraMode::kDown,true};
+    result=controller.Step(input);
+    assert(result.ball.mode==(found ? BallMode::kApproachTwoBeforeDown : BallMode::kDownSearch));
+    if (found) assert(result.command.action==MissionAction::kStepForwardTwo);
+  }
+}
 int main() {
-  auto c=LoadDefaultAlgorithmConfig();
+  TestNearBallTurnThenDown();
+  auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;
   c.line_features.image_center_u=320;
   c.line_p2p.offset_gain=c.line_p2p.heading_gain=1.0;
   c.enable_ball=c.enable_hurdle=c.enable_goal=false;
@@ -545,7 +617,7 @@ int main() {
   manual_config.enable_ball=true;
   manual_config.ball.stable_window=manual_config.ball.stable_min_hits=1;
 
-  manual_config.ball.fine_settle_duration_sec=0;
+
   manual_config.ball.upper_acquire_v_px=480.0;
   manual_config.ball.pickup_u1_px=281.6; manual_config.ball.pickup_u2_px=358.4;
   manual_config.ball.pickup_v1_px=307.2; manual_config.ball.pickup_v2_px=364.8;
@@ -735,9 +807,9 @@ int main() {
   paused_result=pausable.Step(paused_frame);
   assert(paused_result.command.action_id==1);
 
-  // BALL: 4-step 40%-READY mean should select 2-step at DONE even if
-  // the raw DONE frame would incorrectly select four-step.
-  auto ready_cfg=LoadDefaultAlgorithmConfig();
+  // BALL: 3-step 40%-READY mean should select 2-step at DONE even if
+  // the raw DONE frame would incorrectly select three-step.
+  auto ready_cfg=LoadDefaultAlgorithmConfig(); ready_cfg.transition_settle_sec=0;
   ready_cfg.enable_ball=true;
   ready_cfg.enable_goal=ready_cfg.enable_hurdle=false;
   ready_cfg.ball.stable_window=ready_cfg.ball.stable_min_hits=1;
@@ -746,7 +818,7 @@ int main() {
   auto ready_frame=Frame(0.0);
   ready_frame.ball_target=Ball(.5,.2);
   auto ready_result=ball_ready.Step(ready_frame);
-  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
   const auto ball_ready_id=ready_result.command.action_id;
   for (int i=1;i<=27;++i) {
     ready_frame=Frame(i*.1);
@@ -755,7 +827,7 @@ int main() {
     ready_result=ball_ready.Step(ready_frame);
     if (i<27) assert(ready_result.command.action_id==ball_ready_id);
   }
-  // A=23, B=21: READY must reserve B, not wait for A's DONE.
+  // A=22, B=21: READY must reserve B, not wait for A's DONE.
   const auto ball_queued_id=ready_result.command.action_id;
   assert(ball_queued_id!=0 && ball_queued_id!=ball_ready_id);
   assert(ready_result.command.action==MissionAction::kStepForwardTwo);
@@ -808,11 +880,11 @@ int main() {
   assert(ready_result.command.action_id==0);
   assert(ready_result.command.camera_request==CameraRequest::kDown);
 
-  // A=23 can reserve B=25. B's number never restricts READY queue admission.
+  // A=22 can reserve B=25. B's number never restricts READY queue admission.
   MissionController turn_successor(ready_cfg);
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
   ready_result=turn_successor.Step(ready_frame);
-  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
   const auto turn_source_id=ready_result.command.action_id;
   for (int i=1;i<=27;++i) {
     ready_frame=Frame(i*.1);
@@ -919,7 +991,7 @@ int main() {
   MissionController disabled_ready(disabled_ready_cfg);
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
   ready_result=disabled_ready.Step(ready_frame);
-  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
   const auto disabled_id=ready_result.command.action_id;
   for (int i=1;i<=27;++i) {
     ready_frame=Frame(i*.1); ready_frame.ball_target=Ball(.5,.8);
@@ -999,7 +1071,7 @@ int main() {
   const auto hurdle_ready_id=ready_result.command.action_id;
   for (int i=1;i<=27;++i) {
     ready_frame=Frame(i*.1);
-    ready_frame.hurdle_target=Ball(.5,i>=12 ? .7 : .3);
+    ready_frame.hurdle_target=Ball(.5,i>=12 ? .6 : .3);
     ready_frame.delivery_feedback={hurdle_ready_id,true,false,i==27};
     ready_result=hurdle_ready.Step(ready_frame);
   }
@@ -1097,7 +1169,7 @@ int main() {
 
   // GOAL camera after pickup: wall time and READY alone cannot trigger it.
   // A completed five-step LINE cruise (13) triggers GOAL, without queuing B.
-  auto post_pickup_cfg = LoadDefaultAlgorithmConfig();
+  auto post_pickup_cfg = LoadDefaultAlgorithmConfig(); post_pickup_cfg.transition_settle_sec=0;
   post_pickup_cfg.enable_ball=post_pickup_cfg.enable_hurdle=false;
   post_pickup_cfg.enable_goal=true;
   post_pickup_cfg.initial_has_ball=true; // stands in for confirmed BALL recovery
@@ -1214,7 +1286,7 @@ int main() {
 
   // Switching GOAL trial start mode only changes the next explicit Reset.
   {
-    auto trial_cfg=LoadDefaultAlgorithmConfig();
+    auto trial_cfg=LoadDefaultAlgorithmConfig(); trial_cfg.transition_settle_sec=0;
     trial_cfg.enable_ball=false;
     trial_cfg.enable_hurdle=false;
     trial_cfg.enable_goal=true;

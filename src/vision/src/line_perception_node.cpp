@@ -1,3 +1,5 @@
+#include "vision/debug_guides.hpp"
+#include "vision/mission_parameters.hpp"
 #include "vision/backboard_depth.hpp"
 // vision/src/line_perception_node.cpp
 //
@@ -131,6 +133,7 @@ public:
   LinePerceptionNode() : rclcpp::Node("line_perception_node") {
     const vision_core::MissionControllerConfig algorithm_defaults =
         LoadSharedAlgorithmDefaults();
+    vision::DeclareMissionParameters(*this,algorithm_defaults);
     declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw"); // 입력 이미지 토픽
     declare_parameter<std::string>("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw");
     declare_parameter<std::string>("camera_info_topic", "/camera/camera/color/camera_info");
@@ -279,6 +282,7 @@ public:
     goal_cmd_cfg.position_tolerance_m =
         get_parameter("goal_position_tolerance_m").as_double();
     vision_core::MissionControllerConfig mission_config = algorithm_defaults;
+    vision::ReadMissionParameters(*this,mission_config);
     mission_config.backboard_depth_strip_width_px=backboard_depth_strip_width_px_;
     mission_config.camera_motion_timeout_sec =
         get_parameter("camera_motion_timeout_sec").as_double();
@@ -287,6 +291,9 @@ public:
     mission_config.ball = ball_cmd_cfg;
     mission_config.hurdle = hurdle_cmd_cfg;
     mission_config.goal = goal_cmd_cfg;
+    line_debug_cfg_ = line_feature_cfg;
+    ball_debug_cfg_ = ball_cmd_cfg;
+    hurdle_debug_cfg_ = hurdle_cmd_cfg;
     goal_debug_cfg_ = goal_cmd_cfg;
     mission_config.line_detection.class_id = line_class_id_;
     mission_config.line_detection.confidence = conf_thres_;
@@ -337,6 +344,12 @@ public:
           response.successful=true;
           std::optional<bool> proposed;
           for (const auto &parameter : parameters) {
+            if (parameter.get_name()=="transition_settle_sec" || parameter.get_name()=="fine_motion_settle_sec" ||
+                parameter.get_name()=="ball_recovery_walk_turn_max" || parameter.get_name()=="goal_recovery_turn_max") {
+              response.successful=false;
+              response.reason="Mission settings are applied at node startup; restart with the new value";
+              return response;
+            }
             if (parameter.get_name() != "goal_trial_start_forward") continue;
             if (parameter.get_type() != rclcpp::ParameterType::PARAMETER_BOOL) {
               response.successful=false;
@@ -1174,13 +1187,8 @@ private:
       const cv::Rect clipped = raw_box & cv::Rect(0, 0, vis.cols, vis.rows);
       if (clipped.width <= 0 || clipped.height <= 0) return;
       cv::rectangle(vis, clipped, color, 2);
-      const auto center = target->center_rectified
-                              ? target->rectified_center_px
-                              : target->center_px;
-      cv::circle(vis,
-                 cv::Point(static_cast<int>(std::round(center.u)),
-                           static_cast<int>(std::round(center.v))),
-                 4, color, cv::FILLED);
+      // Boxes show recognition evidence; the controller's decision center is
+      // drawn separately, matching the tuning node.
       const int text_y = clipped.y >= 14 ? clipped.y - 4 : clipped.y + 14;
       cv::putText(vis, label, cv::Point(clipped.x, text_y),
                   cv::FONT_HERSHEY_SIMPLEX, 0.60, color, 2);
@@ -1587,25 +1595,145 @@ private:
           cv::Mat vis = bgr.clone();
           for (const auto& detection:dets) if (detection.class_id==backboard_class_id_)
             vision::DrawDepthRegions(vis,detection.box,backboard_depth_strip_width_px_,aligned_depth);
+          const int ref_u = static_cast<int>(std::lround(
+              line_debug_cfg_.image_center_u));
+          const bool line_view=mission_result.active_mission==vision_core::MissionType::kLine ||
+              ball_cmd.mode==vision_core::BallMode::kPostPickupLineRecovery ||
+              goal_cmd.mode==vision_core::GoalMode::kHeadingRecovery;
+          if (line_view && ref_u >= 0 && ref_u < vis.cols) {
+            cv::line(vis, cv::Point(ref_u, 0), cv::Point(ref_u, vis.rows - 1),
+                     cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
+          }
           DrawConfirmedDetections(
               vis, prepared.line_centers, line_confirmed, ball_target,
               ball_confirmed, backboard_target, backboard_confirmed,
               hurdle_target, hurdle_confirmed);
 
-          if (pose_confirmed) {
-            const auto &box = backboard_target->box_px;
-            const int left_x = static_cast<int>(std::round(box.x));
-            const int right_x =
-                static_cast<int>(std::round(box.x + box.width - 1.0));
-            const int y =
-                static_cast<int>(std::round(box.y + 0.5 * box.height));
-            const cv::Rect image_rect(0, 0, vis.cols, vis.rows);
-            cv::rectangle(vis, cv::Rect(left_x - 1, y - 1, 3, 3) & image_rect,
-                          cv::Scalar(0, 0, 255), cv::FILLED);
-            cv::rectangle(vis,
-                          cv::Rect(right_x - 1, y - 1, 3, 3) & image_rect,
-                          cv::Scalar(0, 0, 255), cv::FILLED);
+          const auto draw_decision_center = [&vis](
+              const vision_core::Point2 &point, const cv::Scalar &color) {
+            if (!std::isfinite(point.u) || !std::isfinite(point.v) ||
+                point.u < 0.0 || point.u >= vis.cols ||
+                point.v < 0.0 || point.v >= vis.rows) return;
+            const cv::Point center(
+                std::clamp(static_cast<int>(std::lround(point.u)),0,vis.cols-1),
+                std::clamp(static_cast<int>(std::lround(point.v)),0,vis.rows-1));
+            cv::circle(vis, center, 7, color, 2, cv::LINE_AA);
+            cv::drawMarker(vis, center, color, cv::MARKER_CROSS, 14, 2, cv::LINE_AA);
+          };
+
+          // LINE uses an O/H guide: it has a horizontal decision reference,
+          // but no unique 2D object center. Do not invent a vertical point.
+          if (mission_result.active_mission ==
+                  vision_core::MissionType::kLine &&
+              !mission_result.line_in_recovery) {
+            const auto &guide = mission_result.line_decision_guide
+                ? *mission_result.line_decision_guide : feats.guide;
+            if (guide.valid && std::isfinite(guide.offset) && vis.cols > 1) {
+              const double u = line_debug_cfg_.image_center_u +
+                  0.5 * static_cast<double>(vis.cols) * guide.offset;
+              if (std::isfinite(u) && u >= 0.0 && u < vis.cols) {
+                const int x = static_cast<int>(std::lround(u));
+                cv::line(vis, cv::Point(x, 0), cv::Point(x, vis.rows - 1),
+                         cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+              }
+            }
           }
+
+          if (selected_ball && ball_cmd.tracked.visible)
+            draw_decision_center(ball_cmd.tracked.center_px,
+                                 cv::Scalar(0, 0, 255));
+
+          if (selected_goal) {
+            const auto &fine = goal_cmd.fine_decision_pose;
+            if (goal_cmd.fine_decision_pose_used && fine.valid &&
+                std::isfinite(fine.x_m) && std::isfinite(fine.z_m) &&
+                fine.z_m > 0.0 && std::isfinite(camera_intrinsics_.fx) &&
+                std::isfinite(camera_intrinsics_.cx) && vis.cols > 1) {
+              // FineAction consumes (x,z,yaw) in 3D, not normalized (u,v).
+              // Projection gives the exact horizontal bearing of that
+              // decision; the unused vertical coordinate is not fabricated.
+              const double u = camera_intrinsics_.fx *
+                  fine.x_m / fine.z_m + camera_intrinsics_.cx;
+              if (std::isfinite(u) && u >= 0.0 && u < vis.cols) {
+                const int x = static_cast<int>(std::lround(u));
+                cv::line(vis, cv::Point(x, 0), cv::Point(x, vis.rows - 1),
+                         cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+              }
+            } else if (goal_cmd.tracked.visible &&
+                       !goal_cmd.fine_decision_pose_used) {
+              draw_decision_center(goal_cmd.tracked.center_px,
+                                   cv::Scalar(0, 255, 255));
+            }
+          }
+
+          // The marker is the recent weighted coordinate used for step size
+          // and fine distance. Raw DOWN trigger values are shown in the panel.
+          if (selected_hurdle && hurdle_cmd.tracked.visible)
+            draw_decision_center(hurdle_cmd.tracked.center_px, cv::Scalar(255, 0, 255));
+
+
+          const auto draw_v_line=[&](double v,const cv::Scalar& color) {
+            if (!std::isfinite(v) || v < 0 || v >= vis.rows) return;
+            const int y=std::clamp(static_cast<int>(std::lround(v)),0,vis.rows-1);
+            cv::line(vis,{0,y},{vis.cols-1,y},color,1,cv::LINE_AA);
+          };
+          const auto draw_u_line=[&](double u,const cv::Scalar& color) {
+            if (!std::isfinite(u) || u < 0 || u >= vis.cols) return;
+            const int x=std::clamp(static_cast<int>(std::lround(u)),0,vis.cols-1);
+            cv::line(vis,{x,0},{x,vis.rows-1},color,1,cv::LINE_AA);
+          };
+          if (selected_ball) {
+            const auto& c=ball_debug_cfg_;
+            if (camera_feedback_.actual_mode==vision_core::CameraMode::kForward &&
+                (ball_cmd.mode==vision_core::BallMode::kApproachBall ||
+                 ball_cmd.mode==vision_core::BallMode::kApproachTwoBeforeDown ||
+                 ball_cmd.mode==vision_core::BallMode::kBallRecoveryForward)) {
+              draw_u_line(c.far_u_des_px-c.approach_u_deadband_px,cv::Scalar(0,100,255));
+              draw_u_line(c.far_u_des_px+c.approach_u_deadband_px,cv::Scalar(0,100,255));
+              draw_v_line(c.approach_short_v_px,cv::Scalar(0,200,255));
+              draw_v_line(c.approach_two_step_v_px,cv::Scalar(0,100,255));
+            } else if (camera_feedback_.actual_mode==vision_core::CameraMode::kDown) {
+              draw_v_line(c.down_one_step_v_px,cv::Scalar(0,200,255));
+              draw_v_line(std::min(c.fine_mode_v_px,c.pickup_v1_px),cv::Scalar(0,100,255));
+            }
+          }
+          if (selected_goal && (goal_cmd.mode == vision_core::GoalMode::kForwardApproach ||
+              goal_cmd.mode == vision_core::GoalMode::kApproach ||
+              goal_cmd.mode == vision_core::GoalMode::kSearch)) {
+            const auto& c=goal_debug_cfg_;
+            draw_u_line(c.target_u_px,cv::Scalar(0,255,255));
+            draw_u_line(c.target_u_px-c.approach_u_deadband_px,cv::Scalar(0,160,160));
+            draw_u_line(c.target_u_px+c.approach_u_deadband_px,cv::Scalar(0,160,160));
+          }
+          if (selected_hurdle) {
+            const auto& c=hurdle_debug_cfg_;
+            if (camera_feedback_.actual_mode==vision_core::CameraMode::kForward &&
+                (hurdle_cmd.mode==vision_core::HurdleMode::kApproach ||
+                 hurdle_cmd.mode==vision_core::HurdleMode::kApproachTwoBeforeDown ||
+                 hurdle_cmd.mode==vision_core::HurdleMode::kRecoveryForward)) {
+              draw_v_line(c.approach_short_v_px,cv::Scalar(255,120,255));
+              draw_v_line(c.approach_two_step_v_px,cv::Scalar(200,0,200));
+            } else if (camera_feedback_.actual_mode==vision_core::CameraMode::kDown) {
+              vision::DrawHurdleDownGuides(vis,c,
+                  mission_result.foot_pose==vision_core::FootPose::kFine);
+            }
+          }
+
+          // The pickup region uses the same four pixel edges as FineAction.
+          // Its single decision-center marker is above.
+          if (selected_ball && camera_feedback_.actual_mode==vision_core::CameraMode::kDown) {
+            const auto &c = ball_debug_cfg_;
+            const cv::Rect image_bounds(0, 0, vis.cols, vis.rows);
+            const int left = static_cast<int>(std::lround(c.pickup_u1_px));
+            const int top = static_cast<int>(std::lround(c.pickup_v1_px));
+            const int right = static_cast<int>(std::lround(c.pickup_u2_px));
+            const int bottom = static_cast<int>(std::lround(c.pickup_v2_px));
+            const cv::Rect box = cv::Rect(left, top,
+                std::max(1, right - left + 1), std::max(1, bottom - top + 1)) & image_bounds;
+            if (!box.empty())
+              cv::rectangle(vis, box, cv::Scalar(0,255,255), 2);
+          }
+          // Depth input regions are already shown by DrawDepthRegions above.
 
           cv::putText(vis, perf_text_, cv::Point(10, 24),
                       cv::FONT_HERSHEY_SIMPLEX, 0.70,
@@ -1868,6 +1996,9 @@ private:
   std::unique_ptr<YoloTrtEngine> yolo_;
   std::unique_ptr<vision_core::MissionController> mission_controller_;
   vision_core::Intrinsics camera_intrinsics_{};
+  vision_core::FeatureConfig line_debug_cfg_{};
+  vision_core::BallConfig ball_debug_cfg_{};
+  vision_core::HurdleConfig hurdle_debug_cfg_{};
   vision_core::GoalConfig goal_debug_cfg_{};
 
   // IMU 최신 상태(latest)

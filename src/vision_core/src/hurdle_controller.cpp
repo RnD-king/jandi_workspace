@@ -102,9 +102,11 @@ HurdleResult HurdleController::Compute(
   if (mode_ == HurdleMode::kLineFollow && now_sec < ignore_until_sec_)
     return {};
   // No tracking/near-evidence from the moving camera view.
-  if (mode_ == HurdleMode::kFineAdjust && feedback.action_done)
+  const bool verified = verified_observation_pending_;
+  verified_observation_pending_ = false;
+  if (!verified && mode_ == HurdleMode::kFineAdjust && feedback.action_done)
     ClearTracking();
-  if (mode_ != HurdleMode::kWaitCameraDown &&
+  if (!verified && mode_ != HurdleMode::kWaitCameraDown &&
       mode_ != HurdleMode::kReturnCameraToLine &&
       !(mode_ == HurdleMode::kFineAdjust &&
         (feedback.action_active || feedback.action_done)))
@@ -236,7 +238,7 @@ HurdleResult HurdleController::Compute(
     // A target found after the final step remains eligible for COARSE.
     if (down_search_found_) {
       mode_=HurdleMode::kCoarseAdjust; ClearTracking();
-      settle_until_sec_=now_sec+config_.recovery_settle_duration_sec;
+
       result.mode=mode_; result.action={}; return result;
     }
     if (down_search_steps_completed_ >= config_.down_search_max_steps) {
@@ -252,8 +254,7 @@ HurdleResult HurdleController::Compute(
   }
   case HurdleMode::kCoarseAdjust:
     if (feedback.action_active && !feedback.action_done) return result;
-    if (feedback.action_done) { settle_until_sec_=now_sec+config_.recovery_settle_duration_sec; return result; }
-    if (now_sec < settle_until_sec_) return result;
+    if (feedback.action_done && !verified) return result;
     if (!tracked_.visible) {
       if (lost_count_>=config_.lost_frames) {
         mode_=HurdleMode::kRecoveryDown; ClearTracking(); stationary_recovery_.Begin(now_sec); result.mode=mode_;
@@ -269,13 +270,12 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kWaitFinePose:
     if (feedback.action_done) {
       fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; ClearTracking();
-      settle_until_sec_=now_sec+config_.recovery_settle_duration_sec;
+
       result.mode=mode_; result.tracked={}; return result;
     }
     result.action=Locomotion(MissionAction::kDefaultPoseMode); return result;
   case HurdleMode::kFineAdjust: {
     if (feedback.action_active && !feedback.action_done) return result;
-    if (now_sec < settle_until_sec_) return result;
     if (!tracked_.visible) {
       if (lost_count_>=config_.lost_frames) {
         mode_=HurdleMode::kRecoveryDown;
@@ -326,7 +326,7 @@ HurdleResult HurdleController::Compute(
         config_.recovery_observation_sec,config_.recovery_max_observations);
     if (status==StationaryObjectRecovery::Result::kFound) {
       mode_=HurdleMode::kApproach;
-      settle_until_sec_=now_sec+config_.recovery_settle_duration_sec;
+
     } else if (status==StationaryObjectRecovery::Result::kFailed) mode_=HurdleMode::kFailed;
     else if (status==StationaryObjectRecovery::Result::kRetry) ClearTracking();
     result.mode=mode_; result.tracked=tracked_; return result;
@@ -340,7 +340,6 @@ HurdleResult HurdleController::Compute(
         config_.recovery_observation_sec, config_.recovery_max_observations);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = fine_pose_entered_ ? HurdleMode::kFineAdjust : HurdleMode::kCoarseAdjust;
-      settle_until_sec_ = now_sec + config_.recovery_settle_duration_sec;
     } else if (status == StationaryObjectRecovery::Result::kFailed) mode_ = HurdleMode::kFailed;
     else if (status == StationaryObjectRecovery::Result::kRetry) ClearTracking();
     result.mode = mode_; result.tracked = tracked_; return result;
@@ -356,11 +355,27 @@ void HurdleController::ObserveOnly(const std::optional<ObjectTarget> &target,
     UpdateTracker(target, width, height);
 }
 
+void HurdleController::UseVerifiedObservation(
+    const std::optional<ObjectTarget>& mean, const std::deque<bool>& hits,
+    int width, int height) {
+  ClearTracking();
+  UpdateTracker(mean, width, height);
+  hit_history_ = hits;
+  while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window))
+    hit_history_.pop_front();
+  tracked_.stable = hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+      std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits;
+  lost_count_ = static_cast<int>(std::distance(hit_history_.rbegin(),
+      std::find(hit_history_.rbegin(),hit_history_.rend(),true)));
+  verified_observation_pending_ = true;
+}
+
 void HurdleController::ClearObservationHistory() {
   ClearTracking();
 }
 
 void HurdleController::ClearTracking() {
+  verified_observation_pending_ = false;
   observation_window_.Clear();
   hit_history_.clear();
   acquire_history_.clear();
@@ -380,7 +395,6 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   ClearTracking();
   last_seen_u_px_ = config_.target_u_px;
   state_enter_sec_ = 0.0;
-  settle_until_sec_ = 0.0;
   test_camera_pending_=false; fine_pose_entered_=false; approach_two_issued_=false;
   last_approach_steps_=0; awaiting_approach_observation_=false;
   last_approach_pending_=false;

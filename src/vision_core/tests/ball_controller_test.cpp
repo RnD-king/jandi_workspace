@@ -46,7 +46,7 @@ static BallResult EnterPickupVerification(BallController &controller,
   return result;
 }
 int main() {
-  BallConfig c=LoadDefaultAlgorithmConfig().ball; c.fine_settle_duration_sec=0; c.recovery_settle_duration_sec=0; c.stable_window = c.stable_min_hits = 1;
+  BallConfig c=LoadDefaultAlgorithmConfig().ball;   c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2; c.smooth_alpha = 1.0; c.far_u_des_px = 320.0;
   c.approach_u_deadband_px = 32.0; c.upper_acquire_v_px = 480.0;
   c.approach_short_v_px = 300.0;
@@ -58,7 +58,7 @@ int main() {
   c.recovery_center_tolerance_px = 32.0;
   // Ball approach grid: NORMAL LINE cruise actions 11/12/13 are forbidden.
   for (const auto& scenario : std::vector<std::pair<ObjectTarget,MissionAction>>{
-      {Ball(.5,.3),MissionAction::kStepForwardFour},    // zone 2
+      {Ball(.5,.3),MissionAction::kStepForwardThree},    // zone 2
       {Ball(.5,.65),MissionAction::kStepForwardThree},  // zone 5
       {Ball(.5,.8),MissionAction::kStepForwardTwo},     // zone 8
       {Ball(.3,.8),MissionAction::kTurnLeftInPlace}, // zone 7
@@ -75,10 +75,89 @@ int main() {
     const auto v=grid.Compute(scenario.first,640,480,0,{}, {});
     assert(v.action.action==scenario.second);
     assert(v.action.category==ActionCategory::kLocomotion);
-    if (scenario.second==MissionAction::kStepForwardLeftOne ||
-        scenario.second==MissionAction::kTurnLeftInPlace ||
-        scenario.second==MissionAction::kStepForwardRightOneHurdle)
-      assert(v.camera_request==CameraRequest::kNone);
+    assert(v.camera_request==CameraRequest::kNone);
+    // Only near-center goes straight to DOWN; a side turn first needs a
+    // completed stationary observation before considering its extra turn.
+    ActionExecutionFeedback finished;
+    finished.action_done=true;
+    const auto after=grid.Compute(scenario.first,640,480,.1,{},finished);
+    assert(after.camera_request==(scenario.second==MissionAction::kStepForwardTwo
+        ? CameraRequest::kDown : CameraRequest::kNone));
+  }
+  // Zones 7/9: one failed post-DONE observation permits exactly one extra
+  // same-direction turn, then reobserve before deciding on DOWN. Cover PREVIEW
+  // arriving after DONE, and the body-action admission gate used by COMMIT.
+  for (double u : {.3, .7}) for (bool found : {false,true}) {
+    const auto turn = u < .5 ? MissionAction::kTurnLeftInPlace
+                             : MissionAction::kStepForwardRightOneHurdle;
+    BallController near(c,3.0);
+    auto n = near.Compute(Ball(u,.8),640,480,0,{},{});
+    assert(n.action.action==turn && n.camera_request==CameraRequest::kNone);
+    ActionExecutionFeedback moving;
+    moving.action_active=true;
+    n=near.Compute({},640,480,.1,{},moving);
+    assert(n.action.action==MissionAction::kNone && n.camera_request==CameraRequest::kNone);
+    near.ClearObservationHistory();
+    ActionExecutionFeedback finished;
+    finished.action_done=true;
+    n=near.Compute({},640,480,.2,{},finished);
+    assert(n.mode==BallMode::kApproachBall && n.action.action==MissionAction::kNone);
+    n=near.Compute({},640,480,.3,{},{});
+    assert(n.mode==BallMode::kApproachBall && n.camera_request==CameraRequest::kNone);
+    ActionExecutionFeedback observed;
+    observed.observation_complete=true;
+    n=near.Compute({},640,480,1.2,{},observed,false);
+    assert(n.mode==BallMode::kNearTurnBeforeDown && n.action.action==turn);
+    assert(n.camera_request==CameraRequest::kNone);
+    n=near.Compute({},640,480,1.3,{},finished,false);
+    assert(n.action.action==turn && n.camera_request==CameraRequest::kNone);
+    n=near.Compute({},640,480,1.4,{},{});
+    assert(n.action.action==turn && n.camera_request==CameraRequest::kNone);
+    n=near.Compute({},640,480,1.5,{},moving);
+    assert(n.action.action==MissionAction::kNone && n.camera_request==CameraRequest::kNone);
+    n=near.Compute({},640,480,1.6,{},{});
+    assert(n.action.action==MissionAction::kNone && n.camera_request==CameraRequest::kNone);
+    // DONE alone cannot lower the camera; even a detection on that edge
+    // must wait for the fresh stationary observation.
+    n=near.Compute(Ball(.5,.8),640,480,1.7,{},finished);
+    assert(n.mode==BallMode::kNearTurnBeforeDown && n.camera_request==CameraRequest::kNone);
+    assert(n.action.action==MissionAction::kNone);
+    near.ClearObservationHistory();
+    n=near.Compute({},640,480,1.8,{},{});
+    assert(n.mode==BallMode::kNearTurnBeforeDown && n.camera_request==CameraRequest::kNone);
+    assert(n.action.action==MissionAction::kNone);
+    std::optional<ObjectTarget> reappeared;
+    if (found) reappeared=Ball(.5,.8);
+    n=near.Compute(reappeared,640,480,2.7,{},observed);
+    assert(n.mode==(found ? BallMode::kApproachBall : BallMode::kWaitCameraDown));
+    assert(n.camera_request==(found ? CameraRequest::kNone : CameraRequest::kDown));
+    assert(n.action.action==MissionAction::kNone);
+    if (found) {
+      n=near.Compute(reappeared,640,480,2.8,{},{});
+      assert(n.mode==BallMode::kApproachTwoBeforeDown);
+      assert(n.action.action==MissionAction::kStepForwardTwo);
+      assert(n.camera_request==CameraRequest::kNone);
+    } else {
+      n=near.Compute({},640,480,2.8,{},finished);
+      assert(n.mode==BallMode::kWaitCameraDown && n.action.action==MissionAction::kNone);
+      n=near.Compute({},640,480,2.9,{CameraMode::kDown,true},{});
+      assert(n.mode==BallMode::kDownSearch && n.camera_request==CameraRequest::kNone);
+      assert(n.action.action==MissionAction::kNone);
+    }
+
+    // A successful first-turn observation resumes normal approach, without
+    // forcing the extra turn. Reset must discard any remembered near turn.
+    near.Reset();
+    n=near.Compute(Ball(u,.8),640,480,3,{},{});
+    assert(n.action.action==turn);
+    near.ClearObservationHistory();
+    finished.observation_complete=true;
+    n=near.Compute(Ball(.5,.8),640,480,3.1,{},finished);
+    assert(n.mode==BallMode::kApproachTwoBeforeDown);
+    assert(n.action.action==MissionAction::kStepForwardTwo);
+    near.Reset();
+    n=near.Compute(Ball(.5,.3),640,480,3.2,{},{});
+    assert(n.action.action==MissionAction::kStepForwardThree);
   }
   BallController controller(c, 3.0);
   auto r = controller.Compute(Ball(0.3, 0.3), 640,480, 0, {}, {});
@@ -317,15 +396,18 @@ int main() {
   assert(r.mode==BallMode::kBallRecoveryWalkTurn);
   for(int turn=0;turn<5;++turn) {
     r=walk_recovery.Compute({},640,480,walk_time,{}, {});
-    assert(r.action.action==MissionAction::kStepForwardLeftOne); // action 27
+    assert(r.action.action==MissionAction::kTurnLeftInPlace); // in-place action 31
     walk_time+=.1;
     ActionExecutionFeedback moving; moving.action_active=true;
     r=walk_recovery.Compute({},640,480,walk_time,{},moving);
     assert(r.action.action==MissionAction::kNone);
     walk_time+=.1;
     ActionExecutionFeedback completed; completed.action_done=true;
-    completed.observation_complete=true;
+    completed.observation_complete=false;
     r=walk_recovery.Compute({},640,480,walk_time,{},completed);
+    assert(walk_recovery.RecoveryWalkTurnsCompleted()==turn);
+    ActionExecutionFeedback observed_only; observed_only.observation_complete=true;
+    r=walk_recovery.Compute({},640,480,walk_time+.01,{},observed_only);
     assert(r.action.action==MissionAction::kNone);
     assert(walk_recovery.RecoveryWalkTurnsCompleted()==turn+1);
     walk_time+=.1;
@@ -337,25 +419,30 @@ int main() {
   }
   assert(r.mode==BallMode::kFailed); // original 2 stationary attempts preserved
 
-  BallController found_after_turn(walk_c,3.0);
-  double find_time=80.0;
-  for(int i=0;i<7;++i)
-    found_after_turn.Compute(Ball(.8,.3),640,480,find_time+=.1,{},{});
-  for(int i=0;i<5;++i)
+  for(double recovery_u:{.2,.8}) {
+    BallController found_after_turn(walk_c,3.0);
+    double find_time=80.0;
+    for(int i=0;i<7;++i)
+      found_after_turn.Compute(Ball(recovery_u,.3),640,480,find_time+=.1,{},{});
+    for(int i=0;i<5;++i)
+      r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
+    for(int i=0;i<18 && r.mode!=BallMode::kBallRecoveryWalkTurn;++i)
+      r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
+    assert(r.mode==BallMode::kBallRecoveryWalkTurn);
     r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
-  for(int i=0;i<18 && r.mode!=BallMode::kBallRecoveryWalkTurn;++i)
-    r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
-  assert(r.mode==BallMode::kBallRecoveryWalkTurn);
-  r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
-  assert(r.action.action==MissionAction::kStepForwardRightOneHurdle); // 28
-  ActionExecutionFeedback moving2; moving2.action_active=true;
-  for(int i=0;i<10;++i)
-    r=found_after_turn.Compute(Ball(.8,.3),640,480,find_time+=.1,{},moving2);
-  ActionExecutionFeedback completed2; completed2.action_done=true;
-  completed2.observation_complete=true;
-  r=found_after_turn.Compute(Ball(.8,.3),640,480,find_time+=.1,{},completed2);
-  assert(r.mode==BallMode::kApproachBall);
-  assert(found_after_turn.RecoveryWalkTurnsCompleted()==1);
+    assert(r.action.action==(recovery_u<.5 ? MissionAction::kTurnLeftInPlace
+                                         : MissionAction::kStepForwardRightOneHurdle));
+    ActionExecutionFeedback moving2; moving2.action_active=true;
+    for(int i=0;i<10;++i)
+      r=found_after_turn.Compute(Ball(recovery_u,.3),640,480,find_time+=.1,{},moving2);
+    assert(r.mode==BallMode::kApproachBall);
+    assert(found_after_turn.RecoveryWalkTurnsCompleted()==0);
+    ActionExecutionFeedback completed2; completed2.action_done=true;
+    completed2.observation_complete=true;
+    r=found_after_turn.Compute(Ball(recovery_u,.3),640,480,find_time+=.1,{},completed2);
+    assert(r.mode==BallMode::kApproachBall);
+    assert(found_after_turn.RecoveryWalkTurnsCompleted()==0);
+  }
 
   return 0;
 }

@@ -1,6 +1,5 @@
 """Check preserved source contracts; runtime behavior is tested in C++."""
 from pathlib import Path
-import json
 import re
 import xml.etree.ElementTree as ET
 
@@ -56,45 +55,16 @@ for action, filename in {
     'DEFAULT_POSITION': 'motions/초기자세_다소곳_.json',
 }.items():
     match = re.search(r'case vision::msg::ActionCommand::'+action+r':\s*return "([^"]+)";', main)
-    checks[action+' mapping'] = match is not None and match.group(1)==filename and (root / filename).is_file()
+    checks[action+' mapping'] = match is not None and match.group(1)==filename
 checks['TURN_LEFT_IN_PLACE action number'] = 'uint16 TURN_LEFT_IN_PLACE=31' in (
     root.parent / 'vision/msg/ActionCommand.msg').read_text()
-# Validate single-turn missions and preserve the specific hurdle-right variant.
-for manifest_name, expected_motion in {
-    '직진_좌회전_1번.json': '보행_좌회전전진_20도_최종_초기X.json',
-    '직진_우회전_1번_huddle.json': '보행_우회전전진_20도_최종_초기X.json',
-}.items():
-    manifest = root / 'missions' / manifest_name
-    entries = json.loads(manifest.read_text()).get('motions', [])
-    checks[manifest_name + ' single-turn reference'] = (
-        [entry.get('filename') for entry in entries] == [expected_motion]
-        and (root / 'motions' / expected_motion).is_file()
-    )
-
-pickup = json.loads((root / 'motions/공_줍고일어나기_최종.json').read_text())
-checks['pickup regrip opening speed 80 deg/s'] = (
-    pickup['keyframes'][7].get('name') == '재그립_벌리기'
-    and pickup['keyframes'][7].get('max_speed_deg_s') == 80
-)
+# Live JSON contents/references are validated by motion_assets_check.
 gripper_switch = main.split('static bool UsesFixedGripperPose', 1)[1].split('default:', 1)[0]
 checks['re-pick actions keep JSON gripper'] = all(
     'case Command::' + action + ':' in gripper_switch
     for action in ('PICK_BALL_RE', 'PICK_BALL_RE_STAND')
 )
 
-# Validate both 2x and 3x turn-forward manifests and real motion references.
-for side, motion in {
-    '좌': '보행_좌회전전진_20도_최종_초기X.json',
-    '우': '보행_우회전전진_20도_최종_초기X.json',
-}.items():
-    for count in ((2,3) if side=='좌' else (1,2,3)):
-        manifest = root / f'missions/직진_{side}회전_{count}번.json'
-        entries = json.loads(manifest.read_text()).get('motions', [])
-        expected = [motion]*count if side=='좌' else [motion,'보행_1걸음_초기X.json']*count
-        checks[f'{side}회전 {count}x references'] = (
-            [entry.get('filename') for entry in entries] == expected
-            and all((root / 'motions' / file).is_file() for file in expected)
-        )
 state = (root / 'include/motion_executor_state.hpp').read_text()
 checks['all-mission READY'] = 'IsReadyWalkAction(active_action)' in state
 # The executor only admits one successor B after the CURRENT action A sent

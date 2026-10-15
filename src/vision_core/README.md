@@ -83,6 +83,11 @@ ctest --test-dir build --output-on-failure
 cmake --install build
 ```
 
+튜닝과 테스트 실행 방법은 [tests/README.md](tests/README.md)를 참고한다.
+회귀 테스트는 `tests/fixtures/mission_scenarios.yaml`의 고정된 시나리오를 사용한다.
+운영 `config/vision_algorithm.yaml`은 별도 검사에서 실제 값의 로딩과 유효성을
+확인하므로, 유효한 튜닝값을 변경할 때마다 테스트의 기대 숫자를 수정하지 않는다.
+
 ## DONE 이후 관측 창 (실기 기본값)
 
 - `mission.post_motion_observation_sec=1.0`: 짧은 움직임 및 카메라 DOWN/GOAL 완료 이후

@@ -36,6 +36,8 @@ static vision_core::MissionControllerConfig LoadText(const std::string &yaml) {
 }
 
 int main(int argc, char **argv) {
+  // CTest supplies tests/fixtures/mission_scenarios.yaml, never the tuned YAML.
+  // Literal values and text mutations below describe these fixed scenarios.
   assert(argc == 2);
   const auto c = vision_core::LoadAlgorithmConfig(argv[1]);
   const auto defaults = vision_core::LoadDefaultAlgorithmConfig();
@@ -62,12 +64,12 @@ int main(int argc, char **argv) {
   assert(c.ball.pickup_u2_px == 385);
   assert(c.ball.pickup_v1_px == 80);
   assert(c.ball.pickup_v2_px == 130);
-  assert(c.ball.down_one_step_v_px == 10);
-  assert(c.ball.fine_mode_v_px == 80);
+  assert(c.ball.down_one_step_v_px == 0);
+  assert(c.ball.fine_mode_v_px == 10);
   assert(c.ball.pickup_max_attempts == 100);
-  assert(c.hurdle.contact_steps == 5);
-  assert(c.hurdle.down_one_step_v_px == 120);
-  assert(c.hurdle.fine_mode_v_px == 210);
+  assert(c.hurdle.contact_steps == 3);
+  assert(c.hurdle.down_one_step_v_px == 100);
+  assert(c.hurdle.fine_mode_v_px == 180);
   assert(c.goal.fine_one_step_range_error_m == 0.15);
   assert(c.goal.fine_two_step_range_error_m == 0.30);
   assert(c.backboard_max_depth_m == 2.50);
@@ -127,14 +129,14 @@ int main(int argc, char **argv) {
   Reject(text.str(), "pickup_v1_px: 80", "pickup_v1_px: 131.0");
   Reject(text.str(), "pickup_v2_px: 130", "pickup_v2_px: .inf");
   Reject(text.str(), "smooth_alpha: 0.45", "smooth_alpha: .nan");
-  Reject(text.str(), "approach_two_step_v_px: 360.0", "approach_two_step_v_px: .nan");
+  Reject(text.str(), "approach_two_step_v_px: 240.0", "approach_two_step_v_px: .nan");
   Reject(text.str(), "pickup_max_attempts: 100", "pickup_max_attempts: 0");
   Reject(text.str(), "upper_acquire_v_px: 470.0", "upper_acquire_v_px: -0.1");
-  Reject(text.str(), "target_u_px: 380.0", "target_u_px: .inf");
-  Reject(text.str(), "throw_landing_z_m: 0.48", "throw_landing_z_m: 0.0");
+  Reject(text.str(), "target_u_px: 380", "target_u_px: .inf");
+  Reject(text.str(), "throw_landing_z_m: 0.40", "throw_landing_z_m: 0.0");
   Reject(text.str(), "throw_landing_x_m: -0.08", "throw_landing_x_m: .nan");
-  Reject(text.str(), "fine_settle_duration_sec: 0.60",
-         "fine_settle_duration_sec: -0.1");
+  Reject(text.str(), "transition_settle_sec: 0.6",
+         "transition_settle_sec: -0.1");
   Reject(text.str(), "action_ack_timeout_sec: 10.0",
          "action_ack_timeout_sec: .nan");
   Reject(text.str(), "backboard_min_depth_m: 0.20",
@@ -155,6 +157,15 @@ int main(int argc, char **argv) {
   Reject(text.str(), "center_distance_weight: 1.0",
          "center_distance_weight: -1.0");
 
+  for (const auto& key : {std::string("transition_settle_sec: 0.6"),
+                          std::string("walk_inter_action_hold_sec: 0.0"),
+                          std::string("fine_motion_settle_sec: 0.0"),
+                          std::string("recovery_turn_max: 3")}) {
+    Reject(text.str(),key,"");
+    const auto colon=key.find(':');
+    Reject(text.str(),key,key.substr(0,colon)+": -1");
+    Reject(text.str(),key,key.substr(0,colon)+": .nan");
+  }
   auto direct = c;
   direct.line_detection.class_id = -1;
   bool direct_rejected = false;

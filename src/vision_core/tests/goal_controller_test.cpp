@@ -15,18 +15,100 @@ static ObjectTarget Board(double u=.5) {
 static GoalPoseObservation Pose(double x,double z,double yaw=0) {
   return {true,x,z,yaw,1};
 }
+static void CoarseTurnAlignment(double yaw_limit_deg) {
+  auto c=LoadDefaultAlgorithmConfig().goal;
+  c.stable_window=c.stable_min_hits=1;
+  c.smooth_alpha=0;
+  c.throw_landing_x_m=0;
+  c.throw_landing_z_m=.4;
+  c.shoot_yaw_limit_deg=yaw_limit_deg;
+  const CameraFeedback camera{CameraMode::kGoal,true};
+  const auto enter_coarse=[&](GoalController& goal,const GoalPoseObservation& pose) {
+    goal.StartTestNear();
+    goal.Compute({},{},{},640,480,0,true,camera,{});
+    const auto r=goal.Compute({},Board(),pose,640,480,.1,true,camera,{},true,pose.z_m);
+    assert(r.mode==GoalMode::kCoarseAdjust);
+  };
+  for(double sign:{-1.0,1.0}) {
+    const auto off_axis=Pose(sign*.4,.7);
+    GoalController goal(c,3);
+    enter_coarse(goal,off_axis);
+    auto r=goal.Compute({},Board(),off_axis,640,480,.2,true,camera,{},false);
+    const auto turn=sign<0 ? MissionAction::kTurnLeftInPlace
+                          : MissionAction::kStepForwardRightOneHurdle;
+    // Preview and execution choose the same in-place WALK motion.
+    assert(r.mode==GoalMode::kCoarseAdjust && r.action.action==turn);
+    r=goal.Compute({},Board(),off_axis,640,480,.21,true,camera,{});
+    assert(r.action.action==turn && goal.RecoveryTurnsCompleted()==0);
+    ActionExecutionFeedback busy;busy.action_active=true;
+    r=goal.Compute({},Board(),off_axis,640,480,.3,true,camera,busy);
+    assert(r.action.action==MissionAction::kNone);
+    ActionExecutionFeedback done;done.action_done=true;
+    r=goal.Compute({},Board(),off_axis,640,480,.4,true,camera,done);
+    assert(r.action.action==MissionAction::kNone);
+    // The verified post-DONE pose is reused to resume forward approach.
+    const auto aligned=Pose(0,.7);
+    goal.UseVerifiedObservation(Board(),aligned,{true},{true},640,480);
+    r=goal.Compute({},Board(),aligned,640,480,1.4,true,camera,done);
+    assert(r.action.action==MissionAction::kStepForwardOne);
+
+    // Below 0.15m, switch feet before handling the same angular violation.
+    GoalController close(c,3);
+    const auto close_pose=Pose(sign*.3,.5);
+    enter_coarse(close,close_pose);
+    r=close.Compute({},Board(),close_pose,640,480,.2,true,camera,{});
+    assert(r.mode==GoalMode::kWaitFinePose);
+    assert(r.action.action==MissionAction::kDefaultPoseMode);
+    r=close.Compute({},Board(),close_pose,640,480,.3,true,camera,done);
+    assert(r.mode==GoalMode::kFineAdjust);
+    r=close.Compute({},Board(),close_pose,640,480,.4,true,camera,{});
+    assert(r.action.action==(sign<0 ? MissionAction::kLeftSideStep
+                                  : MissionAction::kRightSideStep));
+  }
+  // Both forward step sizes remain available inside the angular limit.
+  GoalController aligned(c,3);
+  enter_coarse(aligned,Pose(.1,.8));
+  auto r=aligned.Compute({},Board(),Pose(.1,.8),640,480,.2,true,camera,{});
+  assert(r.action.action==MissionAction::kStepForwardTwo);
+  r=aligned.Compute({},Board(),Pose(0,.7),640,480,.3,true,camera,{});
+  assert(r.action.action==MissionAction::kStepForwardOne);
+
+  // Check both sides of the configured 0.15m stance boundary while off-axis.
+  for(double margin:{-1e-6,1e-6}) {
+    const double range=c.throw_landing_z_m+c.fine_one_step_range_error_m+margin;
+    const auto pose=Pose(.4,c.hoop_radius_m+std::sqrt(range*range-.4*.4));
+    GoalController goal(c,3);enter_coarse(goal,pose);
+    r=goal.Compute({},Board(),pose,640,480,.2,true,camera,{});
+    assert(r.action.action==(margin<0 ? MissionAction::kDefaultPoseMode
+                                     : MissionAction::kStepForwardRightOneHurdle));
+  }
+
+  // The existing configurable FINE angular limit also governs WALK alignment.
+  const auto off_axis=Pose(.4,.7);
+  const double angle=std::atan2(.4,.7-c.hoop_radius_m)*180.0/std::acos(-1.0);
+  for(double margin:{-1e-6,1e-6}) {
+    auto threshold=c;threshold.shoot_yaw_limit_deg=angle+margin;
+    GoalController goal(threshold,3);enter_coarse(goal,off_axis);
+    r=goal.Compute({},Board(),off_axis,640,480,.2,true,camera,{});
+    assert(r.action.action==(margin<0 ? MissionAction::kStepForwardRightOneHurdle
+                                     : MissionAction::kStepForwardTwo));
+  }
+}
 int main() {
+  CoarseTurnAlignment(15);
+  CoarseTurnAlignment(30);
   Intrinsics k{640,480,50,50};
   const auto p = EstimateGoalPoseFromBackboardDepths(50,1,40,1.1,60,.9,k);
   assert(p.valid && std::abs(p.x_m) < 1e-12);
   GoalConfig c=LoadDefaultAlgorithmConfig().goal; c.stable_window=c.stable_min_hits=1; c.lost_frames=2;
+  c.recovery_turn_max=0; // Isolate the pre-existing stationary recovery FSM.
   c.smooth_alpha=0; c.post_pickup_walk_fallback_actions=0;
   c.fine_one_step_range_error_m=c.fine_two_step_range_error_m=1.0; // Isolate near fine geometry.
   c.target_u_px=320; c.approach_u_deadband_px=32; c.fine_adjust_start_z_m=.8;
   c.hoop_radius_m=.1; c.throw_landing_x_m=0; c.throw_landing_z_m=.5; c.position_tolerance_m=.05;
-  c.fine_settle_duration_sec=0; c.shoot_yaw_limit_deg=30;
+   c.shoot_yaw_limit_deg=30;
   c.recovery_timeout_sec=5; c.recovery_reacquire_min_hits=3;
-  c.recovery_center_tolerance_px=76.8; c.recovery_settle_duration_sec=.6;
+  c.recovery_center_tolerance_px=76.8;
   GoalController controller(c, 3.0); controller.StartAfterPickup(0);
   BallResult carrying; carrying.has_ball=true; carrying.mode=BallMode::kLineFollow;
   controller.UpdateBallState(carrying);

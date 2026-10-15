@@ -101,8 +101,14 @@ IMU 좌표 기준 통일과 AUTO의 골대 단독 시작 방식 변경은 이번
 
 ## 2026-10-14 공통 접근 및 RESET 규칙
 
-- BALL: 3x3 원거리 가운데 4걸음(23), 중거리 3걸음(22), 근거리 가운데 2걸음(21) 후 DOWN; 근거리 양쪽은 보행 자세 회전 27/28 후 FORWARD 재관측한다.
-- GOAL: FORWARD 접근 방향 오차는 27/28 회전으로 보정하고 중앙은 거리별 4/3걸음. 미세 정렬에서는 카메라 기준 낙하점 `goal_throw_landing_x_m=-0.08`, `goal_throw_landing_z_m=0.48`과 림 중심의 2차원 오차를 확인한다.
+- BALL: 현재 PC의 원거리/중거리 중앙은 3걸음(22), 근거리 중앙은 2걸음(21) 후 DOWN이다. 근거리 양쪽 및 FORWARD 유실 복구는 WALK 제자리 회전 좌 31/우 28을 사용한다. 구역 경계·회복 횟수는 운영 YAML을 따른다.
+- GOAL: 일반 접근은 기존 거리/화면 구역 로직을 사용한다. GOAL 근거리(COARSE)에서는 거리 오차가 `fine_one_step_range_error_m` 이상일 때 `shoot_yaw_limit_deg` 밖이면 WALK 제자리 회전 좌 31/우 28을 우선한다. 경계 미만이면 FINE으로 전환한다. FINE의 림 위치 보정·낙하점·투척 허용값은 운영 YAML의 `hoop_radius_m`, `throw_landing_x_m`, `throw_landing_z_m`, `position_tolerance_m`, `shoot_yaw_limit_deg`를 사용한다.
 - HURDLE: FORWARD에서 LINE O/H score의 좌중우와 허들 중심의 세로 위치를 결합한다. DOWN 진입 후는 기존 알고리즘 그대로 유지한다.
 - RESET: 기존 카메라 상태가 FORWARD로 보고되어도 새로운 카메라 FORWARD 명령을 전송한다. WALK_MODE와 카메라 명령의 실제 DONE 이후 WAIT_START로 진입한다.
 - 백보드 디버그는 좌/중/우 샘플영역의 유효 깊이 픽셀 수, 비율, 중앙값을 표시하지만 새 유효성 거부 임계값을 추가하지 않는다.
+
+## 튜닝 후 검사
+
+코어의 `tests/README.md`와 실행기의 `tests/README.md`에 명령을 정리했다.
+회귀 테스트는 전용 시나리오를 사용하고 운영 YAML·실제 JSON 검사는 별도로 실행한다.
+운영 YAML/JSON을 바꾼 경우 소스와 설치본 비교를 통해 파일 반영 여부도 확인한다.

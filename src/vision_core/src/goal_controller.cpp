@@ -123,6 +123,10 @@ const char *GoalController::ModeName(GoalMode mode) {
     return "GOAL_TO_FINE_FEET";
   case GoalMode::kFineRecovery:
     return "GOAL_FINE_RECOVERY";
+  case GoalMode::kRecoveryTurn:
+    return "GOAL_RECOVERY_TURN";
+  case GoalMode::kEdgeTurn:
+    return "GOAL_EDGE_TURN";
   case GoalMode::kCoarseRecovery:
     return "GOAL_CLOSE_RECOVERY";
   case GoalMode::kPostShootBackAway:
@@ -212,6 +216,9 @@ void GoalController::UpdateGoalTracker(
   const int hits = static_cast<int>(
       std::count(hit_history_.begin(), hit_history_.end(), true));
   tracked_.stable = hits >= std::max(1, config_.stable_min_hits);
+  if (detected && tracked_.stable &&
+      hit_history_.size() >= static_cast<std::size_t>(config_.stable_window))
+    last_stable_u_px_ = tracked_.center_px.u;
   if (detected && tracked_.stable && mode_ != GoalMode::kLineFollow)
     seen_after_camera_goal_ = true;
 }
@@ -365,16 +372,20 @@ GoalResult GoalController::Compute(
     const GoalPoseObservation &pose, int image_width, int image_height,
     double now_sec, bool line_reference_valid, const CameraFeedback &camera,
     const ActionExecutionFeedback &feedback, bool allow_new_body_actions,
-    std::optional<double> center_depth_m, bool post_pickup_line_gate_satisfied) {
+    std::optional<double> center_depth_m, bool post_pickup_line_gate_satisfied,
+    bool backboard_image_without_depth) {
+  const bool board_visible = backboard.has_value() || backboard_image_without_depth;
   const bool pose_valid = pose.valid && std::isfinite(pose.x_m) &&
                           std::isfinite(pose.z_m) && pose.z_m > 0.0 &&
                           std::isfinite(pose.yaw_rad);
   // Intermediate camera angles must not add object evidence to either tracker.
   const bool camera_switching = mode_ == GoalMode::kWaitCameraGoal ||
                                 mode_ == GoalMode::kReturnCameraToLine;
-  if (mode_ == GoalMode::kFineAdjust && feedback.action_done)
+  const bool verified = verified_observation_pending_;
+  verified_observation_pending_ = false;
+  if (!verified && mode_ == GoalMode::kFineAdjust && feedback.action_done)
     ClearTracking();
-  if (!camera_switching &&
+  if (!verified && !camera_switching &&
       !(mode_ == GoalMode::kFineAdjust &&
         (feedback.action_active || feedback.action_done))) {
     UpdateGoalTracker(backboard, image_width, image_height);
@@ -401,6 +412,26 @@ GoalResult GoalController::Compute(
           ? ComputeShootYawRad(tracked_pose_.x_m, tracked_pose_.z_m,
                                tracked_pose_.yaw_rad)
           : shoot_yaw_rad_;
+  // The WALK boundary guard precedes ordinary distance/zone selection.
+  const bool walk_approach = mode_ == GoalMode::kForwardApproach ||
+      mode_ == GoalMode::kSearch || mode_ == GoalMode::kApproach ||
+      mode_ == GoalMode::kCoarseAdjust;
+  if (walk_approach && image_width > 1 && camera.settled && backboard &&
+      backboard->box_px.width > 0 && backboard->box_px.height > 0 && tracked_.stable &&
+      !(feedback.action_active && !feedback.action_done)) {
+    const auto& box = backboard->box_px;
+    const bool left = box.x <= 50.0;
+    const bool right = box.x + box.width >= image_width - 50.0;
+    if (left && right) return result; // No directional evidence for an oversized box.
+    if (left || right) {
+      turn_resume_mode_ = mode_;
+      turn_left_ = left;
+      turn_pending_ = turn_done_ = false;
+      edge_turns_completed_ = 0;
+      mode_ = GoalMode::kEdgeTurn;
+      result.mode = mode_;
+    }
+  }
   switch (mode_) {
   case GoalMode::kLineFollow:
     return result;
@@ -442,6 +473,7 @@ GoalResult GoalController::Compute(
       mode_ = GoalMode::kSearch;
       ClearTracking();
       last_seen_u_px_ = config_.target_u_px;
+      last_stable_u_px_.reset();
       seen_after_camera_goal_ = false;
       recovery_visible_count_ = 0;
       result.mode = mode_;
@@ -458,11 +490,11 @@ GoalResult GoalController::Compute(
     // No past GOAL-view sighting, or a centered last sighting: wait in place.
     if (!tracked_.visible && seen_after_camera_goal_ &&
         lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = GoalMode::kRecoverySearch;
-      stationary_recovery_.Begin(now_sec);
+      if (!board_visible) BeginLostRecovery(now_sec, false);
+      else { mode_=GoalMode::kRecoverySearch; stationary_recovery_.Begin(now_sec); }
       state_enter_sec_ = now_sec;
       recovery_visible_count_ = 0;
-      settle_until_sec_ = now_sec;
+
       result.mode = mode_;
       return result;
     }
@@ -472,7 +504,6 @@ GoalResult GoalController::Compute(
     if (PoseReadyForFineAdjust() ||
         (tracked_.stable && tracked_.visible && center_near)) {
       mode_ = GoalMode::kCoarseAdjust;
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
       result.mode = mode_;
     } else if (tracked_.stable && tracked_.visible) {
       mode_ = GoalMode::kApproach;
@@ -495,19 +526,14 @@ GoalResult GoalController::Compute(
       if (feedback.action_active && !feedback.action_done)
         return result;
       mode_ = GoalMode::kCoarseAdjust;
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
       result.mode = mode_;
       return result;
     }
     if (lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = GoalMode::kRecoverySearch;
-      stationary_recovery_.Begin(now_sec);
-      {
-        state_enter_sec_ = now_sec;
-        recovery_visible_count_ = 0;
-        settle_until_sec_ = now_sec;
-      }
-      ClearTracking();
+      if (!board_visible) BeginLostRecovery(now_sec, false);
+      else { mode_=GoalMode::kRecoverySearch; stationary_recovery_.Begin(now_sec); }
+      state_enter_sec_ = now_sec;
+      recovery_visible_count_ = 0;
       result.mode = mode_;
       return result;
     }
@@ -520,17 +546,17 @@ GoalResult GoalController::Compute(
   case GoalMode::kCoarseAdjust: {
     if (feedback.action_active && !feedback.action_done)
       return result;
-    if (feedback.action_done) {
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
-      return result;
-    }
-    if (now_sec < settle_until_sec_)
+    if (feedback.action_done && !verified)
       return result;
     if (!pose_valid) {
       if (pose_lost_count_ >= config_.lost_frames) {
-        mode_ = GoalMode::kCoarseRecovery;
-        ClearTracking();
-        stationary_recovery_.Begin(now_sec);
+        if (!board_visible && lost_count_ >= config_.lost_frames) {
+          BeginLostRecovery(now_sec, false);
+        } else {
+          mode_ = GoalMode::kCoarseRecovery;
+          ClearTracking();
+          stationary_recovery_.Begin(now_sec);
+        }
         result.mode = mode_;
       }
       return result;
@@ -544,9 +570,19 @@ GoalResult GoalController::Compute(
     result.fine_decision_pose_used = true;
     if (error >= config_.fine_one_step_range_error_m &&
         error > config_.position_tolerance_m) {
-      result.action = Locomotion(error >= config_.fine_two_step_range_error_m
-                                     ? MissionAction::kStepForwardTwo
-                                     : MissionAction::kStepForwardOne);
+      // Use FINE's angular side-step criterion while still in WALK stance.
+      // Once close enough, switch stance before applying FINE corrections.
+      const double yaw_deg =
+          ComputeShootYawRad(pose.x_m, pose.z_m, pose.yaw_rad) * 180.0 / kPi;
+      if (std::abs(yaw_deg) > config_.shoot_yaw_limit_deg) {
+        result.action = Locomotion(yaw_deg < 0.0
+            ? MissionAction::kStepForwardRightOneHurdle
+            : MissionAction::kTurnLeftInPlace);
+      } else {
+        result.action = Locomotion(error >= config_.fine_two_step_range_error_m
+                                       ? MissionAction::kStepForwardTwo
+                                       : MissionAction::kStepForwardOne);
+      }
     } else {
       mode_ = GoalMode::kWaitFinePose;
       result.mode = mode_;
@@ -558,7 +594,6 @@ GoalResult GoalController::Compute(
     if (feedback.action_done) {
       mode_ = GoalMode::kFineAdjust;
       ClearTracking();
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
       result.mode = mode_;
       result.tracked = {};
       result.pose = {};
@@ -574,8 +609,9 @@ GoalResult GoalController::Compute(
         config_.stable_min_hits, config_.recovery_observation_sec,
         config_.recovery_max_observations);
     if (status == StationaryObjectRecovery::Result::kFound) {
+      recovery_turns_completed_ = 0;
+      recovery_exhausted_ = false;
       mode_ = was_fine ? GoalMode::kFineAdjust : GoalMode::kCoarseAdjust;
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
     } else if (status == StationaryObjectRecovery::Result::kFailed)
       mode_ = GoalMode::kFailed;
     else if (status == StationaryObjectRecovery::Result::kRetry)
@@ -586,16 +622,16 @@ GoalResult GoalController::Compute(
   case GoalMode::kFineAdjust: {
     if (feedback.action_active && !feedback.action_done)
       return result;
-    if (feedback.action_done) {
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
-      return result;
-    }
-    if (now_sec + kEpsilon < settle_until_sec_)
+    if (feedback.action_done && !verified)
       return result;
     if (pose_lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = GoalMode::kFineRecovery;
-      ClearTracking();
-      stationary_recovery_.Begin(now_sec);
+      if (!board_visible && lost_count_ >= config_.lost_frames)
+        BeginLostRecovery(now_sec, true);
+      else {
+        mode_ = GoalMode::kFineRecovery;
+        ClearTracking();
+        stationary_recovery_.Begin(now_sec);
+      }
       result.mode = mode_;
       return result;
     }
@@ -618,6 +654,65 @@ GoalResult GoalController::Compute(
       result.mode = mode_;
       result.shoot_yaw_rad = shoot_yaw_rad_;
     }
+    return result;
+  }
+  case GoalMode::kRecoveryTurn:
+  case GoalMode::kEdgeTurn: {
+    const bool recovery = mode_ == GoalMode::kRecoveryTurn;
+    const bool fine = turn_resume_mode_ == GoalMode::kFineAdjust;
+    if (recovery && board_visible && !backboard) {
+      mode_ = fine ? GoalMode::kFineRecovery :
+          (turn_resume_mode_==GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
+      turn_pending_=turn_done_=false;
+      stationary_recovery_.Begin(now_sec);
+      result.mode=mode_;
+      return result;
+    }
+    if (recovery && tracked_.visible && tracked_.stable &&
+        hit_history_.size() >= static_cast<std::size_t>(config_.stable_window)) {
+      mode_ = turn_resume_mode_;
+      recovery_turns_completed_ = 0;
+      turn_pending_ = turn_done_ = false;
+      recovery_exhausted_ = false;
+      result.mode = mode_;
+      return result;
+    }
+    if (turn_pending_ && feedback.action_done) turn_done_ = true;
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (turn_pending_) {
+      if (!turn_done_ || !feedback.observation_complete) return result;
+      turn_pending_ = turn_done_ = false;
+      if (recovery) {
+        ++recovery_turns_completed_;
+        if (recovery_turns_completed_ >= config_.recovery_turn_max) {
+          recovery_exhausted_ = true;
+          mode_ = fine ? GoalMode::kFineRecovery :
+              (turn_resume_mode_ == GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
+          stationary_recovery_.Begin(now_sec);
+          ClearTracking();
+          result.mode = mode_;
+          return result;
+        }
+      } else if (++edge_turns_completed_ >= 2) {
+        mode_ = turn_resume_mode_;
+        result.mode = mode_;
+        return result;
+      }
+    }
+    if (recovery && recovery_turns_completed_ >= config_.recovery_turn_max) {
+      recovery_exhausted_ = true;
+      mode_ = fine ? GoalMode::kFineRecovery :
+          (turn_resume_mode_ == GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
+      stationary_recovery_.Begin(now_sec);
+      ClearTracking();
+      result.mode = mode_;
+      return result;
+    }
+    result.action = Locomotion(fine
+        ? (turn_left_ ? MissionAction::kTurnLeft : MissionAction::kTurnRight)
+        : (turn_left_ ? MissionAction::kTurnLeftInPlace : MissionAction::kStepForwardRightOneHurdle));
+    if (fine) result.action.target_yaw_deg = 15;
+    if (allow_new_body_actions) turn_pending_ = true;
     return result;
   }
   case GoalMode::kShoot:
@@ -713,9 +808,58 @@ void GoalController::ObserveOnly(const std::optional<ObjectTarget> &target,
   }
 }
 
+void GoalController::UseVerifiedObservation(
+    const std::optional<ObjectTarget>& mean, const GoalPoseObservation& pose,
+    const std::deque<bool>& hits, const std::deque<bool>& pose_hits,
+    int width, int height, const std::deque<bool>& near_hits) {
+  ClearTracking();
+  UpdateGoalTracker(mean, width, height);
+  UpdatePoseTracker(mean, pose);
+  hit_history_ = hits;
+  pose_hit_history_ = pose_hits;
+  fine_enter_history_ = near_hits;
+  while (fine_enter_history_.size() > static_cast<std::size_t>(config_.stable_window)) fine_enter_history_.pop_front();
+  while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window)) hit_history_.pop_front();
+  while (pose_hit_history_.size() > static_cast<std::size_t>(config_.stable_window)) pose_hit_history_.pop_front();
+  tracked_.stable = hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+      std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits;
+  tracked_pose_.stable = pose_hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+      std::count(pose_hit_history_.begin(), pose_hit_history_.end(), true) >= config_.stable_min_hits;
+  if (mean && tracked_.stable) last_stable_u_px_ = tracked_.center_px.u;
+  fine_pose_window_.clear();
+  if (pose.valid && tracked_.stable && tracked_pose_.stable) fine_pose_window_.push_back(pose);
+  fine_pose_is_preaveraged_ = !fine_pose_window_.empty();
+  lost_count_ = static_cast<int>(std::distance(hit_history_.rbegin(),
+      std::find(hit_history_.rbegin(),hit_history_.rend(),true)));
+  pose_lost_count_ = static_cast<int>(std::distance(pose_hit_history_.rbegin(),
+      std::find(pose_hit_history_.rbegin(),pose_hit_history_.rend(),true)));
+  if (mean && tracked_.stable) seen_after_camera_goal_ = true;
+  verified_observation_pending_ = true;
+}
+
+void GoalController::BeginLostRecovery(double now_sec, bool fine) {
+  turn_resume_mode_ = mode_;
+  const auto offset = last_stable_u_px_
+      ? std::optional<double>(*last_stable_u_px_ - config_.target_u_px) : std::nullopt;
+  const bool directional = offset && std::isfinite(*offset) &&
+      std::abs(*offset) > config_.recovery_center_tolerance_px;
+  if (!recovery_exhausted_ && config_.recovery_turn_max > 0 && directional) {
+    turn_left_ = *offset < 0.0;
+    turn_pending_ = turn_done_ = false;
+    recovery_turns_completed_ = 0;
+    mode_ = GoalMode::kRecoveryTurn;
+  } else {
+    mode_ = fine ? GoalMode::kFineRecovery :
+        (turn_resume_mode_ == GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
+    stationary_recovery_.Begin(now_sec);
+  }
+  ClearTracking();
+}
+
 void GoalController::ClearObservationHistory() { ClearTracking(); }
 
 void GoalController::ClearTracking() {
+  verified_observation_pending_ = false;
   hit_history_.clear();
   pose_hit_history_.clear();
   fine_enter_history_.clear();
@@ -731,13 +875,15 @@ void GoalController::ClearTracking() {
 }
 
 void GoalController::Reset() {
+  last_stable_u_px_.reset();
+  turn_pending_ = turn_done_ = recovery_exhausted_ = false;
+  recovery_turns_completed_ = edge_turns_completed_ = 0;
   test_execute_requires_stable_ = false;
   stationary_recovery_.Begin(0.0);
   completed_back_steps_ = 0;
   back_away_issued_ = false;
   mode_ = GoalMode::kLineFollow;
   state_enter_sec_ = 0.0;
-  settle_until_sec_ = 0.0;
   shoot_yaw_rad_ = 0.0;
   has_ball_ = false;
   ball_consumed_ = false;

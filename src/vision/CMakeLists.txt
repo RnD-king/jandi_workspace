@@ -226,6 +226,10 @@ install(FILES scripts/mock_executor_protocol.py
 )
 
 if(BUILD_TESTING)
+  add_executable(vision_hurdle_debug_guides_test tests/hurdle_debug_guides_test.cpp)
+  target_include_directories(vision_hurdle_debug_guides_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(vision_hurdle_debug_guides_test shared_vision_core::shared_vision_core ${OpenCV_LIBS})
+  add_test(NAME vision_hurdle_debug_guides_test COMMAND vision_hurdle_debug_guides_test)
   enable_testing()
   add_executable(vision_backboard_depth_regions_test tests/backboard_depth_regions_test.cpp)
   target_include_directories(vision_backboard_depth_regions_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
@@ -234,6 +238,8 @@ if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME vision_mock_executor_protocol_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_executor_protocol_test.py)
+  set_tests_properties(vision_hurdle_debug_guides_test vision_backboard_depth_regions_test
+    vision_mock_executor_protocol_test PROPERTIES LABELS "logic")
 endif()
 
 ament_package()

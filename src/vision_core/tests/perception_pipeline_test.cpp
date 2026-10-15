@@ -20,7 +20,7 @@ PerceptionDetection BallDetection(double u, double v, double confidence=1.0,
 MissionControllerConfig BallPipelineConfig() {
   auto c=LoadDefaultAlgorithmConfig();
   c.enable_hurdle=c.enable_goal=false;
-  c.ball.smooth_alpha=1.0; c.ball.fine_settle_duration_sec=.6;
+  c.ball.smooth_alpha=1.0;
   c.ball.upper_acquire_v_px=480.0;
   // Exercise the historical pickup rectangle independently of YAML tuning.
   c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;

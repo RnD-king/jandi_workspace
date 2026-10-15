@@ -30,7 +30,7 @@ vision_algorithm:
     down_search_timeout_sec: 10.0
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
-    recovery_walk_turn_max: 5 # forward BALL loss: max WALK-pose 27/28 turns, then stationary recovery
+    recovery_walk_turn_max: 3 # forward BALL loss: max completed WALK-pose 31/28 turns, then stationary recovery
     post_pickup_back_steps: 0   # 0: no backing away after pickup; return camera and reacquire line
     stable_window: 10
     stable_min_hits: 7
@@ -41,13 +41,13 @@ vision_algorithm:
 
     # forward
     far_u_des_px: 360.0 # 세로선 중심
-    approach_u_deadband_px: 130 # 세로선 반폭
+    approach_u_deadband_px: 110 # 세로선 반폭
     
-    approach_short_v_px: 120.0 # 위 가로선 (4걸음)
-    approach_two_step_v_px: 220.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
+    approach_short_v_px: 100.0 # 위 가로선 (4걸음)
+    approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
 
     # down
-    down_one_step_v_px: 1.0 # 위 가로선 (2걸음)
+    down_one_step_v_px: 0.0 # 위 가로선 (2걸음)
     fine_mode_v_px: 10 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
 
     pickup_u1_px: 310
@@ -58,11 +58,9 @@ vision_algorithm:
     pickup_max_attempts: 100
     ball_ignore_duration_sec: 5.0
 
-    fine_settle_duration_sec: 0.60
     recovery_timeout_sec: 5.0
     recovery_reacquire_min_hits: 3
     recovery_center_tolerance_px: 76.8
-    recovery_settle_duration_sec: 0.60
 
   hurdle:
     down_search_max_steps: 10 # DOWN-view failed detection: up to ten completed one-step walks
@@ -95,9 +93,9 @@ vision_algorithm:
     recovery_reacquire_min_hits: 3
     recovery_timeout_sec: 5.0
     recovery_center_tolerance_px: 76.8
-    recovery_settle_duration_sec: 0.60
 
   goal:
+    recovery_turn_max: 3
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
     stable_window: 10
@@ -125,21 +123,19 @@ vision_algorithm:
     # 골대 위치 및 투척
     hoop_radius_m: 0.10         # 림 위치 보정에 사용하는 반지름
     throw_landing_x_m: -0.08   # 카메라 기준 허리 0도 공 낙하 X (m)
-    throw_landing_z_m: 0.48    # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
+    throw_landing_z_m: 0.40    # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
     position_tolerance_m: 0.08  # 목표 거리의 허용 오차
-    shoot_yaw_limit_deg: 30.0   # 투척 허용 각도 (±30도)
+    shoot_yaw_limit_deg: 15.0   # ±이 값: COARSE 회전 및 FINE 투척/좌우 이동 판단 기준
 
     # 투척 후
     post_shoot_back_steps: 0    # 0: 투척 후 후진 없이 카메라 FORWARD 및 라인 복귀
 
     # 모션 후 관측 대기
-    fine_settle_duration_sec: 0.60
 
     # 골대 인식 실패 시 복구
     recovery_timeout_sec: 5.0
     recovery_reacquire_min_hits: 3
     recovery_center_tolerance_px: 76.8
-    recovery_settle_duration_sec: 0.60
 
   line_detection:
     class_id: 0
@@ -173,6 +169,7 @@ vision_algorithm:
   mission:
     test_mission: 0
     test_stage: 0
+
     backboard_depth_strip_width_px: 5
     goal_trial_start_forward: false
     test_ball_mission_index: 1
@@ -180,6 +177,10 @@ vision_algorithm:
     mission_recovery_max_turns: 10
     mission_recovery_yaw_deg: 15
     camera_motion_timeout_sec: 3.0
+
+    transition_settle_sec: 0.6
+    walk_inter_action_hold_sec: 0.0
+    fine_motion_settle_sec: 0.0
     post_motion_observation_sec: 1.0
     # Current-action eligibility: AUTO 40%-READY observation AND queue.
     # 22=straight 3 steps, 23=straight 4 steps. Successor ID is unrestricted.
@@ -187,7 +188,7 @@ vision_algorithm:
     # Use [] for normal post-DONE observation of all object walks.
     # LINE 11/12/13 remains permanently eligible. Node restart required.
     object_ready_mean_actions: [22, 23]
-    backboard_min_depth_m: 0.20
+    backboard_min_depth_m: 0.10
     backboard_max_depth_m: 2.50
     enable_ball: true
     enable_hurdle: true

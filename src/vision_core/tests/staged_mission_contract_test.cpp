@@ -14,13 +14,14 @@ ObjectTarget Target(double u=320,double v=336) {
   t.width_px=t.height_px=20;t.area_px=400;t.confidence=1;return t;
 }
 MissionControllerConfig Config(MissionType mission,int stage) {
-  auto c=LoadDefaultAlgorithmConfig();c.test_mission=mission;c.test_stage=stage;
+  auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;c.test_mission=mission;c.test_stage=stage;
   c.enable_ball=mission==MissionType::kBall;c.enable_goal=mission==MissionType::kGoal;
   c.enable_hurdle=mission==MissionType::kHurdle;
-  c.ball.fine_settle_duration_sec=c.hurdle.recovery_settle_duration_sec=c.goal.fine_settle_duration_sec=0;
+
   // Preserve the pre-tuning test geometry for pickup/contact assertions.
   c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
   c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
+  c.goal.throw_landing_z_m=.48; // Explicit legacy geometry for these mission scenarios.
   c.hurdle.contact_steps=3; c.hurdle.contact_v_px=408.0;
   return c;
 }
@@ -172,7 +173,7 @@ void WeightedCoordinatesUseHistory() {
   assert(std::abs(w.Mean(false)->center_px.v-174)<1e-9);
 }
 void FineAdjustmentUsesFreshEqualMeans() {
-  auto c=LoadDefaultAlgorithmConfig();
+  auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;
   // This test isolates averaging behavior using its legacy synthetic
   // landing geometry; calibrated -8cm/48cm geometry has a dedicated test.
   c.goal.throw_landing_x_m=0.0;
@@ -279,7 +280,7 @@ void ExecuteStageCompletesRecovery(MissionType mission) {
     assert(contacted==3 && crossed==1 && backed==0 && turned==0);
 }
 void RecoveryUsesCompleteWindow() {
-  auto c=LoadDefaultAlgorithmConfig();c.ball.lost_frames=c.hurdle.lost_frames=1;
+  auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;c.ball.lost_frames=c.hurdle.lost_frames=1;
   BallController ball(c.ball,3);HurdleController hurdle(c.hurdle,3);
   BallResult b;HurdleResult h;double now=0;
   for(int i=0;i<7;++i){now+=.12;b=ball.Compute(Target(320,144),640,480,now,{}, {},false);h=hurdle.Compute(Target(320,200),640,480,now,{}, {},StraightLine(),false);}
@@ -347,7 +348,7 @@ void AutoPoseDonePrecedesFreshObservation() {
 }
 
 void RejectZeroObservation() {
-  auto c=LoadDefaultAlgorithmConfig();c.post_motion_observation_sec=0;bool rejected=false;
+  auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;c.post_motion_observation_sec=0;bool rejected=false;
   try{ValidateAlgorithmConfig(c);}catch(const std::runtime_error&){rejected=true;}
   assert(rejected);
 }

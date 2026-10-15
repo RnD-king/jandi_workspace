@@ -12,7 +12,7 @@ static ObjectTarget H(double v) {
   t.height_px = 10; t.confidence = 1; return t;
 }
 int main() {
-  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle; c.recovery_settle_duration_sec=0; c.contact_steps=1; c.stable_window = c.stable_min_hits = 1;
+  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle;  c.contact_steps=1; c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2; c.smooth_alpha = 1; c.upper_acquire_v_px=480;
   c.approach_two_step_v_px = 360.0;
   c.approach_short_v_px = 312.0;

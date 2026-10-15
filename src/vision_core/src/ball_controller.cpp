@@ -61,6 +61,8 @@ const char *BallController::ModeName(BallMode mode) {
     return "BALL_DOWN_SEARCH";
   case BallMode::kApproachTwoBeforeDown:
     return "BALL_TWO_THEN_DOWN";
+  case BallMode::kNearTurnBeforeDown:
+    return "BALL_TURN_REOBSERVE";
   case BallMode::kCoarseAdjust:
     return "BALL_DOWN_WALK";
   case BallMode::kWaitFinePose:
@@ -145,7 +147,9 @@ ActionRequest BallController::FarAction() const {
     return {};
   const double v = tracked_.center_px.v;
   // Near: rotate in WALK stance until the ball reaches center column;
-  // only center/near issues the final TWO steps and camera DOWN.
+  // Center/near issues the final TWO steps and camera DOWN. If a side turn
+  // loses the ball, Compute permits one extra same-direction turn and a fresh
+  // stationary observation before deciding whether DOWN is necessary.
   if (v >= config_.approach_two_step_v_px) {
     if (decision.direction == CruiseDirection::kLeft)
       return Locomotion(MissionAction::kTurnLeftInPlace);
@@ -161,8 +165,8 @@ ActionRequest BallController::FarAction() const {
   if (decision.direction == CruiseDirection::kRight)
     return Locomotion(middle_row ? MissionAction::kStepForwardRightOne
                                 : MissionAction::kStepForwardRightTwo);
-  return Locomotion(middle_row ? MissionAction::kStepForwardThree
-                              : MissionAction::kStepForwardFour);
+  // Both far-center (zone 2) and middle-center (zone 5) use three steps.
+  return Locomotion(MissionAction::kStepForwardThree);
 }
 
 ActionRequest BallController::FineAction() const {
@@ -220,9 +224,11 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     return result;
   }
   // Ignore all intermediate DOWN/FORWARD camera frames.
-  if (mode_ == BallMode::kFineAdjustForPickup && feedback.action_done)
+  const bool verified = verified_observation_pending_;
+  verified_observation_pending_ = false;
+  if (!verified && mode_ == BallMode::kFineAdjustForPickup && feedback.action_done)
     ClearTracking();
-  if (mode_ != BallMode::kWaitCameraDown &&
+  if (!verified && mode_ != BallMode::kWaitCameraDown &&
       mode_ != BallMode::kReturnCameraToLine &&
       !(mode_ == BallMode::kFineAdjustForPickup &&
         (feedback.action_active || feedback.action_done)))
@@ -256,6 +262,22 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   case BallMode::kApproachBall: {
     if (feedback.action_active && !feedback.action_done)
       return result;
+    if (near_turn_action_ != MissionAction::kNone) {
+      // DONE may arrive before the next manual PREVIEW. Retain that edge
+      // while waiting for the existing fresh stationary observation window.
+      if (feedback.action_done) near_turn_done_ = true;
+      if (!near_turn_done_ || !feedback.observation_complete)
+        return result;
+      near_turn_done_ = false;
+      if (!tracked_.visible || !tracked_.stable) {
+        mode_ = BallMode::kNearTurnBeforeDown;
+        near_turn_retry_issued_ = allow_new_body_actions;
+        result.mode = mode_;
+        result.action = Locomotion(near_turn_action_);
+        return result;
+      }
+      near_turn_action_ = MissionAction::kNone;
+    }
     if (lost_count_ >= std::max(1, config_.lost_frames)) {
       mode_ = BallMode::kBallRecoveryForward;
       stationary_recovery_.Begin(now_sec);
@@ -263,6 +285,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       recovery_visible_count_ = 0;
       recovery_walk_turns_completed_ = 0;
       recovery_walk_turn_pending_ = false;
+      recovery_walk_turn_done_ = false;
       recovery_turn_search_exhausted_ = false;
       recovery_turn_left_.reset();
       if (last_stable_ball_u_ && std::isfinite(*last_stable_ball_u_)) {
@@ -274,6 +297,12 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       return result;
     }
     result.action = FarAction();
+    if (allow_new_body_actions &&
+        (result.action.action == MissionAction::kTurnLeftInPlace ||
+         result.action.action == MissionAction::kStepForwardRightOneHurdle)) {
+      near_turn_action_ = result.action.action;
+      near_turn_done_ = false;
+    }
     if (result.action.action == MissionAction::kStepForwardTwo) {
       mode_ = BallMode::kApproachTwoBeforeDown;
       approach_two_issued_ = allow_new_body_actions;
@@ -281,6 +310,30 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     }
     return result;
   }
+  case BallMode::kNearTurnBeforeDown:
+    if (feedback.action_active && !feedback.action_done)
+      return result;
+    if (near_turn_retry_issued_) {
+      if (feedback.action_done) near_turn_done_ = true;
+      if (!near_turn_done_ || !feedback.observation_complete)
+        return result;
+      near_turn_done_ = false;
+      near_turn_retry_issued_ = false;
+      near_turn_action_ = MissionAction::kNone;
+      if (tracked_.visible && tracked_.stable) {
+        mode_ = BallMode::kApproachBall;
+        result.mode = mode_;
+        return result;
+      }
+      mode_ = BallMode::kWaitCameraDown;
+      state_enter_sec_ = now_sec;
+      result.mode = mode_;
+      result.camera_request = CameraRequest::kDown;
+      return result;
+    }
+    result.action = Locomotion(near_turn_action_);
+    if (allow_new_body_actions) near_turn_retry_issued_ = true;
+    return result;
   case BallMode::kApproachTwoBeforeDown:
     if (feedback.action_done && approach_two_issued_) {
       approach_two_issued_ = false;
@@ -322,7 +375,6 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     if (down_search_found_) {
       mode_ = BallMode::kCoarseAdjust;
       ClearTracking();
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
       result.mode = mode_;
       result.action = {};
       return result;
@@ -348,11 +400,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   case BallMode::kCoarseAdjust:
     if (feedback.action_active && !feedback.action_done)
       return result;
-    if (feedback.action_done) {
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
-      return result;
-    }
-    if (now_sec < settle_until_sec_)
+    if (feedback.action_done && !verified)
       return result;
     if (!tracked_.visible) {
       if (lost_count_ >= config_.lost_frames) {
@@ -379,7 +427,6 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       mode_ = BallMode::kFineAdjustForPickup;
       fine_pose_entered_ = true;
       ClearTracking();
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
       result.mode = mode_;
       result.tracked = {};
       return result;
@@ -389,11 +436,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   case BallMode::kFineAdjustForPickup:
     if (feedback.action_active && !feedback.action_done)
       return result;
-    if (feedback.action_done) {
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
-      return result;
-    }
-    if (now_sec + kEpsilon < settle_until_sec_)
+    if (feedback.action_done && !verified)
       return result;
     if (lost_count_ >= std::max(1, config_.lost_frames)) {
       mode_ = BallMode::kBallRecoveryDown;
@@ -440,7 +483,6 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
         // attempt는 실제 다음 PICK을 발행할 때만 증가한다.
         mode_ = BallMode::kFineAdjustForPickup;
         ClearTracking();
-        settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
         result.mode = mode_;
       } else {
         pickup_failed_ = true;
@@ -507,7 +549,6 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = fine_pose_entered_ ? BallMode::kFineAdjustForPickup
                                  : BallMode::kCoarseAdjust;
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
     } else if (status == StationaryObjectRecovery::Result::kFailed) {
       mode_ = BallMode::kFailed;
     } else if (status == StationaryObjectRecovery::Result::kRetry)
@@ -528,12 +569,16 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
         can_turn ? 1 : config_.recovery_max_observations);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = BallMode::kApproachBall;
-      settle_until_sec_ = now_sec + config_.recovery_settle_duration_sec;
+      recovery_walk_turns_completed_ = 0;
+      recovery_walk_turn_pending_ = false;
+      recovery_walk_turn_done_ = false;
+      recovery_turn_search_exhausted_ = false;
     } else if (status == StationaryObjectRecovery::Result::kFailed) {
       if (can_turn) {
         mode_ = BallMode::kBallRecoveryWalkTurn;
         recovery_walk_turns_completed_ = 0;
         recovery_walk_turn_pending_ = false;
+        recovery_walk_turn_done_ = false;
         ClearTracking();
       } else
         mode_ = BallMode::kFailed;
@@ -544,21 +589,27 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     return result;
   }
   case BallMode::kBallRecoveryWalkTurn: {
-    // Reuse 27/28 WALK one-cycle turns. A completed turn is followed by
+    if (tracked_.visible && tracked_.stable &&
+        hit_history_.size() >= static_cast<std::size_t>(config_.stable_window)) {
+      mode_ = BallMode::kApproachBall;
+      recovery_walk_turns_completed_ = 0;
+      recovery_walk_turn_pending_ = false;
+      recovery_walk_turn_done_ = false;
+      recovery_turn_search_exhausted_ = false;
+      result.mode = mode_;
+      return result;
+    }
+    if (recovery_walk_turn_pending_ && feedback.action_done) recovery_walk_turn_done_ = true;
+    // Use 31/28 in-place WALK turns. A completed turn is followed by
     // the existing 1s post-DONE observation before considering another turn.
     if (feedback.action_active && !feedback.action_done)
       return result;
     if (recovery_walk_turn_pending_) {
-      if (!feedback.action_done || !feedback.observation_complete)
+      if (!recovery_walk_turn_done_ || !feedback.observation_complete)
         return result;
       recovery_walk_turn_pending_ = false;
+      recovery_walk_turn_done_ = false;
       ++recovery_walk_turns_completed_;
-      if (tracked_.visible && tracked_.stable) {
-        mode_ = BallMode::kApproachBall;
-        settle_until_sec_ = now_sec + config_.recovery_settle_duration_sec;
-        result.mode = mode_;
-        return result;
-      }
       ClearTracking();
       if (recovery_walk_turns_completed_ >= config_.recovery_walk_turn_max) {
         recovery_turn_search_exhausted_ = true;
@@ -569,11 +620,21 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       result.tracked = tracked_;
       return result;
     }
+    // Retuning at a manual WAIT_PREVIEW boundary must respect the new budget.
+    if (recovery_walk_turns_completed_ >= config_.recovery_walk_turn_max) {
+      recovery_turn_search_exhausted_ = true;
+      stationary_recovery_.Begin(now_sec);
+      mode_ = BallMode::kBallRecoveryForward;
+      result.mode = mode_;
+      return result;
+    }
     result.action = Locomotion(*recovery_turn_left_
-                                   ? MissionAction::kStepForwardLeftOne
+                                   ? MissionAction::kTurnLeftInPlace
                                    : MissionAction::kStepForwardRightOneHurdle);
-    if (allow_new_body_actions)
+    if (allow_new_body_actions) {
       recovery_walk_turn_pending_ = true;
+      recovery_walk_turn_done_ = false;
+    }
     return result;
   }
   case BallMode::kFailed:
@@ -589,9 +650,26 @@ void BallController::ObserveOnly(const std::optional<ObjectTarget> &target,
     UpdateTracker(target, width, height);
 }
 
+void BallController::UseVerifiedObservation(
+    const std::optional<ObjectTarget>& mean, const std::deque<bool>& hits,
+    int width, int height) {
+  ClearTracking();
+  UpdateTracker(mean, width, height);
+  hit_history_ = hits;
+  while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window))
+    hit_history_.pop_front();
+  tracked_.stable = hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+      std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits;
+  if (mean && tracked_.stable) last_stable_ball_u_ = tracked_.center_px.u;
+  lost_count_ = static_cast<int>(std::distance(hit_history_.rbegin(),
+      std::find(hit_history_.rbegin(),hit_history_.rend(),true)));
+  verified_observation_pending_ = true;
+}
+
 void BallController::ClearObservationHistory() { ClearTracking(); }
 
 void BallController::ClearTracking() {
+  verified_observation_pending_ = false;
   observation_window_.Clear();
   hit_history_.clear();
   upper_acquire_history_.clear();
@@ -608,12 +686,15 @@ void BallController::ResetToLine(bool clear_ignore) {
   recovery_turn_left_.reset();
   recovery_walk_turns_completed_ = 0;
   recovery_walk_turn_pending_ = false;
+  recovery_walk_turn_done_ = false;
   recovery_turn_search_exhausted_ = false;
   state_enter_sec_ = 0.0;
-  settle_until_sec_ = 0.0;
   test_camera_pending_ = false;
   fine_pose_entered_ = false;
   approach_two_issued_ = false;
+  near_turn_action_ = MissionAction::kNone;
+  near_turn_done_ = false;
+  near_turn_retry_issued_ = false;
   last_approach_steps_ = 0;
   back_away_issued_ = false;
   completed_back_steps_ = 0;

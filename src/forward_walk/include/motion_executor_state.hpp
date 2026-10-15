@@ -83,6 +83,7 @@ public:
         if (id == active_id) return Admission::ActiveDuplicate;
         if (id == queued_id) return Admission::QueuedDuplicate;
         if (completed.Contains(id)) return Admission::CompletedDuplicate;
+        if (queued_id != 0) return Admission::Reject;
         if (active_id == 0) return Admission::Start;
         // Only current A's READY and the empty one-slot queue govern admission.
         // B may be any valid action or mission; full JSON validation precedes ACK.
@@ -132,6 +133,26 @@ public:
     CompletedHistory completed;
 };
 
+// Minimum body hold after ordinary WALK playback. DONE is never postponed.
+class WalkInterActionHold {
+public:
+    void SetDuration(double sec) {
+        if (!std::isfinite(sec) || sec < 0) throw std::invalid_argument("invalid walk hold duration");
+        duration_ = sec;
+    }
+    void Complete(uint16_t action, Clock::time_point now) {
+        const bool walk = (action >= 10 && action <= 13) ||
+            (action >= 21 && action <= 28) || action == 31;
+        until_ = walk ? now + std::chrono::duration_cast<Clock::duration>(
+            std::chrono::duration<double>(duration_)) : now;
+    }
+    bool Waiting(Clock::time_point now) const { return now < until_; }
+    void Reset() { until_ = {}; }
+private:
+    double duration_{0.0};
+    Clock::time_point until_{};
+};
+
 struct CameraPose { int32_t yaw; int32_t pitch; };
 struct CameraConfig {
     int yaw_id{21};
@@ -140,7 +161,7 @@ struct CameraConfig {
     CameraPose down{2036, 2013};
     CameraPose goal{2054, 966};
     double move_sec{0.5};
-    double settle_sec{0.2};
+    double settle_sec{0.0};
     void Validate() const {
         if (yaw_id < 0 || yaw_id > 22 || pitch_id < 0 || pitch_id > 22 || yaw_id == pitch_id ||
             !std::isfinite(move_sec) || move_sec <= 0 ||

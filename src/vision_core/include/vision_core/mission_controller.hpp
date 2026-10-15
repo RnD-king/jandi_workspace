@@ -34,6 +34,9 @@ struct MissionControllerConfig {
   double camera_motion_timeout_sec{};
   // Fresh, post-DONE observation interval for non-queued actions and camera turns.
   double post_motion_observation_sec{};
+  double transition_settle_sec{};
+  double walk_inter_action_hold_sec{};
+  double fine_motion_settle_sec{};
   // YAML allowlist of currently executing object actions whose valid READY
   // moving mean permits one successor ActionCommand to be queued in AUTO.
   // MANUAL reuses the mean for Preview/Commit without reserving B.
@@ -72,6 +75,8 @@ struct MissionFrameInput {
   std::optional<ObjectTarget> goal_target;
   std::optional<ObjectTarget> backboard_target;
   GoalPoseObservation goal_pose;
+  // A valid image detection whose center depth is rejected/missing.
+  bool backboard_image_without_depth{false};
   std::optional<double> backboard_center_depth_m;
   int image_width{0};
   int image_height{0};
@@ -103,6 +108,9 @@ struct MissionFrameInput {
   // Manual PREVIEW triggers observation; AUTO default keeps post-DONE gates.
   bool manual_observation_control{false};
   bool begin_manual_observation{false};
+  // Real 10-frame evidence accompanying a manual READY average.
+  std::deque<bool> manual_object_hits, manual_pose_hits, manual_near_hits;
+  bool manual_ready_mean{false};
   // 단발 튜닝처럼 여러 프레임에서 집계한 guide로 이번 LINE 판단만 수행한다.
   std::optional<LineGuide> line_decision_guide_override;
 };
@@ -182,6 +190,8 @@ struct PerceptionFrameInput {
   // Manual PREVIEW triggers observation; AUTO default keeps post-DONE gates.
   bool manual_observation_control{false};
   bool begin_manual_observation{false};
+  // Real 10-frame evidence accompanying a manual READY average.
+  std::deque<bool> manual_object_hits, manual_pose_hits, manual_near_hits;
   // PerceptionFrameInput only: one synthetic 40%-to-READY object mean.
   bool manual_ready_mean{false};
   std::optional<LineGuide> line_decision_guide_override;
@@ -230,6 +240,10 @@ public:
   bool ManualObservationHasEnoughFrames() const {
     return !decision_observation_active_ || decision_observation_mission_==MissionType::kLine ||
         decision_object_hits_.size()>=9; // next processed frame completes the 10-frame window
+  }
+  bool ManualObservationCanFinish(double now_sec) const {
+    return ManualObservationHasEnoughFrames() && (!decision_observation_active_ ||
+        now_sec + 1e-9 >= decision_observation_start_sec_ + config_.post_motion_observation_sec);
   }
   int RepeatScope() const;
   bool NeedsStationaryObservation() const;
@@ -360,6 +374,7 @@ private:
     ObjectTarget target;
     std::optional<double> center_depth_m;
     GoalPoseObservation pose;
+    std::deque<bool> hits, pose_hits, near_hits;
   };
   std::uint64_t moving_object_action_id_{0};
   CameraMode moving_object_camera_{CameraMode::kForward};
@@ -392,8 +407,11 @@ private:
   MissionType decision_observation_mission_{MissionType::kLine};
   CommandDeliveryFeedback deferred_done_;
   double decision_observation_start_sec_{0.0};
+  double settle_until_sec_{0.0};
+  std::uint64_t last_settle_done_id_{0};
   std::deque<bool> decision_object_hits_;
   std::deque<bool> decision_goal_pose_hits_;
+  std::deque<bool> decision_goal_near_hits_;
   std::size_t decision_observation_total_frames_{0};
   // Raw (already associated) object samples for the 1s stationary mean.
   // Ball/hurdle use bounded later-weighted coordinates. Goal keeps its pose

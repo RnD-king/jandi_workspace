@@ -48,7 +48,6 @@ struct HurdleConfig {
   int recovery_reacquire_min_hits{};
   double recovery_timeout_sec{};
   double recovery_center_tolerance_px{};
-  double recovery_settle_duration_sec{};
 };
 
 struct TrackedHurdle {
@@ -88,9 +87,11 @@ public:
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
+  void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
+      const std::deque<bool>& hits, int width, int height);
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
   void UpdateTuning(const HurdleConfig &config) { config_ = config; }
-  void ShiftTimers(double duration) { state_enter_sec_+=duration; settle_until_sec_+=duration; }
+  void ShiftTimers(double duration) { state_enter_sec_+=duration; }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
   void StartTestNear() { Reset(); mode_=HurdleMode::kWaitCameraDown; test_camera_pending_=true; }
   void StartTestExecute() { Reset(); fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; }
@@ -128,6 +129,7 @@ private:
   int lost_count_{0};
   int recovery_visible_count_{0};
   bool has_smoothed_{false};
+  bool verified_observation_pending_{false};
   ObjectObservationWindow observation_window_;
   bool down_search_started_{false};
   int down_search_steps_completed_{0};
@@ -139,7 +141,6 @@ private:
   TrackedHurdle tracked_;
   double last_seen_u_px_{0.0};
   double state_enter_sec_{0.0};
-  double settle_until_sec_{0.0};
   double ignore_until_sec_{0.0};
 };
 

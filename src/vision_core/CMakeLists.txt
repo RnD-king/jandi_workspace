@@ -73,26 +73,33 @@ install(FILES
 )
 
 if(BUILD_TESTING)
+  # Fixed scenario data keeps logic tests independent of operator tuning.
+  set(VISION_CORE_TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
+  add_executable(shared_vision_core_mission_revision_test tests/mission_revision_test.cpp)
+  target_link_libraries(shared_vision_core_mission_revision_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_mission_revision_test COMMAND shared_vision_core_mission_revision_test)
+  set_tests_properties(shared_vision_core_mission_revision_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_staged_mission_contract_test tests/staged_mission_contract_test.cpp)
   target_link_libraries(shared_vision_core_staged_mission_contract_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_staged_mission_contract_test COMMAND shared_vision_core_staged_mission_contract_test)
   set_tests_properties(shared_vision_core_staged_mission_contract_test PROPERTIES ENVIRONMENT
-    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml")
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_approach_stance_regression_test tests/approach_stance_regression_test.cpp)
   target_link_libraries(shared_vision_core_approach_stance_regression_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_approach_stance_regression_test COMMAND shared_vision_core_approach_stance_regression_test)
   set_tests_properties(shared_vision_core_approach_stance_regression_test PROPERTIES ENVIRONMENT
-    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml")
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_review_regression_test tests/review_regression_test.cpp)
   target_link_libraries(shared_vision_core_review_regression_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_review_regression_test COMMAND shared_vision_core_review_regression_test)
   set_tests_properties(shared_vision_core_review_regression_test PROPERTIES ENVIRONMENT
-    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml")
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_unified_sequence_test tests/unified_sequence_test.cpp)
   target_link_libraries(shared_vision_core_unified_sequence_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_unified_sequence_test COMMAND shared_vision_core_unified_sequence_test)
   set_tests_properties(shared_vision_core_unified_sequence_test PROPERTIES ENVIRONMENT
-    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml")
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_config_loader_test
     tests/config_loader_test.cpp
   )
@@ -102,7 +109,7 @@ if(BUILD_TESTING)
   add_test(
     NAME shared_vision_core_config_loader_test
     COMMAND shared_vision_core_config_loader_test
-            ${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml
+            ${VISION_CORE_TEST_CONFIG}
   )
 
   add_executable(shared_vision_core_ball_controller_test
@@ -216,6 +223,17 @@ if(BUILD_TESTING)
     shared_vision_core_perception_pipeline_test
     shared_vision_core_object_association_tracker_test
     PROPERTIES ENVIRONMENT
-      "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml"
+      "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}"
   )
+  # Logic tests always use the committed scenario fixture, including default
+  # controller constructors. Robot nodes keep their production default path.
+  get_property(_logic_tests DIRECTORY PROPERTY TESTS)
+  set_tests_properties(${_logic_tests} PROPERTIES LABELS "logic")
+
+  add_executable(shared_vision_core_runtime_config_check tests/runtime_config_check.cpp)
+  target_link_libraries(shared_vision_core_runtime_config_check PRIVATE shared_vision_core yaml-cpp)
+  add_test(NAME shared_vision_core_runtime_config_check
+    COMMAND shared_vision_core_runtime_config_check
+      ${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml)
+  set_tests_properties(shared_vision_core_runtime_config_check PROPERTIES LABELS "config")
 endif()

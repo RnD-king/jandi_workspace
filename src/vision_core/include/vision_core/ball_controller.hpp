@@ -28,6 +28,7 @@ enum class BallMode {
   kCoarseAdjust,
   kWaitFinePose,
   kBallRecoveryWalkTurn, // WALK-stance 27/28 search before stationary fallback
+  kNearTurnBeforeDown, // One extra zone-7/9 turn, reobserve, then DOWN if still lost
 };
 
 struct BallConfig {
@@ -35,7 +36,7 @@ struct BallConfig {
   double down_search_timeout_sec{};
   double recovery_observation_sec{};
   int recovery_max_observations{};
-  int recovery_walk_turn_max{5};
+  int recovery_walk_turn_max{3};
   int post_pickup_back_steps{};
 
   int stable_window{};
@@ -56,11 +57,9 @@ struct BallConfig {
   double PickupCenterV() const { return (pickup_v1_px + pickup_v2_px) * 0.5; }
   double PickupHalfWidth() const { return (pickup_u2_px - pickup_u1_px) * 0.5; }
   double PickupHalfHeight() const { return (pickup_v2_px - pickup_v1_px) * 0.5; }
-  double fine_settle_duration_sec{};
   double recovery_timeout_sec{};
   int recovery_reacquire_min_hits{};
   double recovery_center_tolerance_px{};
-  double recovery_settle_duration_sec{};
 };
 
 struct TrackedBall {
@@ -106,9 +105,11 @@ public:
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
+  void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
+      const std::deque<bool>& hits, int width, int height);
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
   void UpdateTuning(const BallConfig &config) { config_ = config; }
-  void ShiftTimers(double duration) { state_enter_sec_+=duration; settle_until_sec_+=duration; }
+  void ShiftTimers(double duration) { state_enter_sec_+=duration; }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
   void StartTestNear() { Reset(); mode_=BallMode::kWaitCameraDown; test_camera_pending_=true; }
   void StartTestExecute() { Reset(); fine_pose_entered_=true; mode_=BallMode::kFineAdjustForPickup; }
@@ -144,10 +145,14 @@ private:
   int last_approach_steps_{0};
   bool fine_pose_entered_{false};
   bool approach_two_issued_{false};
+  MissionAction near_turn_action_{MissionAction::kNone};
+  bool near_turn_done_{false};
+  bool near_turn_retry_issued_{false};
   bool test_camera_pending_{false};
   int lost_count_{0};
   int recovery_visible_count_{0};
   bool has_smoothed_{false};
+  bool verified_observation_pending_{false};
   ObjectObservationWindow observation_window_;
   bool down_search_started_{false};
   bool down_search_found_{false};
@@ -160,9 +165,9 @@ private:
   std::optional<bool> recovery_turn_left_;
   int recovery_walk_turns_completed_{0};
   bool recovery_walk_turn_pending_{false};
+  bool recovery_walk_turn_done_{false};
   bool recovery_turn_search_exhausted_{false};
   double state_enter_sec_{0.0};
-  double settle_until_sec_{0.0};
   double ignore_ball_until_sec_{0.0};
   bool back_away_issued_{false};
   bool has_ball_{false};

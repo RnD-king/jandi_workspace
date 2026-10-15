@@ -20,7 +20,7 @@ MissionFrameInput Frame(double now) {
   f.line_centers={{420,450},{420,350},{420,250}}; return f;
 }
 void TestClockAndGoalReservationDrain() {
-  auto cfg=LoadDefaultAlgorithmConfig(); cfg.initial_has_ball=true;
+  auto cfg=LoadDefaultAlgorithmConfig(); cfg.transition_settle_sec=0; cfg.initial_has_ball=true;
   cfg.enable_ball=cfg.enable_hurdle=false;
   cfg.goal.post_pickup_walk_fallback_actions=3;
   cfg.line_features.image_center_u=320;
@@ -83,7 +83,7 @@ void TestClockExcludesIdleAndDeferredDone() {
   assert(std::abs(clock.LineExecutionSeconds()-5)<1e-8);
 }
 void TestManualPerceptionStationaryRecovery() {
-  auto cfg=LoadDefaultAlgorithmConfig(); cfg.enable_goal=cfg.enable_hurdle=false;
+  auto cfg=LoadDefaultAlgorithmConfig(); cfg.transition_settle_sec=0; cfg.enable_goal=cfg.enable_hurdle=false;
   cfg.ball.upper_acquire_v_px=480.0;
   MissionController core(cfg);
   PerceptionFrameInput in; in.image_width=640; in.image_height=480;
@@ -131,11 +131,11 @@ void TestManualPerceptionStationaryRecovery() {
   assert(!reacquired.NeedsStationaryObservation());
 }
 void TestStationaryRecoveryAndNoHurdleCentering() {
-  auto c=LoadDefaultAlgorithmConfig();
+  auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;
   // This fixture tests mode recovery, not the production 0.60s post-search
   // settling time. With a 10/7 observation window, the remaining frames
   // otherwise end before the settle deadline and never reach kWaitFinePose.
-  c.ball.fine_settle_duration_sec=0.0;
+
   BallController ball(c.ball,3);
   CameraFeedback forward{}, down{CameraMode::kDown,true};
   double now=0; BallResult b;
@@ -161,7 +161,7 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   assert(b.mode==BallMode::kFailed && ball.RecoveryObservationsCompleted()==5);
 
   HurdleController hurdle(c.hurdle,3); HurdleResult h; now=0;
-  for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,.62),640,480,now+=.1,forward,{},StraightLine(),false);
+  for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,(c.hurdle.approach_short_v_px-10)/480.0),640,480,now+=.1,forward,{},StraightLine(),false);
   assert(h.action.action==MissionAction::kStepForwardFour); // Strongly off-center still walks straight.
   for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,.85),640,480,now+=.1,forward,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kApproachTwoBeforeDown);

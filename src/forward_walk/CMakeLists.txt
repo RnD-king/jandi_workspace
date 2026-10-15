@@ -24,6 +24,10 @@ find_package(rosidl_default_generators REQUIRED)
 
 
 find_package(vision REQUIRED)
+# The same installed canonical YAML supplies the executor's default walk gap.
+find_package(shared_vision_core REQUIRED CONFIG
+  HINTS "$ENV{VISION_CORE_ROOT}/lib/cmake/shared_vision_core"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../vision_core/install/lib/cmake/shared_vision_core")
 
 # 타겟에 대한 포함 디렉토리
 include_directories(
@@ -42,6 +46,8 @@ add_executable(main_node
 
 target_compile_definitions(main_node PRIVATE
   FORWARD_WALK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+target_link_libraries(main_node shared_vision_core::shared_vision_core)
 
 # 실행 파일에 필요한 ROS 2 라이브러리 링크
 ament_target_dependencies(main_node
@@ -96,14 +102,21 @@ install(PROGRAMS
 include(CTest)
 if(BUILD_TESTING)
   enable_testing()
+  add_executable(motion_assets_check
+    tests/motion_assets_check.cpp src/p2p_motion_player.cpp src/dynamixel.cpp)
+  ament_target_dependencies(motion_assets_check dynamixel_sdk Eigen3)
+  target_compile_definitions(motion_assets_check PRIVATE
+    FORWARD_WALK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_test(NAME executor_motion_assets COMMAND motion_assets_check)
+  set_tests_properties(executor_motion_assets PROPERTIES LABELS "assets")
+  add_test(NAME executor_asset_checker_test COMMAND motion_assets_check --self-test)
+  set_tests_properties(executor_asset_checker_test PROPERTIES LABELS "logic")
   add_executable(executor_logic_test
     tests/executor_logic_test.cpp
     src/p2p_motion_player.cpp
     src/dynamixel.cpp
   )
   ament_target_dependencies(executor_logic_test dynamixel_sdk Eigen3)
-  target_compile_definitions(executor_logic_test PRIVATE
-    FORWARD_WALK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_test(NAME executor_logic_test COMMAND executor_logic_test)
   # Compile the real MainNode against an in-memory Dxl, never the device driver.
   add_executable(executor_integration_test
@@ -114,12 +127,15 @@ if(BUILD_TESTING)
     -include ${CMAKE_CURRENT_SOURCE_DIR}/tests/fake_dynamixel.hpp)
   target_compile_definitions(executor_integration_test PRIVATE
     FORWARD_WALK_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(executor_integration_test shared_vision_core::shared_vision_core)
   add_test(NAME executor_integration_test COMMAND executor_integration_test)
   set_tests_properties(executor_integration_test PROPERTIES
     TIMEOUT 60 ENVIRONMENT "ROS_DOMAIN_ID=87;ROS_LOCALHOST_ONLY=1")
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME executor_source_contract
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/source_contract_test.py)
+  set_tests_properties(executor_logic_test executor_integration_test executor_source_contract
+    PROPERTIES LABELS "logic")
 endif()
 
 ament_package()

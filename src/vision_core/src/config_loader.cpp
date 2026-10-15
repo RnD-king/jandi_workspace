@@ -74,6 +74,10 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
   NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
+  NonnegativeInt(c.goal.recovery_turn_max, "goal.recovery_turn_max");
+  Nonnegative(c.transition_settle_sec, "mission.transition_settle_sec");
+  Nonnegative(c.walk_inter_action_hold_sec, "mission.walk_inter_action_hold_sec");
+  Nonnegative(c.fine_motion_settle_sec, "mission.fine_motion_settle_sec");
   NonnegativeInt(c.ball.post_pickup_back_steps, "ball.post_pickup_back_steps");
   Nonnegative(c.hurdle.down_one_step_v_px, "hurdle.down_one_step_v_px");
   Nonnegative(c.hurdle.fine_mode_v_px, "hurdle.fine_mode_v_px");
@@ -190,15 +194,11 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.ball.pickup_u1_px >= c.ball.pickup_u2_px ||
       c.ball.pickup_v1_px >= c.ball.pickup_v2_px)
     throw std::runtime_error("ball pickup edges require u1 < u2 and v1 < v2");
-  Nonnegative(c.ball.fine_settle_duration_sec,
-              "ball.fine_settle_duration_sec");
   Nonnegative(c.ball.recovery_timeout_sec, "ball.recovery_timeout_sec");
   PositiveInt(c.ball.recovery_reacquire_min_hits,
               "ball.recovery_reacquire_min_hits");
   Nonnegative(c.ball.recovery_center_tolerance_px,
        "ball.recovery_center_tolerance_px");
-  Nonnegative(c.ball.recovery_settle_duration_sec,
-              "ball.recovery_settle_duration_sec");
 
   HitsWithinWindow(c.hurdle.stable_min_hits, c.hurdle.stable_window,
                    "hurdle.stable_min_hits", "hurdle.stable_window");
@@ -214,8 +214,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
               "hurdle.recovery_timeout_sec");
   Nonnegative(c.hurdle.recovery_center_tolerance_px,
        "hurdle.recovery_center_tolerance_px");
-  Nonnegative(c.hurdle.recovery_settle_duration_sec,
-              "hurdle.recovery_settle_duration_sec");
 
   HitsWithinWindow(c.goal.stable_min_hits, c.goal.stable_window,
                    "goal.stable_min_hits", "goal.stable_window");
@@ -229,16 +227,12 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Finite(c.goal.throw_landing_x_m, "goal.throw_landing_x_m");
   Positive(c.goal.throw_landing_z_m, "goal.throw_landing_z_m");
   Nonnegative(c.goal.position_tolerance_m, "goal.position_tolerance_m");
-  Nonnegative(c.goal.fine_settle_duration_sec,
-              "goal.fine_settle_duration_sec");
   Nonnegative(c.goal.shoot_yaw_limit_deg, "goal.shoot_yaw_limit_deg");
   Nonnegative(c.goal.recovery_timeout_sec, "goal.recovery_timeout_sec");
   PositiveInt(c.goal.recovery_reacquire_min_hits,
               "goal.recovery_reacquire_min_hits");
   Nonnegative(c.goal.recovery_center_tolerance_px,
        "goal.recovery_center_tolerance_px");
-  Nonnegative(c.goal.recovery_settle_duration_sec,
-              "goal.recovery_settle_duration_sec");
 
   NonnegativeInt(c.line_detection.class_id, "line_detection.class_id");
   Unit(c.line_detection.confidence, "line_detection.confidence");
@@ -371,11 +365,9 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "pickup_u2_px", c.ball.pickup_u2_px);
   Assign(b, "pickup_v1_px", c.ball.pickup_v1_px);
   Assign(b, "pickup_v2_px", c.ball.pickup_v2_px);
-  Assign(b, "fine_settle_duration_sec", c.ball.fine_settle_duration_sec);
   Assign(b, "recovery_timeout_sec", c.ball.recovery_timeout_sec);
   Assign(b, "recovery_reacquire_min_hits", c.ball.recovery_reacquire_min_hits);
   Assign(b, "recovery_center_tolerance_px", c.ball.recovery_center_tolerance_px);
-  Assign(b, "recovery_settle_duration_sec", c.ball.recovery_settle_duration_sec);
 
   const auto h = a["hurdle"];
   Assign(h, "down_one_step_v_px", c.hurdle.down_one_step_v_px);
@@ -399,11 +391,11 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "recovery_reacquire_min_hits", c.hurdle.recovery_reacquire_min_hits);
   Assign(h, "recovery_timeout_sec", c.hurdle.recovery_timeout_sec);
   Assign(h, "recovery_center_tolerance_px", c.hurdle.recovery_center_tolerance_px);
-  Assign(h, "recovery_settle_duration_sec", c.hurdle.recovery_settle_duration_sec);
 
   const auto g = a["goal"];
   Assign(g,"fine_one_step_range_error_m",c.goal.fine_one_step_range_error_m);
   Assign(g,"fine_two_step_range_error_m",c.goal.fine_two_step_range_error_m);
+  Assign(g, "recovery_turn_max", c.goal.recovery_turn_max);
   Assign(g, "recovery_observation_sec", c.goal.recovery_observation_sec);
   Assign(g, "recovery_max_observations", c.goal.recovery_max_observations);
   Assign(g, "approach_short_z_m", c.goal.approach_short_z_m);
@@ -422,12 +414,10 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "throw_landing_x_m", c.goal.throw_landing_x_m);
   Assign(g, "throw_landing_z_m", c.goal.throw_landing_z_m);
   Assign(g, "position_tolerance_m", c.goal.position_tolerance_m);
-  Assign(g, "fine_settle_duration_sec", c.goal.fine_settle_duration_sec);
   Assign(g, "shoot_yaw_limit_deg", c.goal.shoot_yaw_limit_deg);
   Assign(g, "recovery_timeout_sec", c.goal.recovery_timeout_sec);
   Assign(g, "recovery_reacquire_min_hits", c.goal.recovery_reacquire_min_hits);
   Assign(g, "recovery_center_tolerance_px", c.goal.recovery_center_tolerance_px);
-  Assign(g, "recovery_settle_duration_sec", c.goal.recovery_settle_duration_sec);
 
   const auto ld = a["line_detection"];
   Assign(ld, "class_id", c.line_detection.class_id);
@@ -466,6 +456,9 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(m, "mission_recovery_yaw_deg", c.mission_recovery_yaw_deg);
 
   Assign(m, "camera_motion_timeout_sec", c.camera_motion_timeout_sec);
+  Assign(m, "transition_settle_sec", c.transition_settle_sec);
+  Assign(m, "walk_inter_action_hold_sec", c.walk_inter_action_hold_sec);
+  Assign(m, "fine_motion_settle_sec", c.fine_motion_settle_sec);
   Assign(m, "post_motion_observation_sec", c.post_motion_observation_sec);
   Assign(m, "object_ready_mean_actions", c.object_ready_mean_actions);
   Assign(m, "backboard_min_depth_m", c.backboard_min_depth_m);

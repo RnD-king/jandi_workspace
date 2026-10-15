@@ -27,54 +27,35 @@ RawPositions InitialPose() {
     return pose;
 }
 
+void TestWalkInterActionHold() {
+    WalkInterActionHold hold;
+    const auto t=Clock::time_point{}+1s;
+    hold.Complete(13,t);
+    Require(!hold.Waiting(t), "zero gap changed legacy execution");
+    hold.SetDuration(.6);
+    for(uint16_t action : {10,11,12,13,21,22,23,24,25,26,27,28,31}) {
+        hold.Complete(action,t);
+        Require(hold.Waiting(t+599ms), "WALK hold ended early");
+        Require(!hold.Waiting(t+600ms), "WALK hold extended past configured duration");
+    }
+    hold.Complete(3,t);
+    Require(!hold.Waiting(t), "WALK hold applied to FINE motion");
+    Rejects([&]{hold.SetDuration(-.1);});
+    ActionTransactions state;
+    state.Activate(1,1,13);state.MarkReady();state.queued_id=2;state.CompleteActive();
+    Require(state.Evaluate(2,1,13)==Admission::QueuedDuplicate, "delayed B lost idempotency");
+    Require(state.Evaluate(3,1,13)==Admission::Reject, "third command bypassed delayed one-slot queue");
+}
+
 int main() {
-    const fs::path assets(FORWARD_WALK_SOURCE_DIR);
+    TestWalkInterActionHold();
     const fs::path temporary = fs::temp_directory_path() / ("jandi_executor_test_" + std::to_string(getpid()));
     fs::create_directories(temporary);
     int groups = 0;
     auto pass = [&](const std::string& label) { ++groups; std::cout << "PASS " << label << '\n'; };
     try {
         P2PMotionPlayer player(nullptr); // No Dxl instance/constructor or device access.
-        const auto left = assets / "motions/보행_좌회전전진_20도_최종_초기X.json";
-        const auto right = assets / "motions/보행_우회전전진_20도_최종_초기X.json";
-        const auto five = assets / "missions/연속걷기.json";
-        const auto left_three = assets / "missions/직진_좌회전_3번.json";
-        const auto right_three = assets / "missions/직진_우회전_3번.json";
-        const auto left_in_place = assets / "motions/좌회전_최종.json";
-        const auto right_in_place = assets / "motions/우회전_최종.json";
-        for (const auto& path : {left, right, five, left_three, right_three,
-                                left_in_place, right_in_place}) {
-            const auto program = player.PrepareProgram(path.string(), (assets / "motions").string(), {});
-            Require(player.StartPrepared(program, InitialPose(), Clock::time_point{}), player.Error());
-            player.Stop();
-        }
-        for (const std::string file : {"직진_2걸음.json","직진_3걸음.json","직진_4걸음.json",
-                                      "직진_좌회전_2번.json","직진_우회전_2번.json","직진_우회전_1번.json"}) {
-            const auto program=player.PrepareProgram((assets/"missions"/file).string(),(assets/"motions").string(),{});
-            Require(player.StartPrepared(program,InitialPose(),Clock::time_point{}),player.Error());
-            player.Stop();
-        }
-        pass("new action 21..26 real mission JSON preparation");
-        // 좌회전은 회전만 반복하고, 우회전은 회전→직진을 반복하는 의도된 구성을 검증한다.
-        for (const auto& spec : {
-            std::make_pair(left_three, std::string("보행_좌회전전진_20도_최종_초기X.json")),
-            std::make_pair(right_three, std::string("보행_우회전전진_20도_최종_초기X.json"))
-        }) {
-            boost::property_tree::ptree mission;
-            boost::property_tree::read_json(spec.first.string(), mission);
-            const auto& motions = mission.get_child("motions");
-            const bool right_sequence=spec.first==right_three;
-            Require(motions.size()==(right_sequence ? 6 : 3), "wrong three-turn sequence length");
-            std::size_t item_index=0;
-            for (const auto& item : motions) {
-                const auto expected=right_sequence && item_index%2 ? "보행_1걸음_초기X.json" : spec.second;
-                Require(item.second.get<std::string>("filename")==expected,
-                        "turn-forward mission has an incorrect motion reference");
-                ++item_index;
-            }
-        }
-        pass("11/12/13 real motion paths and 3x turn-forward manifests");
-
+        // Real operator assets are checked separately by motion_assets_check.
         const auto fixture = temporary / "fixture.json";
         auto write_fixture = [&](double duration, double hold) {
             std::ofstream stream(fixture);
@@ -99,7 +80,13 @@ int main() {
         player.Update(&actual, t0);
         control.Update(&expected, t0);
         const auto before = player.RemainingNominalSec(t0);
-        player.PrepareProgram(left.string(), (assets / "motions").string(), {});
+        boost::property_tree::ptree queued;
+        boost::property_tree::read_json(fixture.string(), queued);
+        queued.put("name", "queued");
+        queued.get_child("keyframes").front().second.put("positions.0", 2248);
+        const auto queued_path=temporary/"queued.json";
+        boost::property_tree::write_json(queued_path.string(),queued);
+        player.PrepareProgram(queued_path.string(), temporary.string(), {});
         Require(player.IsPlaying() && player.MotionName() == "test" &&
                 player.RemainingNominalSec(t0) == before, "prepare mutated active state");
         player.Update(&actual, t0 + 90ms);
@@ -107,6 +94,25 @@ int main() {
         Require(actual == expected && actual.at(0) == 2056, "delayed update skipped a step");
         Require(!player.IsNearCompletion(0.25, t0 + 90ms), "wall delay caused early READY");
         pass("non-destructive preparation + 90ms delay preserves fixed step");
+
+        // Verify mission ordering/repetition with fixed test assets rather than
+        // freezing the operator's live mission contents or timing.
+        const auto sequence_path=temporary/"sequence.json";
+        std::ofstream(sequence_path) <<
+            "{\"motions\":[{\"filename\":\"fixture.json\"},"
+            "{\"filename\":\"queued.json\"},{\"filename\":\"fixture.json\"}]}";
+        P2PMotionPlayer sequence(nullptr);
+        const auto sequence_program=sequence.PrepareProgram(sequence_path.string(),temporary.string(),{});
+        Require(sequence.StartPrepared(sequence_program,InitialPose(),t0),sequence.Error());
+        for(int step=0;step<75;++step) {
+            RawPositions output;
+            sequence.Update(&output,t0+step*20ms);
+            if(step==24 || step==74) Require(output.at(0)==2148,"mission skipped/reordered repeated motion");
+            if(step==49) Require(output.at(0)==2248,"mission did not follow referenced motion order");
+        }
+        Require(sequence.Update(&actual,t0+1500ms)==P2PMotionPlayer::UpdateResult::kFinished,
+                "mission length did not reflect its references");
+        pass("fixed mission reference order, repeated references and completion");
 
         using boost::property_tree::ptree;
         ptree root;
@@ -345,14 +351,14 @@ int main() {
         for (int i=2;i<25;++i) { now+=20ms; camera.Update(now); }
         camera.Merge(base);
         Require(base.at(21)==2054 && base.at(22)==966, "camera target not reached");
-        Require(camera.Update(now+20ms)==CameraMotion::Result::Running, "settle skipped");
-        Require(camera.Update(now+220ms)==CameraMotion::Result::Finished, "camera DONE missing after settle");
+        Require(camera.Update(now+20ms)==CameraMotion::Result::Finished, "camera DONE gained an extra settle delay");
+        Require(camera.Update(now+220ms)==CameraMotion::Result::Idle, "completed camera emitted completion again");
         auto next_body = InitialPose(); camera.Merge(next_body);
         for (int id : Dxl::MotorIds()) {
             Require(next_body.at(id)==(id==21?2054:id==22?966:2048), "override changed body motor or was cleared after DONE");
         }
         Require(!camera.Active() && camera.OverrideEnabled(), "persistent override lost");
-        pass("camera calibration, delayed interpolation, settle/DONE, persistent full-packet merge");
+        pass("camera calibration, delayed interpolation, immediate DONE, persistent full-packet merge");
 
         fs::remove_all(temporary);
         std::cout << "All " << groups << " test groups passed without hardware.\n";

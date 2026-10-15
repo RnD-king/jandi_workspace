@@ -355,6 +355,14 @@ void MissionController::TrackMovingObjectReadyWindow(
   mean.action_id = moving_object_action_id_;
   mean.mission = active_mission_;
   mean.camera = moving_object_camera_;
+  for (std::size_t i = window.size() - 10; i < window.size(); ++i) {
+    const auto& sample = *window[i];
+    mean.hits.push_back(sample.target.has_value());
+    mean.pose_hits.push_back(sample.target && sample.pose.valid &&
+        std::isfinite(sample.pose.x_m) && std::isfinite(sample.pose.z_m) &&
+        sample.pose.z_m > 0 && std::isfinite(sample.pose.yaw_rad));
+    mean.near_hits.push_back(mean.pose_hits.back() && sample.pose.z_m<=config_.goal.fine_adjust_start_z_m);
+  }
   double sum_u=0.0, sum_v=0.0, sum_ru=0.0, sum_rv=0.0;
   double sum_x=0.0, sum_y=0.0, sum_w=0.0, sum_h=0.0;
   double sum_conf=0.0, total_weight=0.0, last_seen=-1.0;
@@ -466,10 +474,11 @@ void MissionController::BeginDecisionObservation(
   decision_observation_camera_only_ = camera_only;
   decision_observation_first_frame_ = true;
   decision_observation_mission_ = mission;
-  decision_observation_start_sec_ = now_sec;
+  decision_observation_start_sec_ = std::max(now_sec, settle_until_sec_);
   deferred_done_ = done;
   decision_object_hits_.clear();
   decision_goal_pose_hits_.clear();
+  decision_goal_near_hits_.clear();
   decision_observation_total_frames_ = 0;
   decision_object_weight_=0.0;
   decision_last_target_.reset();
@@ -497,7 +506,7 @@ void MissionController::BeginDecisionObservation(
 }
 
 void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
-  if (!decision_observation_active_) return;
+  if (!decision_observation_active_ || input.now_sec + 1e-9 < decision_observation_start_sec_) return;
   ++decision_observation_total_frames_;
   const std::optional<ObjectTarget> *target = nullptr;
   switch (decision_observation_mission_) {
@@ -516,6 +525,8 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
           std::isfinite(input.goal_pose.z_m) &&
           std::isfinite(input.goal_pose.yaw_rad);
       decision_goal_pose_hits_.push_back(pose_valid);
+      decision_goal_near_hits_.push_back(pose_valid && input.goal_pose.z_m<=config_.goal.fine_adjust_start_z_m);
+      while (decision_goal_near_hits_.size()>10) decision_goal_near_hits_.pop_front();
       while (decision_goal_pose_hits_.size() > 10)
         decision_goal_pose_hits_.pop_front();
     }
@@ -572,8 +583,8 @@ bool MissionController::DecisionObservationReady(double now_sec) const {
       now_sec - decision_observation_start_sec_ + 1e-9 <
           config_.post_motion_observation_sec) return false;
   if (decision_observation_mission_ == MissionType::kLine) return true;
-  // Object 10/7 evidence is reserved for initial acquisition.
-  // After DONE, end at one second; missing targets go to recovery FSM.
+  // Time and real frames accumulate concurrently. The completed window
+  // validates 10/7 once; controllers reuse that evidence without recollection.
   return decision_object_hits_.size() >= 10;
 }
 
@@ -647,32 +658,33 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       input.camera_feedback.settled &&
       input.camera_feedback.actual_mode == moving_object_ready_mean_->camera) {
     const auto mean = *moving_object_ready_mean_;
-    // The cached mean already passed ten/7 detection checks. Reconstruct
-    // tracker stability using that verified evidence, not a single raw DONE
-    // frame, and let the owning mission FSM consume the real DONE immediately.
+    // Import the actual window's hit/miss history with the cached mean.
     if (active_mission_ == MissionType::kBall) {
       input.ball_target = mean.target;
-      ball_controller_.ClearObservationHistory();
-      for (int i=1; i<std::max(1,config_.ball.stable_min_hits); ++i)
-        ball_controller_.ObserveOnly(input.ball_target,input.image_width,input.image_height);
-      ball_controller_.UseNextObservationAsMean();
+      ball_controller_.UseVerifiedObservation(input.ball_target,mean.hits,input.image_width,input.image_height);
     } else if (active_mission_ == MissionType::kHurdle) {
       input.hurdle_target = mean.target;
-      hurdle_controller_.ClearObservationHistory();
-      for (int i=1; i<std::max(1,config_.hurdle.stable_min_hits); ++i)
-        hurdle_controller_.ObserveOnly(input.hurdle_target,input.image_width,input.image_height);
-      hurdle_controller_.UseNextObservationAsMean();
+      hurdle_controller_.UseVerifiedObservation(input.hurdle_target,mean.hits,input.image_width,input.image_height);
     } else {
       input.backboard_target = mean.target;
       input.backboard_center_depth_m = mean.center_depth_m;
       input.goal_pose = mean.pose;
       goal_controller_.ClearMovingApproachTriggers();
-      goal_controller_.ClearObservationHistory();
-      for (int i=1; i<std::max(1,config_.goal.stable_min_hits); ++i)
-        goal_controller_.ObserveOnly(input.backboard_target,input.goal_pose,
-                                     input.image_width,input.image_height);
-      goal_controller_.UseNextObservationAsMean();
+      goal_controller_.UseVerifiedObservation(input.backboard_target,input.goal_pose,
+          mean.hits,mean.pose_hits,input.image_width,input.image_height,mean.near_hits);
     }
+    applied_object_ready_mean = true;
+  }
+  if (input.manual_observation_control && input.manual_ready_mean &&
+      input.manual_object_hits.size() == 10 &&
+      std::count(input.manual_object_hits.begin(),input.manual_object_hits.end(),true) >= 7) {
+    if (active_mission_ == MissionType::kBall)
+      ball_controller_.UseVerifiedObservation(input.ball_target,input.manual_object_hits,input.image_width,input.image_height);
+    else if (active_mission_ == MissionType::kHurdle)
+      hurdle_controller_.UseVerifiedObservation(input.hurdle_target,input.manual_object_hits,input.image_width,input.image_height);
+    else if (active_mission_ == MissionType::kGoal)
+      goal_controller_.UseVerifiedObservation(input.backboard_target,input.goal_pose,
+          input.manual_object_hits,input.manual_pose_hits,input.image_width,input.image_height,input.manual_near_hits);
     applied_object_ready_mean = true;
   }
   if (input.delivery_feedback.done) {
@@ -683,6 +695,19 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   // Consume the real completion edge for timing before any observation gate
   // defers it. Stationary post-DONE samples must never count as walking.
   command_coordinator_.ObserveExecutionTime(input.delivery_feedback, input.now_sec);
+  const bool timing_done = input.delivery_feedback.done && last_command_.action_id != 0 &&
+      input.delivery_feedback.action_id == last_command_.action_id &&
+      last_settle_done_id_ != input.delivery_feedback.action_id;
+  if (timing_done) {
+    last_settle_done_id_ = input.delivery_feedback.action_id;
+    const auto action = last_command_.action;
+    const int number = static_cast<int>(action);
+    const bool transition = action == MissionAction::kDefaultPoseMode ||
+        action == MissionAction::kWalkMode || action == MissionAction::kHurdle;
+    const double delay = transition ? config_.transition_settle_sec :
+        (number >= 3 && number <= 6 ? config_.fine_motion_settle_sec : 0.0);
+    settle_until_sec_ = std::max(settle_until_sec_, input.now_sec + delay);
+  }
   const bool pose_done = input.delivery_feedback.done && last_command_.action_id != 0 &&
       input.delivery_feedback.action_id == last_command_.action_id &&
       (last_command_.action == MissionAction::kDefaultPoseMode || last_command_.action == MissionAction::kWalkMode);
@@ -792,8 +817,19 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       input.camera_feedback.settled &&
       (input.camera_feedback.actual_mode == CameraMode::kDown ||
        input.camera_feedback.actual_mode == CameraMode::kGoal);
+  if (camera_settle_edge)
+    settle_until_sec_ = std::max(settle_until_sec_,input.now_sec + config_.transition_settle_sec);
   previous_camera_settled_ = input.camera_feedback.settled;
   previous_camera_mode_ = input.camera_feedback.actual_mode;
+  if (input.now_sec + 1e-9 < settle_until_sec_ && !timing_done &&
+      !camera_settle_edge && !decision_observation_active_ && !input.begin_manual_observation) {
+    output.active_mission=active_mission_; output.has_ball=has_ball_;
+    output.ball=ball_result_; output.goal=goal_result_; output.hurdle=hurdle_result_;
+    output.command=command_coordinator_.Compute(active_mission_,0,{},CameraRequest::kNone,
+        input.delivery_feedback,input.now_sec);
+    PopulateDiagnostics(output,input.now_sec);
+    return output;
+  }
   if (fresh_after_search_) {
     fresh_after_search_=false;
     if (!input.manual_observation_control)
@@ -853,14 +889,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         }
         if (decision_observation_mission_ == MissionType::kBall) {
           input.ball_target = mean;
-          if (mean) ball_controller_.UseNextObservationAsMean();
+          ball_controller_.UseVerifiedObservation(mean,decision_object_hits_,input.image_width,input.image_height);
         } else if (decision_observation_mission_ == MissionType::kHurdle) {
           input.hurdle_target = mean;
-          if (mean) hurdle_controller_.UseNextObservationAsMean();
+          hurdle_controller_.UseVerifiedObservation(mean,decision_object_hits_,input.image_width,input.image_height);
         } else if (decision_observation_mission_ == MissionType::kGoal) {
           input.backboard_target = mean;
           input.goal_pose = {};
-          if (mean) goal_controller_.UseNextObservationAsMean();
+
           const int stable_pose_hits = static_cast<int>(std::count(
               decision_goal_pose_hits_.begin(), decision_goal_pose_hits_.end(), true));
           if (mean && decision_goal_pose_hits_.size() == 10 &&
@@ -874,6 +910,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                 decision_pose_sin_sum_, decision_pose_cos_sum_);
             input.goal_pose.confidence = mean->confidence;
           }
+          goal_controller_.UseVerifiedObservation(mean,input.goal_pose,decision_object_hits_,
+              decision_goal_pose_hits_,input.image_width,input.image_height,decision_goal_near_hits_);
         }
       }
       if (decision_observation_mission_ == MissionType::kLine) {
@@ -903,13 +941,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     output.line_features = ComputeLineFeatures(input.line_centers,
         input.image_width, input.image_height, config_.line_features);
     output.line_computed = true;
-    if (active_mission_ == MissionType::kBall)
+    const bool collecting = input.now_sec + 1e-9 >= decision_observation_start_sec_;
+    if (collecting && active_mission_ == MissionType::kBall)
       ball_controller_.ObserveOnly(input.ball_target, input.image_width,
                                     input.image_height);
-    else if (active_mission_ == MissionType::kHurdle)
+    else if (collecting && active_mission_ == MissionType::kHurdle)
       hurdle_controller_.ObserveOnly(input.hurdle_target, input.image_width,
                                       input.image_height);
-    else if (active_mission_ == MissionType::kGoal)
+    else if (collecting && active_mission_ == MissionType::kGoal)
       goal_controller_.ObserveOnly(input.backboard_target, input.goal_pose,
                                     input.image_width, input.image_height);
     output.command = command_coordinator_.Compute(active_mission_, 0, {},
@@ -1062,7 +1101,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
             line_state_ == LineState::kNormal &&
             (post_pickup_five_step_completed_ ||
              post_pickup_line_actions_completed_ >=
-                 config_.goal.post_pickup_walk_fallback_actions));
+                 config_.goal.post_pickup_walk_fallback_actions), input.backboard_image_without_depth);
         if (goal_result_.mode != GoalMode::kLineFollow)
           EnterMission(MissionType::kGoal);
       }
@@ -1142,7 +1181,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         input.goal_target, input.backboard_target, input.goal_pose,
         input.image_width, input.image_height, input.now_sec,
         line_reference_valid, input.camera_feedback, action_feedback,
-            controller_allow, input.backboard_center_depth_m);
+            controller_allow, input.backboard_center_depth_m, false, input.backboard_image_without_depth);
     if (goal_result_.mode==GoalMode::kHeadingRecovery) goal_result_.action=line_action;
     has_ball_ = goal_controller_.HasBall();
     ball_controller_.SetHasBall(has_ball_);
@@ -1247,7 +1286,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     request = {};
     camera_request = CameraRequest::kNone;
   }
-  if (observation_hold) {
+  if (observation_hold || input.now_sec + 1e-9 < settle_until_sec_) {
     request = {};
     camera_request = CameraRequest::kNone;
   }
@@ -1366,8 +1405,10 @@ PerceptionMissionFrameResult MissionController::StepPerception(
     const PerceptionFrameInput &input) {
   PerceptionMissionFrameResult output;
   std::vector<Detection> detections;
+  std::vector<Detection> image_detections;
   detections.reserve(input.detections.size());
   for (const auto &observation : input.detections) {
+    image_detections.push_back(observation.detection);
     Detection detection = observation.detection;
     if (detection.class_id == config_.object_targets.backboard_class_id) {
       const double lo = std::min(config_.backboard_min_depth_m,
@@ -1494,7 +1535,8 @@ PerceptionMissionFrameResult MissionController::StepPerception(
     const bool fine = active_mission_ == MissionType::kGoal &&
         (goal_result_.mode == GoalMode::kFineAdjust || goal_result_.mode == GoalMode::kCoarseAdjust ||
          goal_result_.mode == GoalMode::kFineRecovery || goal_result_.mode == GoalMode::kCoarseRecovery ||
-         goal_result_.mode == GoalMode::kShoot);
+         goal_result_.mode == GoalMode::kShoot ||
+         (goal_result_.mode == GoalMode::kRecoveryTurn && foot_pose_ == FootPose::kFine));
     const bool near = depth.center_depth_m &&
         *depth.center_depth_m <= config_.goal.fine_adjust_start_z_m;
     if (backboard && depth.center_depth_m && depth.left_depth_m &&
@@ -1516,6 +1558,11 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   prepared.hurdle_target = output.perception.targets.hurdle;
   prepared.goal_target = output.perception.targets.goal;
   prepared.backboard_target = output.perception.targets.backboard;
+  prepared.backboard_image_without_depth = input.camera_feedback.settled &&
+      !ExtractObjectTargetCandidates(image_detections,config_.object_targets.backboard_class_id,
+          config_.object_targets.backboard_confidence,config_.object_targets).empty() &&
+      ExtractObjectTargetCandidates(detections,config_.object_targets.backboard_class_id,
+          config_.object_targets.backboard_confidence,config_.object_targets).empty();
   prepared.goal_pose = output.perception.goal_pose;
   prepared.backboard_center_depth_m=output.perception.backboard_center_depth_m;
   prepared.image_width = input.image_width; prepared.image_height = input.image_height;
@@ -1525,12 +1572,19 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   prepared.delivery_feedback = input.delivery_feedback;
   prepared.allow_new_line_action = input.allow_new_line_action;
   prepared.allow_new_commands = input.allow_new_commands;
-  prepared.allow_new_body_actions = input.allow_new_body_actions;
+  const bool manual_evidence_valid = input.manual_object_hits.size()==10 &&
+      std::count(input.manual_object_hits.begin(),input.manual_object_hits.end(),true)>=7;
+  prepared.allow_new_body_actions = input.allow_new_body_actions &&
+      (!input.manual_ready_mean || manual_evidence_valid);
   prepared.allow_test_setup_body_actions = input.allow_test_setup_body_actions;
   prepared.allow_new_mission_entry = input.allow_new_mission_entry;
   prepared.advance_line_fsm = input.advance_line_fsm;
   prepared.manual_observation_control = input.manual_observation_control;
   prepared.begin_manual_observation = input.begin_manual_observation;
+  prepared.manual_ready_mean = input.manual_ready_mean;
+  prepared.manual_object_hits = input.manual_object_hits;
+  prepared.manual_pose_hits = input.manual_pose_hits;
+  prepared.manual_near_hits = input.manual_near_hits;
   prepared.line_decision_guide_override = input.line_decision_guide_override;
   // Line robot-reference is independent from the camera optical cx.
   std::optional<double> center = config_.line_features.image_center_u;
@@ -1660,6 +1714,9 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   MissionControllerConfig updated = config_;
   updated.line_features.image_center_u = candidate.line_features.image_center_u;
   updated.line_p2p = candidate.line_p2p;
+  updated.transition_settle_sec=candidate.transition_settle_sec;
+  updated.walk_inter_action_hold_sec=candidate.walk_inter_action_hold_sec;
+  updated.fine_motion_settle_sec=candidate.fine_motion_settle_sec;
   updated.ball=candidate.ball;
   updated.hurdle=candidate.hurdle;
   updated.goal=candidate.goal;
@@ -1760,11 +1817,14 @@ void MissionController::Reset(bool preserve_action_ids) {
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;
   decision_observation_active_ = false;
+  settle_until_sec_ = 0.0;
+  last_settle_done_id_ = 0;
   decision_observation_camera_only_ = false;
   decision_observation_first_frame_ = false;
   deferred_done_ = {};
   decision_object_hits_.clear();
   decision_goal_pose_hits_.clear();
+  decision_goal_near_hits_.clear();
   decision_observation_total_frames_ = 0;
   decision_last_target_.reset();
   decision_target_u_sum_ = decision_target_v_sum_ = 0.0;

@@ -4,6 +4,7 @@
 #include "dynamixel.hpp"
 #include "p2p_motion_player.hpp"
 #include "motion_executor_state.hpp"
+#include "vision_core/config_loader.hpp"
 #include "vision/msg/action_command.hpp"
 #include "vision/msg/camera_command.hpp"
 #include "vision/msg/command_status.hpp"
@@ -96,6 +97,27 @@ public:
         if (!std::isfinite(arm_transition_sec_) || arm_transition_sec_<=0 || arm_transition_sec_>60)
             throw std::invalid_argument("invalid mission arm transition duration");
 
+        const auto algorithm = vision_core::LoadDefaultAlgorithmConfig();
+        const double walk_hold = declare_parameter<double>("walk_inter_action_hold_sec", algorithm.walk_inter_action_hold_sec);
+        walk_hold_.SetDuration(walk_hold);
+        timing_parameter_callback_ = add_on_set_parameters_callback(
+            [this](const std::vector<rclcpp::Parameter>& parameters) {
+                rcl_interfaces::msg::SetParametersResult result;
+                result.successful = true;
+                for (const auto& p : parameters) if (p.get_name() == "walk_inter_action_hold_sec") {
+                    if (p.get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE ||
+                        !std::isfinite(p.as_double()) || p.as_double() < 0 ||
+                        motion_in_progress_ || queued_action_) {
+                        result.successful=false;
+                        result.reason="walk hold must be finite/nonnegative and changed while idle";
+                        return result;
+                    }
+                }
+                for (const auto& p : parameters) if (p.get_name() == "walk_inter_action_hold_sec")
+                    walk_hold_.SetDuration(p.as_double());
+                return result;
+            });
+
         // READY를 보낼 종료 전 여유 시간(초). 실제 통신 지연을 예측하는 값은 아니다.
         ready_lead_sec_ = declare_parameter<double>("ready_lead_sec", 0.25);
         // 카메라 yaw=좌우 회전, pitch=상하 회전. 자세 값은 각도가 아니라 encoder tick이다.
@@ -107,9 +129,12 @@ public:
         camera_config_.down.pitch = declare_parameter<int>("camera_down_pitch_tick", 2013);
         camera_config_.goal.yaw = declare_parameter<int>("camera_goal_yaw_tick", 2054);
         camera_config_.goal.pitch = declare_parameter<int>("camera_goal_pitch_tick", 966);
-        // move_sec 동안 보간 이동하고 settle_sec 동안 기다린 뒤 카메라 DONE을 보낸다.
+        // The core owns transition settling after camera DONE; no default extra executor wait.
         camera_config_.move_sec = declare_parameter<double>("camera_move_duration_sec", 0.5);
-        camera_config_.settle_sec = declare_parameter<double>("camera_settle_sec", 0.2);
+        const double legacy_camera_settle=declare_parameter<double>("camera_settle_sec",0.0);
+        if (legacy_camera_settle != 0.0)
+            throw std::invalid_argument("camera_settle_sec is replaced by mission.transition_settle_sec; leave it at zero");
+        camera_config_.settle_sec=0.0;
         camera_config_.Validate();
         camera_motion_ = std::make_unique<motion_executor::CameraMotion>(camera_config_);
 
@@ -452,6 +477,7 @@ private:
             message->action_id, message->mission, message->action);
         using motion_executor::Admission;
         if (admission == Admission::ActiveDuplicate || admission == Admission::QueuedDuplicate) {
+            if (admission == Admission::QueuedDuplicate && !queued_action_acknowledged_) return;
             PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
             return;
         }
@@ -490,7 +516,8 @@ private:
                 // A가 끝나기 전에는 준비/ACK만 하고, 이후 실제 팔 상태로 판정한다.
                 zero_turn=true;
                 if (!NeedsMissionArmTransition(message->mission) &&
-                    admission != Admission::Queue) {
+                    admission != Admission::Queue &&
+                    !walk_hold_.Waiting(std::chrono::steady_clock::now())) {
                     // 유휴 실행에서의 0도 회전은 기존 즉시 ACK/DONE 유지.
                     PublishActionStatus(message->action_id,
                                         vision::msg::CommandStatus::ACK);
@@ -579,12 +606,15 @@ private:
             std::optional<P2PMotionPlayer::PreparedProgram> program;
             if (!zero_turn) program=p2p_player_->PrepareProgram(
                 path.string(), (asset_root / "motions").string(), start_options);
-            if (admission == Admission::Queue) {
+            if (admission == Admission::Queue || walk_hold_.Waiting(std::chrono::steady_clock::now())) {
                 // 대기열은 한 칸이다. 검증된 데이터까지 저장한 뒤 ACK하므로 나중에 다시 읽지 않는다.
                 queued_action_.emplace(QueuedAction{message->action_id, message->mission,
                     message->action, effective_target_yaw_deg, std::move(program)});
                 action_transactions_.queued_id = message->action_id;
-                PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
+                queued_action_acknowledged_ = admission == Admission::Queue;
+                if (queued_action_acknowledged_)
+                    PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
+                EnsureMotionLoop();
                 return;
             }
             if (!StartMissionProgram(program,message->mission,message->action)) {
@@ -676,6 +706,8 @@ private:
         camera_motion_->Abort(last_sent_positions_);
         action_transactions_.Abort();
         queued_action_.reset();
+        queued_action_acknowledged_=false;
+        walk_hold_.Reset();
         pending_mission_program_.reset();
         arm_transition_in_progress_=false;
         arm_pose_uncertain_=true; // 팔 전환 중단 후 다음 명령에서 출발점을 다시 읽고 재전환한다.
@@ -687,11 +719,42 @@ private:
         motion_loop_timer_->cancel();
     }
 
+    void StartQueuedAction(std::chrono::steady_clock::time_point now) {
+        if (!queued_action_ || action_transactions_.active_id != 0 || walk_hold_.Waiting(now)) return;
+        auto queued = std::move(*queued_action_);
+        queued_action_.reset();
+        const bool already_acknowledged = queued_action_acknowledged_;
+        queued_action_acknowledged_ = false;
+        action_transactions_.Activate(queued.id, queued.mission, queued.action);
+        current_action_ = queued.action;
+        active_target_yaw_deg_ = queued.effective_target_yaw_deg;
+        try {
+            if (!queued.program && !NeedsMissionArmTransition(queued.mission)) {
+                if (!already_acknowledged) PublishActionStatus(queued.id, vision::msg::CommandStatus::ACK);
+                PublishActionStatus(queued.id, vision::msg::CommandStatus::DONE);
+                action_transactions_.CompleteActive();
+                current_action_ = 0;
+                active_target_yaw_deg_ = 0;
+            } else {
+                if (!StartMissionProgram(queued.program,queued.mission,queued.action)) {
+                    AbortPlayback("Queued action start failed: " + p2p_player_->Error());
+                    return;
+                }
+                if (!already_acknowledged) PublishActionStatus(queued.id, vision::msg::CommandStatus::ACK);
+            }
+        } catch (const std::exception& e) {
+            AbortPlayback("Queued action transition failed: " + std::string(e.what()));
+            return;
+        }
+        motion_in_progress_ = action_transactions_.active_id != 0;
+    }
+
     // 몸 목표 계산 → 카메라 목표 계산 → 한 패킷으로 합쳐 전송 → READY/DONE 처리 순서.
     void MotionLoop()
     {
-        if (!startup_pose_in_progress_ && !motion_in_progress_ && !camera_motion_->Active()) return;
-        const auto now = std::chrono::steady_clock::now();  // 시스템 시각 변경의 영향을 받지 않는 주기 기준
+        if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ && !camera_motion_->Active()) return;
+        const auto now = std::chrono::steady_clock::now();
+        StartQueuedAction(now);  // 시스템 시각 변경의 영향을 받지 않는 주기 기준
         // gap_ms는 타이머 콜백 사이의 간격이다. 모터 패킷 사이의 간격을 직접 측정한 값은 아니다.
         const double gap_ms = std::chrono::duration<double, std::milli>(now - last_motion_tick_at_).count();
         last_motion_tick_at_ = now;
@@ -786,40 +849,16 @@ private:
                 const auto completed_id = action_transactions_.active_id;  // 방금 끝난 몸 명령의 ID
                 // A의 DONE을 먼저 보낸 뒤, 이미 ACK한 대기 동작 B를 활성 동작으로 올린다.
                 PublishActionStatus(completed_id, vision::msg::CommandStatus::DONE);
+                walk_hold_.Complete(current_action_, now);
                 action_transactions_.CompleteActive();
                 motion_in_progress_ = false;
                 current_action_ = 0;
                 active_target_yaw_deg_ = 0;
-                if (queued_action_) {
-                    auto queued = std::move(*queued_action_);  // 대기열에서 꺼낸 다음 명령과 검증된 모션
-                    queued_action_.reset();
-                    action_transactions_.Activate(queued.id, queued.mission, queued.action);
-                    current_action_ = queued.action;
-                    active_target_yaw_deg_ = queued.effective_target_yaw_deg;
-                    try {
-                        if (!queued.program && !NeedsMissionArmTransition(queued.mission)) {
-                            // Deferred zero-degree turn: never send B DONE before A DONE.
-                            PublishActionStatus(queued.id, vision::msg::CommandStatus::DONE);
-                            action_transactions_.CompleteActive();
-                            current_action_ = 0;
-                            active_target_yaw_deg_ = 0;
-                        } else if (!StartMissionProgram(queued.program,queued.mission,queued.action)) {
-                            AbortPlayback("Queued action start failed: " + p2p_player_->Error());
-                            return;
-                        }
-                    } catch (const std::exception& e) {
-                        AbortPlayback("Queued action transition failed: "+std::string(e.what()));
-                        return;
-                    }
-                    motion_in_progress_ = action_transactions_.active_id != 0;
-                    // B는 대기열 저장 시 ACK했으므로 여기서는 다시 ACK하지 않는다.
-                    RCLCPP_INFO(get_logger(), "Queued action started automatically: id=%llu",
-                                static_cast<unsigned long long>(queued.id));
-                }
+                StartQueuedAction(now);
             }
         }
         // 시작 자세/몸/카메라가 모두 유휴 상태일 때만 타이머를 끈다.
-        if (!startup_pose_in_progress_ && !motion_in_progress_ && !camera_motion_->Active()) {
+        if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ && !camera_motion_->Active()) {
             motion_loop_timer_->cancel();
         }
     }
@@ -955,6 +994,9 @@ private:
     // 몸의 활성 ID, 대기 ID, READY 전송 여부, 최근 완료 ID 32개를 관리한다.
     // ID 중복이면 재실행하지 않고 진행 중 명령에는 ACK, 완료 명령에는 DONE을 다시 보낸다.
     motion_executor::ActionTransactions action_transactions_;
+    bool queued_action_acknowledged_{false};
+    motion_executor::WalkInterActionHold walk_hold_;
+    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr timing_parameter_callback_;
     std::optional<QueuedAction> queued_action_;        // 비어 있으면 다음 동작 없음, 값이 있으면 1개 대기
     motion_executor::CameraTransactions camera_transactions_; // 몸과 독립인 카메라 활성/완료 ID 기록
     motion_executor::CameraConfig camera_config_;     // 카메라 모터 ID, 세 자세 tick, 이동/안정화 시간

@@ -50,14 +50,15 @@ struct Trial {
   }
 };
 MissionControllerConfig Config() {
-  auto c=LoadDefaultAlgorithmConfig();
+  auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;
   c.enable_hurdle=c.enable_goal=false;
   c.ball.upper_acquire_v_px=480.0;
 
-  c.ball.fine_settle_duration_sec=0;
-  c.goal.fine_settle_duration_sec=0;
+
+
   c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
   c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
+  c.goal.throw_landing_z_m=.48; // Explicit legacy geometry for these mission scenarios.
   c.hurdle.contact_steps=3;
   return c;
 }
@@ -232,7 +233,7 @@ void TestGoalForwardTrial() {
 void TestHurdleSearchAndContact() {
   auto c=Config(); c.enable_ball=false; c.enable_hurdle=true;
   c.hurdle.upper_acquire_v_px=480;
-  c.hurdle.recovery_settle_duration_sec=0;
+
   Trial t(c); t.in.hurdle_target=Target(.5,.85);
   // HURDLE now aligns using LINE O/H, so supply a straight guide.
   t.in.line_centers={{410,450},{410,400},{410,350},{410,300},{410,250}};
@@ -258,7 +259,7 @@ void TestHurdleSearchAndContact() {
 int main() {
   // Distance thresholds keep raw GOAL pose geometry, changing only primitive length.
   auto gc=LoadDefaultAlgorithmConfig().goal;
-  gc.stable_window=gc.stable_min_hits=1; gc.fine_settle_duration_sec=0;
+  gc.stable_window=gc.stable_min_hits=1;
   GoalController goal(gc,3); goal.StartForwardTrial();
   goal.Compute({},Target(),{true,0,.7,0,1},640,480,0,true,{}, {},true,.7);
   goal.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
