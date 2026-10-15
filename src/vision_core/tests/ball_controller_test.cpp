@@ -357,5 +357,17 @@ int main() {
   assert(r.mode==BallMode::kApproachBall);
   assert(found_after_turn.RecoveryWalkTurnsCompleted()==1);
 
+  // A separate FINE locomotion settle timer may be zero; nonzero delays
+  // the next fine decision, independently of transition settling.
+  BallConfig timed=c; timed.fine_motion_settle_duration_sec=.2;
+  BallController timed_fine(timed,3.0); timed_fine.StartTestExecute();
+  r=timed_fine.Compute(Ball(.2,.7),640,480,0,{},{});
+  assert(r.action.action==MissionAction::kLeftSideStep);
+  r=timed_fine.Compute(Ball(.2,.7),640,480,.1,{},done);
+  assert(r.action.action==MissionAction::kNone);
+  r=timed_fine.Compute(Ball(.2,.7),640,480,.2,{},{});
+  assert(r.action.action==MissionAction::kNone);
+  r=timed_fine.Compute(Ball(.2,.7),640,480,.31,{},{});
+  assert(r.action.action==MissionAction::kLeftSideStep);
   return 0;
 }
