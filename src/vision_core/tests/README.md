@@ -63,6 +63,12 @@ ctest --test-dir /home/noh/vision_core/build_pc_tests -L config --output-on-fail
   --installed "${VISION_CORE_ALGORITHM_CONFIG:-/home/noh/vision_core/install/share/shared_vision_core/config/vision_algorithm.yaml}"
 ```
 
+허들 접촉 보행은 각 실제 DONE 뒤 다음 접촉 보행까지 고정 0.5초 HOLD한다.
+첫 접촉 보행과 마지막 접촉 뒤 넘기에는 이 추가 대기를 넣지 않는다.
+중간 1초 재관측 없이 기존 접촉 반복 범위를 유지하며, `fine_motion_settle_sec`와는
+별개다. 허들 컨트롤러 및 단일 COMMIT 시퀀스 테스트는 0.5초 경계, 중복 DONE,
+미실행 PREVIEW, Reset과 타이머 이동을 검사한다.
+
 ## 제어 코드 변경 후
 
 ```bash

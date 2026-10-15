@@ -11,7 +11,63 @@ static ObjectTarget H(double v) {
   ObjectTarget t; t.center_px = {320.0, v * 480.0}; t.box_px = {310, v*480-5, 20, 10};
   t.height_px = 10; t.confidence = 1; return t;
 }
+static void ContactWalkHold() {
+  auto c=LoadDefaultAlgorithmConfig().hurdle;
+  c.contact_steps=3;c.stable_window=c.stable_min_hits=c.down_search_min_hits=1;
+  const CameraFeedback down{CameraMode::kDown,true};
+  const auto target=H(.9);
+  c.contact_v_px=260;
+  HurdleController controller(c,3);
+  const auto enter=[&](double now) {
+    controller.StartTestExecute();
+    controller.UseVerifiedObservation(target,{true},640,480);
+    const auto r=controller.Compute({},640,480,now,down,{},{});
+    assert(r.mode==HurdleMode::kContactWalk && r.action.action==MissionAction::kStepForwardHalf);
+  };
+  enter(1.0);
+  ActionExecutionFeedback active;active.action_active=true;
+  ActionExecutionFeedback done;done.action_done=true;
+  auto r=controller.Compute({},640,480,1.1,down,active,{});
+  assert(r.mode==HurdleMode::kContactWalk);
+  r=controller.Compute({},640,480,1.2,down,done,{});
+  assert(r.action.action==MissionAction::kNone && r.mode==HurdleMode::kContactWalk);
+  // A repeated DONE in the hold cannot consume a step or restart the timer.
+  r=controller.Compute({},640,480,1.3,down,done,{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,1.699,down,{},{});
+  assert(r.action.action==MissionAction::kNone);
+  // Preview proposes the next step without marking it issued.
+  r=controller.Compute({},640,480,1.7,down,{},{},false);
+  assert(r.action.action==MissionAction::kStepForwardHalf);
+  r=controller.Compute({},640,480,1.71,down,done,{},false);
+  assert(r.mode==HurdleMode::kContactWalk && r.action.action==MissionAction::kStepForwardHalf);
+  r=controller.Compute({},640,480,1.72,down,{},{});
+  assert(r.action.action==MissionAction::kStepForwardHalf);
+  // Elapsed motion time cannot replace its actual DONE.
+  r=controller.Compute({},640,480,10,down,active,{});
+  assert(r.mode==HurdleMode::kContactWalk);
+  r=controller.Compute({},640,480,10.1,down,done,{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,10.2,down,done,{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,10.599,down,{},{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,10.6,down,{},{});
+  assert(r.action.action==MissionAction::kStepForwardHalf);
+  r=controller.Compute({},640,480,10.7,down,done,{});
+  assert(r.mode==HurdleMode::kCross && r.action.action==MissionAction::kHurdle);
+  // Reset clears both the pending count and the old hold deadline.
+  enter(0.0);
+  r=controller.Compute({},640,480,.1,down,done,{});
+  assert(r.action.action==MissionAction::kNone);
+  controller.ShiftTimers(2.0);
+  r=controller.Compute({},640,480,2.599,down,{},{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,2.6,down,{},{});
+  assert(r.action.action==MissionAction::kStepForwardHalf);
+}
 int main() {
+  ContactWalkHold();
   HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle;  c.contact_steps=1; c.down_search_min_hits=1; c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2; c.smooth_alpha = 1; c.upper_acquire_v_px=480;
   c.approach_two_step_v_px = 360.0;

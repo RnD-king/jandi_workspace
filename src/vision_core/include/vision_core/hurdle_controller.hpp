@@ -99,7 +99,10 @@ public:
       down_search_.InvalidateDetection();
     config_ = config;
   }
-  void ShiftTimers(double duration) { state_enter_sec_+=duration; }
+  void ShiftTimers(double duration) {
+    state_enter_sec_+=duration;
+    if (contact_next_step_sec_>0.0) contact_next_step_sec_+=duration;
+  }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
   void StartTestNear() { Reset(); mode_=HurdleMode::kWaitCameraDown; test_camera_pending_=true; }
   void StartTestExecute() { Reset(); fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; }
@@ -143,6 +146,8 @@ private:
   StationaryObjectRecovery stationary_recovery_;
   int completed_back_steps_{0};
   int completed_contact_steps_{0};
+  bool contact_step_pending_{false};
+  double contact_next_step_sec_{0.0};
   TrackedHurdle tracked_;
   double last_seen_u_px_{0.0};
   double state_enter_sec_{0.0};

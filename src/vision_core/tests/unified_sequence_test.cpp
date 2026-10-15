@@ -256,7 +256,24 @@ void TestHurdleSearchAndContact() {
   for(int i=0;i<10;++i)t.Tick();
   t.Commit(); assert(t.out.hurdle.mode==HurdleMode::kContactWalk);
   assert(t.out.command.action==MissionAction::kStepForwardHalf);
-  for(int i=0;i<3;++i)t.Tick(true);
+  const auto contact_scope=t.permit;
+  assert(contact_scope!=0);
+  for(int i=0;i<3;++i) {
+    const auto id=t.out.command.action_id;assert(id!=0);
+    t.Tick(true);
+    if(i==2) break;
+    assert(t.out.command.action_id==0 && t.permit==contact_scope && !t.out.post_motion_observing);
+    // Duplicate completed IDs during the hold cannot shorten or extend it.
+    t.Tick(false,id);
+    assert(t.out.command.action_id==0);
+    for(int hold=0;hold<3;++hold) {
+      t.Tick();
+      assert(t.out.command.action_id==0 && t.permit==contact_scope && !t.out.post_motion_observing);
+    }
+    t.Tick(); // Exactly 0.5 s after the preceding contact DONE.
+    assert(t.out.command.action_id!=0 && t.out.command.action_id!=id);
+    assert(t.out.command.action==MissionAction::kStepForwardHalf && t.permit==contact_scope);
+  }
   assert(t.out.hurdle.mode==HurdleMode::kCross && t.out.command.action_id==0 && t.permit==0);
   t.Commit(); assert(t.out.command.action==MissionAction::kHurdle);
 }

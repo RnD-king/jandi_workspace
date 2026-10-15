@@ -88,19 +88,19 @@ vision_algorithm:
     upper_acquire_v_px: 470.0 # 허들이 있을 조건
 
     # forward
-    approach_short_v_px: 250.0    # 위 가로선 (4걸음)
-    approach_two_step_v_px: 330.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
+    approach_short_v_px: 120.0    # 위 가로선 (4걸음)
+    approach_two_step_v_px: 300.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
 
     # 가로 정렬 (라인 기준임. 이거 의미 없을 듯)
     target_u_px: 380 # 세로선 중심
     u_deadband_px: 160 # 세로선 반폭
 
     # DOWN 카메라 세로 3구역
-    down_one_step_v_px: 100.0 # 위 가로선 (2걸음)
+    down_one_step_v_px: 80.0 # 위 가로선 (2걸음)
     fine_mode_v_px: 180     # 아래 가로선 (1걸음)
 
     # 허들 접촉 및 넘기
-    contact_v_px: 260 # 접촉 선 (반걸음)
+    contact_v_px: 240 # 접촉 선 (반걸음)
     contact_steps: 3     # 접촉 보행 반 걸음 횟수
 
     hurdle_ignore_duration_sec: 5.0
@@ -109,7 +109,7 @@ vision_algorithm:
     recovery_center_tolerance_px: 76.8
 
   goal:
-    edge_margin_px: 100.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
+    edge_margin_px: 50.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
 
     backboard_depth_strip_width_px: 5 # 백보드 좌우 표본 폭, 중앙은 3x3
     backboard_min_depth_m: 0.10 # 백보드 최소 거리

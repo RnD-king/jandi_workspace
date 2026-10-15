@@ -10,6 +10,8 @@
 namespace vision_core {
 namespace {
 constexpr double kEpsilon = 1e-9;
+// Required fixed hold between completed contact steps, independent of FINE settling.
+constexpr double kContactStepHoldSec = 0.5;
 double Denom(double value) { return std::max(value, 1e-6); }
 ActionRequest Locomotion(MissionAction action, std::int16_t yaw = 0) {
   return {action, ActionCategory::kLocomotion, yaw, false};
@@ -280,7 +282,12 @@ HurdleResult HurdleController::Compute(
     }
     if (!ExecutionObservationReady()) return result;
     if (tracked_.center_px.v>=config_.contact_v_px) {
-      if (allow_new_body_actions) { mode_=HurdleMode::kContactWalk; completed_contact_steps_=0; }
+      if (allow_new_body_actions) {
+        mode_=HurdleMode::kContactWalk;
+        completed_contact_steps_=0;
+        contact_step_pending_=true;
+        contact_next_step_sec_=0.0;
+      }
       result.mode=mode_;
       result.action=Locomotion(MissionAction::kStepForwardHalf);
     } else {
@@ -289,12 +296,22 @@ HurdleResult HurdleController::Compute(
     return result;
   }
   case HurdleMode::kContactWalk:
-    if (feedback.action_done) ++completed_contact_steps_;
+    if (feedback.action_done && contact_step_pending_) {
+      contact_step_pending_=false;
+      ++completed_contact_steps_;
+      contact_next_step_sec_=now_sec+kContactStepHoldSec;
+    }
     if (completed_contact_steps_>=config_.contact_steps) {
+      contact_next_step_sec_=0.0;
       mode_=HurdleMode::kCross; result.mode=mode_;
       result.action=Mission(MissionAction::kHurdle); return result;
     }
+    // Keep the repeat scope active, but request no body action during the
+    // fixed hold. DONE remains immediate; no extra observation is started.
+    if (now_sec+kEpsilon<contact_next_step_sec_) return result;
+    contact_next_step_sec_=0.0;
     result.action=Locomotion(MissionAction::kStepForwardHalf);
+    if (allow_new_body_actions) contact_step_pending_=true;
     return result;
   case HurdleMode::kCross:
     result.action = Mission(MissionAction::kHurdle);
@@ -385,6 +402,8 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   down_search_.Reset();
   stationary_recovery_.Begin(0.0);
   completed_contact_steps_=0;
+  contact_step_pending_=false;
+  contact_next_step_sec_=0.0;
   ClearTracking();
   last_seen_u_px_ = config_.target_u_px;
   state_enter_sec_ = 0.0;
