@@ -46,7 +46,7 @@ struct HurdleConfig {
   double down_one_step_v_px{};
   double fine_mode_v_px{};
   double hurdle_ignore_duration_sec{};
-  double fine_settle_duration_sec{};
+  double fine_settle_duration_sec{0.60};
   double fine_motion_settle_duration_sec{};
   int recovery_reacquire_min_hits{};
   double recovery_timeout_sec{};
