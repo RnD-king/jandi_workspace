@@ -24,7 +24,9 @@ int main() {
   c.fine_one_step_range_error_m=c.fine_two_step_range_error_m=1.0; // Isolate near fine geometry.
   c.target_u_px=320; c.approach_u_deadband_px=32; c.fine_adjust_start_z_m=.8;
   c.hoop_radius_m=.1; c.throw_landing_x_m=0; c.throw_landing_z_m=.5; c.position_tolerance_m=.05;
-  c.fine_settle_duration_sec=0; c.shoot_yaw_limit_deg=30;
+  c.fine_settle_duration_sec=0; c.fine_motion_settle_duration_sec=0;
+  c.recovery_walk_turn_max=0; // Legacy stationary recovery cases below.
+  c.shoot_yaw_limit_deg=30;
   c.recovery_timeout_sec=5; c.recovery_reacquire_min_hits=3;
   c.recovery_center_tolerance_px=76.8; c.recovery_settle_duration_sec=.6;
   GoalController controller(c, 3.0); controller.StartAfterPickup(0);
@@ -195,5 +197,84 @@ int main() {
     r=right.Compute({}, {}, {},640,480,.5+i,true,{CameraMode::kGoal,true},{});
   assert(right.RecoveryObservationsCompleted()==5);
   assert(r.mode==GoalMode::kFailed && r.action.action==MissionAction::kNone);
+
+  // Off-center GOAL-view loss: three real DONE-confirmed WALK turns,
+  // then existing stationary recovery (never a fourth turn).
+  GoalConfig bounded=c; bounded.recovery_walk_turn_max=3;
+  GoalController turning(bounded,3.0);
+  turning.StartAfterPickup(0); turning.UpdateBallState(carrying);
+  turning.Compute({},Board(),Pose(0,.7),640,480,0,true,{},{});
+  turning.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
+  r=turning.Compute({},Board(.2),Pose(0,1.2),640,480,.2,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kApproach);
+  turning.Compute({}, {}, {},640,480,.3,true,{CameraMode::kGoal,true},{});
+  r=turning.Compute({}, {}, {},640,480,.4,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kRecoveryWalkTurn);
+  ActionExecutionFeedback completed_observed;
+  completed_observed.action_done=true;
+  completed_observed.observation_complete=true;
+  for (int n=0;n<3;++n) {
+    r=turning.Compute({}, {}, {},640,480,.5+n,true,{CameraMode::kGoal,true},{});
+    assert(r.mode==GoalMode::kRecoveryWalkTurn);
+    assert(r.action.action==MissionAction::kTurnLeftInPlace);
+    r=turning.Compute({}, {}, {},640,480,.6+n,true,{CameraMode::kGoal,true},completed_observed);
+    assert(r.action.action==MissionAction::kNone);
+  }
+  assert(r.mode==GoalMode::kRecoverySearch);
+  r=turning.Compute({}, {}, {},640,480,3.7,true,{CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kNone);
+
+  GoalController turn_right(bounded,3.0);
+  turn_right.StartAfterPickup(0); turn_right.UpdateBallState(carrying);
+  turn_right.Compute({},Board(),Pose(0,.7),640,480,0,true,{},{});
+  turn_right.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
+  turn_right.Compute({},Board(.8),Pose(0,1.2),640,480,.2,true,{CameraMode::kGoal,true},{});
+  turn_right.Compute({}, {}, {},640,480,.3,true,{CameraMode::kGoal,true},{});
+  turn_right.Compute({}, {}, {},640,480,.4,true,{CameraMode::kGoal,true},{});
+  r=turn_right.Compute({}, {}, {},640,480,.5,true,{CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kStepForwardRightOneHurdle);
+  r=turn_right.Compute({},Board(.8),Pose(0,1.2),640,480,.6,
+                       true,{CameraMode::kGoal,true},completed_observed);
+  assert(r.mode==GoalMode::kApproach); // Valid reacquisition stops the sequence.
+
+  // FINE loss: a stance transition must not be counted as a turn.
+  GoalController fine_turn(bounded,3.0);
+  fine_turn.StartTestExecute();
+  fine_turn.Compute({},Board(.2),Pose(-.2,.6),640,480,0,true,{CameraMode::kGoal,true},{});
+  fine_turn.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
+  r=fine_turn.Compute({}, {}, {},640,480,.2,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kRecoveryWalkTurn);
+  r=fine_turn.Compute({}, {}, {},640,480,.3,true,{CameraMode::kGoal,true},
+                       {},true,std::nullopt,false,false);
+  assert(r.action.action==MissionAction::kTurnLeftInPlace);
+  r=fine_turn.Compute({}, {}, {},640,480,.4,true,{CameraMode::kGoal,true},
+                       {},true,std::nullopt,false,true);
+  assert(r.action.action==MissionAction::kTurnLeftInPlace);
+  r=fine_turn.Compute({},Board(.2),Pose(-.2,.6),640,480,.5,
+                       true,{CameraMode::kGoal,true},completed_observed);
+  assert(r.mode==GoalMode::kWaitFinePose);
+  r=fine_turn.Compute({},Board(.2),Pose(-.2,.6),640,480,.6,
+                       true,{CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kDefaultPoseMode);
+
+  // YOLO sees the board but edge depth is invalid: do not spin.
+  GoalController depth_only_loss(bounded,3.0);
+  depth_only_loss.StartTestExecute();
+  depth_only_loss.Compute({},Board(.2),Pose(-.2,.6),640,480,0,true,{CameraMode::kGoal,true},{});
+  depth_only_loss.Compute({},Board(.2),{},640,480,.1,true,{CameraMode::kGoal,true},{});
+  r=depth_only_loss.Compute({},Board(.2),{},640,480,.2,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kFineRecovery);
+
+  // Separate FINE settle timer: zero is allowed, nonzero holds after a step.
+  GoalConfig timed=c; timed.fine_motion_settle_duration_sec=.2;
+  GoalController timed_fine(timed,3.0); timed_fine.StartTestExecute();
+  timed_fine.Compute({},Board(),Pose(0,.8),640,480,0,true,{CameraMode::kGoal,true},{});
+  r=timed_fine.Compute({},Board(),Pose(0,.8),640,480,.1,true,
+                       {CameraMode::kGoal,true},fine_done);
+  assert(r.action.action==MissionAction::kNone);
+  r=timed_fine.Compute({},Board(),Pose(0,.8),640,480,.2,true,{CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kNone);
+  r=timed_fine.Compute({},Board(),Pose(0,.8),640,480,.31,true,{CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kStepForwardHalf);
   return 0;
 }
