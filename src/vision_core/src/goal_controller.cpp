@@ -579,7 +579,7 @@ GoalResult GoalController::Compute(
         config_.recovery_max_observations);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = was_fine ? GoalMode::kFineAdjust : GoalMode::kCoarseAdjust;
-      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
+      settle_until_sec_ = now_sec + config_.recovery_settle_duration_sec;
     } else if (status == StationaryObjectRecovery::Result::kFailed)
       mode_ = GoalMode::kFailed;
     else if (status == StationaryObjectRecovery::Result::kRetry)
