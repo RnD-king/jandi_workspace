@@ -226,6 +226,18 @@ install(FILES scripts/mock_executor_protocol.py
 )
 
 if(BUILD_TESTING)
+  add_executable(vision_mission_parameters_test tests/mission_parameters_test.cpp)
+  target_include_directories(vision_mission_parameters_test PRIVATE include)
+  target_link_libraries(vision_mission_parameters_test shared_vision_core::shared_vision_core)
+  ament_target_dependencies(vision_mission_parameters_test rclcpp)
+  add_test(NAME vision_mission_parameters_test COMMAND vision_mission_parameters_test)
+  set_tests_properties(vision_mission_parameters_test PROPERTIES LABELS "logic"
+    ENVIRONMENT "ROS_DOMAIN_ID=88;ROS_LOCALHOST_ONLY=1")
+  add_executable(vision_mission_debug_view_test tests/mission_debug_view_test.cpp)
+  target_include_directories(vision_mission_debug_view_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(vision_mission_debug_view_test shared_vision_core::shared_vision_core ${OpenCV_LIBS})
+  add_test(NAME vision_mission_debug_view_test COMMAND vision_mission_debug_view_test)
+  set_tests_properties(vision_mission_debug_view_test PROPERTIES LABELS "logic")
   add_executable(vision_hurdle_debug_guides_test tests/hurdle_debug_guides_test.cpp)
   target_include_directories(vision_hurdle_debug_guides_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(vision_hurdle_debug_guides_test shared_vision_core::shared_vision_core ${OpenCV_LIBS})

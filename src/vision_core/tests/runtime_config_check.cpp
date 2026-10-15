@@ -86,6 +86,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(hurdle, recovery_timeout_sec);
   FIELD(hurdle, recovery_center_tolerance_px);
   FIELD(goal, recovery_turn_max);
+  FIELD(goal, edge_margin_px);
   FIELD(goal, recovery_observation_sec);
   FIELD(goal, recovery_max_observations);
   FIELD(goal, stable_window);
@@ -132,10 +133,10 @@ void CheckConfiguration(const std::string& path) {
   FIELD(command, action_ack_timeout_sec);
   CheckField(a["mission"], "test_mission", static_cast<int>(c.test_mission), "mission");
   MISSION(test_stage);
-  MISSION(backboard_depth_strip_width_px);
-  MISSION(goal_trial_start_forward);
-  MISSION(test_ball_mission_index);
-  MISSION(test_goal_mission_index);
+  CheckField(a["goal"], "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px, "goal");
+  CheckField(a["goal"], "trial_start_forward", c.goal_trial_start_forward, "goal");
+  CheckField(a["ball"], "test_mission_index", c.test_ball_mission_index, "ball");
+  CheckField(a["goal"], "test_mission_index", c.test_goal_mission_index, "goal");
   MISSION(mission_recovery_max_turns);
   MISSION(mission_recovery_yaw_deg);
   MISSION(camera_motion_timeout_sec);
@@ -144,8 +145,8 @@ void CheckConfiguration(const std::string& path) {
   MISSION(fine_motion_settle_sec);
   MISSION(post_motion_observation_sec);
   MISSION(object_ready_mean_actions);
-  MISSION(backboard_min_depth_m);
-  MISSION(backboard_max_depth_m);
+  CheckField(a["goal"], "backboard_min_depth_m", c.backboard_min_depth_m, "goal");
+  CheckField(a["goal"], "backboard_max_depth_m", c.backboard_max_depth_m, "goal");
   MISSION(enable_ball);
   MISSION(enable_hurdle);
   MISSION(enable_goal);

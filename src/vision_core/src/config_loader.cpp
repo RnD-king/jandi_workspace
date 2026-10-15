@@ -75,6 +75,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
   NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
   NonnegativeInt(c.goal.recovery_turn_max, "goal.recovery_turn_max");
+  Nonnegative(c.goal.edge_margin_px, "goal.edge_margin_px");
   Nonnegative(c.transition_settle_sec, "mission.transition_settle_sec");
   Nonnegative(c.walk_inter_action_hold_sec, "mission.walk_inter_action_hold_sec");
   Nonnegative(c.fine_motion_settle_sec, "mission.fine_motion_settle_sec");
@@ -106,9 +107,9 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   const int tm=static_cast<int>(c.test_mission);
   if ((tm!=0 && tm!=2 && tm!=3 && tm!=4) || c.test_stage<0 || c.test_stage>3 ||
       (tm==0 && c.test_stage!=0)) throw std::runtime_error("invalid test mission/stage");
-  PositiveInt(c.backboard_depth_strip_width_px,"mission.backboard_depth_strip_width_px");
-  PositiveInt(c.test_ball_mission_index,"mission.test_ball_mission_index");
-  PositiveInt(c.test_goal_mission_index,"mission.test_goal_mission_index");
+  PositiveInt(c.backboard_depth_strip_width_px,"goal.backboard_depth_strip_width_px");
+  PositiveInt(c.test_ball_mission_index,"ball.test_mission_index");
+  PositiveInt(c.test_goal_mission_index,"goal.test_mission_index");
   PositiveInt(c.mission_recovery_max_turns,"mission.mission_recovery_max_turns");
   PositiveInt(c.mission_recovery_yaw_deg,"mission.mission_recovery_yaw_deg");
   if (c.mission_recovery_yaw_deg>180) throw std::runtime_error("recovery yaw exceeds 180 degrees");
@@ -287,15 +288,15 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.command.action_ack_timeout_sec,
               "command.action_ack_timeout_sec");
 
-  Positive(c.backboard_min_depth_m, "mission.backboard_min_depth_m");
+  Positive(c.backboard_min_depth_m, "goal.backboard_min_depth_m");
   Nonnegative(c.camera_motion_timeout_sec, "mission.camera_motion_timeout_sec");
   Positive(c.post_motion_observation_sec,
               "mission.post_motion_observation_sec");
-  Positive(c.backboard_max_depth_m, "mission.backboard_max_depth_m");
+  Positive(c.backboard_max_depth_m, "goal.backboard_max_depth_m");
   if (c.backboard_min_depth_m > c.backboard_max_depth_m)
     throw std::runtime_error(
-        "vision algorithm key 'mission.backboard_min_depth_m' must be <= "
-        "'mission.backboard_max_depth_m'");
+        "vision algorithm key 'goal.backboard_min_depth_m' must be <= "
+        "'goal.backboard_max_depth_m'");
 }
 
 std::string DefaultAlgorithmConfigPath() {
@@ -342,6 +343,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(lp, "recovery_turn_yaw_deg", c.line_p2p.recovery_turn_yaw_deg);
 
   const auto b = a["ball"];
+  Assign(b, "test_mission_index", c.test_ball_mission_index);
   Assign(b, "down_one_step_v_px", c.ball.down_one_step_v_px);
   Assign(b, "fine_mode_v_px", c.ball.fine_mode_v_px);
   Assign(b, "approach_short_v_px", c.ball.approach_short_v_px);
@@ -393,6 +395,12 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "recovery_center_tolerance_px", c.hurdle.recovery_center_tolerance_px);
 
   const auto g = a["goal"];
+  Assign(g, "edge_margin_px", c.goal.edge_margin_px);
+  Assign(g, "trial_start_forward", c.goal_trial_start_forward);
+  Assign(g, "test_mission_index", c.test_goal_mission_index);
+  Assign(g, "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px);
+  Assign(g, "backboard_min_depth_m", c.backboard_min_depth_m);
+  Assign(g, "backboard_max_depth_m", c.backboard_max_depth_m);
   Assign(g,"fine_one_step_range_error_m",c.goal.fine_one_step_range_error_m);
   Assign(g,"fine_two_step_range_error_m",c.goal.fine_two_step_range_error_m);
   Assign(g, "recovery_turn_max", c.goal.recovery_turn_max);
@@ -445,13 +453,9 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(cmd, "first_action_id", c.command.first_action_id);
   Assign(cmd, "action_ack_timeout_sec", c.command.action_ack_timeout_sec);
   const auto m = a["mission"];
-  Assign(m, "goal_trial_start_forward", c.goal_trial_start_forward);
-  Assign(m, "test_ball_mission_index", c.test_ball_mission_index);
-  Assign(m, "test_goal_mission_index", c.test_goal_mission_index);
   int test_mission=0;
   Assign(m,"test_mission",test_mission); c.test_mission=static_cast<MissionType>(test_mission);
   Assign(m,"test_stage",c.test_stage);
-  Assign(m,"backboard_depth_strip_width_px",c.backboard_depth_strip_width_px);
   Assign(m, "mission_recovery_max_turns", c.mission_recovery_max_turns);
   Assign(m, "mission_recovery_yaw_deg", c.mission_recovery_yaw_deg);
 
@@ -461,8 +465,6 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(m, "fine_motion_settle_sec", c.fine_motion_settle_sec);
   Assign(m, "post_motion_observation_sec", c.post_motion_observation_sec);
   Assign(m, "object_ready_mean_actions", c.object_ready_mean_actions);
-  Assign(m, "backboard_min_depth_m", c.backboard_min_depth_m);
-  Assign(m, "backboard_max_depth_m", c.backboard_max_depth_m);
   Assign(m, "enable_ball", c.enable_ball);
   Assign(m, "enable_hurdle", c.enable_hurdle);
   Assign(m, "enable_goal", c.enable_goal);

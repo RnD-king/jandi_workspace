@@ -504,7 +504,6 @@ private:
         int effective_target_yaw_deg = 0;
         bool zero_turn=false;
         P2PMotionPlayer::StartOptions start_options;  // 반복, 관절 offset, 뒤에 붙일 모션 등의 옵션
-
         if (IsTurnAction(message->action)) {
             // 회전 방향은 TURN_LEFT/TURN_RIGHT action으로만 정한다.
             // Vision이 전달한 양수 회전량은 별도 부호 변환 없이 그대로 사용한다.

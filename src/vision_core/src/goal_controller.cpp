@@ -420,8 +420,8 @@ GoalResult GoalController::Compute(
       backboard->box_px.width > 0 && backboard->box_px.height > 0 && tracked_.stable &&
       !(feedback.action_active && !feedback.action_done)) {
     const auto& box = backboard->box_px;
-    const bool left = box.x <= 50.0;
-    const bool right = box.x + box.width >= image_width - 50.0;
+    const bool left = box.x <= config_.edge_margin_px;
+    const bool right = box.x + box.width >= image_width - config_.edge_margin_px;
     if (left && right) return result; // No directional evidence for an oversized box.
     if (left || right) {
       turn_resume_mode_ = mode_;
@@ -680,7 +680,9 @@ GoalResult GoalController::Compute(
     if (turn_pending_ && feedback.action_done) turn_done_ = true;
     if (feedback.action_active && !feedback.action_done) return result;
     if (turn_pending_) {
-      if (!turn_done_ || !feedback.observation_complete) return result;
+      // Edge correction is a fixed pair of existing single-turn actions.
+      // Each actual DONE advances it without an intermediate observation.
+      if (!turn_done_ || (recovery && !feedback.observation_complete)) return result;
       turn_pending_ = turn_done_ = false;
       if (recovery) {
         ++recovery_turns_completed_;
@@ -693,10 +695,13 @@ GoalResult GoalController::Compute(
           result.mode = mode_;
           return result;
         }
-      } else if (++edge_turns_completed_ >= 2) {
-        mode_ = turn_resume_mode_;
-        result.mode = mode_;
-        return result;
+      } else {
+        ++edge_turns_completed_;
+        if (edge_turns_completed_ >= 2) {
+          mode_ = turn_resume_mode_;
+          result.mode = mode_;
+          return result;
+        }
       }
     }
     if (recovery && recovery_turns_completed_ >= config_.recovery_turn_max) {
@@ -875,9 +880,10 @@ void GoalController::ClearTracking() {
 }
 
 void GoalController::Reset() {
+  edge_turns_completed_ = 0;
   last_stable_u_px_.reset();
   turn_pending_ = turn_done_ = recovery_exhausted_ = false;
-  recovery_turns_completed_ = edge_turns_completed_ = 0;
+  recovery_turns_completed_ = 0;
   test_execute_requires_stable_ = false;
   stationary_recovery_.Begin(0.0);
   completed_back_steps_ = 0;

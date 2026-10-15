@@ -112,6 +112,26 @@ class GoalTrialParameterWiringTests(unittest.TestCase):
             '\n          mission_controller_->Reset(true);', src)
         self.assertIn('mission_config.goal_trial_start_forward = goal_trial_start_forward_pending_;', src)
 
+    def test_final_ros_overrides_follow_subconfig_assignment(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in ('line_perception_node.cpp', 'perception_tuning_node.cpp'):
+            src = (root / 'src' / name).read_text()
+            construction = src[:src.index('std::make_unique<vision_core::MissionController>(mission_config)')]
+            read = construction.index('vision::ReadMissionParameters(*this,mission_config);')
+            self.assertGreater(read, construction.rindex('mission_config.ball ='))
+            self.assertGreater(read, construction.rindex('mission_config.goal ='))
+            self.assertLess(read, construction.index('vision_core::ValidateAlgorithmConfig(mission_config);'))
+
+    def test_live_and_tuning_use_one_renderer_in_running_and_paused_views(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in ('line_perception_node.cpp', 'perception_tuning_node.cpp'):
+            src = (root / 'src' / name).read_text()
+            self.assertEqual(src.count('vision::RenderMissionDebug('), 2)
+            self.assertIn('vision::DrawRawDebugDetections(', src)
+            self.assertNotIn('void DrawConfirmedDetections(', src)
+            self.assertNotIn('draw_decision_center', src)
+            self.assertIn('goal_edge_margin_px', src)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -255,6 +255,43 @@ void TestHurdleSearchAndContact() {
   assert(t.out.hurdle.mode==HurdleMode::kCross && t.out.command.action_id==0 && t.permit==0);
   t.Commit(); assert(t.out.command.action==MissionAction::kHurdle);
 }
+void TestGoalEdgeSingleCommit(bool left) {
+  auto c=Config();c.enable_ball=false;c.enable_goal=true;
+  c.goal_trial_start_forward=c.initial_has_ball=true;
+  c.goal.stable_window=c.goal.stable_min_hits=1;
+  Trial t(c);
+  t.in.camera_feedback={CameraMode::kForward,true};
+  t.in.backboard_target=Target(left?.05:.95,.3);
+  t.in.backboard_center_depth_m=2;
+  for(int i=0;i<7;++i)t.Tick();
+  assert(t.out.goal.mode==GoalMode::kEdgeTurn && t.out.command.action_id==0);
+  const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
+  t.Commit();
+  const auto first=t.out.command.action_id;
+  const int scope=t.permit;
+  assert(first!=0 && scope!=0 && t.out.command.action==turn);
+  t.in.backboard_target=Target(.5,.3);
+  for(int i=0;i<5;++i)t.Tick(); // Reacquisition cannot stop this fixed pair.
+  t.Tick(true);
+  const auto second=t.out.command.action_id;
+  assert(second!=0 && second!=first && t.out.command.action==turn);
+  assert(t.permit==scope && !t.out.post_motion_observing);
+  t.Tick(false,first); // A duplicate DONE cannot consume B.
+  assert(t.out.command.action_id==second && t.permit==scope);
+  t.Tick(true);
+  assert(t.out.command.action_id==0 && t.permit==0 && !t.out.repeat_sequence);
+  assert(t.out.goal.mode==GoalMode::kForwardApproach);
+  // Manual tuning keeps PREVIEW as the observation trigger after the pair.
+  t.Tick();assert(!t.out.post_motion_observing && t.out.command.action_id==0);
+  t.in.begin_manual_observation=true;t.Tick();
+  t.in.begin_manual_observation=false;
+  assert(t.out.post_motion_observing);
+  for(int i=0;i<9;++i) {
+    t.Tick();assert(t.out.post_motion_observing && t.out.command.action_id==0);
+  }
+  t.Tick();assert(!t.out.post_motion_observing && t.out.command.action_id==0);
+  assert(t.Preview().command.action==MissionAction::kStepForwardFour);
+}
 } // namespace
 int main() {
   // Distance thresholds keep raw GOAL pose geometry, changing only primitive length.
@@ -270,4 +307,5 @@ int main() {
   assert(medium.fine_decision_pose_used && medium.action.action==MissionAction::kStepForwardOne);
   TestCameraLatchSurvivesLoss(); TestWindowAndDeadline(); TestAlternatingBoundedRecovery();
   TestGoalForwardTrial(); TestHurdleSearchAndContact();
+  for(bool left:{false,true})TestGoalEdgeSingleCommit(left);
 }

@@ -103,6 +103,10 @@ int main(int argc, char **argv) {
   Reject(text.str(), "object_ready_mean_actions: [22, 23]",
          "object_ready_mean_actions: 22");
   Reject(text.str(), "object_ready_mean_actions: [22, 23]", "");
+  Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: -1.0");
+  Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: .nan");
+  Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: .inf");
+  Reject(text.str(), "edge_margin_px: 50.0", "");
   Reject(text.str(), "post_motion_observation_sec: 1.0", "post_motion_observation_sec: 0.0");
   Reject(text.str(), "test_stage: 0", "test_stage: 4");
   Reject(text.str(), "backboard_depth_strip_width_px: 5", "backboard_depth_strip_width_px: 0");

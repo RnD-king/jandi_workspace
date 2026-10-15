@@ -30,6 +30,7 @@ enum class GoalMode {
 };
 
 struct GoalConfig {
+  double edge_margin_px{};
   int recovery_turn_max{3};
   double recovery_observation_sec{};
   int recovery_max_observations{};
@@ -160,7 +161,13 @@ public:
     fine_pose_mean_pending_ = true;
     fine_pose_is_preaveraged_ = false;
   }
-  void UpdateTuning(const GoalConfig &config) { config_ = config; }
+  void UpdateTuning(const GoalConfig &config) {
+    // A previewed boundary correction must be reconsidered with the new margin;
+    // never interrupt an accepted two-turn sequence, including between DONEs.
+    if (mode_ == GoalMode::kEdgeTurn && !turn_pending_ && edge_turns_completed_ == 0)
+      mode_ = turn_resume_mode_;
+    config_ = config;
+  }
   void ShiftTimers(double duration) { state_enter_sec_+=duration; }
   void Reset();
 

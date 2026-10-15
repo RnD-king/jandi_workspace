@@ -15,6 +15,18 @@ CTest의 `logic` 검사는 `fixtures/mission_scenarios.yaml`을 사용한다. �
 확인한다. 운영 각도가 반드시 30도인지 같은 과거 튜닝값 검사는 하지 않는다.
 GOAL 회전/FINE 동작은 별도 고정 시나리오에서 15도와 30도를 모두 확인한다.
 
+## YAML 미션별 배치
+
+백보드 Depth 설정은 `goal.backboard_depth_strip_width_px`,
+`goal.backboard_min_depth_m`, `goal.backboard_max_depth_m`에서 읽는다.
+단독 시험 설정은 `goal.trial_start_forward`, `goal.test_mission_index`,
+`ball.test_mission_index`에서 읽는다. 이 항목들의 예전 `mission` 경로는 사용하지
+않는다. ROS/rqt 파라미터 이름과 기존 C++ 구성 필드는 유지했다.
+
+`goal.edge_margin_px`는 화면 좌우 끝의 회전 보정 여유 폭(px)이다.
+실제 노드에서는 `goal_edge_margin_px`로 설정한다. 필수 키 누락·음수·NaN·무한대는
+거부한다. 운영 YAML과 테스트 시나리오 모두 새 배치를 사용한다.
+
 ## 검사 도구 빌드
 
 아래는 사용자가 실행하는 명령이다. 설치하거나 로봇 노드를 시작하지 않는다.

@@ -1,5 +1,6 @@
 #pragma once
 #include <rclcpp/rclcpp.hpp>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include "vision_core/mission_controller.hpp"
@@ -11,6 +12,7 @@ inline void DeclareMissionParameters(rclcpp::Node& node,
   node.declare_parameter<double>("fine_motion_settle_sec", c.fine_motion_settle_sec);
   node.declare_parameter<int>("ball_recovery_walk_turn_max", c.ball.recovery_walk_turn_max);
   node.declare_parameter<int>("goal_recovery_turn_max", c.goal.recovery_turn_max);
+  node.declare_parameter<double>("goal_edge_margin_px", c.goal.edge_margin_px);
 }
 inline void ReadMissionParameters(const rclcpp::Node& node,
                                  vision_core::MissionControllerConfig& c) {
@@ -24,5 +26,9 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   };
   c.ball.recovery_walk_turn_max = turns("ball_recovery_walk_turn_max");
   c.goal.recovery_turn_max = turns("goal_recovery_turn_max");
+  const double margin=node.get_parameter("goal_edge_margin_px").as_double();
+  if (!std::isfinite(margin) || margin<0.0)
+    throw std::invalid_argument("goal_edge_margin_px must be finite and nonnegative");
+  c.goal.edge_margin_px = margin;
 }
 }

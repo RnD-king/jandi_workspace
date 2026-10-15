@@ -98,32 +98,130 @@ void GoalRecovery(bool fine, bool left) {
 }
 void GoalEdges() {
   auto c=LoadDefaultAlgorithmConfig().goal;c.stable_window=c.stable_min_hits=1;
-  for(bool left:{false,true}) {
+  const CameraFeedback camera{CameraMode::kGoal,true};
+  for(double margin:{0.0,35.0,50.0,80.0}) for(bool left:{false,true}) {
+    c.edge_margin_px=margin;
     GoalController goal(c,3);goal.StartTestNear();
-    const CameraFeedback camera{CameraMode::kGoal,true};
     goal.Compute({},{},{},640,480,0,true,camera,{});
-    const auto edge=Target(left?60:580,100,20); // x=50 or right=590, inclusive
+    const auto edge=Target(left?margin+10:640-margin-10,100,20);
     auto g=goal.Compute({},edge,{},640,480,.1,true,camera,{});
     const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
     assert(g.mode==GoalMode::kEdgeTurn && g.action.action==turn);
+    // Stable reacquisition during either cycle cannot stop a fixed pair.
     g=goal.Compute({},Target(320),{},640,480,.2,true,camera,{false,true,false});
-    assert(g.action.action==MissionAction::kNone);
-    g=goal.Compute({},Target(320),{},640,480,.3,true,camera,{true,false,false});
-    assert(g.action.action==MissionAction::kNone); // no second turn before observation
-    g=goal.Compute({},Target(320),{},640,480,1.3,true,camera,{false,false,true});
-    assert(g.action.action==turn);
-    g=goal.Compute({},Target(320),{},640,480,2.3,true,camera,{true,false,true});
+    assert(g.mode==GoalMode::kEdgeTurn && g.action.action==MissionAction::kNone);
+    g=goal.Compute({},Target(320),{},640,480,.4,true,camera,{false,true,false});
+    assert(g.mode==GoalMode::kEdgeTurn && g.action.action==MissionAction::kNone);
+    // First actual DONE immediately requests the second single turn, even
+    // without observation_complete and despite stable centered reacquisition.
+    g=goal.Compute({},Target(320),{},640,480,.5,true,camera,{true,false,false});
+    assert(g.mode==GoalMode::kEdgeTurn && g.action.action==turn);
+    g=goal.Compute({},Target(320),{},640,480,.6,true,camera,{false,true,false});
+    assert(g.mode==GoalMode::kEdgeTurn && g.action.action==MissionAction::kNone);
+    g=goal.Compute({},Target(320),{},640,480,.7,true,camera,{true,false,false});
     assert(g.mode==GoalMode::kSearch && g.action.action==MissionAction::kNone);
-    assert(goal.RecoveryTurnsCompleted()==0); // boundary correction is not loss recovery
+    assert(goal.RecoveryTurnsCompleted()==0);
+    // A later edge event starts a fresh two-turn budget.
+    g=goal.Compute({},edge,{},640,480,.8,true,camera,{});
+    assert(g.mode==GoalMode::kEdgeTurn && g.action.action==turn);
+    g=goal.Compute({},Target(320),{},640,480,.9,true,camera,{true,false,false});
+    assert(g.mode==GoalMode::kEdgeTurn && g.action.action==turn);
+    g=goal.Compute({},Target(320),{},640,480,1.0,true,camera,{true,false,false});
+    assert(g.mode==GoalMode::kSearch && g.action.action==MissionAction::kNone);
+    // A box one pixel outside the margin does not trigger a pair.
+    GoalController outside(c,3);outside.StartTestNear();
+    outside.Compute({},{},{},640,480,0,true,camera,{});
+    g=outside.Compute({},Target(left?margin+11:640-margin-11),{},640,480,.1,true,camera,{});
+    assert(g.mode!=GoalMode::kEdgeTurn);
   }
+  c.edge_margin_px=50;
   GoalController both(c,3);both.StartTestNear();
-  both.Compute({},{},{},640,480,0,true,{CameraMode::kGoal,true},{});
-  auto g=both.Compute({},Target(320,100,600),{},640,480,.1,true,{CameraMode::kGoal,true},{});
+  both.Compute({},{},{},640,480,0,true,camera,{});
+  auto g=both.Compute({},Target(320,100,600),{},640,480,.1,true,camera,{});
   assert(g.action.action==MissionAction::kNone && g.mode==GoalMode::kSearch);
+  // Retuning a not-yet-committed pair re-evaluates the new boundary.
+  GoalController preview(c,3);preview.StartTestNear();
+  preview.Compute({},{},{},640,480,0,true,camera,{});
+  g=preview.Compute({},Target(60),{},640,480,.1,true,camera,{},false);
+  assert(g.action.action==MissionAction::kTurnLeftInPlace);
+  c.edge_margin_px=20;preview.UpdateTuning(c);
+  g=preview.Compute({},Target(60),{},640,480,.2,true,camera,{},false);
+  assert(g.mode!=GoalMode::kEdgeTurn);
+  // PAUSE can consume A DONE without authorizing B yet. Retuning in that
+  // idle gap must preserve the accepted pair and its one remaining turn.
+  c.edge_margin_px=50;
+  GoalController paused(c,3);paused.StartTestNear();
+  paused.Compute({},{},{},640,480,0,true,camera,{});
+  g=paused.Compute({},Target(60),{},640,480,.1,true,camera,{});
+  assert(g.action.action==MissionAction::kTurnLeftInPlace);
+  g=paused.Compute({},Target(320),{},640,480,.2,true,camera,{true,false,false},false);
+  assert(g.mode==GoalMode::kEdgeTurn);
+  c.edge_margin_px=0;paused.UpdateTuning(c);
+  g=paused.Compute({},Target(320),{},640,480,.3,true,camera,{},false);
+  assert(g.mode==GoalMode::kEdgeTurn);
+  g=paused.Compute({},Target(320),{},640,480,.4,true,camera,{});
+  assert(g.action.action==MissionAction::kTurnLeftInPlace);
+  g=paused.Compute({},Target(320),{},640,480,.5,true,camera,{true,false,false});
+  assert(g.mode==GoalMode::kSearch && g.action.action==MissionAction::kNone);
 }
 MissionFrameInput Frame(double t) {
   MissionFrameInput f;f.now_sec=t;f.image_width=640;f.image_height=480;
   f.command_transport_enabled=true;f.advance_line_fsm=false;return f;
+}
+void GoalPairHasOneObservation(bool left) {
+  auto c=LoadDefaultAlgorithmConfig();
+  c.test_mission=MissionType::kGoal;c.test_stage=1;
+  c.enable_ball=c.enable_hurdle=false;c.initial_has_ball=true;
+  c.transition_settle_sec=0;
+  c.goal.stable_window=c.goal.stable_min_hits=1;
+  MissionController core(c);
+  auto f=Frame(0);f.camera_feedback={CameraMode::kGoal,true};
+  f.backboard_target=Target(left?60:580);f.goal_pose={true,0,1.2,0,1};
+  f.backboard_center_depth_m=1.2;
+  const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
+  MissionFrameResult r;
+  for(int i=0;i<100;++i) {
+    f.now_sec=.1*i;f.delivery_feedback={};
+    if(r.command.action_id)f.delivery_feedback={r.command.action_id,true,true,false};
+    r=core.Step(f);
+    if(r.command.action==turn)break;
+  }
+  assert(r.command.action==turn && r.repeat_sequence);
+  const auto first_id=r.command.action_id;
+  const int scope=r.repeat_scope;
+  f.backboard_target=Target(320);
+  for(int i=0;i<5;++i) {
+    f.now_sec+=.1;f.delivery_feedback={first_id,true,false,false};r=core.Step(f);
+    assert(!r.post_motion_observing && r.repeat_scope==scope);
+  }
+  // A's actual DONE dispatches B with a new ID in this same frame.
+  f.now_sec+=.1;f.delivery_feedback={first_id,true,true,false};r=core.Step(f);
+  assert(!r.post_motion_observing && r.repeat_scope==scope);
+  assert(r.command.command_type==CommandType::kAction && r.command.action==turn);
+  const auto second_id=r.command.action_id;
+  assert(second_id!=0 && second_id!=first_id);
+  // A repeated/late A DONE must not finish B or issue a third turn.
+  for(int i=0;i<5;++i) {
+    f.now_sec+=.1;
+    f.delivery_feedback=i==0 ? CommandDeliveryFeedback{first_id,true,true,false}
+        : CommandDeliveryFeedback{second_id,true,false,false};
+    r=core.Step(f);
+    assert(!r.post_motion_observing && r.repeat_scope==scope);
+    assert(r.command.action_id==second_id);
+  }
+  f.now_sec+=.1;const double done_at=f.now_sec;
+  // PAUSE may receive physical DONE before its next sensory frame. Changing
+  // only the margin must keep that edge available for the normal observation.
+  core.AcceptDeliveryFeedback({second_id,true,true,false},f.now_sec);
+  core.SetGoalEdgeMargin(40);
+  f.delivery_feedback={second_id,true,true,false};r=core.Step(f);
+  assert(r.post_motion_observing && !r.repeat_sequence && r.command.action_id==0);
+  for(int i=1;i<10;++i) {
+    f.now_sec=done_at+.1*i;f.delivery_feedback={};r=core.Step(f);
+    assert(r.post_motion_observing && !r.repeat_sequence && r.command.action_id==0);
+  }
+  f.now_sec=done_at+1;f.delivery_feedback={};r=core.Step(f);
+  assert(!r.post_motion_observing && r.goal.mode!=GoalMode::kEdgeTurn);
 }
 void PoseSettleAndConcurrentObservation() {
   auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kBall;c.test_stage=3;
@@ -220,6 +318,7 @@ void Defaults() {
 }
 int main() {
   Defaults();VerifiedFineWindows();InvalidAndNearWindows();GoalEdges();ImageDetectionWithMissingDepth();
+  for(bool left:{false,true})GoalPairHasOneObservation(left);
   for(bool fine:{false,true})for(bool left:{false,true})GoalRecovery(fine,left);
   PoseSettleAndConcurrentObservation();
   FineObservationTiming(0);FineObservationTiming(.25);FineObservationTiming(.25,true);

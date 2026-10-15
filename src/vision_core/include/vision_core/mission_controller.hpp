@@ -248,6 +248,9 @@ public:
   int RepeatScope() const;
   bool NeedsStationaryObservation() const;
   bool SetTestMissionIndices(int ball_index, int goal_index);
+  // Adapter calls only after physical body/camera DONE while disarmed/paused.
+  // A sensory DONE may still be waiting for RESUME; preserve that pending edge.
+  void SetGoalEdgeMargin(double margin_px);
   bool SetTestStage(MissionType mission,int stage);
   bool TestSetupPending() const { return test_setup_pending_; }
   int MissionStateKey() const {

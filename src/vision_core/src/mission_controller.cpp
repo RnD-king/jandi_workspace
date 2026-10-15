@@ -1182,6 +1182,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         input.image_width, input.image_height, input.now_sec,
         line_reference_valid, input.camera_feedback, action_feedback,
             controller_allow, input.backboard_center_depth_m, false, input.backboard_image_without_depth);
+    // Fixed edge turns share the existing repeat gate. After the second actual
+    // DONE, collect one fresh observation before resuming approach decisions.
+    if (before == GoalMode::kEdgeTurn && goal_result_.mode != GoalMode::kEdgeTurn &&
+        !input.manual_observation_control && config_.post_motion_observation_sec > 0.0) {
+      BeginDecisionObservation(input.now_sec, active_mission_, false, {});
+      output.post_motion_observing = true;
+    }
     if (goal_result_.mode==GoalMode::kHeadingRecovery) goal_result_.action=line_action;
     has_ball_ = goal_controller_.HasBall();
     ball_controller_.SetHasBall(has_ball_);
@@ -1612,7 +1619,8 @@ int MissionController::RepeatScope() const {
     if (hurdle_result_.mode==HurdleMode::kDownSearch || hurdle_result_.mode==HurdleMode::kContactWalk)
       return 400+static_cast<int>(hurdle_result_.mode);
   } else if (active_mission_==MissionType::kGoal) {
-    if (goal_result_.mode==GoalMode::kPostShootBackAway || goal_result_.mode==GoalMode::kHeadingRecovery)
+    if (goal_result_.mode==GoalMode::kPostShootBackAway || goal_result_.mode==GoalMode::kHeadingRecovery ||
+        goal_result_.mode==GoalMode::kEdgeTurn)
       return 300+static_cast<int>(goal_result_.mode);
   }
   return 0;
@@ -1706,6 +1714,14 @@ double MissionController::ManualPreviewDurationSec() const {
                       config_.line_p2p.recovery_observation_sec);
   }
   return config_.post_motion_observation_sec;
+}
+
+void MissionController::SetGoalEdgeMargin(double margin_px) {
+  auto candidate=config_;
+  candidate.goal.edge_margin_px=margin_px;
+  ValidateAlgorithmConfig(candidate);
+  config_.goal.edge_margin_px=margin_px;
+  goal_controller_.UpdateTuning(config_.goal);
 }
 
 bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {

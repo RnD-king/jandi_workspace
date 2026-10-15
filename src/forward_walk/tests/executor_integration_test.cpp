@@ -300,6 +300,24 @@ int main() {
             Check(Dxl::current.at(19)==1968, "single-turn action lost normal gripper override");
         }
         std::cout<<"PASS single-turn 27/28/31 JSON actions and missing-asset rejection\n";
+        // Vision chains two existing turns after their separate actual DONEs.
+        for(uint16_t code:{31,28}) {
+            const uint64_t first=35500+2*code, second=first+1;
+            action(first,code);
+            pump([&]{return node->action_transactions_.completed.Contains(first);});flush();
+            Check(Count(actions,first,Status::ACK)==1 && Count(actions,first,Status::DONE)==1 &&
+                  Count(actions,first,Status::READY)==0, "first turn lost its own ACK/DONE");
+            action(second,code);
+            // A repeated delivery after B starts must not replay A.
+            action(first,code);
+            Check(node->action_transactions_.active_id==second,
+                  "late duplicate turn replaced the second transaction");
+            pump([&]{return node->action_transactions_.completed.Contains(second);});flush();
+            Check(Count(actions,second,Status::ACK)==1 && Count(actions,second,Status::DONE)==1 &&
+                  Count(actions,second,Status::READY)==0,
+                  "second turn lost its own ACK/DONE or unexpectedly emitted READY");
+        }
+        std::cout<<"PASS consecutive single-turn 31/28 transactions and duplicate protection\n";
 
         action(36000,21);
         pump([&]{return node->action_transactions_.ready_sent;});
