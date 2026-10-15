@@ -12,7 +12,7 @@ static ObjectTarget H(double v) {
   t.height_px = 10; t.confidence = 1; return t;
 }
 int main() {
-  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle; c.recovery_settle_duration_sec=0; c.contact_steps=1; c.stable_window = c.stable_min_hits = 1;
+  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle; c.recovery_settle_duration_sec=0; c.fine_settle_duration_sec=0; c.fine_motion_settle_duration_sec=0; c.contact_steps=1; c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2; c.smooth_alpha = 1; c.upper_acquire_v_px=480;
   c.approach_two_step_v_px = 360.0;
   c.approach_short_v_px = 312.0;
@@ -79,6 +79,15 @@ int main() {
   r = controller.Compute(H(0.8), 640,480, .4,
                          {CameraMode::kDown, true}, done, straight);
   assert(r.action.action == MissionAction::kHurdle);
+  HurdleConfig cross_settle=c;
+  cross_settle.fine_settle_duration_sec=.6;
+  controller.UpdateTuning(cross_settle);
+  r=controller.Compute({},640,480,.5,{CameraMode::kDown,true},done,straight);
+  assert(r.mode==HurdleMode::kPostCrossSettle && r.camera_request==CameraRequest::kNone);
+  r=controller.Compute({},640,480,.51,{CameraMode::kDown,true},{},straight);
+  assert(r.mode==HurdleMode::kPostCrossSettle && r.camera_request==CameraRequest::kNone);
+  r=controller.Compute({},640,480,1.11,{CameraMode::kDown,true},{},straight);
+  assert(r.mode==HurdleMode::kReturnCameraToLine && r.camera_request==CameraRequest::kForward);
   // Camera-transition observations cannot contaminate the DOWN-view evidence.
   HurdleController fresh_down(c,3.0);
   fresh_down.Compute(H(.5),640,480,0,{},{}, straight);

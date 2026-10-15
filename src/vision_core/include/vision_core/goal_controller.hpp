@@ -25,11 +25,13 @@ enum class GoalMode {
   kWaitFinePose,
   kFineRecovery,
   kCoarseRecovery,
+  kRecoveryWalkTurn, // bounded GOAL-camera WALK-stance heading search
 };
 
 struct GoalConfig {
   double recovery_observation_sec{};
   int recovery_max_observations{};
+  int recovery_walk_turn_max{3};
   double approach_short_z_m{};
   double fine_one_step_range_error_m{};
   double fine_two_step_range_error_m{};
@@ -48,6 +50,7 @@ struct GoalConfig {
   double throw_landing_z_m{};
   double position_tolerance_m{};
   double fine_settle_duration_sec{};
+  double fine_motion_settle_duration_sec{};
   double shoot_yaw_limit_deg{};
   double recovery_timeout_sec{};
   int recovery_reacquire_min_hits{};
@@ -134,7 +137,8 @@ public:
                      const ActionExecutionFeedback &action_feedback,
                      bool allow_new_body_actions = true,
                      std::optional<double> center_depth_m = std::nullopt,
-                     bool post_pickup_line_gate_satisfied = false);
+                     bool post_pickup_line_gate_satisfied = false,
+                     bool walk_stance_ready = true);
   static const char *ModeName(GoalMode mode);
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
@@ -171,6 +175,8 @@ private:
   double ThrowRangeM() const;
   void ClearTracking();
   ActionRequest SearchRecoveryAction() const;
+  void BeginTurnOrStationaryRecovery(GoalMode origin, double now_sec);
+  void FinishTurnRecovery(double now_sec);
 
   GoalConfig config_;
   double camera_motion_timeout_sec_{};
@@ -200,6 +206,12 @@ private:
   bool camera_request_started_{false};
   bool fine_trigger_latched_{false};
   double last_seen_u_px_{0.0};
+  std::optional<double> last_stable_goal_u_;
+  std::optional<bool> recovery_turn_left_;
+  GoalMode recovery_turn_origin_{GoalMode::kApproach};
+  int recovery_turns_completed_{0};
+  bool recovery_turn_pending_{false};
+  bool post_shoot_settle_pending_{false};
   bool seen_after_camera_goal_{false};
   int recovery_visible_count_{0};
   int completed_back_steps_{0};

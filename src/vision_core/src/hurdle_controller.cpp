@@ -44,6 +44,7 @@ const char *HurdleController::ModeName(HurdleMode mode) {
   case HurdleMode::kApproachTwoBeforeDown: return "HURDLE_TWO_THEN_DOWN";
   case HurdleMode::kCoarseAdjust: return "HURDLE_DOWN_WALK";
   case HurdleMode::kWaitFinePose: return "HURDLE_TO_FINE_FEET";
+  case HurdleMode::kPostCrossSettle: return "HURDLE_POST_CROSS_SETTLE";
   }
   return "UNKNOWN";
 }
@@ -213,6 +214,7 @@ HurdleResult HurdleController::Compute(
       ClearTracking();  // Intermediate camera observations are discarded.
       last_seen_u_px_ = config_.target_u_px;
       mode_ = HurdleMode::kDownSearch;
+      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
       down_search_started_ = down_search_found_ = false;
       down_search_steps_completed_=0;
       down_search_step_pending_=false;
@@ -227,6 +229,7 @@ HurdleResult HurdleController::Compute(
     }
     return result;
   case HurdleMode::kDownSearch: {
+    if (now_sec < settle_until_sec_) return result; // Camera settle.
     down_search_found_=down_search_found_ || (tracked_.visible && tracked_.stable);
     if (feedback.action_active && !feedback.action_done) return result;
     if (feedback.action_done && down_search_step_pending_) {
@@ -236,7 +239,7 @@ HurdleResult HurdleController::Compute(
     // A target found after the final step remains eligible for COARSE.
     if (down_search_found_) {
       mode_=HurdleMode::kCoarseAdjust; ClearTracking();
-      settle_until_sec_=now_sec+config_.recovery_settle_duration_sec;
+      // Camera already had its settle window.
       result.mode=mode_; result.action={}; return result;
     }
     if (down_search_steps_completed_ >= config_.down_search_max_steps) {
@@ -252,7 +255,7 @@ HurdleResult HurdleController::Compute(
   }
   case HurdleMode::kCoarseAdjust:
     if (feedback.action_active && !feedback.action_done) return result;
-    if (feedback.action_done) { settle_until_sec_=now_sec+config_.recovery_settle_duration_sec; return result; }
+    if (feedback.action_done) { settle_until_sec_=now_sec; return result; } // Shared DONE observation.
     if (now_sec < settle_until_sec_) return result;
     if (!tracked_.visible) {
       if (lost_count_>=config_.lost_frames) {
@@ -269,12 +272,16 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kWaitFinePose:
     if (feedback.action_done) {
       fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; ClearTracking();
-      settle_until_sec_=now_sec+config_.recovery_settle_duration_sec;
+      settle_until_sec_=now_sec+config_.fine_settle_duration_sec;
       result.mode=mode_; result.tracked={}; return result;
     }
     result.action=Locomotion(MissionAction::kDefaultPoseMode); return result;
   case HurdleMode::kFineAdjust: {
     if (feedback.action_active && !feedback.action_done) return result;
+    if (feedback.action_done) {
+      settle_until_sec_=now_sec+config_.fine_motion_settle_duration_sec;
+      return result;
+    }
     if (now_sec < settle_until_sec_) return result;
     if (!tracked_.visible) {
       if (lost_count_>=config_.lost_frames) {
@@ -304,11 +311,17 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kCross:
     result.action = Mission(MissionAction::kHurdle);
     if (feedback.action_done) {
-      mode_ = HurdleMode::kReturnCameraToLine;
+      mode_ = HurdleMode::kPostCrossSettle;
+      settle_until_sec_ = now_sec + config_.fine_settle_duration_sec;
       result.mode = mode_;
       result.action = {};
-      result.camera_request = CameraRequest::kForward;
     }
+    return result;
+  case HurdleMode::kPostCrossSettle:
+    if (now_sec < settle_until_sec_) return result;
+    mode_ = HurdleMode::kReturnCameraToLine;
+    result.mode = mode_;
+    result.camera_request = CameraRequest::kForward;
     return result;
   case HurdleMode::kReturnCameraToLine:
     result.camera_request = CameraRequest::kForward;

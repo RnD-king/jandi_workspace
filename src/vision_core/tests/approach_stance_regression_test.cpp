@@ -37,6 +37,8 @@ void BallStages() {
 void HurdlePostWalkPolicy(int steps) {
   auto c=LoadDefaultAlgorithmConfig().hurdle;
   c.stable_window=c.stable_min_hits=1; c.lost_frames=1;
+  // Fix this geometry fixture independently of live competition grid tuning.
+  c.approach_short_v_px=312.0; c.approach_two_step_v_px=360.0;
   HurdleController hurdle(c,3);
   const double v=steps==4 ? 200 : steps==3 ? 330 : 400;
   auto r=hurdle.Compute(Target(100,v),640,480,0,{},{},StraightLine());

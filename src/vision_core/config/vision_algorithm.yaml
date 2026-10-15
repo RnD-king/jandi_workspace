@@ -58,13 +58,16 @@ vision_algorithm:
     pickup_max_attempts: 100
     ball_ignore_duration_sec: 5.0
 
-    fine_settle_duration_sec: 0.60
+    fine_settle_duration_sec: 0.60 # camera/stance transition settle (not per fine action)
+    fine_motion_settle_duration_sec: 0.0 # after each BALL fine locomotion; zero allowed
     recovery_timeout_sec: 5.0
     recovery_reacquire_min_hits: 3
     recovery_center_tolerance_px: 76.8
     recovery_settle_duration_sec: 0.60
 
   hurdle:
+    fine_settle_duration_sec: 0.60 # camera/stance transition and post-cross
+    fine_motion_settle_duration_sec: 0.0 # after each HURDLE fine locomotion
     down_search_max_steps: 10 # DOWN-view failed detection: up to ten completed one-step walks
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
@@ -98,6 +101,7 @@ vision_algorithm:
     recovery_settle_duration_sec: 0.60
 
   goal:
+    recovery_walk_turn_max: 3 # GOAL-view loss: up to three DONE-confirmed turns before fallback
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
     stable_window: 10
@@ -133,7 +137,8 @@ vision_algorithm:
     post_shoot_back_steps: 0    # 0: 투척 후 후진 없이 카메라 FORWARD 및 라인 복귀
 
     # 모션 후 관측 대기
-    fine_settle_duration_sec: 0.60
+    fine_settle_duration_sec: 0.60 # camera/stance transition and post-shoot
+    fine_motion_settle_duration_sec: 0.0 # after each GOAL fine locomotion; zero allowed
 
     # 골대 인식 실패 시 복구
     recovery_timeout_sec: 5.0

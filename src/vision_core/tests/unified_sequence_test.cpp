@@ -5,6 +5,7 @@
 #endif
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 
 using namespace vision_core;
 static CruiseDecision StraightLine() { CruiseDecision d; d.applicable=true; d.direction=CruiseDirection::kStraight; return d; }
@@ -41,6 +42,12 @@ struct Trial {
   }
   void Commit() {
     const auto expected=Preview();
+    if (expected.command.command_type!=CommandType::kAction)
+      std::fprintf(stderr,
+          "Commit preview has no action: now=%.3f ball=%d goal=%d hurdle=%d phase=%d scope=%d\\n",
+          in.now_sec, static_cast<int>(expected.ball.mode),
+          static_cast<int>(expected.goal.mode), static_cast<int>(expected.hurdle.mode),
+          expected.command.mission_phase, core.RepeatScope());
     assert(expected.command.command_type==CommandType::kAction);
     auto committed=in; committed.delivery_feedback={}; committed.allow_new_body_actions=true;
     out=core.Step(committed); permit=out.repeat_scope;
@@ -56,6 +63,10 @@ MissionControllerConfig Config() {
 
   c.ball.fine_settle_duration_sec=0;
   c.goal.fine_settle_duration_sec=0;
+  c.hurdle.fine_settle_duration_sec=0;
+  // Keep this staged-mission fixture independent of live DOWN grid tuning.
+  c.ball.down_one_step_v_px=216.0;
+  c.ball.fine_mode_v_px=278.4;
   c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
   c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
   c.hurdle.contact_steps=3;
