@@ -1,0 +1,34 @@
+{
+  "name": "직진_4걸음_수정",
+  "motions": [
+    {
+      "filename": "보행_1걸음_초기X_수정.json",
+      "keyframe_count": 4,
+      "name": "보행_1걸음_초기X_수정",
+      "nominal_sec": 0.54,
+      "saved_at": "2026-10-16T03:18:43"
+    },
+    {
+      "filename": "보행_1걸음_초기X_수정.json",
+      "keyframe_count": 4,
+      "name": "보행_1걸음_초기X_수정",
+      "nominal_sec": 0.54,
+      "saved_at": "2026-10-16T03:18:43"
+    },
+    {
+      "filename": "보행_1걸음_초기X_수정.json",
+      "keyframe_count": 4,
+      "name": "보행_1걸음_초기X_수정",
+      "nominal_sec": 0.54,
+      "saved_at": "2026-10-16T03:18:43"
+    },
+    {
+      "filename": "보행_1걸음_초기X_수정.json",
+      "keyframe_count": 4,
+      "name": "보행_1걸음_초기X_수정",
+      "nominal_sec": 0.54,
+      "saved_at": "2026-10-16T03:18:43"
+    }
+  ],
+  "saved_at": "2026-10-16T04:46:14"
+}

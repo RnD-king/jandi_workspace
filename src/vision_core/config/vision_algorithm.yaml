@@ -176,14 +176,14 @@ vision_algorithm:
 
 
     # 객체별 최소 bbox 크기(px). 이보다 작은 가로 또는 세로는 검출 후보에서 제외.
-    ball_min_box_width: 2.0 # ball 최소 가로
-    ball_min_box_height: 2.0 # ball 최소 세로
-    goal_min_box_width: 2.0 # goal 최소 가로
-    goal_min_box_height: 2.0 # goal 최소 세로
-    backboard_min_box_width: 2.0 # backboard 최소 가로
-    backboard_min_box_height: 2.0 # backboard 최소 세로
-    hurdle_min_box_width: 2.0 # hurdle 최소 가로
-    hurdle_min_box_height: 2.0 # hurdle 최소 세로
+    ball_min_box_width: 20 # ball 최소 가로 (제일 멀 때 40,40 / 가까울 때  80,80)
+    ball_min_box_height: 30 # ball 최소 세로
+    goal_min_box_width: 20 # goal 최소 가로
+    goal_min_box_height: 20 # goal 최소 세로
+    backboard_min_box_width: 20 # backboard 최소 가로
+    backboard_min_box_height: 20 # backboard 최소 세로
+    hurdle_min_box_width: 200 # hurdle 최소 가로
+    hurdle_min_box_height: 10 # hurdle 최소 세로
 
   object_association:
     missing_frame_limit: 5 # 같은 물체의 추적을 유지할 미검출 프레임 수

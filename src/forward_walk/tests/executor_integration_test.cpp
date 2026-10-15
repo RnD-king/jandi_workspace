@@ -70,16 +70,17 @@ int main() {
     fs::create_directories(directory/"motions");
     fs::create_directories(directory/"missions");
     const auto startup=directory/"motions/보행_왼발만앞에.json";
-    const auto left=directory/"motions/보행_좌회전전진_20도_최종_초기X.json";
-    const auto right=directory/"motions/보행_우회전전진_20도_최종_초기X.json";
+    const auto left=directory/"motions/보행_좌회전전진_20도_최종_초기X_수정.json";
+    const auto right=directory/"motions/보행_우회전전진_20도_최종_초기X_찐.json";
     WriteMotion(startup,true);WriteMotion(left);WriteMotion(right);
     WriteMotion(directory/"motions/우회전_최종.json");
     WriteMotion(directory/"motions/공_재그립.json",false,1968);
-    WriteTripleMission(directory/"missions/직진_좌회전_3번.json", left.filename().string());
-    WriteTripleMission(directory/"missions/직진_우회전_3번.json", right.filename().string());
-    WriteTripleMission(directory/"missions/직진_우회전_2번.json", right.filename().string(),2);
-    WriteTripleMission(directory/"missions/직진_좌회전_1번.json", left.filename().string(),1);
-    WriteTripleMission(directory/"missions/직진_우회전_1번_huddle.json", right.filename().string(),1);
+    for(int count=1;count<=3;++count) {
+        WriteTripleMission(directory/("missions/좌회전전진_"+std::to_string(count)+"회.json"),
+            left.filename().string(),count);
+        WriteTripleMission(directory/("missions/우회전전진_"+std::to_string(count)+"회.json"),
+            right.filename().string(),count);
+    }
     const std::vector<std::string> options={"executor_integration_test","--ros-args",
         "-p","p2p_asset_directory:="+directory.string(),
         "-p","motor_health_log_directory:="+(directory/"log").string(),

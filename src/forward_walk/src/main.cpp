@@ -302,25 +302,25 @@ private:
             return "motions/보행_왼발만앞에.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_ONE:
-            return "motions/보행_1걸음_초기X.json";
+            return "motions/보행_1걸음_초기X_수정.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_LEFT_THREE:
-            return "missions/직진_좌회전_3번.json";
+            return "missions/좌회전전진_3회.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_THREE:
-            return "missions/직진_우회전_2번.json";
+            return "missions/우회전전진_3회.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_LEFT_TWO:
-            return "missions/직진_좌회전_2번.json";
+            return "missions/좌회전전진_2회.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_TWO:
-            return "missions/직진_우회전_2번_ball.json";
+            return "missions/우회전전진_2회.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE:
-            return "missions/직진_우회전_1번.json";
+            return "missions/우회전전진_1회.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_LEFT_ONE:
-            return "missions/직진_좌회전_1번.json";
+            return "missions/좌회전전진_1회.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE_HUDDLE:
             return "motions/우회전_최종.json";
@@ -334,13 +334,13 @@ private:
             return "missions/연속걷기.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_TWO:
-            return "missions/직진_2걸음.json";
+            return "missions/직진_2걸음_수정.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_THREE:
-            return "missions/직진_3걸음.json";
+            return "missions/직진_3걸음_수정.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_FOUR:
-            return "missions/직진_4걸음.json";
+            return "missions/직진_4걸음_수정.json";
             
         case vision::msg::ActionCommand::PICK_BALL:
             return "motions/공_줍고일어나기_최종.json";
