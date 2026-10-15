@@ -240,7 +240,7 @@ int main() {
   // FINE loss: a stance transition must not be counted as a turn.
   GoalController fine_turn(bounded,3.0);
   fine_turn.StartTestExecute();
-  fine_turn.Compute({},Board(.2),Pose(-.2,.6),640,480,0,true,{CameraMode::kGoal,true},{});
+  fine_turn.Compute({},Board(.2),Pose(-.4,.8),640,480,0,true,{CameraMode::kGoal,true},{});
   fine_turn.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
   r=fine_turn.Compute({}, {}, {},640,480,.2,true,{CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kRecoveryWalkTurn);
@@ -250,17 +250,17 @@ int main() {
   r=fine_turn.Compute({}, {}, {},640,480,.4,true,{CameraMode::kGoal,true},
                        {},true,std::nullopt,false,true);
   assert(r.action.action==MissionAction::kTurnLeftInPlace);
-  r=fine_turn.Compute({},Board(.2),Pose(-.2,.6),640,480,.5,
+  r=fine_turn.Compute({},Board(.2),Pose(-.4,.8),640,480,.5,
                        true,{CameraMode::kGoal,true},completed_observed);
   assert(r.mode==GoalMode::kWaitFinePose);
-  r=fine_turn.Compute({},Board(.2),Pose(-.2,.6),640,480,.6,
+  r=fine_turn.Compute({},Board(.2),Pose(-.4,.8),640,480,.6,
                        true,{CameraMode::kGoal,true},{});
   assert(r.action.action==MissionAction::kDefaultPoseMode);
 
   // YOLO sees the board but edge depth is invalid: do not spin.
   GoalController depth_only_loss(bounded,3.0);
   depth_only_loss.StartTestExecute();
-  depth_only_loss.Compute({},Board(.2),Pose(-.2,.6),640,480,0,true,{CameraMode::kGoal,true},{});
+  depth_only_loss.Compute({},Board(.2),Pose(-.4,.8),640,480,0,true,{CameraMode::kGoal,true},{});
   depth_only_loss.Compute({},Board(.2),{},640,480,.1,true,{CameraMode::kGoal,true},{});
   r=depth_only_loss.Compute({},Board(.2),{},640,480,.2,true,{CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kFineRecovery);
