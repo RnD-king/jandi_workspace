@@ -79,9 +79,14 @@ int main() {
   r = controller.Compute(H(0.8), 640,480, .4,
                          {CameraMode::kDown, true}, done, straight);
   assert(r.action.action == MissionAction::kHurdle);
+  HurdleConfig cross_settle=c;
+  cross_settle.fine_settle_duration_sec=.6;
+  controller.UpdateTuning(cross_settle);
   r=controller.Compute({},640,480,.5,{CameraMode::kDown,true},done,straight);
   assert(r.mode==HurdleMode::kPostCrossSettle && r.camera_request==CameraRequest::kNone);
   r=controller.Compute({},640,480,.51,{CameraMode::kDown,true},{},straight);
+  assert(r.mode==HurdleMode::kPostCrossSettle && r.camera_request==CameraRequest::kNone);
+  r=controller.Compute({},640,480,1.11,{CameraMode::kDown,true},{},straight);
   assert(r.mode==HurdleMode::kReturnCameraToLine && r.camera_request==CameraRequest::kForward);
   // Camera-transition observations cannot contaminate the DOWN-view evidence.
   HurdleController fresh_down(c,3.0);
