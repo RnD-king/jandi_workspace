@@ -992,6 +992,8 @@ int main() {
   hurdle_ready_cfg.enable_ball=false; hurdle_ready_cfg.enable_hurdle=true;
   hurdle_ready_cfg.hurdle.stable_window=hurdle_ready_cfg.hurdle.stable_min_hits=1;
   hurdle_ready_cfg.hurdle.upper_acquire_v_px=480;
+  hurdle_ready_cfg.hurdle.approach_short_v_px=312.0;
+  hurdle_ready_cfg.hurdle.approach_two_step_v_px=360.0;
   MissionController hurdle_ready(hurdle_ready_cfg);
   ready_frame=Frame(0.0); ready_frame.hurdle_target=Ball(.5,.3);
   ready_result=hurdle_ready.Step(ready_frame);
