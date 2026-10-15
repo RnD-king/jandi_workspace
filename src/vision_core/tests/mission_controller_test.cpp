@@ -34,7 +34,7 @@ static void TestNearBallTurnThenDown() {
   config.enable_ball=true;
   config.enable_goal=config.enable_hurdle=false;
   config.post_motion_observation_sec=1.0;
-  config.ball.stable_window=config.ball.stable_min_hits=1;
+  config.ball.entry_min_hits=1; config.ball.stable_window=config.ball.stable_min_hits=1;
   config.ball.upper_acquire_v_px=480;
   config.ball.far_u_des_px=320;
   config.ball.approach_u_deadband_px=32;
@@ -122,10 +122,10 @@ int main() {
   two_point_input=Frame(2.0);
   two_point_result=two_point_controller.Step(two_point_input);
   assert(!two_point_result.line_in_recovery);
-  assert(two_point_result.command.action==MissionAction::kStepForwardFive);
+  assert(two_point_result.command.action==MissionAction::kStepForwardFour);
   MissionController controller(c);
   auto in=Frame(0); auto r=controller.Step(in);
-  assert(r.command.action==MissionAction::kStepForwardFive);
+  assert(r.command.action==MissionAction::kStepForwardFour);
   assert(r.command.action_id!=0);
   const auto id=r.command.action_id;
   in=Frame(.1); in.delivery_feedback={id,true,false,false};
@@ -136,7 +136,7 @@ int main() {
   in=Frame(2.55); in.delivery_feedback={id,true,false,true};
   r=controller.Step(in);
   assert(r.command.action_id!=0 && r.command.action_id!=id);
-  assert(r.command.action==MissionAction::kStepForwardFive);
+  assert(r.command.action==MissionAction::kStepForwardFour);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
   assert(r.line_window_stats && r.line_window_stats->used_frames >= 5);
   // Debug telemetry must report the SAME READY average used to select B.
@@ -160,7 +160,7 @@ int main() {
   }
   in=Frame(2.55); in.delivery_feedback={delayed_ack_id,true,false,true};
   r=controller.Step(in);
-  assert(r.command.action==MissionAction::kStepForwardFive);
+  assert(r.command.action==MissionAction::kStepForwardFour);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
   assert(r.line_window_stats && r.line_window_stats->used_frames >= 5);
 
@@ -240,7 +240,7 @@ int main() {
   in=Frame(1.0); in.delivery_feedback={right_id,true,false,true};
   r=controller.Step(in);
   const auto straight_id=r.command.action_id;
-  assert(r.command.action==MissionAction::kStepForwardFive);
+  assert(r.command.action==MissionAction::kStepForwardFour);
   in=Frame(1.1); in.delivery_feedback={straight_id,true,false,false};
   r=controller.Step(in);
   in=Frame(1.2); in.delivery_feedback={right_id,true,true,false};
@@ -259,7 +259,7 @@ int main() {
   terminal_config.line_p2p.no_evidence_max_retries=0;
   terminal_config.enable_ball=true;
   terminal_config.enable_hurdle=false;
-  terminal_config.ball.stable_window=1;
+  terminal_config.ball.entry_min_hits=1; terminal_config.ball.stable_window=1;
   terminal_config.ball.stable_min_hits=1;
   MissionController terminal(terminal_config);
   in=Frame(0); in.line_centers.clear(); r=terminal.Step(in);
@@ -391,7 +391,7 @@ int main() {
   assert(rejected);
   in=Frame(0); in.line_decision_guide_override=Guide(.5);
   r=tuning.Step(in);
-  assert(r.command.action==MissionAction::kStepForwardFive);
+  assert(r.command.action==MissionAction::kStepForwardFour);
 
   // Tuning observations compute features but never start production recovery.
   MissionController frozen(c);
@@ -449,14 +449,14 @@ int main() {
   observation.now_sec=20; observation.advance_line_fsm=true;
   observation.line_decision_guide_override=Guide(0);
   const auto p=frozen_perception.StepPerception(observation);
-  assert(p.mission.command.action==MissionAction::kStepForwardFive);
+  assert(p.mission.command.action==MissionAction::kStepForwardFour);
 
   // One common timeout is injected into all three object controllers. Use a
   // non-default value so an accidental per-mission/default 3s is detectable.
   auto camera_config=c;
   camera_config.camera_motion_timeout_sec=.5;
   camera_config.enable_ball=true;
-  camera_config.ball.stable_window=camera_config.ball.stable_min_hits=1;
+  camera_config.ball.entry_min_hits=1; camera_config.ball.stable_window=camera_config.ball.stable_min_hits=1;
   camera_config.ball.smooth_alpha=1;
   camera_config.ball.upper_acquire_v_px=480.0;
 
@@ -615,7 +615,7 @@ int main() {
   // but previewing PICK must not increment attempts or change the real FSM.
   auto manual_config=c;
   manual_config.enable_ball=true;
-  manual_config.ball.stable_window=manual_config.ball.stable_min_hits=1;
+  manual_config.ball.entry_min_hits=1; manual_config.ball.stable_window=manual_config.ball.stable_min_hits=1;
 
 
   manual_config.ball.upper_acquire_v_px=480.0;
@@ -691,7 +691,7 @@ int main() {
   assert(std::abs(ephemeral.mission.line_decision_guide->offset -
                   ephemeral.mission.line_features.guide.offset) < 1e-9);
   assert(ephemeral.mission.command.action_id==1);
-  assert(ephemeral.mission.command.action==MissionAction::kStepForwardFive);
+  assert(ephemeral.mission.command.action==MissionAction::kStepForwardFour);
   auto ref_adjust=c;
   ref_adjust.line_features.image_center_u=250.0;
   assert(line_manual.UpdateTuning(ref_adjust));
@@ -812,7 +812,7 @@ int main() {
   auto ready_cfg=LoadDefaultAlgorithmConfig(); ready_cfg.transition_settle_sec=0;
   ready_cfg.enable_ball=true;
   ready_cfg.enable_goal=ready_cfg.enable_hurdle=false;
-  ready_cfg.ball.stable_window=ready_cfg.ball.stable_min_hits=1;
+  ready_cfg.ball.entry_min_hits=1; ready_cfg.ball.stable_window=ready_cfg.ball.stable_min_hits=1;
   ready_cfg.ball.upper_acquire_v_px=480;
   MissionController ball_ready(ready_cfg);
   auto ready_frame=Frame(0.0);
@@ -1180,7 +1180,7 @@ int main() {
   assert(gated_stage.TestSetupPending());
 
   // GOAL camera after pickup: wall time and READY alone cannot trigger it.
-  // A completed five-step LINE cruise (13) triggers GOAL, without queuing B.
+  // A completed four-step LINE cruise (23) triggers GOAL, without queuing B.
   auto post_pickup_cfg = LoadDefaultAlgorithmConfig(); post_pickup_cfg.transition_settle_sec=0;
   post_pickup_cfg.enable_ball=post_pickup_cfg.enable_hurdle=false;
   post_pickup_cfg.enable_goal=true;
@@ -1191,7 +1191,7 @@ int main() {
   MissionController five_step_goal(post_pickup_cfg);
   auto goal_frame=Frame(0.0);
   auto goal_step=five_step_goal.Step(goal_frame);
-  assert(goal_step.command.action==MissionAction::kStepForwardFive);
+  assert(goal_step.command.action==MissionAction::kStepForwardFour);
   const auto five_id=goal_step.command.action_id;
   goal_frame=Frame(.1); goal_frame.delivery_feedback={five_id,true,false,false};
   goal_step=five_step_goal.Step(goal_frame);

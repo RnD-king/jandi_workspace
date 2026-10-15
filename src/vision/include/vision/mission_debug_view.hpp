@@ -83,6 +83,7 @@ inline std::string DebugRepeatLabel(int scope, const vision_core::MissionControl
   if (scope==200+static_cast<int>(BallMode::kPostPickupBackAway)) return "BACK x"+std::to_string(config.ball.post_pickup_back_steps);
   if (scope==300+static_cast<int>(GoalMode::kPostShootBackAway)) return "BACK x"+std::to_string(config.goal.post_shoot_back_steps);
   if (scope==300+static_cast<int>(GoalMode::kEdgeTurn)) return "EDGE TURN x2";
+  if (scope==200+static_cast<int>(BallMode::kFineSidePair)) return "SIDE STEP x2";
   if (scope==200+static_cast<int>(BallMode::kPostPickupLineRecovery) ||
       scope==300+static_cast<int>(GoalMode::kHeadingRecovery)) return "LINE SEARCH <="+std::to_string(config.mission_recovery_max_turns)+" turns";
   if (scope==400+static_cast<int>(HurdleMode::kContactWalk)) return "CONTACT x"+std::to_string(config.hurdle.contact_steps);
@@ -435,11 +436,12 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   } else {
     tune_line(338, "far u-target: --", muted);
   }
-  std::snprintf(buf, sizeof(buf), "PICK u=[%.1f,%.1f]px  v=[%.1f,%.1f]px",
-      bc.pickup_u1_px, bc.pickup_u2_px, bc.pickup_v1_px, bc.pickup_v2_px);
+  std::snprintf(buf, sizeof(buf), "PICK u=[%.1f,%.1f] v=[%.1f,%.1f] | SIDE x2 excess>=%.1fpx",
+      bc.pickup_u1_px, bc.pickup_u2_px, bc.pickup_v1_px, bc.pickup_v2_px, bc.fine_side_two_step_margin_px);
   tune_line(366, buf, text_color);
   const bool ball_fine = selected_ball && ball_cmd.tracked.visible &&
       (ball_cmd.mode == vision_core::BallMode::kFineAdjustForPickup ||
+       ball_cmd.mode == vision_core::BallMode::kFineSidePair ||
        ball_cmd.mode == vision_core::BallMode::kPickupBall);
   if (ball_fine) {
     std::snprintf(buf, sizeof(buf), "PICK u=%.1fpx  v=%.1fpx | forward error=%+.1fpx",
@@ -449,15 +451,10 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   } else {
     tune_line(394, "PICK u/v / forward error: --", muted);
   }
-  if (selected_ball && ball_cmd.mode == vision_core::BallMode::kApproachBall &&
-      ball_target && vis.rows > 1) {
-    // The raw camera gate uses the same pixel threshold as the core.
-    std::snprintf(buf, sizeof(buf), "ENTRY v<=%.1fpx | weighted v-two-step=%+.1fpx",
-        bc.upper_acquire_v_px, ball_cmd.tracked.center_px.v - bc.approach_two_step_v_px);
-    tune_line(422, buf, ball_color);
-  } else {
-    tune_line(422, "APPROACH v-two-step: --", muted);
-  }
+  std::snprintf(buf, sizeof(buf), "ENTRY v<=%.0f | hits=%d/%d need=%d | frames=%d/%d",
+      bc.upper_acquire_v_px, ball_cmd.entry_hits, bc.stable_window, bc.entry_min_hits,
+      ball_cmd.entry_frames, bc.stable_window);
+  tune_line(422, buf, ball_color);
 
   const auto &gc = config.goal;
   tune_line(462, std::string("GOAL  |  ") +
@@ -555,7 +552,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   tune_line(822,mission_result.recovery_failed ? "LINE SEARCH LIMIT: HOLD / RESET" :
       std::string("Approved: ")+DebugRepeatLabel(view.approved_repeat_scope,config),text_color);
   if (mission_result.goal_walk_gate_active) {
-    std::snprintf(buf, sizeof(buf), "GOAL LINE walks %d / %d | 5-step DONE=%s | %s",
+    std::snprintf(buf, sizeof(buf), "GOAL LINE walks %d / %d | 4-step DONE=%s | %s",
         mission_result.goal_walk_actions_completed, gc.post_pickup_walk_fallback_actions,
         mission_result.goal_five_step_completed ? "YES" : "NO",
         mission_result.goal_walk_actions_remaining == 0 ||

@@ -51,7 +51,7 @@ struct BallPipeline {
     return result;
   }
   void EnterVerification() {
-    // Keep the production 10/7 acquisition and close-trigger thresholds.
+    // Keep the frozen 10/7 acquisition and close-trigger thresholds.
     for (int i=0;i<7;++i) Tick({BallDetection(.5,.8)});
     assert(result.mission.ball.mode==BallMode::kApproachTwoBeforeDown);
     Tick({},true);
@@ -125,7 +125,7 @@ void TestVerificationBypassesAssociationAndFineReacquires() {
 
 void TestPauseDoesNotAcquireNewMission() {
   auto config=BallPipelineConfig();
-  config.ball.stable_window=1;
+  config.ball.entry_min_hits=1; config.ball.stable_window=1;
   config.ball.stable_min_hits=1;
   config.line.line_stable_window=1;
   config.line.line_stable_min_hits=1;
@@ -221,7 +221,7 @@ int main() {
   const auto out=controller.StepPerception(in);
   assert(out.perception.raw_line_centers.size()==5);
   assert(out.mission.line_features.guide.valid);
-  assert(out.mission.command.action==MissionAction::kStepForwardFive);
+  assert(out.mission.command.action==MissionAction::kStepForwardFour);
   TestNormalBallAssociation();
   TestVerificationBypassesAssociationAndFineReacquires();
   TestVerificationSixHitsSucceeds();

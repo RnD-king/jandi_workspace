@@ -272,31 +272,31 @@ private:
             return "motions/초기자세_다소곳_.json";
 
         case vision::msg::ActionCommand::DEFAULT_POSE_MODE:
-            return "motions/미세보행_초기자세가기.json";
+            return "motions/미세보행_초기자세가기_수정1.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_HALF:
-            return "motions/미세보행_미세전진.json";
+            return "motions/미세보행_미세전진_초기X.json";
 
         case vision::msg::ActionCommand::STEP_BACK:
             return "motions/미세보행_후진.json";
 
         case vision::msg::ActionCommand::LEFT_SIDE_STEP:
-            return "motions/미세보행_좌로이동.json";
+            return "motions/미세보행_좌로이동_초기X.json";
 
         case vision::msg::ActionCommand::RIGHT_SIDE_STEP:
-            return "motions/미세보행_우로이동.json";
+            return "motions/미세보행_우로이동_초기X.json";
 
         case vision::msg::ActionCommand::TURN_LEFT:
-            return "motions/미세보행_좌회전.json";
+            return "motions/미세보행_좌회전_초기X.json";
 
         case vision::msg::ActionCommand::TURN_RIGHT:
-            return "motions/미세보행_우회전.json";
+            return "motions/미세보행_우회전_초기X.json";
 
         case vision::msg::ActionCommand::TURN_LEFT_AND_STEP:
-            return "motions/미세보행_좌회전.json";
+            return "motions/미세보행_좌회전_초기X.json";
 
         case vision::msg::ActionCommand::TURN_RIGHT_AND_STEP:
-            return "motions/미세보행_우회전.json";
+            return "motions/미세보행_우회전_초기X.json";
 
         case vision::msg::ActionCommand::WALK_MODE:
             return "motions/보행_왼발만앞에.json";
@@ -358,7 +358,7 @@ private:
             return "missions/허들넘기.json";
             
         case vision::msg::ActionCommand::SHOOT:
-            return "motions/공_던지기.json";
+            return "motions/공_던지기_초기X.json";
         
         default:
             return {};

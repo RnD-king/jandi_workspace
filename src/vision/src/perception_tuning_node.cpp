@@ -894,6 +894,7 @@ private:
       if (name == "transition_settle_sec") target=&candidate.transition_settle_sec;
       else if (name == "fine_motion_settle_sec") target=&candidate.fine_motion_settle_sec;
       else if (name == "goal_edge_margin_px") target=&candidate.goal.edge_margin_px;
+      else if (name == "ball_fine_side_two_step_margin_px") target=&candidate.ball.fine_side_two_step_margin_px;
       else if (name == "goal_fine_one_step_range_error_m") target=&candidate.goal.fine_one_step_range_error_m;
       else if (name == "goal_fine_two_step_range_error_m") target=&candidate.goal.fine_two_step_range_error_m;
       else if (name == "ball_down_one_step_v_px") target=&candidate.ball.down_one_step_v_px;
@@ -1031,13 +1032,13 @@ private:
   }
   bool IsReadyWalk(vision_core::MissionAction action) const {
     using vision_core::MissionAction;
-    // LINE READY uses its original 11/12/13 protocol, regardless of YAML.
+    // LINE READY uses 11/12/23, regardless of the object-action YAML allowlist.
     // Object mean eligibility is shared with AUTO via the loaded core config.
     const auto mission = mission_controller_->ActiveMission();
     if (manual_committed_command_.mission != mission) return false;
     if (mission == vision_core::MissionType::kLine)
       return action == MissionAction::kStepForwardLeft ||
-             action == MissionAction::kStepForwardFive ||
+             action == MissionAction::kStepForwardFour ||
              action == MissionAction::kStepForwardRight;
     return tuning_config_.UsesObjectReadyMean(action);
   }

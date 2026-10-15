@@ -3,6 +3,38 @@
 PC에서 vision을 실행하고, 실제 몸/카메라 ACK·READY·DONE은 forward_walk에서 받는다.
 알고리즘은 모든 노드에서 같은 vision_core를 사용한다. 전용 노드는 다음 세 개다.
 
+LINE → BALL 진입은 `ball.stable_window` 내에서 공 중심의 v가
+`ball.upper_acquire_v_px` 이하인 검출 프레임을 세어 판단한다
+(운영 설정: 중심 v≤470인 검출이 10프레임 중 6회).
+현재 프레임 검출과 접근 추적의 7회 안정 조건은 진입에 요구하지 않는다.
+검출 confidence·박스 크기 필터는 그대로 사용한다.
+이미 예약된 다음 LINE 보행은 유지하며, 그 보행이 실행되면 BALL 진입을
+다시 판단한다. 공을 들고 있거나 PAUSE·최종 정지 상태일 때는 새 진입을 막는다.
+FINE 및 DONE 후 공통 관측의 10/7 기준은 유지한다.
+실전·튜닝 공통 디버그의 `ENTRY hits/need/frames`로 진입 이력을 확인한다.
+
+LINE 직진은 23번(4걸음)을 사용하며, READY 관측·예약 시점은 유지한다.
+공 픽업 후 GOAL 전환의 직진 완료 판정도 23번 DONE을 사용한다.
+
+BALL FINE은 기존 좌우/앞뒤 우선순위로 횡이동이 선택된 경우에만
+`ball.fine_side_two_step_margin_px` 이상 픽업 좌우 경계를 벗어나면
+같은 방향의 5번/6번을 2회 연속 실행한다(기본 100px).
+첫 DONE 뒤 재관측·추가 안정 대기는 생략하고, 두 번째 DONE 뒤 공통 관측을 한다.
+튜닝에서도 한 번의 COMMIT으로 두 모션을 실행한다.
+ROS/rqt 이름은 `ball_fine_side_two_step_margin_px`이다.
+실전 노드는 WAIT_START 또는 PAUSED에서 몸·카메라 DONE 후 편집할 수 있고,
+튜닝 노드는 기존 WAIT_PREVIEW/WAIT_COMMIT 편집 규칙을 따른다.
+
+BALL 진입 검출의 실제 좌우 평균을 별도로 기억한다. 진입 후 첫 정지 관측에서
+공을 못 찾으면 이 방향으로 WALK 제자리 회전을 최대 `ball.recovery_walk_turn_max`
+회 실행한다. 중앙 근처/방향 미확인은 기존 정지 복구를 사용한다.
+방향 기억이 6회여도 복구 재검출·FINE 관측의 10/7은 완화하지 않는다.
+
+GOAL도 카메라 전환 전 백보드 방향을 별도로 기억한다. 첫 GOAL 공통 관측에서
+못 찾으면 그 방향으로 최대 `goal.recovery_turn_max`회 WALK 회전(좌31/우28)을 한다.
+방향 미확인·중앙 근처이면 기존 정지 복구로 들어간다. 백보드가 보이지만
+Depth만 실패한 경우에는 회전하지 않는다. GOAL 진입·Depth·투척 조건은 유지한다.
+
 | 노드 | 미션 |
 |---|---|
 | ball_tuning_node | 공 |
@@ -138,7 +170,7 @@ IMU 좌표 기준 통일과 AUTO의 골대 단독 시작 방식 변경은 이번
 
 - ROS/rqt: `goal_trial_start_goal`, YAML: `vision_algorithm.goal.trial_start_goal`.
   기본값은 false다. 예전 `goal_trial_start_forward` 이름은 교체한다.
-- false: 공을 가진 상태로 LINE에서 시작한다. 기존 13번 DONE/보행 3회 DONE의
+- false: 공을 가진 상태로 LINE에서 시작한다. 23번 DONE/보행 3회 DONE의
   GOAL 진입 조건과 FORWARD RESET을 유지한다.
 - true: START 직후 새 GOAL 카메라 명령을 보내고, 카메라 완료 후 공통
   `transition_settle_sec` 및 1초/10·7 관측을 거쳐 접근한다. RESET도 GOAL로 복귀한다.

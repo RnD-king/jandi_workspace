@@ -13,6 +13,7 @@ inline void DeclareMissionParameters(rclcpp::Node& node,
   node.declare_parameter<int>("ball_recovery_walk_turn_max", c.ball.recovery_walk_turn_max);
   node.declare_parameter<int>("goal_recovery_turn_max", c.goal.recovery_turn_max);
   node.declare_parameter<double>("goal_edge_margin_px", c.goal.edge_margin_px);
+  node.declare_parameter<double>("ball_fine_side_two_step_margin_px", c.ball.fine_side_two_step_margin_px);
 }
 inline void ReadMissionParameters(const rclcpp::Node& node,
                                  vision_core::MissionControllerConfig& c) {
@@ -30,5 +31,6 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   if (!std::isfinite(margin) || margin<0.0)
     throw std::invalid_argument("goal_edge_margin_px must be finite and nonnegative");
   c.goal.edge_margin_px = margin;
+  c.ball.fine_side_two_step_margin_px = node.get_parameter("ball_fine_side_two_step_margin_px").as_double();
 }
 }

@@ -20,7 +20,7 @@ ActionRequest Mission(MissionAction action, std::int16_t yaw = 0) {
   return {action, ActionCategory::kMission, yaw, false};
 }
 MissionAction GoalApproachWalk(CruiseDirection direction, bool short_distance) {
-  // Keep normal LINE cruise IDs 11/12/13 out of GOAL approach.
+  // Keep GOAL approach selection independent of normal LINE cruise.
   switch (direction) {
   case CruiseDirection::kLeft:
     return short_distance ? MissionAction::kTurnLeftInPlace
@@ -145,6 +145,9 @@ void GoalController::StartAfterPickup(double) {
 }
 
 void GoalController::StartForwardTrial() {
+  last_stable_u_px_.reset();
+  entry_recovery_u_.reset();
+  entry_recovery_pending_ = false;
   SetHasBall(true);
   goal_entry_armed_ = true;
   mode_ = GoalMode::kForwardApproach;
@@ -209,6 +212,9 @@ void GoalController::UpdateGoalTracker(
       tracked_.confidence = observed.confidence;
     }
     last_seen_u_px_ = tracked_.center_px.u;
+    // Keep real sightings from the first GOAL observation as direction only,
+    // even when that window never obtains enough hits for stability.
+    if (entry_recovery_pending_) entry_recovery_u_ = last_seen_u_px_;
   } else {
     ++lost_count_;
     tracked_.visible = false;
@@ -397,6 +403,7 @@ GoalResult GoalController::Compute(
        config_.post_pickup_walk_fallback_actions == 0)) {
     // Enter GOAL only after the qualifying LINE motion's actual DONE.
     // A zero fallback is an explicit immediate-entry override (used by tests).
+    CaptureEntryDirection();
     mode_ = GoalMode::kWaitCameraGoal;
     camera_request_started_ = false;
   }
@@ -412,6 +419,29 @@ GoalResult GoalController::Compute(
           ? ComputeShootYawRad(tracked_pose_.x_m, tracked_pose_.z_m,
                                tracked_pose_.yaw_rad)
           : shoot_yaw_rad_;
+  // A failed first GOAL-view window must not erase the direction seen
+  // before the camera moved, or leave an unseen board in SEARCH forever.
+  if (mode_ == GoalMode::kSearch && entry_recovery_pending_ &&
+      feedback.observation_complete) {
+    entry_recovery_pending_ = false;
+    if (!tracked_.visible || !tracked_.stable) {
+      if (board_visible) {
+        // Image present but Depth/association observation invalid: observe
+        // in place rather than rotating to search for a visible board.
+        mode_ = GoalMode::kRecoverySearch;
+        stationary_recovery_.Begin(now_sec);
+        ClearTracking();
+      } else {
+        BeginLostRecovery(now_sec, false,
+            last_stable_u_px_ ? last_stable_u_px_ : entry_recovery_u_);
+      }
+      result.mode = mode_;
+      return result;
+    }
+  }
+  // Direct/manual callers can establish a valid view without a common window.
+  if (mode_ == GoalMode::kSearch && tracked_.visible && tracked_.stable)
+    entry_recovery_pending_ = false;
   // The WALK boundary guard precedes ordinary distance/zone selection.
   const bool walk_approach = mode_ == GoalMode::kForwardApproach ||
       mode_ == GoalMode::kSearch || mode_ == GoalMode::kApproach ||
@@ -446,6 +476,7 @@ GoalResult GoalController::Compute(
     if (camera_trigger_latched_) {
       if (feedback.action_active && !feedback.action_done)
         return result;
+      CaptureEntryDirection();
       mode_ = GoalMode::kWaitCameraGoal;
       state_enter_sec_ = now_sec;
       result.mode = mode_;
@@ -462,6 +493,14 @@ GoalResult GoalController::Compute(
     return result;
   }
   case GoalMode::kWaitCameraGoal:
+    // Direct GOAL startup may still have one real FORWARD-view detection.
+    // Never learn direction from intermediate camera angles or the GOAL view.
+    if (!entry_recovery_u_ && camera.settled &&
+        camera.actual_mode == CameraMode::kForward && backboard) {
+      const auto u = backboard->center_rectified
+          ? backboard->rectified_center_px.u : backboard->center_px.u;
+      if (std::isfinite(u)) entry_recovery_u_ = u;
+    }
     if (feedback.action_active && !feedback.action_done)
       return result;
     if (!camera_request_started_) {
@@ -474,6 +513,7 @@ GoalResult GoalController::Compute(
       ClearTracking();
       last_seen_u_px_ = config_.target_u_px;
       last_stable_u_px_.reset();
+      entry_recovery_pending_ = true;
       seen_after_camera_goal_ = false;
       recovery_visible_count_ = 0;
       result.mode = mode_;
@@ -842,10 +882,18 @@ void GoalController::UseVerifiedObservation(
   verified_observation_pending_ = true;
 }
 
-void GoalController::BeginLostRecovery(double now_sec, bool fine) {
+void GoalController::CaptureEntryDirection() {
+  entry_recovery_u_ = last_stable_u_px_;
+  if (!entry_recovery_u_ && has_smoothed_ && std::isfinite(last_seen_u_px_))
+    entry_recovery_u_ = last_seen_u_px_;
+}
+
+void GoalController::BeginLostRecovery(double now_sec, bool fine,
+                                       std::optional<double> direction_u) {
   turn_resume_mode_ = mode_;
-  const auto offset = last_stable_u_px_
-      ? std::optional<double>(*last_stable_u_px_ - config_.target_u_px) : std::nullopt;
+  const auto u = direction_u ? direction_u : last_stable_u_px_;
+  const auto offset = u
+      ? std::optional<double>(*u - config_.target_u_px) : std::nullopt;
   const bool directional = offset && std::isfinite(*offset) &&
       std::abs(*offset) > config_.recovery_center_tolerance_px;
   if (!recovery_exhausted_ && config_.recovery_turn_max > 0 && directional) {
@@ -881,6 +929,8 @@ void GoalController::ClearTracking() {
 
 void GoalController::Reset() {
   edge_turns_completed_ = 0;
+  entry_recovery_u_.reset();
+  entry_recovery_pending_ = false;
   last_stable_u_px_.reset();
   turn_pending_ = turn_done_ = recovery_exhausted_ = false;
   recovery_turns_completed_ = 0;

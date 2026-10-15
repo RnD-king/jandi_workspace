@@ -30,7 +30,7 @@ void TestClockAndGoalReservationDrain() {
   f.line_centers={{320,450},{320,350},{320,250}};
   auto r=core.Step(f);
   const auto a=r.command.action_id;
-  assert(a!=0 && r.command.action==MissionAction::kStepForwardFive);
+  assert(a!=0 && r.command.action==MissionAction::kStepForwardFour);
   assert(r.goal_walk_actions_completed==0);
   // Elapsed wall time without a DONE is not walking progress.
   f.now_sec=20; f.delivery_feedback={a,true,false,false}; r=core.Step(f);
@@ -68,7 +68,7 @@ void TestCommonLineEvidence() {
 }
 void TestClockExcludesIdleAndDeferredDone() {
   ControlCommandCoordinator clock({1,10});
-  ActionRequest walk{MissionAction::kStepForwardFive,ActionCategory::kLocomotion,0,false};
+  ActionRequest walk{MissionAction::kStepForwardFour,ActionCategory::kLocomotion,0,false};
   clock.Compute(MissionType::kLine,0,walk,CameraRequest::kNone,{},0);
   clock.Compute(MissionType::kLine,0,{},CameraRequest::kNone,{1,true,false,false},.2);
   clock.ObserveExecutionTime({1,true,true,false},3.2);

@@ -39,6 +39,7 @@ vision_algorithm:
     post_pickup_back_steps: 0
     stable_window: 10
     stable_min_hits: 7
+    entry_min_hits: 7 # Frozen historical scenarios; production YAML uses 6.
     lost_frames: 5
     smooth_alpha: 0.45
 
@@ -51,6 +52,7 @@ vision_algorithm:
     approach_two_step_v_px: 240.0
 
     down_one_step_v_px: 0.0
+    fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
     fine_mode_v_px: 10
 
     pickup_u1_px: 310

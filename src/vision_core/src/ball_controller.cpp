@@ -29,6 +29,8 @@ BallController::BallController(const BallConfig &config,
 
 const char *BallController::ModeName(BallMode mode) {
   switch (mode) {
+  case BallMode::kFineSidePair:
+    return "BALL_FINE_SIDE_PAIR";
   case BallMode::kLineFollow:
     return "LINE_FOLLOW";
   case BallMode::kApproachBall:
@@ -130,13 +132,6 @@ void BallController::UpdateTracker(const std::optional<ObjectTarget> &target,
     if (n >= config_.stable_min_hits)
       last_stable_ball_u_ = sum / static_cast<double>(n);
   }
-
-  const bool upper =
-      detected && target->center_px.v <= config_.upper_acquire_v_px;
-  upper_acquire_history_.push_back(upper);
-  while (static_cast<int>(upper_acquire_history_.size()) >
-         std::max(1, config_.stable_window))
-    upper_acquire_history_.pop_front();
 }
 
 ActionRequest BallController::FarAction() const {
@@ -157,7 +152,7 @@ ActionRequest BallController::FarAction() const {
       return Locomotion(MissionAction::kStepForwardRightOneHurdle);
     return Locomotion(MissionAction::kStepForwardTwo);
   }
-  // 11/12/13 are reserved for normal LINE cruise, not object approach.
+  // BALL keeps its own approach mapping; LINE curves 11/12 are not used here.
   const bool middle_row = v >= config_.approach_short_v_px;
   if (decision.direction == CruiseDirection::kLeft)
     return Locomotion(middle_row ? MissionAction::kStepForwardLeftOne
@@ -208,19 +203,36 @@ ActionRequest BallController::RecoveryAction() const {
       error < 0.0 ? MissionAction::kTurnLeft : MissionAction::kTurnRight, 15);
 }
 
+void BallController::BeginForwardRecovery(double now, std::optional<double> u,
+                                           bool immediate_turn) {
+  stationary_recovery_.Begin(now);
+  state_enter_sec_ = now;
+  recovery_walk_turns_completed_ = 0;
+  recovery_walk_turn_pending_ = recovery_walk_turn_done_ = false;
+  recovery_turn_search_exhausted_ = false;
+  recovery_turn_left_.reset();
+  if (u && std::isfinite(*u)) {
+    const double offset = *u - config_.far_u_des_px;
+    if (std::abs(offset) > config_.recovery_center_tolerance_px)
+      recovery_turn_left_ = offset < 0.0;
+  }
+  mode_ = immediate_turn && recovery_turn_left_ && config_.recovery_walk_turn_max > 0
+      ? BallMode::kBallRecoveryWalkTurn : BallMode::kBallRecoveryForward;
+}
+
 BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
                                    int image_width, int image_height,
                                    double now_sec, const CameraFeedback &camera,
                                    const ActionExecutionFeedback &feedback,
-                                   bool allow_new_body_actions) {
+                                   bool allow_new_body_actions,
+                                   bool allow_mission_entry,
+                                   std::optional<bool> entry_detected,
+                                   std::optional<double> entry_center_u,
+                                   bool allow_pickup,
+                                   bool allow_fine_pair) {
   if (mode_ == BallMode::kLineFollow && has_ball_) {
     BallResult result;
     result.has_ball = true;
-    return result;
-  }
-  if (mode_ == BallMode::kLineFollow && now_sec < ignore_ball_until_sec_) {
-    BallResult result;
-    result.has_ball = has_ball_;
     return result;
   }
   // Ignore all intermediate DOWN/FORWARD camera frames.
@@ -230,15 +242,32 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     ClearTracking();
   if (!verified && mode_ != BallMode::kWaitCameraDown &&
       mode_ != BallMode::kReturnCameraToLine &&
-      !(mode_ == BallMode::kFineAdjustForPickup &&
+      !((mode_ == BallMode::kFineAdjustForPickup || mode_ == BallMode::kFineSidePair) &&
         (feedback.action_active || feedback.action_done)))
     UpdateTracker(target, image_width, image_height);
 
   if (mode_ == BallMode::kLineFollow) {
-    const int upper_hits = static_cast<int>(std::count(
-        upper_acquire_history_.begin(), upper_acquire_history_.end(), true));
-    if (tracked_.stable && tracked_.visible &&
-        upper_hits >= std::max(1, config_.stable_min_hits)) {
+    // Count actual detections within the entry row, including misses.
+    // Admission does not require a hit in the current frame or FINE stability.
+    const bool entry_hit = entry_detected.value_or(
+        target && target->center_px.v <= config_.upper_acquire_v_px);
+    entry_hit_history_.push_back(entry_hit);
+    const auto entry_u = entry_center_u ? entry_center_u :
+        (target ? std::optional<double>(target->center_px.u) : std::nullopt);
+    entry_u_history_.push_back(entry_hit && entry_u && std::isfinite(*entry_u)
+        ? entry_u : std::nullopt);
+    while (static_cast<int>(entry_u_history_.size()) > config_.stable_window)
+      entry_u_history_.pop_front();
+    while (static_cast<int>(entry_hit_history_.size()) > config_.stable_window)
+      entry_hit_history_.pop_front();
+    const int entry_hits = static_cast<int>(std::count(
+        entry_hit_history_.begin(), entry_hit_history_.end(), true));
+    if (allow_mission_entry && entry_hits >= config_.entry_min_hits) {
+      entry_recovery_u_.reset();
+      double sum_u = 0; int count_u = 0;
+      for (const auto &u : entry_u_history_) if (u) { sum_u += *u; ++count_u; }
+      if (count_u >= config_.entry_min_hits) entry_recovery_u_ = sum_u / count_u;
+      entry_recovery_pending_ = true;
       mode_ = BallMode::kApproachBall;
       state_enter_sec_ = now_sec;
       pickup_attempt_count_ = 0;
@@ -255,6 +284,9 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   result.has_ball = has_ball_;
   result.pickup_failed = pickup_failed_;
   result.pickup_attempt_count = pickup_attempt_count_;
+  result.entry_frames = static_cast<int>(entry_hit_history_.size());
+  result.entry_hits = static_cast<int>(std::count(
+      entry_hit_history_.begin(), entry_hit_history_.end(), true));
 
   switch (mode_) {
   case BallMode::kLineFollow:
@@ -262,6 +294,16 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   case BallMode::kApproachBall: {
     if (feedback.action_active && !feedback.action_done)
       return result;
+    // The first post-entry stationary window may fail before ordinary
+    // tracking ever reaches seven hits. Retain the real six-hit direction.
+    if (entry_recovery_pending_ && feedback.observation_complete) {
+      entry_recovery_pending_ = false;
+      if (!tracked_.visible || !tracked_.stable) {
+        BeginForwardRecovery(now_sec, entry_recovery_u_, true);
+        result.mode = mode_;
+        return result;
+      }
+    }
     if (near_turn_action_ != MissionAction::kNone) {
       // DONE may arrive before the next manual PREVIEW. Retain that edge
       // while waiting for the existing fresh stationary observation window.
@@ -279,24 +321,15 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       near_turn_action_ = MissionAction::kNone;
     }
     if (lost_count_ >= std::max(1, config_.lost_frames)) {
-      mode_ = BallMode::kBallRecoveryForward;
-      stationary_recovery_.Begin(now_sec);
-      state_enter_sec_ = now_sec;
-      recovery_visible_count_ = 0;
-      recovery_walk_turns_completed_ = 0;
-      recovery_walk_turn_pending_ = false;
-      recovery_walk_turn_done_ = false;
-      recovery_turn_search_exhausted_ = false;
-      recovery_turn_left_.reset();
-      if (last_stable_ball_u_ && std::isfinite(*last_stable_ball_u_)) {
-        const double offset = *last_stable_ball_u_ - config_.far_u_des_px;
-        if (std::abs(offset) > config_.recovery_center_tolerance_px)
-          recovery_turn_left_ = offset < 0.0;
-      }
+      const auto direction = entry_recovery_pending_ ? entry_recovery_u_ : last_stable_ball_u_;
+      entry_recovery_pending_ = false;
+      BeginForwardRecovery(now_sec, direction, false);
       result.mode = mode_;
       return result;
     }
     result.action = FarAction();
+    if (allow_new_body_actions && result.action.action != MissionAction::kNone)
+      entry_recovery_pending_ = false;
     if (allow_new_body_actions &&
         (result.action.action == MissionAction::kTurnLeftInPlace ||
          result.action.action == MissionAction::kStepForwardRightOneHurdle)) {
@@ -448,13 +481,47 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     if (!ExecutionObservationReady())
       return result;
     result.action = FineAction();
-    if (allow_new_body_actions &&
+    if (result.action.action == MissionAction::kLeftSideStep ||
+        result.action.action == MissionAction::kRightSideStep) {
+      const double excess = result.action.action == MissionAction::kLeftSideStep
+          ? config_.pickup_u1_px - tracked_.center_px.u
+          : tracked_.center_px.u - config_.pickup_u2_px;
+      if (excess >= config_.fine_side_two_step_margin_px &&
+          allow_new_body_actions && allow_fine_pair) {
+        fine_side_action_ = result.action.action;
+        fine_side_remaining_ = 2;
+        fine_side_pending_ = allow_new_body_actions;
+        fine_side_done_ = false;
+        mode_ = BallMode::kFineSidePair;
+        result.mode = mode_;
+        return result;
+      }
+    }
+    if (allow_new_body_actions && allow_pickup &&
         result.action.action == MissionAction::kPickBall) {
       ++pickup_attempt_count_;
       result.pickup_attempt_count = pickup_attempt_count_;
       mode_ = BallMode::kPickupBall;
       result.mode = mode_;
     }
+    return result;
+  case BallMode::kFineSidePair:
+    if (fine_side_pending_ && feedback.action_done) fine_side_done_ = true;
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (fine_side_pending_) {
+      if (!fine_side_done_) return result;
+      fine_side_pending_ = fine_side_done_ = false;
+      if (--fine_side_remaining_ == 0) {
+        mode_ = BallMode::kFineAdjustForPickup;
+        fine_side_action_ = MissionAction::kNone;
+        ClearTracking();
+        result.mode = mode_;
+        result.tracked = {};
+        return result;
+      }
+    }
+    result.action = Locomotion(fine_side_action_);
+    if (allow_new_body_actions) fine_side_pending_ = true;
     return result;
   case BallMode::kPickupBall:
     result.action = Mission(MissionAction::kPickBall);
@@ -672,7 +739,8 @@ void BallController::ClearTracking() {
   verified_observation_pending_ = false;
   observation_window_.Clear();
   hit_history_.clear();
-  upper_acquire_history_.clear();
+  entry_hit_history_.clear();
+  entry_u_history_.clear();
   recent_ball_u_.clear();
   lost_count_ = 0;
   recovery_visible_count_ = 0;
@@ -682,6 +750,11 @@ void BallController::ClearTracking() {
 
 void BallController::ResetToLine(bool clear_ignore) {
   mode_ = BallMode::kLineFollow;
+  entry_recovery_u_.reset();
+  entry_recovery_pending_ = false;
+  fine_side_action_ = MissionAction::kNone;
+  fine_side_remaining_ = 0;
+  fine_side_pending_ = fine_side_done_ = false;
   last_stable_ball_u_.reset();
   recovery_turn_left_.reset();
   recovery_walk_turns_completed_ = 0;

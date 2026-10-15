@@ -66,7 +66,7 @@ ROS 어댑터 설정은 `config/vision_params.yaml`에 둔다.
 
 ## DONE 이후 새 관측 (2026-10)
 
-- 긴 LINE Action 11/12/13은 변경 없이 READY 사전 관측·one-slot 예약을 사용한다.
+- 긴 LINE Action 11/12/23은 기존 시점의 READY 사전 관측·one-slot 예약을 사용한다.
 - BALL/HURDLE/GOAL의 이동 중 평균 대상은 **공통 YAML**
   `mission.object_ready_mean_actions`로 선택한다. 기본값은 `[22, 23]`
   (직진 3·4걸음)이고, 최초 ACK 이후 40%~READY 관측을 저장한다.

@@ -71,6 +71,11 @@ enum class FootPose { kWalk, kFine };
 struct MissionFrameInput {
   std::vector<Point2> line_centers;
   std::optional<ObjectTarget> ball_target;
+  // LINE entry counts raw candidates within upper_acquire_v_px; association
+  // remains for approach. Candidates already passed confidence/size filters.
+  // Direct callers may omit this and use ball_target detection presence.
+  std::optional<bool> ball_entry_detected;
+  std::optional<double> ball_entry_center_u; // Actual candidate used for entry-direction memory.
   std::optional<ObjectTarget> hurdle_target;
   std::optional<ObjectTarget> goal_target;
   std::optional<ObjectTarget> backboard_target;
@@ -149,7 +154,7 @@ struct MissionFrameResult {
   bool foot_transition{false};
   bool physical_reset_complete{false};
   int goal_walk_actions_completed{0}, goal_walk_actions_remaining{0};
-  bool goal_five_step_completed{false};
+  bool goal_five_step_completed{false}; // Legacy field name: now tracks LINE straight 23 DONE.
   bool goal_walk_gate_active{false};
   BallResult ball;
   HurdleResult hurdle;
@@ -251,6 +256,7 @@ public:
   // Adapter calls only after physical body/camera DONE while disarmed/paused.
   // A sensory DONE may still be waiting for RESUME; preserve that pending edge.
   void SetGoalEdgeMargin(double margin_px);
+  void SetBallFineSideTwoStepMargin(double margin_px);
   bool SetTestStage(MissionType mission,int stage);
   bool TestSetupPending() const { return test_setup_pending_; }
   int MissionStateKey() const {

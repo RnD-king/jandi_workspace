@@ -29,6 +29,7 @@ enum class BallMode {
   kWaitFinePose,
   kBallRecoveryWalkTurn, // WALK-stance 27/28 search before stationary fallback
   kNearTurnBeforeDown, // One extra zone-7/9 turn, reobserve, then DOWN if still lost
+  kFineSidePair, // Fixed pair of existing 5/6 actions; append to preserve phase IDs.
 };
 
 struct BallConfig {
@@ -41,6 +42,7 @@ struct BallConfig {
 
   int stable_window{};
   int stable_min_hits{};
+  int entry_min_hits{}; // LINE entry only; independent of FINE stability.
   int lost_frames{};
   double smooth_alpha{}; // Legacy config key; position uses the bounded 1->3 window.
   double far_u_des_px{};
@@ -49,6 +51,7 @@ struct BallConfig {
   double approach_two_step_v_px{};
   double down_one_step_v_px{};
   double fine_mode_v_px{};
+  double fine_side_two_step_margin_px{};
   int pickup_max_attempts{};
   double ball_ignore_duration_sec{};
   // Inclusive pickup rectangle edges, in input-image pixels.
@@ -78,6 +81,8 @@ struct BallResult {
   bool has_ball{false};
   bool pickup_failed{false};
   int pickup_attempt_count{0};
+  int entry_frames{0};
+  int entry_hits{0};
   int recovery_observations_completed{0};
   double recovery_observation_elapsed_sec{0.0};
   double down_search_remaining_sec{0.0};
@@ -95,7 +100,12 @@ public:
                      int image_width, int image_height, double now_sec,
                      const CameraFeedback &camera_feedback,
                      const ActionExecutionFeedback &action_feedback,
-                     bool allow_new_body_actions = true);
+                     bool allow_new_body_actions = true,
+                     bool allow_mission_entry = true,
+                     std::optional<bool> entry_detected = std::nullopt,
+                     std::optional<double> entry_center_u = std::nullopt,
+                     bool allow_pickup = true,
+                     bool allow_fine_pair = true);
   static const char *ModeName(BallMode mode);
   bool HasBall() const { return has_ball_; }
   void SetHasBall(bool has_ball) { has_ball_ = has_ball; }
@@ -108,6 +118,7 @@ public:
   void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
       const std::deque<bool>& hits, int width, int height);
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
+  // Accepted pairs retain their action/count when parameters change.
   void UpdateTuning(const BallConfig &config) { config_ = config; }
   void ShiftTimers(double duration) { state_enter_sec_+=duration; }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
@@ -119,6 +130,7 @@ public:
         hit_history_.size()>=static_cast<std::size_t>(config_.stable_window);
   }
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
+  int FineSideActionsRemaining() const { return fine_side_remaining_; }
   int RecoveryWalkTurnsCompleted() const { return recovery_walk_turns_completed_; }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   double DownSearchRemaining(double now) const {
@@ -134,13 +146,21 @@ private:
   ActionRequest FineAction() const;
   ActionRequest RecoveryAction() const;
   void ClearTracking();
+  void BeginForwardRecovery(double now, std::optional<double> u, bool immediate_turn);
   void ResetToLine(bool clear_ignore);
 
   BallConfig config_;
   double camera_motion_timeout_sec_{};
   BallMode mode_{BallMode::kLineFollow};
   std::deque<bool> hit_history_;
-  std::deque<bool> upper_acquire_history_;
+  std::deque<bool> entry_hit_history_;
+  std::deque<std::optional<double>> entry_u_history_;
+  std::optional<double> entry_recovery_u_;
+  bool entry_recovery_pending_{false};
+  MissionAction fine_side_action_{MissionAction::kNone};
+  int fine_side_remaining_{0};
+  bool fine_side_pending_{false};
+  bool fine_side_done_{false};
   std::deque<std::optional<double>> recent_ball_u_;
   int last_approach_steps_{0};
   bool fine_pose_entered_{false};

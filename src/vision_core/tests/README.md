@@ -74,3 +74,20 @@ ctest --test-dir /home/noh/vision_core/build_pc_tests --output-on-failure
 실제 JSON 및 소스/설치본 비교는 `forward_walk/tests/README.md`를 참고한다.
 이 검사들은 실제 카메라 품질, 관절 도착, 보행 안정성이나 실제 투척 성공을
 검증하지 않는다. 테스트 구현 변경 후 빌드·실행 결과는 사용자가 확인해야 한다.
+
+BALL entry counts frames with a valid ball center at or above
+`ball.upper_acquire_v_px` (`v <= threshold`), using `ball.entry_min_hits`
+(production: 6 of the last 10 frames);
+FINE and common observation retain 10/7. The frozen scenario YAML keeps the
+historical entry value 7. Focused entry tests explicitly select 6 and cover READY.
+
+LINE straight cruise now selects 23 (four steps), preserving the LINE READY
+window and one-slot queue. BALL FINE may commit a fixed pair of 5/6 actions
+when excess beyond its pickup edge reaches fine_side_two_step_margin_px.
+Entry recovery remembers actual admission detections without inventing seven-hit stability.
+
+GOAL entry now retains pre-camera direction independently of tracking history.
+After the first completed common window, a missing board searches with existing
+31/28 turns and goal.recovery_turn_max; missing/central direction falls back to
+bounded stationary recovery. A visible board with failed Depth never requests
+an entry search turn. Normal COARSE/FINE criteria and the 10/7 observer remain.

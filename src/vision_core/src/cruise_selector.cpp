@@ -27,7 +27,7 @@ CruiseDecision SelectCruiseDecision(bool applicable, bool valid,
 MissionAction CruiseAction(CruiseDirection direction) {
   switch (direction) {
   case CruiseDirection::kLeft: return MissionAction::kStepForwardLeft;
-  case CruiseDirection::kStraight: return MissionAction::kStepForwardFive;
+  case CruiseDirection::kStraight: return MissionAction::kStepForwardFour;
   case CruiseDirection::kRight: return MissionAction::kStepForwardRight;
   case CruiseDirection::kNone: break;
   }

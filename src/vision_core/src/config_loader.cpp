@@ -177,6 +177,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
         "vision algorithm key 'line_p2p.recovery_turn_yaw_deg' must be in "
         "[1, 180]");
 
+  HitsWithinWindow(c.ball.entry_min_hits, c.ball.stable_window,
+                   "ball.entry_min_hits", "ball.stable_window");
   HitsWithinWindow(c.ball.stable_min_hits, c.ball.stable_window,
                    "ball.stable_min_hits", "ball.stable_window");
   PositiveInt(c.ball.lost_frames, "ball.lost_frames");
@@ -184,6 +186,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.ball.far_u_des_px, "ball.far_u_des_px");
   Nonnegative(c.ball.approach_u_deadband_px, "ball.approach_u_deadband_px");
   Nonnegative(c.ball.upper_acquire_v_px, "ball.upper_acquire_v_px");
+  Nonnegative(c.ball.fine_side_two_step_margin_px, "ball.fine_side_two_step_margin_px");
   Nonnegative(c.ball.approach_two_step_v_px, "ball.approach_two_step_v_px");
   PositiveInt(c.ball.pickup_max_attempts, "ball.pickup_max_attempts");
   Nonnegative(c.ball.ball_ignore_duration_sec,
@@ -355,11 +358,13 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   Assign(b, "stable_window", c.ball.stable_window);
   Assign(b, "stable_min_hits", c.ball.stable_min_hits);
+  Assign(b, "entry_min_hits", c.ball.entry_min_hits);
   Assign(b, "lost_frames", c.ball.lost_frames);
   Assign(b, "smooth_alpha", c.ball.smooth_alpha);
   Assign(b, "far_u_des_px", c.ball.far_u_des_px);
   Assign(b, "approach_u_deadband_px", c.ball.approach_u_deadband_px);
   Assign(b, "upper_acquire_v_px", c.ball.upper_acquire_v_px);
+  Assign(b, "fine_side_two_step_margin_px", c.ball.fine_side_two_step_margin_px);
   Assign(b, "approach_two_step_v_px", c.ball.approach_two_step_v_px);
   Assign(b, "pickup_max_attempts", c.ball.pickup_max_attempts);
   Assign(b, "ball_ignore_duration_sec", c.ball.ball_ignore_duration_sec);

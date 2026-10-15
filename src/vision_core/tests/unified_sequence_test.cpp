@@ -77,7 +77,7 @@ Trial BallSearch() {
   return t;
 }
 void TestCameraLatchSurvivesLoss() {
-  auto c=Config(); c.ball.stable_window=c.ball.stable_min_hits=1; c.ball.lost_frames=1;
+  auto c=Config(); c.ball.entry_min_hits=1; c.ball.stable_window=c.ball.stable_min_hits=1; c.ball.lost_frames=1;
   BallController ball(c.ball,3); ActionExecutionFeedback busy; busy.action_active=true;
   ActionExecutionFeedback done; done.action_done=true;
   ball.Compute(Target(.5,.85),640,480,0,{},{});

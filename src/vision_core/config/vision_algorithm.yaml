@@ -37,14 +37,16 @@ vision_algorithm:
     down_search_timeout_sec: 10.0
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
-    recovery_walk_turn_max: 3 # forward BALL loss: max completed WALK-pose 31/28 turns, then stationary recovery
+    recovery_walk_turn_max: 3 # 복구 회전
     post_pickup_back_steps: 0   # 0: no backing away after pickup; return camera and reacquire line
+
     stable_window: 10
-    stable_min_hits: 7
+    stable_min_hits: 7 # 미세 조정
+    entry_min_hits: 6 # LINE → BALL 진입
     lost_frames: 5
     smooth_alpha: 0.45
 
-    upper_acquire_v_px: 470.0 # 공이 있을 조건
+    upper_acquire_v_px: 470.0 # 공이 있을 조건 (중심 v가 이 값 이하인 프레임을 진입 횟수로 계산)
 
     # forward
     far_u_des_px: 380.0 # 세로선 중심
@@ -55,6 +57,7 @@ vision_algorithm:
 
     # down
     down_one_step_v_px: 0.0 # 위 가로선 (2걸음)
+    fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
     fine_mode_v_px: 10 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
 
     pickup_u1_px: 310 # 사각형
@@ -63,7 +66,7 @@ vision_algorithm:
     pickup_v2_px: 130 # ㅇㅋ
 
     pickup_max_attempts: 100
-    ball_ignore_duration_sec: 5.0
+    ball_ignore_duration_sec: 5.0 # 호환 키: LINE → BALL 진입 지연에는 사용하지 않음
 
     recovery_timeout_sec: 5.0
     recovery_reacquire_min_hits: 3
@@ -102,7 +105,7 @@ vision_algorithm:
     recovery_center_tolerance_px: 76.8
 
   goal:
-    edge_margin_px: 100.0 # 이거 밖이면 무조건 회전
+    edge_margin_px: 100.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
 
     backboard_depth_strip_width_px: 5 # 백보드 좌우 표본 폭, 중앙은 3x3
     backboard_min_depth_m: 0.10 # 백보드 최소 거리
@@ -119,7 +122,7 @@ vision_algorithm:
     lost_frames: 5
     smooth_alpha: 0.45
 
-    post_pickup_walk_fallback_actions: 3 # 라인 복귀 후 13번(5걸음) DONE 우선 / 없으면 보행 3회 DONE 후 GOAL 카메라
+    post_pickup_walk_fallback_actions: 1 # 라인 복귀 후 13번(5걸음) DONE 우선 / 없으면 보행 3회 DONE 후 GOAL 카메라
 
     # forward
     target_u_px: 360.0          # 중앙 세로 구역의 중심
@@ -192,10 +195,10 @@ vision_algorithm:
     mission_recovery_yaw_deg: 15 # 미션 전후 라인 복구 요청 각도 (도)
 
     # 카메라 전환 완료 제한
-    camera_motion_timeout_sec: 3.0 # 카메라 전환 완료를 기다리는 제한 시간 (초)
+    camera_motion_timeout_sec: 30.0 # 카메라 전환 완료를 기다리는 제한 시간 (초)
 
     # 모션 후 관측 대기
-    transition_settle_sec: 0.6 # DOWN/GOAL 카메라, 발 자세 변경, 허들 넘기 후 안정 대기 (초)
+    transition_settle_sec: 0.5 # DOWN/GOAL 카메라, 발 자세 변경, 허들 넘기 후 안정 대기 (초)
     walk_inter_action_hold_sec: 0.0 # 일반 WALK 모션 사이 마지막 자세 유지 최소 시간 (초)
     fine_motion_settle_sec: 0.0 # FINE 전진·후진·옆걸음 후 관측 전 추가 대기 (초)
     post_motion_observation_sec: 1.0 # DONE 후 공통 관측 최소 시간 (초, 10/7 검사와 동시 진행)

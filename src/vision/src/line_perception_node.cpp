@@ -342,7 +342,22 @@ public:
           response.successful=true;
           std::optional<bool> proposed;
           std::optional<double> edge_margin;
+          std::optional<double> ball_side_margin;
           for (const auto &parameter : parameters) {
+            if (parameter.get_name()=="ball_fine_side_two_step_margin_px") {
+              if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
+                  !std::isfinite(parameter.as_double()) || parameter.as_double()<0.0) {
+                response.successful=false; response.reason="ball_fine_side_two_step_margin_px must be a finite nonnegative double";
+                return response;
+              }
+              if ((run_state_!=RunState::kWaitStart && run_state_!=RunState::kPaused) ||
+                  !outstanding_actions_.empty() || !outstanding_cameras_.empty() || pending_camera_id_!=0) {
+                response.successful=false; response.reason="Change ball_fine_side_two_step_margin_px in WAIT_START or PAUSED after DONE";
+                return response;
+              }
+              ball_side_margin=parameter.as_double();
+              continue;
+            }
             if (parameter.get_name()=="goal_edge_margin_px") {
               if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
                   !std::isfinite(parameter.as_double()) || parameter.as_double()<0.0) {
@@ -376,14 +391,16 @@ public:
             }
             proposed=parameter.as_bool();
           }
-          if (edge_margin) {
+          if (edge_margin || ball_side_margin) {
             auto candidate=debug_config_;
-            candidate.goal.edge_margin_px=*edge_margin;
+            if (edge_margin) candidate.goal.edge_margin_px=*edge_margin;
+            if (ball_side_margin) candidate.ball.fine_side_two_step_margin_px=*ball_side_margin;
             try {
               vision_core::ValidateAlgorithmConfig(candidate);
               // Physical DONE was checked above. Preserve any sensory DONE
               // queued for RESUME instead of discarding it to permit retuning.
-              mission_controller_->SetGoalEdgeMargin(*edge_margin);
+              if (edge_margin) mission_controller_->SetGoalEdgeMargin(*edge_margin);
+              if (ball_side_margin) mission_controller_->SetBallFineSideTwoStepMargin(*ball_side_margin);
             } catch(const std::exception& error) {
               response.successful=false; response.reason=error.what(); return response;
             }
@@ -764,6 +781,7 @@ private:
 
   bool IsSimulatedLongWalk(vision_core::MissionAction action) const {
     return action == vision_core::MissionAction::kStepForwardFive ||
+           action == vision_core::MissionAction::kStepForwardFour ||
            action == vision_core::MissionAction::kStepForwardLeft ||
            action == vision_core::MissionAction::kStepForwardRight ||
            action == vision_core::MissionAction::kTurnLeftAndStep ||
@@ -840,6 +858,8 @@ private:
   double SimulatedActionDurationSec(
       vision_core::MissionAction action) const {
     switch (action) {
+    case vision_core::MissionAction::kStepForwardFour:
+      return 4.0 * std::max(0.0, simulate_step_forward_one_duration_sec_);
     case vision_core::MissionAction::kStepForwardFive:
     case vision_core::MissionAction::kTurnLeftAndStep:
     case vision_core::MissionAction::kTurnRightAndStep:

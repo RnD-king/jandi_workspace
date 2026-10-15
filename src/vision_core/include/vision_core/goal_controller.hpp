@@ -216,6 +216,9 @@ private:
   bool fine_trigger_latched_{false};
   double last_seen_u_px_{0.0};
   std::optional<double> last_stable_u_px_;
+  // Direction only: never reused as GOAL-view stability or Depth evidence.
+  std::optional<double> entry_recovery_u_;
+  bool entry_recovery_pending_{false};
   GoalMode turn_resume_mode_{GoalMode::kApproach};
   bool turn_left_{false};
   bool turn_pending_{false};
@@ -223,7 +226,9 @@ private:
   bool recovery_exhausted_{false};
   int recovery_turns_completed_{0};
   int edge_turns_completed_{0};
-  void BeginLostRecovery(double now_sec, bool fine);
+  void CaptureEntryDirection();
+  void BeginLostRecovery(double now_sec, bool fine,
+                         std::optional<double> direction_u = std::nullopt);
 
   bool seen_after_camera_goal_{false};
   int recovery_visible_count_{0};

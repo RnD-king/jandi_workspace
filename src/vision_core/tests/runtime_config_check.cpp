@@ -47,6 +47,8 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, post_pickup_back_steps);
   FIELD(ball, stable_window);
   FIELD(ball, stable_min_hits);
+  FIELD(ball, entry_min_hits);
+  FIELD(ball, fine_side_two_step_margin_px);
   FIELD(ball, lost_frames);
   FIELD(ball, smooth_alpha);
   FIELD(ball, upper_acquire_v_px);

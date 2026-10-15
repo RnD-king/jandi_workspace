@@ -77,6 +77,24 @@ int main(int argc, char **argv) {
   assert(c.camera_motion_timeout_sec == 3.0);
   assert(c.line_features.guide_min_points == 3);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
+  for (const auto value : {"0", "-1", "11", "not_a_number"})
+    Reject(text.str(), "entry_min_hits: 7", std::string("entry_min_hits: ") + value);
+  Reject(text.str(), "    entry_min_hits: 7", "    removed_entry_min_hits: 7");
+  auto entry_yaml = text.str();
+  const auto entry_pos = entry_yaml.find("entry_min_hits: 7");
+  assert(entry_pos != std::string::npos);
+  entry_yaml.replace(entry_pos, std::string("entry_min_hits: 7").size(), "entry_min_hits: 6");
+  const auto entry = LoadText(entry_yaml);
+  assert(entry.ball.entry_min_hits == 6 && entry.ball.stable_min_hits == 7);
+  Reject(text.str(), "fine_side_two_step_margin_px: 100.0", "fine_side_two_step_margin_px: -1.0");
+  Reject(text.str(), "fine_side_two_step_margin_px: 100.0", "fine_side_two_step_margin_px: .nan");
+  Reject(text.str(), "fine_side_two_step_margin_px: 100.0", "removed_side_margin: 100.0");
+  Reject(text.str(), "fine_side_two_step_margin_px: 100.0", "fine_side_two_step_margin_px: .inf");
+  auto side_yaml=text.str();
+  const auto side_pos=side_yaml.find("fine_side_two_step_margin_px: 100.0");
+  assert(side_pos!=std::string::npos);
+  side_yaml.replace(side_pos,std::string("fine_side_two_step_margin_px: 100.0").size(),"fine_side_two_step_margin_px: 75.0");
+  assert(LoadText(side_yaml).ball.fine_side_two_step_margin_px==75.0);
   // Future opt-in only edits YAML; AUTO and tuning use the same parser.
   const auto replaced = [&text](const std::string &value) {
     std::string modified = text.str();

@@ -31,6 +31,7 @@ public:
   // Execution clock includes arm transitions; queued ACK does not start it.
   void ObserveExecutionTime(const CommandDeliveryFeedback &feedback, double now_sec);
   double LineExecutionSeconds() const { return line_execution_sec_; }
+  bool HasQueuedAction() const { return queued_action_id_ != 0; }
 
 private:
   ControlCommand BeginAction(ControlCommand command,

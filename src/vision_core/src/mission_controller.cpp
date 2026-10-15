@@ -11,7 +11,7 @@ namespace vision_core {
 namespace {
 bool IsLongLineAction(MissionAction action) {
   return action == MissionAction::kStepForwardLeft ||
-         action == MissionAction::kStepForwardFive ||
+         action == MissionAction::kStepForwardFour ||
          action == MissionAction::kStepForwardRight;
 }
 ActionRequest LineLocomotion(MissionAction action, bool queue_eligible) {
@@ -66,7 +66,7 @@ ActionRequest MissionController::CruiseAction(const LineGuide &guide,
   if (decision.direction == CruiseDirection::kLeft)
     action = MissionAction::kStepForwardLeft;
   else if (decision.direction == CruiseDirection::kStraight)
-    action = MissionAction::kStepForwardFive;
+    action = MissionAction::kStepForwardFour;
   else if (decision.direction == CruiseDirection::kRight)
     action = MissionAction::kStepForwardRight;
   return decision.applicable ? LineLocomotion(action, queue_eligible)
@@ -613,7 +613,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     if (it != post_pickup_line_actions_.end()) {
       // The unique action ID is counted exactly once, only at physical DONE.
       ++post_pickup_line_actions_completed_;
-      if (it->second == MissionAction::kStepForwardFive)
+      if (it->second == MissionAction::kStepForwardFour)
         post_pickup_five_step_completed_ = true;
       post_pickup_line_actions_.erase(it);
     }
@@ -704,8 +704,11 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     const int number = static_cast<int>(action);
     const bool transition = action == MissionAction::kDefaultPoseMode ||
         action == MissionAction::kWalkMode || action == MissionAction::kHurdle;
+    const bool intermediate_side = active_mission_ == MissionType::kBall &&
+        ball_result_.mode == BallMode::kFineSidePair &&
+        ball_controller_.FineSideActionsRemaining() > 1;
     const double delay = transition ? config_.transition_settle_sec :
-        (number >= 3 && number <= 6 ? config_.fine_motion_settle_sec : 0.0);
+        (number >= 3 && number <= 6 && !intermediate_side ? config_.fine_motion_settle_sec : 0.0);
     settle_until_sec_ = std::max(settle_until_sec_, input.now_sec + delay);
   }
   const bool pose_done = input.delivery_feedback.done && last_command_.action_id != 0 &&
@@ -1138,7 +1141,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         ball_result_ = ball_controller_.Compute(
             input.ball_target, input.image_width, input.image_height,
             input.now_sec, input.camera_feedback, action_feedback,
-            input.allow_new_body_actions && input.allow_new_commands);
+            input.allow_new_body_actions && input.allow_new_commands,
+            !command_coordinator_.HasQueuedAction(), input.ball_entry_detected,
+            input.ball_entry_center_u);
         if (ball_result_.mode != BallMode::kLineFollow)
           EnterMission(MissionType::kBall);
       }
@@ -1146,13 +1151,20 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     break;
   case MissionType::kBall: {
     const BallMode before = ball_result_.mode;
-    const bool controller_allow=input.allow_new_body_actions && input.allow_new_commands && !(config_.test_mission!=MissionType::kNone && config_.test_stage==2 && before==BallMode::kFineAdjustForPickup);
+    const bool controller_allow=input.allow_new_body_actions && input.allow_new_commands;
     if (before == BallMode::kPostPickupLineRecovery)
       line_action=ComputeMissionLineRecovery(input,action_feedback,&line_reference_valid,&output);
     ball_result_ = ball_controller_.Compute(
         input.ball_target, input.image_width, input.image_height,
         input.now_sec, input.camera_feedback, action_feedback,
-            controller_allow);
+            controller_allow, true, std::nullopt, std::nullopt,
+            !(config_.test_mission!=MissionType::kNone && config_.test_stage==2),
+            !(config_.test_mission!=MissionType::kNone && config_.test_stage==3 && !test_execution_started_));
+    if (before == BallMode::kFineSidePair && ball_result_.mode != BallMode::kFineSidePair &&
+        !input.manual_observation_control && config_.post_motion_observation_sec > 0.0) {
+      BeginDecisionObservation(input.now_sec, active_mission_, false, {});
+      output.post_motion_observing = true;
+    }
     if (ball_result_.mode!=BallMode::kLineFollow) test_entry_pending_=false;
     if (before==BallMode::kDownSearch && ball_result_.mode==BallMode::kCoarseAdjust)
       fresh_after_search_=true;
@@ -1288,7 +1300,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   if (active_mission_ == MissionType::kLine &&
       !input.allow_new_line_action)
     request = {};
-  // Stop booking another cruise once the current 13 (five-step) or the
+  // Stop booking another cruise once the current 23 (four-step) or the
   // third post-pickup LINE walk is committed. GOAL camera follows its DONE.
   // Recovery turns remain available if the line itself becomes invalid.
   if (active_mission_ == MissionType::kLine &&
@@ -1299,7 +1311,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
            config_.goal.post_pickup_walk_fallback_actions ||
        (last_command_.mission == MissionType::kLine &&
         last_command_.action_id != 0 &&
-        last_command_.action == MissionAction::kStepForwardFive)))
+        last_command_.action == MissionAction::kStepForwardFour)))
     request = {};
   // Manual tuning freezes NEW body actions but permits automatic camera
   // requests; unlike allow_new_commands, feedback still advances.
@@ -1580,6 +1592,17 @@ PerceptionMissionFrameResult MissionController::StepPerception(
   MissionFrameInput prepared;
   prepared.line_centers = output.perception.line_centers;
   prepared.ball_target = output.perception.targets.ball;
+  prepared.ball_entry_detected = false;
+  const ObjectTargetCandidate *entry_candidate = nullptr;
+  if (!camera_moving) for (const auto &candidate : ball_candidates) {
+    if (candidate.target.center_px.v <= config_.ball.upper_acquire_v_px &&
+        (!entry_candidate || lower_raw_rank(*entry_candidate, candidate)))
+      entry_candidate = &candidate;
+  }
+  if (entry_candidate) {
+    prepared.ball_entry_detected = true;
+    prepared.ball_entry_center_u = entry_candidate->target.center_px.u;
+  }
   prepared.hurdle_target = output.perception.targets.hurdle;
   prepared.goal_target = output.perception.targets.goal;
   prepared.backboard_target = output.perception.targets.backboard;
@@ -1629,7 +1652,8 @@ PerceptionMissionFrameResult MissionController::PreviewPerception(
 int MissionController::RepeatScope() const {
   if (mission_recovery_failed_ || mission_finish_pending_ || pose_change_pending_) return 0;
   if (active_mission_==MissionType::kBall) {
-    if (ball_result_.mode==BallMode::kDownSearch ||
+    if (ball_result_.mode==BallMode::kFineSidePair ||
+        ball_result_.mode==BallMode::kDownSearch ||
         ball_result_.mode==BallMode::kPostPickupBackAway ||
         ball_result_.mode==BallMode::kPostPickupLineRecovery)
       return 200+static_cast<int>(ball_result_.mode);
@@ -1732,6 +1756,14 @@ double MissionController::ManualPreviewDurationSec() const {
                       config_.line_p2p.recovery_observation_sec);
   }
   return config_.post_motion_observation_sec;
+}
+
+void MissionController::SetBallFineSideTwoStepMargin(double margin_px) {
+  auto candidate=config_;
+  candidate.ball.fine_side_two_step_margin_px=margin_px;
+  ValidateAlgorithmConfig(candidate);
+  config_.ball.fine_side_two_step_margin_px=margin_px;
+  ball_controller_.UpdateTuning(config_.ball);
 }
 
 void MissionController::SetGoalEdgeMargin(double margin_px) {
