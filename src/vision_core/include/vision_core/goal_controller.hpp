@@ -30,6 +30,7 @@ enum class GoalMode {
 struct GoalConfig {
   double recovery_observation_sec{};
   int recovery_max_observations{};
+  int recovery_walk_turn_max{3};
   double approach_short_z_m{};
   double fine_one_step_range_error_m{};
   double fine_two_step_range_error_m{};
@@ -48,6 +49,7 @@ struct GoalConfig {
   double throw_landing_z_m{};
   double position_tolerance_m{};
   double fine_settle_duration_sec{};
+  double fine_motion_settle_duration_sec{};
   double shoot_yaw_limit_deg{};
   double recovery_timeout_sec{};
   int recovery_reacquire_min_hits{};
