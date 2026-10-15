@@ -11,6 +11,7 @@ inline void DeclareMissionParameters(rclcpp::Node& node,
   node.declare_parameter<int>("ball_down_search_max_steps",c.ball.down_search_max_steps);
   node.declare_parameter<double>("ball_approach_direct_down_v_px",c.ball.approach_direct_down_v_px);
   node.declare_parameter<int>("hurdle_down_search_max_steps",c.hurdle.down_search_max_steps);
+  node.declare_parameter<double>("hurdle_contact_inter_action_hold_sec",c.hurdle.contact_inter_action_hold_sec);
   node.declare_parameter<double>("line_min_box_width",c.line_detection.min_box_width);
   node.declare_parameter<double>("line_min_box_height",c.line_detection.min_box_height);
   node.declare_parameter<int>("ball_down_search_min_hits",c.ball.down_search_min_hits);
@@ -44,6 +45,10 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   c.ball.down_search_max_steps=turns("ball_down_search_max_steps");
   c.ball.approach_direct_down_v_px=node.get_parameter("ball_approach_direct_down_v_px").as_double();
   c.hurdle.down_search_max_steps=turns("hurdle_down_search_max_steps");
+  const double contact_hold=node.get_parameter("hurdle_contact_inter_action_hold_sec").as_double();
+  if (!std::isfinite(contact_hold) || contact_hold<0.0)
+    throw std::invalid_argument("hurdle_contact_inter_action_hold_sec must be finite and nonnegative");
+  c.hurdle.contact_inter_action_hold_sec=contact_hold;
   c.line_detection.min_box_width=node.get_parameter("line_min_box_width").as_double();
   c.line_detection.min_box_height=node.get_parameter("line_min_box_height").as_double();
   c.ball.down_search_min_hits=turns("ball_down_search_min_hits");
@@ -70,6 +75,13 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
 inline bool ApplyLivePerceptionParameter(const rclcpp::Parameter& p,
                                         vision_core::MissionControllerConfig& c) {
   const auto& name=p.get_name();
+  if (name=="hurdle_contact_inter_action_hold_sec") {
+    if (p.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
+        !std::isfinite(p.as_double()) || p.as_double()<0.0)
+      throw std::invalid_argument(name+" must be a finite nonnegative double");
+    c.hurdle.contact_inter_action_hold_sec=p.as_double();
+    return true;
+  }
   if (name=="ball_approach_direct_down_v_px") {
     if (p.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE)
       throw std::invalid_argument(name+" must be double");

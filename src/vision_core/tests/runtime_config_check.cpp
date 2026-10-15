@@ -87,6 +87,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(hurdle, fine_mode_v_px);
   FIELD(hurdle, contact_v_px);
   FIELD(hurdle, contact_steps);
+  FIELD(hurdle, contact_inter_action_hold_sec);
   FIELD(hurdle, hurdle_ignore_duration_sec);
   FIELD(hurdle, recovery_reacquire_min_hits);
   FIELD(hurdle, recovery_timeout_sec);

@@ -92,6 +92,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.hurdle.u_deadband_px, "hurdle.u_deadband_px");
   Nonnegative(c.hurdle.contact_v_px, "hurdle.contact_v_px");
   PositiveInt(c.hurdle.contact_steps, "hurdle.contact_steps");
+  Nonnegative(c.hurdle.contact_inter_action_hold_sec, "hurdle.contact_inter_action_hold_sec");
   Nonnegative(c.goal.fine_one_step_range_error_m,"goal.fine_one_step_range_error_m");
   Nonnegative(c.goal.fine_two_step_range_error_m,"goal.fine_two_step_range_error_m");
   Positive(c.goal.recovery_observation_sec, "goal.recovery_observation_sec");
@@ -405,6 +406,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "u_deadband_px", c.hurdle.u_deadband_px);
   Assign(h, "contact_v_px", c.hurdle.contact_v_px);
   Assign(h, "contact_steps", c.hurdle.contact_steps);
+  Assign(h, "contact_inter_action_hold_sec", c.hurdle.contact_inter_action_hold_sec);
 
   Assign(h, "stable_window", c.hurdle.stable_window);
   Assign(h, "stable_min_hits", c.hurdle.stable_min_hits);

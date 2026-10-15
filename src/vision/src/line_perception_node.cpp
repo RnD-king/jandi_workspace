@@ -345,7 +345,7 @@ public:
                 if ((run_state_!=RunState::kWaitStart && run_state_!=RunState::kPaused) ||
                     !outstanding_actions_.empty() || !outstanding_cameras_.empty() || pending_camera_id_!=0) {
                   response.successful=false;
-                  response.reason="Change perception/approach/LINE guard settings in WAIT_START or PAUSED after DONE";
+                  response.reason="Change live mission settings in WAIT_START or PAUSED after DONE";
                   return response;
                 }
                 live_perception_touched=true;

@@ -88,8 +88,8 @@ vision_algorithm:
     upper_acquire_v_px: 470.0 # 허들이 있을 조건
 
     # forward
-    approach_short_v_px: 120.0    # 위 가로선 (4걸음)
-    approach_two_step_v_px: 300.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
+    approach_short_v_px: 100.0    # 위 가로선 (4걸음)
+    approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
 
     # 가로 정렬 (라인 기준임. 이거 의미 없을 듯)
     target_u_px: 380 # 세로선 중심
@@ -101,7 +101,8 @@ vision_algorithm:
 
     # 허들 접촉 및 넘기
     contact_v_px: 240 # 접촉 선 (반걸음)
-    contact_steps: 3     # 접촉 보행 반 걸음 횟수
+    contact_steps: 2     # 접촉 보행 반 걸음 횟수
+    contact_inter_action_hold_sec: 0.5 # 접촉 보행 DONE 후 다음 접촉 보행까지 정지 시간 (초, 0: 추가 대기 없음)
 
     hurdle_ignore_duration_sec: 5.0
     recovery_reacquire_min_hits: 3

@@ -13,7 +13,8 @@ static ObjectTarget H(double v) {
 }
 static void ContactWalkHold() {
   auto c=LoadDefaultAlgorithmConfig().hurdle;
-  c.contact_steps=3;c.stable_window=c.stable_min_hits=c.down_search_min_hits=1;
+  c.contact_steps=3;c.contact_inter_action_hold_sec=.5;
+  c.stable_window=c.stable_min_hits=c.down_search_min_hits=1;
   const CameraFeedback down{CameraMode::kDown,true};
   const auto target=H(.9);
   c.contact_v_px=260;
@@ -65,6 +66,27 @@ static void ContactWalkHold() {
   assert(r.action.action==MissionAction::kNone);
   r=controller.Compute({},640,480,2.6,down,{},{});
   assert(r.action.action==MissionAction::kStepForwardHalf);
+
+  // Live retuning keeps the original DONE time, not a fresh full hold.
+  c.contact_inter_action_hold_sec=.8;controller.UpdateTuning(c);
+  enter(5.0);
+  r=controller.Compute({},640,480,5.1,down,done,{});
+  assert(r.action.action==MissionAction::kNone);
+  c.contact_inter_action_hold_sec=1.2;controller.UpdateTuning(c);
+  r=controller.Compute({},640,480,6.299,down,{},{});
+  assert(r.action.action==MissionAction::kNone);
+  c.contact_inter_action_hold_sec=.4;controller.UpdateTuning(c);
+  r=controller.Compute({},640,480,6.3,down,{},{});
+  assert(r.action.action==MissionAction::kStepForwardHalf);
+  // Zero restores immediate consecutive contact steps after actual DONE.
+  c.contact_inter_action_hold_sec=0;controller.UpdateTuning(c);
+  enter(7.0);
+  r=controller.Compute({},640,480,7.1,down,done,{});
+  assert(r.mode==HurdleMode::kContactWalk && r.action.action==MissionAction::kStepForwardHalf);
+  r=controller.Compute({},640,480,7.2,down,done,{});
+  assert(r.mode==HurdleMode::kContactWalk && r.action.action==MissionAction::kStepForwardHalf);
+  r=controller.Compute({},640,480,7.3,down,done,{});
+  assert(r.mode==HurdleMode::kCross && r.action.action==MissionAction::kHurdle);
 }
 int main() {
   ContactWalkHold();

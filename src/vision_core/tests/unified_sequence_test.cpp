@@ -59,7 +59,7 @@ MissionControllerConfig Config() {
   c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
   c.ball.pickup_v1_px=307.2; c.ball.pickup_v2_px=364.8;
   c.goal.throw_landing_z_m=.48; // Explicit legacy geometry for these mission scenarios.
-  c.hurdle.contact_steps=3;
+  c.hurdle.contact_steps=3;c.hurdle.contact_inter_action_hold_sec=.5;
   return c;
 }
 Trial BallSearch() {
@@ -263,14 +263,18 @@ void TestHurdleSearchAndContact() {
     t.Tick(true);
     if(i==2) break;
     assert(t.out.command.action_id==0 && t.permit==contact_scope && !t.out.post_motion_observing);
-    // Duplicate completed IDs during the hold cannot shorten or extend it.
-    t.Tick(false,id);
-    assert(t.out.command.action_id==0);
-    for(int hold=0;hold<3;++hold) {
-      t.Tick();
+    // Both public tuning paths must reach the real contact FSM and adjust
+    // an existing deadline relative to DONE, preserving the repeat scope.
+    auto updated=c;
+    updated.hurdle.contact_inter_action_hold_sec=i==0?.8:.2;
+    if(i==0) t.core.SetLivePerceptionTuning(updated);
+    else assert(t.core.UpdateTuning(updated));
+    const int hold_ticks=i==0?8:2;
+    for(int hold=1;hold<hold_ticks;++hold) {
+      t.Tick(false,hold==1?id:0);
       assert(t.out.command.action_id==0 && t.permit==contact_scope && !t.out.post_motion_observing);
     }
-    t.Tick(); // Exactly 0.5 s after the preceding contact DONE.
+    t.Tick();
     assert(t.out.command.action_id!=0 && t.out.command.action_id!=id);
     assert(t.out.command.action==MissionAction::kStepForwardHalf && t.permit==contact_scope);
   }

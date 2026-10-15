@@ -68,6 +68,7 @@ int main(int argc, char **argv) {
   assert(c.ball.fine_mode_v_px == 10);
   assert(c.ball.pickup_max_attempts == 100);
   assert(c.hurdle.contact_steps == 3);
+  assert(c.hurdle.contact_inter_action_hold_sec == 0.5);
   assert(c.hurdle.down_one_step_v_px == 100);
   assert(c.hurdle.fine_mode_v_px == 180);
   assert(c.goal.fine_one_step_range_error_m == 0.15);
@@ -189,6 +190,18 @@ int main(int argc, char **argv) {
   direct_yaml.replace(direct_pos,std::string("approach_direct_down_v_px: 480.0").size(),
       "approach_direct_down_v_px: 355.0");
   assert(LoadText(direct_yaml).ball.approach_direct_down_v_px==355.0);
+  for (const auto* value : {"-1", ".nan", ".inf"})
+    Reject(text.str(),"contact_inter_action_hold_sec: 0.5",
+        std::string("contact_inter_action_hold_sec: ")+value);
+  Reject(text.str(),"contact_inter_action_hold_sec: 0.5","");
+  for (const auto* value : {"0.0", "0.8"}) {
+    auto contact_yaml=text.str();
+    const auto pos=contact_yaml.find("contact_inter_action_hold_sec: 0.5");
+    assert(pos!=std::string::npos);
+    contact_yaml.replace(pos,std::string("contact_inter_action_hold_sec: 0.5").size(),
+        std::string("contact_inter_action_hold_sec: ")+value);
+    assert(LoadText(contact_yaml).hurdle.contact_inter_action_hold_sec==std::stod(value));
+  }
   Reject(text.str(), "pickup_max_attempts: 100", "pickup_max_attempts: 0");
   Reject(text.str(), "upper_acquire_v_px: 470.0", "upper_acquire_v_px: -0.1");
   Reject(text.str(), "target_u_px: 380", "target_u_px: .inf");

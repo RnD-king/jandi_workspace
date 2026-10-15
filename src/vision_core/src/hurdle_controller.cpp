@@ -10,8 +10,6 @@
 namespace vision_core {
 namespace {
 constexpr double kEpsilon = 1e-9;
-// Required fixed hold between completed contact steps, independent of FINE settling.
-constexpr double kContactStepHoldSec = 0.5;
 double Denom(double value) { return std::max(value, 1e-6); }
 ActionRequest Locomotion(MissionAction action, std::int16_t yaw = 0) {
   return {action, ActionCategory::kLocomotion, yaw, false};
@@ -299,7 +297,7 @@ HurdleResult HurdleController::Compute(
     if (feedback.action_done && contact_step_pending_) {
       contact_step_pending_=false;
       ++completed_contact_steps_;
-      contact_next_step_sec_=now_sec+kContactStepHoldSec;
+      contact_next_step_sec_=now_sec+config_.contact_inter_action_hold_sec;
     }
     if (completed_contact_steps_>=config_.contact_steps) {
       contact_next_step_sec_=0.0;
@@ -307,7 +305,7 @@ HurdleResult HurdleController::Compute(
       result.action=Mission(MissionAction::kHurdle); return result;
     }
     // Keep the repeat scope active, but request no body action during the
-    // fixed hold. DONE remains immediate; no extra observation is started.
+    // configured hold. DONE remains immediate; no extra observation is started.
     if (now_sec+kEpsilon<contact_next_step_sec_) return result;
     contact_next_step_sec_=0.0;
     result.action=Locomotion(MissionAction::kStepForwardHalf);

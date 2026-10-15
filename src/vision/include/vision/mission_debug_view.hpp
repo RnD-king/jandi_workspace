@@ -630,6 +630,9 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   std::snprintf(buf,sizeof(buf),"DOWN 1-step=%.1fpx FINE=%.1fpx contact=%.1fpx",
       hc.down_one_step_v_px,hc.fine_mode_v_px,hc.contact_v_px);
   add_row(hurdle_fine_rows,buf,hurdle_color);
+  std::snprintf(buf,sizeof(buf),"CONTACT: steps=%d | inter-action hold=%.2fs after DONE",
+      hc.contact_steps,hc.contact_inter_action_hold_sec);
+  add_row(hurdle_fine_rows,buf,hurdle_color);
   add_row(footer_rows,mission_result.recovery_failed ? "LINE SEARCH LIMIT: HOLD / RESET" :
       std::string("Approved: ")+DebugRepeatLabel(view.approved_repeat_scope,config),text_color);
   if (mission_result.goal_walk_gate_active) {

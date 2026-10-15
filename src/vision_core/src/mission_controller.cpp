@@ -1803,6 +1803,7 @@ void MissionController::SetLivePerceptionTuning(const MissionControllerConfig& c
   updated.ball.approach_direct_down_v_px=candidate.ball.approach_direct_down_v_px;
   updated.ball.down_search_max_steps=candidate.ball.down_search_max_steps;
   updated.hurdle.down_search_max_steps=candidate.hurdle.down_search_max_steps;
+  updated.hurdle.contact_inter_action_hold_sec=candidate.hurdle.contact_inter_action_hold_sec;
   updated.ball.down_search_min_hits=candidate.ball.down_search_min_hits;
   updated.hurdle.down_search_min_hits=candidate.hurdle.down_search_min_hits;
   updated.line_p2p.in_place_turn_score=candidate.line_p2p.in_place_turn_score;

@@ -93,6 +93,7 @@ vision_algorithm:
 
     contact_v_px: 260
     contact_steps: 3
+    contact_inter_action_hold_sec: 0.5
 
     hurdle_ignore_duration_sec: 5.0
     recovery_reacquire_min_hits: 3
