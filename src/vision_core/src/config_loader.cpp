@@ -91,6 +91,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.goal.fine_two_step_range_error_m,"goal.fine_two_step_range_error_m");
   Positive(c.goal.recovery_observation_sec, "goal.recovery_observation_sec");
   PositiveInt(c.goal.recovery_max_observations, "goal.recovery_max_observations");
+  NonnegativeInt(c.goal.recovery_walk_turn_max, "goal.recovery_walk_turn_max");
   Positive(c.goal.approach_short_z_m, "goal.approach_short_z_m");
   Positive(c.goal.camera_goal_start_z_m, "goal.camera_goal_start_z_m");
   NonnegativeInt(c.goal.post_shoot_back_steps, "goal.post_shoot_back_steps");
@@ -192,6 +193,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     throw std::runtime_error("ball pickup edges require u1 < u2 and v1 < v2");
   Nonnegative(c.ball.fine_settle_duration_sec,
               "ball.fine_settle_duration_sec");
+  Nonnegative(c.ball.fine_motion_settle_duration_sec,
+              "ball.fine_motion_settle_duration_sec");
   Nonnegative(c.ball.recovery_timeout_sec, "ball.recovery_timeout_sec");
   PositiveInt(c.ball.recovery_reacquire_min_hits,
               "ball.recovery_reacquire_min_hits");
@@ -216,6 +219,10 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
        "hurdle.recovery_center_tolerance_px");
   Nonnegative(c.hurdle.recovery_settle_duration_sec,
               "hurdle.recovery_settle_duration_sec");
+  Nonnegative(c.hurdle.fine_settle_duration_sec,
+              "hurdle.fine_settle_duration_sec");
+  Nonnegative(c.hurdle.fine_motion_settle_duration_sec,
+              "hurdle.fine_motion_settle_duration_sec");
 
   HitsWithinWindow(c.goal.stable_min_hits, c.goal.stable_window,
                    "goal.stable_min_hits", "goal.stable_window");
@@ -231,6 +238,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.goal.position_tolerance_m, "goal.position_tolerance_m");
   Nonnegative(c.goal.fine_settle_duration_sec,
               "goal.fine_settle_duration_sec");
+  Nonnegative(c.goal.fine_motion_settle_duration_sec,
+              "goal.fine_motion_settle_duration_sec");
   Nonnegative(c.goal.shoot_yaw_limit_deg, "goal.shoot_yaw_limit_deg");
   Nonnegative(c.goal.recovery_timeout_sec, "goal.recovery_timeout_sec");
   PositiveInt(c.goal.recovery_reacquire_min_hits,
@@ -372,6 +381,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "pickup_v1_px", c.ball.pickup_v1_px);
   Assign(b, "pickup_v2_px", c.ball.pickup_v2_px);
   Assign(b, "fine_settle_duration_sec", c.ball.fine_settle_duration_sec);
+  Assign(b, "fine_motion_settle_duration_sec", c.ball.fine_motion_settle_duration_sec);
   Assign(b, "recovery_timeout_sec", c.ball.recovery_timeout_sec);
   Assign(b, "recovery_reacquire_min_hits", c.ball.recovery_reacquire_min_hits);
   Assign(b, "recovery_center_tolerance_px", c.ball.recovery_center_tolerance_px);
@@ -396,6 +406,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "upper_acquire_v_px", c.hurdle.upper_acquire_v_px);
   Assign(h, "approach_two_step_v_px", c.hurdle.approach_two_step_v_px);
   Assign(h, "hurdle_ignore_duration_sec", c.hurdle.hurdle_ignore_duration_sec);
+  Assign(h, "fine_settle_duration_sec", c.hurdle.fine_settle_duration_sec);
+  Assign(h, "fine_motion_settle_duration_sec", c.hurdle.fine_motion_settle_duration_sec);
   Assign(h, "recovery_reacquire_min_hits", c.hurdle.recovery_reacquire_min_hits);
   Assign(h, "recovery_timeout_sec", c.hurdle.recovery_timeout_sec);
   Assign(h, "recovery_center_tolerance_px", c.hurdle.recovery_center_tolerance_px);
@@ -406,6 +418,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g,"fine_two_step_range_error_m",c.goal.fine_two_step_range_error_m);
   Assign(g, "recovery_observation_sec", c.goal.recovery_observation_sec);
   Assign(g, "recovery_max_observations", c.goal.recovery_max_observations);
+  Assign(g, "recovery_walk_turn_max", c.goal.recovery_walk_turn_max);
   Assign(g, "approach_short_z_m", c.goal.approach_short_z_m);
   Assign(g, "camera_goal_start_z_m", c.goal.camera_goal_start_z_m);
   Assign(g, "post_shoot_back_steps", c.goal.post_shoot_back_steps);
@@ -423,6 +436,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "throw_landing_z_m", c.goal.throw_landing_z_m);
   Assign(g, "position_tolerance_m", c.goal.position_tolerance_m);
   Assign(g, "fine_settle_duration_sec", c.goal.fine_settle_duration_sec);
+  Assign(g, "fine_motion_settle_duration_sec", c.goal.fine_motion_settle_duration_sec);
   Assign(g, "shoot_yaw_limit_deg", c.goal.shoot_yaw_limit_deg);
   Assign(g, "recovery_timeout_sec", c.goal.recovery_timeout_sec);
   Assign(g, "recovery_reacquire_min_hits", c.goal.recovery_reacquire_min_hits);
