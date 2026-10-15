@@ -24,6 +24,7 @@ enum class HurdleMode {
   kApproachTwoBeforeDown,
   kCoarseAdjust,
   kWaitFinePose,
+  kPostCrossSettle, // preserve prior phase numbers
 };
 
 struct HurdleConfig {
