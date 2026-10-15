@@ -63,6 +63,7 @@ MissionControllerConfig Config() {
 
   c.ball.fine_settle_duration_sec=0;
   c.goal.fine_settle_duration_sec=0;
+  c.hurdle.fine_settle_duration_sec=0;
   // Keep this staged-mission fixture independent of live DOWN grid tuning.
   c.ball.down_one_step_v_px=216.0;
   c.ball.fine_mode_v_px=278.4;
