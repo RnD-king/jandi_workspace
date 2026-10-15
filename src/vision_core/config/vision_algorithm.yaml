@@ -67,10 +67,10 @@ vision_algorithm:
 
     recovery_timeout_sec: 5.0
     recovery_reacquire_min_hits: 3
-    recovery_center_tolerance_px: 76.8
+    recovery_center_tolerance_px: 50 # 복구 방향 선택 기준 - 중앙에서 얼마나
 
   hurdle:
-    down_search_max_steps: 10 # DOWN-view failed detection: up to ten completed one-step walks
+    down_search_max_steps: 10 # 번까지 직진
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
     stable_window: 10
@@ -102,15 +102,12 @@ vision_algorithm:
     recovery_center_tolerance_px: 76.8
 
   goal:
-    # 화면 이탈 방지: 좌우 끝에서 이 픽셀 이내에 박스가 닿으면 연속 2회 회전
-    edge_margin_px: 50.0 # rqt: goal_edge_margin_px, 양쪽에 동시에 닿으면 HOLD
+    edge_margin_px: 100.0 # 이거 밖이면 무조건 회전
 
-    # 백보드 Depth 표본 및 유효 거리 (px, m)
-    backboard_depth_strip_width_px: 5 # 백보드 좌·우 Depth 표본 띠의 폭 (px), 중앙은 3x3
-    backboard_min_depth_m: 0.10 # 백보드 Depth의 최소 유효 거리 (m)
-    backboard_max_depth_m: 2.50 # 백보드 Depth의 최대 유효 거리 (m)
+    backboard_depth_strip_width_px: 5 # 백보드 좌우 표본 폭, 중앙은 3x3
+    backboard_min_depth_m: 0.10 # 백보드 최소 거리
+    backboard_max_depth_m: 2.50 # 백보드 최대 거리
 
-    # 단독 시험 시작 위치와 순서
     trial_start_goal: false # true: 골대 단독 시험을 GOAL 카메라에서 시작, false: 기존 라인 출발
     test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
 
@@ -122,8 +119,7 @@ vision_algorithm:
     lost_frames: 5
     smooth_alpha: 0.45
 
-    # 공을 주운 후 GOAL 미션 진입
-    post_pickup_walk_fallback_actions: 3 # 라인 복귀 후 13번(5걸음) DONE 우선; 없으면 보행 3회 DONE 후 GOAL 카메라
+    post_pickup_walk_fallback_actions: 3 # 라인 복귀 후 13번(5걸음) DONE 우선 / 없으면 보행 3회 DONE 후 GOAL 카메라
 
     # forward
     target_u_px: 360.0          # 중앙 세로 구역의 중심
