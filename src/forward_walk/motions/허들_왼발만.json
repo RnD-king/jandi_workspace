@@ -29,8 +29,8 @@
   "baudrate": 4000000,
   "keyframes": [
     {
-      "duration_sec": 1,
-      "hold_sec": 1.5,
+      "duration_sec": 0.1,
+      "hold_sec": 0,
       "interpolation": "smoothstep",
       "max_speed_deg_s": 30,
       "name": "초기자세",
@@ -128,7 +128,7 @@
       "duration_sec": 0.5,
       "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 30,
+      "max_speed_deg_s": 100,
       "name": "왼발넘기기0.5",
       "positions": {
         "0": 2234,
@@ -160,7 +160,7 @@
       "duration_sec": 0.5,
       "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 30,
+      "max_speed_deg_s": 100,
       "name": "왼발넘기기1",
       "positions": {
         "0": 2234,
@@ -192,7 +192,7 @@
       "duration_sec": 0.5,
       "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 30,
+      "max_speed_deg_s": 100,
       "name": "왼발넘기기2",
       "positions": {
         "0": 2233,
@@ -224,7 +224,7 @@
       "duration_sec": 0.5,
       "hold_sec": 1.5,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 1200,
+      "max_speed_deg_s": 300,
       "name": "왼발내리기",
       "positions": {
         "0": 2021,
@@ -253,5 +253,5 @@
       }
     }
   ],
-  "saved_at": "2026-09-19T00:14:49"
+  "saved_at": "2026-10-16T00:14:29"
 }

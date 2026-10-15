@@ -355,7 +355,7 @@ private:
             return "motions/공_재그립.json";
 
         case vision::msg::ActionCommand::HUDDLE:
-            return "missions/허들넘기.json";
+            return "missions/허들넘기_최종.json";
             
         case vision::msg::ActionCommand::SHOOT:
             return "motions/공_던지기_초기X.json";
