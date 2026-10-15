@@ -57,6 +57,7 @@ struct BallConfig {
   double PickupHalfWidth() const { return (pickup_u2_px - pickup_u1_px) * 0.5; }
   double PickupHalfHeight() const { return (pickup_v2_px - pickup_v1_px) * 0.5; }
   double fine_settle_duration_sec{};
+  double fine_motion_settle_duration_sec{};
   double recovery_timeout_sec{};
   int recovery_reacquire_min_hits{};
   double recovery_center_tolerance_px{};
