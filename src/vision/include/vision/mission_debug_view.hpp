@@ -322,7 +322,6 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   if (selected_goal && mission_result.foot_pose==vision_core::FootPose::kWalk) {
     draw_u_line(config.goal.edge_margin_px,cv::Scalar(60,60,255));
     draw_u_line(vis.cols-config.goal.edge_margin_px,cv::Scalar(60,60,255));
-    cv::putText(vis,"EDGE x2",{8,vis.rows-12},cv::FONT_HERSHEY_SIMPLEX,0.5,{60,60,255},1,cv::LINE_AA);
   }
   if (selected_hurdle) {
     const auto& c=config.hurdle;
@@ -601,7 +600,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     tune_line(962, buf, hurdle_color);
   }
 
-  std::snprintf(buf,sizeof(buf),"GOAL edge margin=%.1fpx | WALK edge correction: 2 turns / one DONE",config.goal.edge_margin_px);
+  std::snprintf(buf,sizeof(buf),"GOAL edge margin=%.1fpx | WALK edge correction: 2 turns / DONE per turn",config.goal.edge_margin_px);
   tune_line(1000,buf,goal_color);
   std::snprintf(buf,sizeof(buf),"OBS: %s elapsed=%.2fs frames=%zu valid=%d/%zu",
       mission_result.post_motion_observing ? "HOLD" : "IDLE",mission_result.post_motion_elapsed_sec,

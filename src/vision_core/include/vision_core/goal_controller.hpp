@@ -115,7 +115,8 @@ public:
   GoalController(const GoalConfig &config, double camera_motion_timeout_sec);
   void StartAfterPickup(double now_sec);
   void StartForwardTrial();
-  void StartTestNear() { Reset(); StartAfterPickup(0); mode_=GoalMode::kWaitCameraGoal; }
+  void StartGoalTrial() { Reset(); StartAfterPickup(0); mode_=GoalMode::kWaitCameraGoal; }
+  void StartTestNear() { StartGoalTrial(); }
   void StartTestExecute() { Reset(); test_execute_requires_stable_=true; SetHasBall(true); mode_=GoalMode::kFineAdjust; }
   void SetHasBall(bool has_ball);
   void UpdateBallState(const BallResult &ball_result);

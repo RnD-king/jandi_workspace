@@ -168,6 +168,59 @@ MissionFrameInput Frame(double t) {
   MissionFrameInput f;f.now_sec=t;f.image_width=640;f.image_height=480;
   f.command_transport_enabled=true;f.advance_line_fsm=false;return f;
 }
+void DirectGoalStartAndReset() {
+  auto c=LoadDefaultAlgorithmConfig();
+  c.enable_ball=c.enable_hurdle=false;c.enable_goal=true;
+  c.initial_has_ball=true;c.goal_trial_start_goal=true;
+  c.transition_settle_sec=.6;c.post_motion_observation_sec=1;
+  c.goal.stable_window=10;c.goal.stable_min_hits=7;
+  for(auto initial:{CameraMode::kForward,CameraMode::kGoal}) {
+    MissionController core(c);
+    auto f=Frame(0);f.camera_feedback={initial,true};
+    // Disarmed frames cannot consume the mandatory camera request.
+    f.allow_new_commands=false;
+    auto r=core.Step(f);
+    assert(r.command.camera_request==CameraRequest::kNone && r.command.action_id==0);
+    f.now_sec=.1;f.allow_new_commands=true;r=core.Step(f);
+    assert(r.active_mission==MissionType::kGoal && r.goal.mode==GoalMode::kWaitCameraGoal);
+    assert(r.command.camera_request==CameraRequest::kGoal && r.command.action_id==0);
+    // No board is needed to start the camera; body motion waits for its DONE.
+    f.now_sec=.2;f.camera_feedback={CameraMode::kTransition,false};r=core.Step(f);
+    assert(r.command.action_id==0 && r.goal.mode==GoalMode::kWaitCameraGoal);
+    f.now_sec=.5;f.camera_feedback={CameraMode::kGoal,true};
+    f.backboard_target=Target(320);f.backboard_center_depth_m=1.6;
+    r=core.Step(f);assert(r.post_motion_observing && r.command.action_id==0);
+    // GOAL camera DONE + .6s settle + 1s observation, with real 10/7 samples.
+    for(int i=1;i<16;++i) {
+      f.now_sec=.5+.1*i;r=core.Step(f);
+      assert(r.post_motion_observing && r.command.action_id==0);
+    }
+    f.now_sec=2.1;r=core.Step(f);
+    assert(!r.post_motion_observing && r.command.action==MissionAction::kStepForwardFour);
+    assert(r.goal.mode==GoalMode::kApproach);
+  }
+  MissionController reset(c);reset.BeginPhysicalReset();
+  auto r=reset.StepPhysicalReset({}, {CameraMode::kGoal,true},0);
+  assert(r.command.action==MissionAction::kWalkMode && r.command.camera_request==CameraRequest::kGoal);
+  assert(!r.physical_reset_complete);
+  const auto id=r.command.action_id;
+  r=reset.StepPhysicalReset({id,true,true,false},{CameraMode::kTransition,false},.1);
+  assert(!r.physical_reset_complete);
+  r=reset.StepPhysicalReset({},{CameraMode::kForward,true},.2);
+  assert(!r.physical_reset_complete && r.command.camera_request==CameraRequest::kGoal);
+  r=reset.StepPhysicalReset({},{CameraMode::kGoal,true},.3);
+  assert(r.physical_reset_complete);
+  auto f=Frame(.4);f.camera_feedback={CameraMode::kGoal,true};
+  r=reset.Step(f);
+  assert(r.command.camera_request==CameraRequest::kGoal && r.command.action_id==0);
+  // Default false retains LINE entry and FORWARD reset.
+  c.goal_trial_start_goal=false;
+  MissionController normal(c);f=Frame(0);r=normal.Step(f);
+  assert(r.active_mission==MissionType::kLine);
+  normal.BeginPhysicalReset();
+  r=normal.StepPhysicalReset({}, {CameraMode::kGoal,true},1);
+  assert(r.command.camera_request==CameraRequest::kForward);
+}
 void GoalPairHasOneObservation(bool left) {
   auto c=LoadDefaultAlgorithmConfig();
   c.test_mission=MissionType::kGoal;c.test_stage=1;
@@ -318,6 +371,7 @@ void Defaults() {
 }
 int main() {
   Defaults();VerifiedFineWindows();InvalidAndNearWindows();GoalEdges();ImageDetectionWithMissingDepth();
+  DirectGoalStartAndReset();
   for(bool left:{false,true})GoalPairHasOneObservation(left);
   for(bool fine:{false,true})for(bool left:{false,true})GoalRecovery(fine,left);
   PoseSettleAndConcurrentObservation();

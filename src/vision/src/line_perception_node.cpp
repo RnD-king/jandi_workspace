@@ -176,7 +176,7 @@ public:
     // all은 위 enable_* 값을 따르고, 나머지는 지정한 알고리즘 하나만 실행한다.
     declare_parameter<std::string>("algorithm_mode", "all");
     // rqt may select GOAL's starting phase, but only while disarmed.
-    declare_parameter<bool>("goal_trial_start_forward", algorithm_defaults.goal_trial_start_forward);
+    declare_parameter<bool>("goal_trial_start_goal", algorithm_defaults.goal_trial_start_goal);
     // 실제 카메라 대신 endpoint 도달 feedback을 모사하는 시험 옵션이다.
     declare_parameter<bool>("simulate_camera_feedback", false);
     // 실제 executor 없이 ACK/READY/DONE lifecycle을 시험하는 명시적
@@ -322,9 +322,9 @@ public:
     // Goal 단독 실행만 공 집기 과정을 생략한다. 통합 모드는 반드시 Ball
     // 성공 결과를 통해서만 has_ball이 켜진다.
     mission_config.initial_has_ball = algorithm_mode_ == "goal";
-    goal_trial_start_forward_pending_ = algorithm_mode_ == "goal" &&
-        get_parameter("goal_trial_start_forward").as_bool();
-    mission_config.goal_trial_start_forward = goal_trial_start_forward_pending_;
+    goal_trial_start_goal_pending_ = algorithm_mode_ == "goal" &&
+        get_parameter("goal_trial_start_goal").as_bool();
+    mission_config.goal_trial_start_goal = goal_trial_start_goal_pending_;
     // ROS override가 shared YAML validation을 우회하지 못하게 하고, 무거운
     // TensorRT engine을 만들기 전에 fail-fast한다.
     vision::ReadMissionParameters(*this,mission_config);
@@ -363,15 +363,15 @@ public:
               response.reason="Mission settings are applied at node startup; restart with the new value";
               return response;
             }
-            if (parameter.get_name() != "goal_trial_start_forward") continue;
+            if (parameter.get_name() != "goal_trial_start_goal") continue;
             if (parameter.get_type() != rclcpp::ParameterType::PARAMETER_BOOL) {
               response.successful=false;
-              response.reason="goal_trial_start_forward must be a bool";
+              response.reason="goal_trial_start_goal must be a bool";
               return response;
             }
             if (run_state_ != RunState::kWaitStart || algorithm_mode_ != "goal") {
               response.successful=false;
-              response.reason="goal_trial_start_forward requires GOAL mode and WAIT_START (RESET first)";
+              response.reason="goal_trial_start_goal requires GOAL mode and WAIT_START (RESET first)";
               return response;
             }
             proposed=parameter.as_bool();
@@ -389,7 +389,7 @@ public:
             }
             debug_config_=candidate;
           }
-          if (proposed) goal_trial_start_forward_pending_=*proposed;
+          if (proposed) goal_trial_start_goal_pending_=*proposed;
           return response;
         });
 
@@ -435,13 +435,22 @@ public:
             response->message = "START requires WAIT_START (RESET when PAUSED)";
             return;
           }
-          mission_controller_->SetGoalTrialStartForward(goal_trial_start_forward_pending_);
+          mission_controller_->SetGoalTrialStartGoal(goal_trial_start_goal_pending_);
           mission_controller_->Reset(true);  // Preserve all issued action IDs.
           last_debug_result_={};
-          BeginFreshObservation(get_clock()->now().seconds());
+          if (goal_trial_start_goal_pending_) {
+            // The core first requests GOAL, then owns camera settling and the
+            // fresh object observation. Do not spend 1s in the old view first.
+            observation_accumulator_.Reset();
+            run_state_ = RunState::kRunning;
+          } else {
+            BeginFreshObservation(get_clock()->now().seconds());
+          }
           response->success = true;
-          response->message = "START accepted; observing for 1.0 s before motion";
-          RCLCPP_INFO(get_logger(), "[CONTROL] START -> OBSERVING");
+          response->message = goal_trial_start_goal_pending_
+              ? "START accepted; GOAL camera -> settle -> fresh observation"
+              : "START accepted; observing for 1.0 s before motion";
+          RCLCPP_INFO(get_logger(), "[CONTROL] %s", response->message.c_str());
         });
     pause_service_ = create_service<std_srvs::srv::Trigger>(
         "pause", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
@@ -505,13 +514,13 @@ public:
           run_state_ = RunState::kResetting;
           DrivePhysicalReset();
           // Preserve unique IDs and completion timestamps. The physical
-          // reset explicitly commands WALK stance and FORWARD camera.
+          // reset explicitly commands WALK stance and the configured start camera.
           {
             std::lock_guard<std::mutex> lock(image_mutex_);
             latest_image_.reset();
           }
           response->success = true;
-          response->message = "RESET: WALK feet and FORWARD camera pending; WAIT_START (Action IDs preserved)";
+          response->message = "RESET: WALK feet and configured start camera pending; WAIT_START (Action IDs preserved)";
           RCLCPP_INFO(get_logger(), "[CONTROL] RESET -> WAIT_START");
         });
 
@@ -961,7 +970,8 @@ private:
     PublishActionCommand(result.command); PublishCameraCommand(result.command.camera_request);
     if (result.physical_reset_complete && outstanding_actions_.empty() && outstanding_cameras_.empty()) {
       run_state_=RunState::kWaitStart;
-      RCLCPP_INFO(get_logger(),"[RESET] WALK feet + FORWARD camera DONE -> WAIT_START");
+      RCLCPP_INFO(get_logger(),"[RESET] WALK feet + %s camera DONE -> WAIT_START",
+          camera_feedback_.actual_mode == vision_core::CameraMode::kGoal ? "GOAL" : "FORWARD");
     }
   }
 
@@ -1026,7 +1036,8 @@ private:
     if (request == vision_core::CameraRequest::kNone) return;
     // The node may only originate new camera requests in RUNNING.
     if (run_state_ != RunState::kRunning &&
-        !(run_state_==RunState::kResetting && request==vision_core::CameraRequest::kForward)) return;
+        !(run_state_==RunState::kResetting &&
+          (request==vision_core::CameraRequest::kForward || request==vision_core::CameraRequest::kGoal))) return;
     if (simulate_camera_feedback_) {
       switch (request) {
       case vision_core::CameraRequest::kDown:
@@ -1584,7 +1595,7 @@ private:
   int backboard_depth_strip_width_px_{};
   double max_depth_age_sec_{0.20};
   std::string algorithm_mode_{"all"};
-  bool goal_trial_start_forward_pending_{false};
+  bool goal_trial_start_goal_pending_{false};
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
       goal_trial_parameter_handle_;
 

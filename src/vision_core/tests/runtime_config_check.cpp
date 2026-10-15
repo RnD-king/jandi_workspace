@@ -134,7 +134,7 @@ void CheckConfiguration(const std::string& path) {
   CheckField(a["mission"], "test_mission", static_cast<int>(c.test_mission), "mission");
   MISSION(test_stage);
   CheckField(a["goal"], "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px, "goal");
-  CheckField(a["goal"], "trial_start_forward", c.goal_trial_start_forward, "goal");
+  CheckField(a["goal"], "trial_start_goal", c.goal_trial_start_goal, "goal");
   CheckField(a["ball"], "test_mission_index", c.test_ball_mission_index, "ball");
   CheckField(a["goal"], "test_mission_index", c.test_goal_mission_index, "goal");
   MISSION(mission_recovery_max_turns);

@@ -107,6 +107,16 @@ int main(int argc, char **argv) {
   Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: .nan");
   Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: .inf");
   Reject(text.str(), "edge_margin_px: 50.0", "");
+  assert(!c.goal_trial_start_goal);
+  {
+    auto direct_goal=text.str();
+    const auto pos=direct_goal.find("trial_start_goal: false");
+    assert(pos!=std::string::npos);
+    direct_goal.replace(pos,std::string("trial_start_goal: false").size(),"trial_start_goal: true");
+    assert(LoadText(direct_goal).goal_trial_start_goal);
+  }
+  Reject(text.str(), "trial_start_goal: false", "");
+  Reject(text.str(), "trial_start_goal: false", "trial_start_goal: not_a_bool");
   Reject(text.str(), "post_motion_observation_sec: 1.0", "post_motion_observation_sec: 0.0");
   Reject(text.str(), "test_stage: 0", "test_stage: 4");
   Reject(text.str(), "backboard_depth_strip_width_px: 5", "backboard_depth_strip_width_px: 0");

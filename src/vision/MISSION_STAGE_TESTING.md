@@ -104,7 +104,7 @@ IMU 좌표 기준 통일과 AUTO의 골대 단독 시작 방식 변경은 이번
 - BALL: 현재 PC의 원거리/중거리 중앙은 3걸음(22), 근거리 중앙은 2걸음(21) 후 DOWN이다. 근거리 양쪽 및 FORWARD 유실 복구는 WALK 제자리 회전 좌 31/우 28을 사용한다. 구역 경계·회복 횟수는 운영 YAML을 따른다.
 - GOAL: 일반 접근은 기존 거리/화면 구역 로직을 사용한다. GOAL 근거리(COARSE)에서는 거리 오차가 `fine_one_step_range_error_m` 이상일 때 `shoot_yaw_limit_deg` 밖이면 WALK 제자리 회전 좌 31/우 28을 우선한다. 경계 미만이면 FINE으로 전환한다. FINE의 림 위치 보정·낙하점·투척 허용값은 운영 YAML의 `hoop_radius_m`, `throw_landing_x_m`, `throw_landing_z_m`, `position_tolerance_m`, `shoot_yaw_limit_deg`를 사용한다.
 - HURDLE: FORWARD에서 LINE O/H score의 좌중우와 허들 중심의 세로 위치를 결합한다. DOWN 진입 후는 기존 알고리즘 그대로 유지한다.
-- RESET: 기존 카메라 상태가 FORWARD로 보고되어도 새로운 카메라 FORWARD 명령을 전송한다. WALK_MODE와 카메라 명령의 실제 DONE 이후 WAIT_START로 진입한다.
+- RESET: 기본 흐름과 전용 Stage 시험은 기존 카메라 상태가 FORWARD로 보고되어도 새로운 FORWARD 명령을 전송한다. 일반 GOAL 단독 실행에서 `goal_trial_start_goal=true`이면 GOAL 명령을 전송한다. WALK_MODE와 카메라 명령의 실제 DONE 이후 WAIT_START로 진입한다.
 - 백보드 디버그는 좌/중/우 샘플영역의 유효 깊이 픽셀 수, 비율, 중앙값을 표시하지만 새 유효성 거부 임계값을 추가하지 않는다.
 
 ## 튜닝 후 검사
@@ -133,3 +133,22 @@ IMU 좌표 기준 통일과 AUTO의 골대 단독 시작 방식 변경은 이번
 - 백보드 Depth와 단독 시험 설정은 공통 `mission` YAML에서 각각 `goal`/`ball`로
   이동했다. ROS/rqt의 기존 이름은 유지한다. 코어 설치와 두 노드·실행기 재빌드가
   필요하며 운영 YAML의 기존 수치와 모션 JSON은 이번 작업에서 바꾸지 않았다.
+
+## 일반 GOAL 노드의 시작 카메라 선택
+
+- ROS/rqt: `goal_trial_start_goal`, YAML: `vision_algorithm.goal.trial_start_goal`.
+  기본값은 false다. 예전 `goal_trial_start_forward` 이름은 교체한다.
+- false: 공을 가진 상태로 LINE에서 시작한다. 기존 13번 DONE/보행 3회 DONE의
+  GOAL 진입 조건과 FORWARD RESET을 유지한다.
+- true: START 직후 새 GOAL 카메라 명령을 보내고, 카메라 완료 후 공통
+  `transition_settle_sec` 및 1초/10·7 관측을 거쳐 접근한다. RESET도 GOAL로 복귀한다.
+  START 전의 영상이나 FORWARD에서의 백보드 검출은 시작 조건이 아니다.
+- 실전·일반 튜닝 노드에서 GOAL 모드의 WAIT_START일 때 변경하고 다음 START에
+  적용한다. 전용 `goal_tuning_node`의 Stage 0~3 시작 구간은 `test_stage`가 결정한다.
+
+```bash
+ros2 run vision line_perception_node --ros-args \
+  -p algorithm_mode:=goal \
+  -p goal_trial_start_goal:=true \
+  -p show_debug_view:=true
+```

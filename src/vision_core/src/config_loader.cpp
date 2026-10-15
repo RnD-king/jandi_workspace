@@ -396,7 +396,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   const auto g = a["goal"];
   Assign(g, "edge_margin_px", c.goal.edge_margin_px);
-  Assign(g, "trial_start_forward", c.goal_trial_start_forward);
+  Assign(g, "trial_start_goal", c.goal_trial_start_goal);
   Assign(g, "test_mission_index", c.test_goal_mission_index);
   Assign(g, "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px);
   Assign(g, "backboard_min_depth_m", c.backboard_min_depth_m);

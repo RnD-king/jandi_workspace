@@ -194,9 +194,14 @@ void TestAlternatingBoundedRecovery() {
 }
 void TestGoalForwardTrial() {
   auto c=Config(); c.enable_ball=false; c.enable_goal=true;
-  c.goal_trial_start_forward=c.initial_has_ball=true;
+  // The dedicated stage-0 trial retains its FORWARD approach independently
+  // of the production GOAL-view starting option.
+  c.test_mission=MissionType::kGoal;c.test_stage=0;c.initial_has_ball=true;
   c.test_goal_mission_index=2;
   Trial t(c); t.in.backboard_target=Target(.5,.3); t.in.backboard_center_depth_m=2;
+  t.in.allow_test_setup_body_actions=true;
+  t.Tick();assert(t.out.command.action==MissionAction::kWalkMode);
+  t.Tick(true);t.in.allow_test_setup_body_actions=false;
   for(int i=0;i<7;++i)t.Tick();
   assert(t.out.goal.mode==GoalMode::kForwardApproach);
   assert(t.out.command.camera_request==CameraRequest::kNone);
@@ -257,10 +262,10 @@ void TestHurdleSearchAndContact() {
 }
 void TestGoalEdgeSingleCommit(bool left) {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;
-  c.goal_trial_start_forward=c.initial_has_ball=true;
+  c.goal_trial_start_goal=c.initial_has_ball=true;
   c.goal.stable_window=c.goal.stable_min_hits=1;
   Trial t(c);
-  t.in.camera_feedback={CameraMode::kForward,true};
+  t.in.camera_feedback={CameraMode::kGoal,true};
   t.in.backboard_target=Target(left?.05:.95,.3);
   t.in.backboard_center_depth_m=2;
   for(int i=0;i<7;++i)t.Tick();
@@ -280,7 +285,7 @@ void TestGoalEdgeSingleCommit(bool left) {
   assert(t.out.command.action_id==second && t.permit==scope);
   t.Tick(true);
   assert(t.out.command.action_id==0 && t.permit==0 && !t.out.repeat_sequence);
-  assert(t.out.goal.mode==GoalMode::kForwardApproach);
+  assert(t.out.goal.mode==GoalMode::kSearch);
   // Manual tuning keeps PREVIEW as the observation trigger after the pair.
   t.Tick();assert(!t.out.post_motion_observing && t.out.command.action_id==0);
   t.in.begin_manual_observation=true;t.Tick();

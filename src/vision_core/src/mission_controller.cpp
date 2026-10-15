@@ -49,12 +49,12 @@ MissionController::MissionController(const MissionControllerConfig &config)
   goal_mission_index_=config_.test_goal_mission_index-1;
   if (has_ball_) goal_controller_.StartAfterPickup(0.0);
   post_pickup_goal_line_gate_active_ =
-      has_ball_ && config_.enable_goal && !config_.goal_trial_start_forward;
-  if (config_.goal_trial_start_forward) {
+      has_ball_ && config_.enable_goal && !config_.goal_trial_start_goal;
+  if (config_.goal_trial_start_goal) {
     active_mission_=MissionType::kGoal; has_ball_=true;
     goal_mission_index_=config_.test_goal_mission_index;
-    goal_controller_.StartForwardTrial();
-    goal_result_.mode=GoalMode::kForwardApproach;
+    goal_controller_.StartGoalTrial();
+    goal_result_.mode=GoalMode::kWaitCameraGoal;
   }
   InitializeTest();
 }
@@ -262,7 +262,7 @@ void MissionController::FinishMission() {
     post_pickup_line_actions_.clear();
   }
   if (config_.test_mission!=MissionType::kNone ||
-      (active_mission_==MissionType::kGoal && config_.goal_trial_start_forward)) goal_trial_complete_=true;
+      (active_mission_==MissionType::kGoal && config_.goal_trial_start_goal)) goal_trial_complete_=true;
   active_mission_ = MissionType::kLine;
   if (config_.test_mission==MissionType::kNone) {
     ball_result_ = {}; hurdle_result_ = {}; goal_result_ = {};
@@ -808,6 +808,24 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     output.active_mission=active_mission_; output.has_ball=has_ball_;
     output.ball=ball_result_; output.goal=goal_result_; output.hurdle=hurdle_result_;
     PopulateDiagnostics(output,input.now_sec); return output;
+  }
+  if (goal_start_camera_pending_) {
+    // Explicit direct-GOAL START must issue its own camera command before
+    // judging any backboard, even if cached feedback already says GOAL.
+    const auto camera = input.allow_new_commands ? CameraRequest::kGoal : CameraRequest::kNone;
+    output.command = command_coordinator_.Compute(active_mission_,
+        static_cast<int>(GoalMode::kWaitCameraGoal), {}, camera,
+        input.delivery_feedback, input.now_sec);
+    if (input.allow_new_commands) {
+      goal_start_camera_pending_ = false;
+      previous_camera_settled_ = false;
+      previous_camera_mode_ = CameraMode::kTransition;
+    }
+    last_command_ = output.command;
+    output.active_mission = active_mission_; output.has_ball = has_ball_;
+    output.goal = goal_result_;
+    PopulateDiagnostics(output, input.now_sec);
+    return output;
   }
   if (input.image_width > 1) last_line_image_width_ = input.image_width;
   // Observe the camera transition edge even if no ActionCommand is pending.
@@ -1386,7 +1404,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output, double n
   output.ball_mission_index = std::max(1, (active_mission_==MissionType::kBall || (goal_trial_complete_ && config_.test_mission==MissionType::kBall)) ? ball_mission_index_ : ball_mission_index_+1);
   output.goal_mission_index = std::max(1, (active_mission_==MissionType::kGoal || (goal_trial_complete_ &&
       (config_.test_mission==MissionType::kGoal ||
-       (config_.test_mission==MissionType::kNone && config_.goal_trial_start_forward)))) ? goal_mission_index_ : goal_mission_index_+1);
+       (config_.test_mission==MissionType::kNone && config_.goal_trial_start_goal)))) ? goal_mission_index_ : goal_mission_index_+1);
   output.recovery_turns_completed = mission_recovery_turns_;
   output.recovery_failed = mission_recovery_failed_;
   output.recovery_verifying = mission_recovery_verifying_;
@@ -1396,7 +1414,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output, double n
           post_pickup_line_actions_completed_);
   output.goal_five_step_completed = post_pickup_five_step_completed_;
   output.goal_walk_gate_active = has_ball_ && config_.enable_goal &&
-      !config_.goal_trial_start_forward && (post_pickup_goal_line_gate_active_ ||
+      !config_.goal_trial_start_goal && (post_pickup_goal_line_gate_active_ ||
       (active_mission_ == MissionType::kGoal && goal_result_.mode == GoalMode::kWaitCameraGoal));
   output.goal.recovery_observations_completed=goal_controller_.RecoveryObservationsCompleted();
   output.goal.recovery_observation_elapsed_sec=goal_controller_.RecoveryObservationElapsed(now);
@@ -1864,11 +1882,11 @@ void MissionController::Reset(bool preserve_action_ids) {
   ball_result_ = {}; hurdle_result_ = {}; goal_result_ = {}; last_command_ = {};
   if (has_ball_) goal_controller_.StartAfterPickup(0.0);
   post_pickup_goal_line_gate_active_ =
-      has_ball_ && config_.enable_goal && !config_.goal_trial_start_forward;
-  if (config_.goal_trial_start_forward) {
+      has_ball_ && config_.enable_goal && !config_.goal_trial_start_goal;
+  if (config_.goal_trial_start_goal) {
     active_mission_=MissionType::kGoal; has_ball_=true;
     goal_mission_index_=config_.test_goal_mission_index;
-    goal_controller_.StartForwardTrial(); goal_result_.mode=GoalMode::kForwardApproach;
+    goal_controller_.StartGoalTrial(); goal_result_.mode=GoalMode::kWaitCameraGoal;
   }
   InitializeTest();
 }
@@ -1884,15 +1902,18 @@ MissionFrameResult MissionController::StepPhysicalReset(
   if (!physical_reset_pending_) { result.physical_reset_complete=true; return result; }
   if (feedback.done && last_command_.action_id!=0 && feedback.action_id==last_command_.action_id &&
       last_command_.action==MissionAction::kWalkMode) { reset_walk_done_=true; foot_pose_=FootPose::kWalk; }
-  // Force a NEW FORWARD command on every physical RESET even if the cached
-  // mode already says FORWARD. In hardware the pending command sets camera
-  // feedback to TRANSITION until its own new ID receives DONE.
+  // Direct GOAL trials reset to their starting view. Dedicated staged tests
+  // keep their existing FORWARD reset and prepare their own camera on START.
+  const bool start_goal = config_.goal_trial_start_goal && config_.test_mission == MissionType::kNone;
+  const auto wanted = start_goal ? CameraMode::kGoal : CameraMode::kForward;
+  const auto request = start_goal ? CameraRequest::kGoal : CameraRequest::kForward;
+  // Always force a NEW camera command, even when cached feedback matches.
   const bool camera_ready = reset_camera_command_sent_ &&
-      camera.settled && camera.actual_mode==CameraMode::kForward;
+      camera.settled && camera.actual_mode==wanted;
   result.command=command_coordinator_.Compute(MissionType::kLine,902,
       reset_walk_done_ ? ActionRequest{} : ActionRequest{MissionAction::kWalkMode,ActionCategory::kLocomotion,0,false},
-      camera_ready ? CameraRequest::kNone : CameraRequest::kForward,feedback,now_sec);
-  if (result.command.camera_request == CameraRequest::kForward)
+      camera_ready ? CameraRequest::kNone : request,feedback,now_sec);
+  if (result.command.camera_request == request)
     reset_camera_command_sent_=true;
   last_command_=result.command;
   if (reset_walk_done_ && camera_ready && last_command_.action_id==0) {
@@ -1902,7 +1923,10 @@ MissionFrameResult MissionController::StepPhysicalReset(
 }
 
 void MissionController::InitializeTest() {
+  goal_start_camera_pending_ = config_.test_mission == MissionType::kNone &&
+      config_.goal_trial_start_goal;
   if (config_.test_mission==MissionType::kNone) return;
+  post_pickup_goal_line_gate_active_ = false;
   active_mission_=config_.test_mission;
   ball_result_={}; hurdle_result_={}; goal_result_={};
   test_execution_started_=false;

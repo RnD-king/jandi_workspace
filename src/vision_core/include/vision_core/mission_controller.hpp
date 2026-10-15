@@ -56,7 +56,7 @@ struct MissionControllerConfig {
   bool enable_goal{};
   // Goal 단독 시험처럼 공 집기 과정을 생략하는 구성에서만 사용한다.
   bool initial_has_ball{};
-  bool goal_trial_start_forward{};
+  bool goal_trial_start_goal{}; // Skip initial LINE walking and start in GOAL view.
   int test_ball_mission_index{};
   int test_goal_mission_index{};
   int mission_recovery_max_turns{};
@@ -283,7 +283,7 @@ public:
   // gain/deadband를 상태 손실 없이 교체한다.
   bool UpdateLineP2pTuning(const LineP2pConfig &line_p2p);
   // Apply on the next START Reset; action IDs must not be recycled.
-  void SetGoalTrialStartForward(bool enabled) { config_.goal_trial_start_forward = enabled; }
+  void SetGoalTrialStartGoal(bool enabled) { config_.goal_trial_start_goal = enabled; }
   // Discard stale line/object evidence without resetting mission progress.
   void ClearObservationEvidence();
   void Reset(); // Retain the original public ABI for existing clients.
@@ -337,6 +337,7 @@ private:
   bool fresh_after_search_{false};
   bool test_setup_camera_started_{false}, test_failed_{false};
   bool test_setup_pose_done_{false};
+  bool goal_start_camera_pending_{false};
   double test_setup_camera_start_sec_{0};
   FootPose foot_pose_{FootPose::kWalk};
   bool pose_change_pending_{false};

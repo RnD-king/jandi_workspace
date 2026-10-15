@@ -103,7 +103,7 @@ vision_algorithm:
     backboard_max_depth_m: 2.50
 
     # 단독 시험 시작 위치와 순서
-    trial_start_forward: false
+    trial_start_goal: false
     test_mission_index: 1
 
     recovery_turn_max: 3

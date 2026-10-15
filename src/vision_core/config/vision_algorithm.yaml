@@ -1,28 +1,27 @@
 vision_algorithm:
   line_features:
-    max_centers: 8 # 한 프레임에서 라인 계산에 사용할 중심점 최대 개수
-    guide_min_points: 3 # 직선 안내선 계산에 필요한 최소 중심점 수
-    image_center_u: 410.0 # 라인 정렬 기준 가로 좌표 (px)
+    max_centers: 8
+    guide_min_points: 3 # 필요한 최소 개수
+    image_center_u: 380.0 # 라인 중앙 기준선
     guide_fit_rmse_full_scale_px: 20.0 # 안내선 오차 표시의 기준 크기 (px)
 
-    curve_min_points: 5 # 곡률 표시 계산에 필요한 최소 중심점 수
-    curve_min_v_span_px: 80.0 # 곡률 계산에 필요한 세로 분포 폭 (px)
+    curve_min_points: 5 # 곡률 계산 최소 개수
+    curve_min_v_span_px: 80.0 # 곡률 계산에 세로 분포 폭
     curve_local_fit_points: 4 # 곡률 표시용 부분 직선 계산의 점 개수
 
-  # 라인 검출 안정성
   line:
-    line_stable_window: 10 # 라인 안정 검출을 확인할 최근 프레임 수
-    line_stable_min_hits: 7 # 위 프레임 중 필요한 유효 검출 횟수
+    line_stable_window: 10
+    line_stable_min_hits: 7
 
   # 라인 보행 방향 판단과 유실 복구
   line_p2p:
-    offset_gain: 0.3 # 라인 좌우 위치 오차에 곱하는 값
-    heading_gain: 0.3 # 라인 방향 오차에 곱하는 값
-    steering_deadband: 0.10 # 좌우 보정 없이 직진할 합산 오차 범위
+    offset_gain: 0.3 # 게인 3개
+    heading_gain: 0.3
+    steering_deadband: 0.10
 
-    ready_lead_sec: 0.25  # Match forward_walk; estimate the 40% sampling point
+    ready_lead_sec: 0.25  # ~초 전까지
 
-    failure_observation_sec: 2.0 # 라인 유실을 판단하기 전 정지 관측 시간 (초)
+    failure_observation_sec: 2.0 # 라인 복구 대기
     failure_min_valid_samples: 5
     no_evidence_max_retries: 5 # 방향 정보가 없을 때 정지 관측 재시도 횟수
 
@@ -48,8 +47,8 @@ vision_algorithm:
     upper_acquire_v_px: 470.0 # 공이 있을 조건
 
     # forward
-    far_u_des_px: 360.0 # 세로선 중심
-    approach_u_deadband_px: 110 # 세로선 반폭
+    far_u_des_px: 380.0 # 세로선 중심
+    approach_u_deadband_px: 90 # 세로선 반폭
 
     approach_short_v_px: 100.0 # 위 가로선 (4걸음)
     approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
@@ -58,7 +57,7 @@ vision_algorithm:
     down_one_step_v_px: 0.0 # 위 가로선 (2걸음)
     fine_mode_v_px: 10 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
 
-    pickup_u1_px: 310
+    pickup_u1_px: 310 # 사각형
     pickup_u2_px: 385 # ㅇㅋ
     pickup_v1_px: 80
     pickup_v2_px: 130 # ㅇㅋ
@@ -112,7 +111,7 @@ vision_algorithm:
     backboard_max_depth_m: 2.50 # 백보드 Depth의 최대 유효 거리 (m)
 
     # 단독 시험 시작 위치와 순서
-    trial_start_forward: false # 골대 단독 시험을 FORWARD 카메라에서 시작
+    trial_start_goal: false # true: 골대 단독 시험을 GOAL 카메라에서 시작, false: 기존 라인 출발
     test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
 
     recovery_turn_max: 3

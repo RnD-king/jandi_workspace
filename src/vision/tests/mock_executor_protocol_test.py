@@ -103,14 +103,14 @@ class GoalTrialParameterWiringTests(unittest.TestCase):
     def test_rqt_trial_setting_commits_only_at_next_start(self):
         src = (Path(__file__).resolve().parents[1] /
                'src' / 'line_perception_node.cpp').read_text()
-        self.assertIn('declare_parameter<bool>("goal_trial_start_forward"', src)
+        self.assertIn('declare_parameter<bool>("goal_trial_start_goal"', src)
         self.assertIn('add_on_set_parameters_callback(', src)
         self.assertIn('run_state_ != RunState::kWaitStart || algorithm_mode_ != "goal"', src)
-        self.assertIn('if (proposed) goal_trial_start_forward_pending_=*proposed;', src)
+        self.assertIn('if (proposed) goal_trial_start_goal_pending_=*proposed;', src)
         self.assertIn(
-            'mission_controller_->SetGoalTrialStartForward(goal_trial_start_forward_pending_);' +
+            'mission_controller_->SetGoalTrialStartGoal(goal_trial_start_goal_pending_);' +
             '\n          mission_controller_->Reset(true);', src)
-        self.assertIn('mission_config.goal_trial_start_forward = goal_trial_start_forward_pending_;', src)
+        self.assertIn('mission_config.goal_trial_start_goal = goal_trial_start_goal_pending_;', src)
 
     def test_final_ros_overrides_follow_subconfig_assignment(self):
         root = Path(__file__).resolve().parents[1]
@@ -121,6 +121,18 @@ class GoalTrialParameterWiringTests(unittest.TestCase):
             self.assertGreater(read, construction.rindex('mission_config.ball ='))
             self.assertGreater(read, construction.rindex('mission_config.goal ='))
             self.assertLess(read, construction.index('vision_core::ValidateAlgorithmConfig(mission_config);'))
+
+    def test_goal_view_start_is_exposed_by_both_nodes(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in ('line_perception_node.cpp', 'perception_tuning_node.cpp'):
+            src = (root / 'src' / name).read_text()
+            self.assertIn('declare_parameter<bool>("goal_trial_start_goal"', src)
+            self.assertIn('get_parameter("goal_trial_start_goal").as_bool()', src)
+            self.assertNotIn('goal_trial_start_forward', src)
+            self.assertIn('preparing GOAL camera' if name == 'perception_tuning_node.cpp'
+                          else 'GOAL camera -> settle -> fresh observation', src)
+            camera_publish = src.split('void PublishCameraCommand(', 1)[1].split('if (simulate_camera_feedback_)', 1)[0]
+            self.assertIn('CameraRequest::kGoal', camera_publish)
 
     def test_live_and_tuning_use_one_renderer_in_running_and_paused_views(self):
         root = Path(__file__).resolve().parents[1]

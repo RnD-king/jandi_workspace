@@ -146,6 +146,7 @@ public:
     const vision_core::MissionControllerConfig algorithm_defaults =
         LoadSharedAlgorithmDefaults();
     vision::DeclareMissionParameters(*this,algorithm_defaults);
+    declare_parameter<bool>("goal_trial_start_goal",algorithm_defaults.goal_trial_start_goal);
     declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw"); // 입력 이미지 토픽
     declare_parameter<std::string>("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw");
     declare_parameter<std::string>("camera_info_topic", "/camera/camera/color/camera_info");
@@ -404,7 +405,8 @@ public:
     // Goal 단독 실행만 공 집기 과정을 생략한다. 통합 모드는 반드시 Ball
     // 성공 결과를 통해서만 has_ball이 켜진다.
     mission_config.initial_has_ball = algorithm_mode_ == "goal";
-    mission_config.goal_trial_start_forward=algorithm_mode_=="goal";
+    mission_config.goal_trial_start_goal=algorithm_mode_=="goal" &&
+        get_parameter("goal_trial_start_goal").as_bool();
     mission_config.test_stage=static_cast<int>(get_parameter("test_stage").as_int());
     if (dedicated_test_) mission_config.test_mission=algorithm_mode_=="ball" ? vision_core::MissionType::kBall :
         algorithm_mode_=="hurdle" ? vision_core::MissionType::kHurdle : vision_core::MissionType::kGoal;
@@ -480,11 +482,12 @@ public:
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
           const bool goal_stage_one = dedicated_test_ && algorithm_mode_ == "goal" &&
                                       tuning_config_.test_stage == 1;
+          const bool direct_goal_start = !dedicated_test_ && tuning_config_.goal_trial_start_goal;
           if (run_state_ != RunState::kWaitStart || !mission_controller_->FeetReadyToStart() || pending_camera_id_ != 0 ||
               !outstanding_actions_.empty() || !outstanding_cameras_.empty() ||
               manual_action_active_ || preview_ready_ ||
               !camera_feedback_.settled ||
-              (!(dedicated_test_ && (tuning_config_.test_stage>=2 || goal_stage_one)) &&
+              (!direct_goal_start && !(dedicated_test_ && (tuning_config_.test_stage>=2 || goal_stage_one)) &&
                camera_feedback_.actual_mode != vision_core::CameraMode::kForward)) {
             response->success = false;
             response->message = "START requires WAIT_START, known foot stance and settled camera (FORWARD for full/non-GOAL far test)";
@@ -505,10 +508,11 @@ public:
           manual_observation_session_ = false;
           observation_required_sec_ = 1.0;
           manual_wait_accumulated_sec_ = 0.0;
-          BeginFreshObservation(get_clock()->now().seconds());
+          if (direct_goal_start) run_state_=RunState::kRunning;
+          else BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
-          response->message = "START accepted; observing for 1.0 s";
-          RCLCPP_INFO(get_logger(), "[CONTROL] START -> OBSERVING");
+          response->message = direct_goal_start ? "START accepted; preparing GOAL camera" : "START accepted; observing for 1.0 s";
+          RCLCPP_INFO(get_logger(), "[CONTROL] %s", response->message.c_str());
         });
     preview_service_ = create_service<std_srvs::srv::Trigger>(
         ServiceName("preview"), [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
@@ -809,6 +813,22 @@ private:
       const std::vector<rclcpp::Parameter> &parameters) {
     rcl_interfaces::msg::SetParametersResult response;
     response.successful = true;
+    const auto start_goal=std::find_if(parameters.begin(),parameters.end(),[](const auto& p) {
+      return p.get_name()=="goal_trial_start_goal";
+    });
+    if (start_goal!=parameters.end()) {
+      if (parameters.size()!=1 || dedicated_test_ || algorithm_mode_!="goal" ||
+          start_goal->get_type()!=rclcpp::ParameterType::PARAMETER_BOOL ||
+          run_state_!=RunState::kWaitStart || !outstanding_actions_.empty() ||
+          !outstanding_cameras_.empty() || pending_camera_id_!=0) {
+        response.successful=false;
+        response.reason="goal_trial_start_goal: non-staged GOAL node, WAIT_START, bool; change separately";
+        return response;
+      }
+      tuning_config_.goal_trial_start_goal=start_goal->as_bool();
+      mission_controller_->SetGoalTrialStartGoal(start_goal->as_bool());
+      return response;
+    }
     const auto stage_parameter=std::find_if(parameters.begin(),parameters.end(),[](const auto& p) { return p.get_name()=="test_stage"; });
     if (stage_parameter!=parameters.end()) {
       if (parameters.size()!=1 || !dedicated_test_ ||
@@ -1519,7 +1539,8 @@ private:
     if (result.physical_reset_complete && outstanding_actions_.empty() && outstanding_cameras_.empty()) {
       run_state_=RunState::kWaitStart;
       manual_action_active_=false; manual_action_id_=0;
-      RCLCPP_INFO(get_logger(),"[RESET] WALK feet and FORWARD camera DONE -> WAIT_START");
+      RCLCPP_INFO(get_logger(),"[RESET] WALK feet and %s camera DONE -> WAIT_START",
+          camera_feedback_.actual_mode==vision_core::CameraMode::kGoal ? "GOAL" : "FORWARD");
     }
   }
 
@@ -1585,7 +1606,7 @@ private:
     // The node may only originate new camera requests in RUNNING.
     if (run_state_ != RunState::kRunning &&
         !(run_state_ == RunState::kResettingCamera &&
-          request == vision_core::CameraRequest::kForward)) return;
+          (request == vision_core::CameraRequest::kForward || request == vision_core::CameraRequest::kGoal))) return;
     if (simulate_camera_feedback_) {
       switch (request) {
       case vision_core::CameraRequest::kDown:

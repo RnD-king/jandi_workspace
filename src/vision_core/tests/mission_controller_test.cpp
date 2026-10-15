@@ -1086,22 +1086,33 @@ int main() {
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
   assert(ready_result.command.action_id==hurdle_queued_id);
 
-  // GOAL: center-depth mean prevents premature camera transition at DONE.
+  // GOAL: center-depth mean prevents premature close-walk entry at DONE.
   auto goal_ready_cfg=ready_cfg;
   goal_ready_cfg.enable_ball=false; goal_ready_cfg.enable_goal=true;
-  goal_ready_cfg.goal_trial_start_forward=true;
+  goal_ready_cfg.goal_trial_start_goal=true;
   goal_ready_cfg.goal.stable_window=goal_ready_cfg.goal.stable_min_hits=1;
   MissionController goal_ready(goal_ready_cfg);
-  ready_frame=Frame(0.0); ready_frame.backboard_target=Ball(.5,.3);
+  // Complete the new camera/observation startup without admitting a walk.
+  for(int i=0;i<40;++i) {
+    auto startup=Frame(.05*i);
+    startup.camera_feedback={CameraMode::kGoal,true};
+    startup.backboard_target=Ball(.5,.3);startup.backboard_center_depth_m=1.8;
+    startup.allow_new_body_actions=false;
+    const auto prepared=goal_ready.Step(startup);
+    assert(prepared.command.action_id==0);
+  }
+  ready_frame=Frame(2.0); ready_frame.backboard_target=Ball(.5,.3);
+  ready_frame.camera_feedback={CameraMode::kGoal,true};
   ready_frame.backboard_center_depth_m=1.8;
   ready_result=goal_ready.Step(ready_frame);
   assert(ready_result.command.action==MissionAction::kStepForwardFour);
   const auto goal_ready_id=ready_result.command.action_id;
   for (int i=1;i<=27;++i) {
-    ready_frame=Frame(i*.1);
+    ready_frame=Frame(2.0+i*.1);
+    ready_frame.camera_feedback={CameraMode::kGoal,true};
     ready_frame.backboard_target=Ball(.5,.3);
     // A transient near-range reading early in the moving action must
-    // not leave a latched camera change after the verified READY mean.
+    // not leave a latched close-walk trigger after the verified READY mean.
     ready_frame.backboard_center_depth_m=i==3 ? .5 : (i>=12 ? 1.0 : 1.8);
     ready_frame.delivery_feedback={goal_ready_id,true,false,i==27};
     ready_result=goal_ready.Step(ready_frame);
@@ -1109,7 +1120,8 @@ int main() {
   assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
   const auto goal_queued_id=ready_result.command.action_id;
-  ready_frame=Frame(3.0); ready_frame.backboard_target=Ball(.5,.3);
+  ready_frame=Frame(5.0); ready_frame.backboard_target=Ball(.5,.3);
+  ready_frame.camera_feedback={CameraMode::kGoal,true};
   ready_frame.backboard_center_depth_m=.5;
   ready_frame.delivery_feedback={goal_ready_id,true,true,false};
   ready_result=goal_ready.Step(ready_frame);
@@ -1296,14 +1308,15 @@ int main() {
     assert(trial_line.active_mission==MissionType::kLine);
     const auto original_id=trial_line.command.action_id;
     assert(original_id!=0);
-    trial_toggle.SetGoalTrialStartForward(true);
+    trial_toggle.SetGoalTrialStartGoal(true);
     // Setter itself must never interrupt the ongoing LINE mission.
     assert(trial_toggle.Step(Frame(.1)).active_mission==MissionType::kLine);
     trial_toggle.Reset(true);
     const auto near_start=trial_toggle.Step(Frame(1.));
     assert(near_start.active_mission==MissionType::kGoal);
-    assert(near_start.goal.mode==GoalMode::kForwardApproach);
-    trial_toggle.SetGoalTrialStartForward(false);
+    assert(near_start.goal.mode==GoalMode::kWaitCameraGoal);
+    assert(near_start.command.action_id==0 && near_start.command.camera_request==CameraRequest::kGoal);
+    trial_toggle.SetGoalTrialStartGoal(false);
     trial_toggle.Reset(true);
     const auto line_again=trial_toggle.Step(Frame(2.));
     assert(line_again.active_mission==MissionType::kLine);

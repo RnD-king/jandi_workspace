@@ -19,13 +19,22 @@ GOAL 회전/FINE 동작은 별도 고정 시나리오에서 15도와 30도를 �
 
 백보드 Depth 설정은 `goal.backboard_depth_strip_width_px`,
 `goal.backboard_min_depth_m`, `goal.backboard_max_depth_m`에서 읽는다.
-단독 시험 설정은 `goal.trial_start_forward`, `goal.test_mission_index`,
+단독 시험 설정은 `goal.trial_start_goal`, `goal.test_mission_index`,
 `ball.test_mission_index`에서 읽는다. 이 항목들의 예전 `mission` 경로는 사용하지
 않는다. ROS/rqt 파라미터 이름과 기존 C++ 구성 필드는 유지했다.
 
 `goal.edge_margin_px`는 화면 좌우 끝의 회전 보정 여유 폭(px)이다.
 실제 노드에서는 `goal_edge_margin_px`로 설정한다. 필수 키 누락·음수·NaN·무한대는
 거부한다. 운영 YAML과 테스트 시나리오 모두 새 배치를 사용한다.
+
+ROS `goal_trial_start_goal` / YAML `goal.trial_start_goal`의 기본값은 false다.
+false는 기존 LINE 출발·FORWARD RESET을 유지한다. true는 직접 GOAL 카메라를
+요청하고 카메라 완료 후 전환 안정 대기와 공통 관측을 마쳐 접근한다. RESET도
+GOAL 카메라로 돌아간다. 예전 `goal_trial_start_forward` / `trial_start_forward`는
+새 이름으로 교체해야 한다. 전용 튜닝의 Stage 0~3은 기존 시작 구간을 유지한다.
+
+`mission_revision_test`에 직접 GOAL 시작, 명령 비활성 중 요청 보존, 이미 GOAL인
+상태의 새 요청, 0.6초+1초 관측, GOAL/FORWARD RESET 회귀 시나리오를 추가했다.
 
 ## 검사 도구 빌드
 
