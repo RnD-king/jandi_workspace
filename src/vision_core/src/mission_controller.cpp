@@ -622,7 +622,8 @@ MissionFrameResult MissionController::Step(const MissionFrameInput &input) {
 
 MissionFrameResult MissionController::StepWithLineImageCenter(
     const MissionFrameInput &source,
-    std::optional<double> line_image_center_u) {
+    std::optional<double> line_image_center_u,
+    bool evaluating_ready_successor) {
   MissionFrameInput input = source;
   if (decision_observation_restart_pending_) {
     decision_observation_restart_pending_ = false;
@@ -657,7 +658,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     MissionFrameInput complete = input;
     complete.delivery_feedback = {input.delivery_feedback.action_id, true, true, false};
     const MissionFrameResult proposed =
-        speculative.StepWithLineImageCenter(complete, line_image_center_u);
+        speculative.StepWithLineImageCenter(complete, line_image_center_u, true);
     const ControlCommand &next = proposed.command;
     if (next.command_type == CommandType::kAction &&
         next.action_id != 0 &&
@@ -676,11 +677,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   bool applied_object_ready_mean = false;
   // A READY mean alone is not a reserved successor. Without B in the
   // one-slot queue, retain the fresh 1s post-DONE observation gate.
+  // Only the disposable candidate calculation may use the mean before B
+  // exists; requiring B there would prevent the first reservation entirely.
   if (moving_object_ready_mean_ &&
       input.delivery_feedback.done &&
       input.delivery_feedback.action_id == moving_object_ready_mean_->action_id &&
-      object_queued_parent_id_ == input.delivery_feedback.action_id &&
-      object_queued_successor_.has_value() &&
+      (evaluating_ready_successor ||
+       (object_queued_parent_id_ == input.delivery_feedback.action_id &&
+        object_queued_successor_.has_value())) &&
       active_mission_ == moving_object_ready_mean_->mission &&
       input.camera_feedback.settled &&
       input.camera_feedback.actual_mode == moving_object_ready_mean_->camera) {
@@ -1025,6 +1029,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     PopulateDiagnostics(output, input.now_sec);
     return output;
   }
+  // The camera-settled transition also belongs to the observation gate,
+  // although it advances WAIT_CAMERA without collecting a sample yet.
+  output.post_motion_observing = observation_hold;
   decision_observation_first_frame_ = false;
   const int line_turns_before=line_recovery_turns_;
   ActionExecutionFeedback action_feedback = input.action_feedback;

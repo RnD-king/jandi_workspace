@@ -54,7 +54,10 @@ static void CoarseTurnAlignment(double yaw_limit_deg) {
 
     // Below 0.15m, switch feet before handling the same angular violation.
     GoalController close(c,3);
-    const auto close_pose=Pose(sign*.3,.5);
+    // Keep the rim at the target radial range so distance correction does
+    // not take priority over the side-step this scenario is testing.
+    const auto close_pose=Pose(sign*.3,c.hoop_radius_m+
+        std::sqrt(c.throw_landing_z_m*c.throw_landing_z_m-.3*.3));
     enter_coarse(close,close_pose);
     r=close.Compute({},Board(),close_pose,640,480,.2,true,camera,{});
     assert(r.mode==GoalMode::kWaitFinePose);

@@ -205,7 +205,7 @@ void TestGoalForwardTrial() {
   for(int i=0;i<7;++i)t.Tick();
   assert(t.out.goal.mode==GoalMode::kForwardApproach);
   assert(t.out.command.camera_request==CameraRequest::kNone);
-  t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardFour);
+  t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardThree);
   t.in.backboard_center_depth_m=.7; t.Tick(true);
   assert(t.out.command.camera_request==CameraRequest::kGoal);
   t.in.camera_feedback={CameraMode::kGoal,true}; t.Tick();
@@ -316,7 +316,7 @@ void TestGoalEdgeSingleCommit(bool left) {
     t.Tick();assert(t.out.post_motion_observing && t.out.command.action_id==0);
   }
   t.Tick();assert(!t.out.post_motion_observing && t.out.command.action_id==0);
-  assert(t.Preview().command.action==MissionAction::kStepForwardFour);
+  assert(t.Preview().command.action==MissionAction::kStepForwardThree);
 }
 } // namespace
 int main() {

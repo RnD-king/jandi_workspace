@@ -311,7 +311,8 @@ private:
 
   MissionFrameResult StepWithLineImageCenter(
       const MissionFrameInput &input,
-      std::optional<double> line_image_center_u);
+      std::optional<double> line_image_center_u,
+      bool evaluating_ready_successor = false);
   ActionRequest ComputeLineAction(const LineGuide &guide,
                                   const MissionFrameInput &input,
                                   bool action_active,

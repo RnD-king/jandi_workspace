@@ -561,6 +561,8 @@ int main() {
   r = camera_gate.Step(in);
   assert(r.goal.mode == GoalMode::kSearch);
   assert(r.command.action_id == 0);
+  assert(r.post_motion_observing);
+  assert(r.post_motion_frames == 0 && r.post_motion_window_frames == 0);
   for (int i = 0; i < 9; ++i) {
     in = Frame(1.2 + 0.1 * i);
     in.camera_feedback = {CameraMode::kGoal, true};
@@ -810,6 +812,7 @@ int main() {
   // BALL: 3-step 40%-READY mean should select 2-step at DONE even if
   // the raw DONE frame would incorrectly select three-step.
   auto ready_cfg=LoadDefaultAlgorithmConfig(); ready_cfg.transition_settle_sec=0;
+  ready_cfg.object_ready_mean_actions={22,23};
   ready_cfg.enable_ball=true;
   ready_cfg.enable_goal=ready_cfg.enable_hurdle=false;
   ready_cfg.ball.entry_min_hits=1; ready_cfg.ball.down_search_min_hits=1; ready_cfg.ball.stable_window=ready_cfg.ball.stable_min_hits=1;
@@ -830,6 +833,8 @@ int main() {
   // A=22, B=21: READY must reserve B, not wait for A's DONE.
   const auto ball_queued_id=ready_result.command.action_id;
   assert(ball_queued_id!=0 && ball_queued_id!=ball_ready_id);
+  assert(!ready_result.object_ready_mean_used);
+  assert(ready_result.ball.mode==BallMode::kApproachBall);
   assert(ready_result.command.action==MissionAction::kStepForwardTwo);
   assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
   ready_frame=Frame(2.8); ready_frame.ball_target=Ball(.5,.2);
@@ -1003,6 +1008,64 @@ int main() {
   ready_result=disabled_ready.Step(ready_frame);
   assert(!ready_result.object_ready_mean_used);
   assert(ready_result.post_motion_observing);
+
+  // Disabling object READY never disables LINE's own READY policy (23).
+  auto line_ready_cfg=disabled_ready_cfg;
+  line_ready_cfg.enable_ball=false;
+  line_ready_cfg.line_features.image_center_u=320;
+  MissionController line_ready(line_ready_cfg);
+  ready_result=line_ready.Step(Frame(0.0));
+  assert(ready_result.command.mission==MissionType::kLine);
+  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  const auto line_ready_id=ready_result.command.action_id;
+  for (int i=1;i<=27;++i) {
+    ready_frame=Frame(i*.1);
+    ready_frame.delivery_feedback={line_ready_id,true,false,i==27};
+    ready_result=line_ready.Step(ready_frame);
+  }
+  assert(ready_result.command.mission==MissionType::kLine);
+  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  assert(ready_result.command.action_id!=0 && ready_result.command.action_id!=line_ready_id);
+  assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
+
+  // Valid READY evidence is insufficient when PAUSE prevents reserving B.
+  // Test the global command gate and the separate body-action gate.
+  for (bool pause_commands : {false,true}) {
+    MissionController unreserved(ready_cfg);
+    ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
+    ready_result=unreserved.Step(ready_frame);
+    const auto unreserved_id=ready_result.command.action_id;
+    assert(unreserved_id!=0);
+    for (int i=1;i<=27;++i) {
+      ready_frame=Frame(i*.1);
+      ready_frame.ball_target=Ball(.5,i>=12 ? .8 : .2);
+      ready_frame.delivery_feedback={unreserved_id,true,false,i==27};
+      if (i==27) {
+        ready_frame.allow_new_commands=!pause_commands;
+        ready_frame.allow_new_body_actions=pause_commands;
+      }
+      ready_result=unreserved.Step(ready_frame);
+    }
+    assert(ready_result.command.action_id==unreserved_id);
+    assert(ready_result.command.control_phase!=ControlPhase::kWaitingQueuedActionAck);
+    ready_frame=Frame(3.0); ready_frame.ball_target=Ball(.5,.8);
+    ready_frame.delivery_feedback={unreserved_id,true,true,false};
+    ready_result=unreserved.Step(ready_frame);
+    assert(!ready_result.object_ready_mean_used && ready_result.post_motion_observing);
+    assert(ready_result.command.command_type==CommandType::kHold);
+    assert(ready_result.command.action_id==unreserved_id);
+    for (int i=1;i<=9;++i) {
+      ready_frame=Frame(3.0+i*.1); ready_frame.ball_target=Ball(.5,.8);
+      ready_result=unreserved.Step(ready_frame);
+      assert(ready_result.post_motion_observing && !ready_result.object_ready_mean_used);
+      assert(ready_result.command.action_id==unreserved_id);
+    }
+    ready_frame=Frame(4.01); ready_frame.ball_target=Ball(.5,.8);
+    ready_result=unreserved.Step(ready_frame);
+    assert(!ready_result.post_motion_observing && !ready_result.object_ready_mean_used);
+    assert(ready_result.command.action==MissionAction::kStepForwardTwo);
+    assert(ready_result.command.action_id!=0 && ready_result.command.action_id!=unreserved_id);
+  }
 
   // Straight two-step is deliberately not a moving READY candidate.
   MissionController straight_two(ready_cfg);

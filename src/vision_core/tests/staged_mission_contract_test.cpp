@@ -103,7 +103,7 @@ void FarStageStopsAfterCamera(MissionType mission) {
     t.Tick(); // GOAL camera known and settled, enter search
     for(int n=0;n<12 && t.out.goal.mode!=GoalMode::kApproach;++n)t.Tick();
     assert(t.out.goal.mode==GoalMode::kApproach);
-    assert(t.Preview().command.action==MissionAction::kStepForwardFour);
+    assert(t.Preview().command.action==MissionAction::kStepForwardThree);
     t.in.backboard_center_depth_m=.7;
     for(int n=0;n<10 && !t.out.trial_complete;++n)t.Tick();
     assert(t.out.trial_complete);

@@ -56,6 +56,9 @@ void BallMiddleLoss(int zone) {
     assert(r.action.action==turn);
     done.observation_complete=true;
     r=ball.Compute({},640,480,3.9,{},done);
+    assert(ball.RecoveryWalkTurnsCompleted()==2 && r.action.action==MissionAction::kNone);
+    // Completion updates the count; the next decision issues the third turn.
+    r=ball.Compute({},640,480,4.0,{},{});
     assert(ball.RecoveryWalkTurnsCompleted()==2 && r.action.action==turn);
     r=ball.Compute({},640,480,5.0,{},done);
     assert(ball.RecoveryWalkTurnsCompleted()==3);
@@ -308,6 +311,19 @@ void LineBoxFilters() {
   edited.line_detection.min_box_width=2;
   assert(core.UpdateTuning(edited));
   f.now_sec=.2;
+  // LINE rejects sizes equal to either threshold as well as smaller boxes.
+  assert(core.StepPerception(f).perception.raw_line_centers.empty());
+  edited.line_detection.min_box_width=1;
+  assert(core.UpdateTuning(edited));
+  f.now_sec=.3;
+  assert(core.StepPerception(f).perception.raw_line_centers.size()==3);
+  edited.line_detection.min_box_height=10;
+  core.SetLivePerceptionTuning(edited);
+  f.now_sec=.4;
+  assert(core.StepPerception(f).perception.raw_line_centers.empty());
+  edited.line_detection.min_box_height=9;
+  assert(core.UpdateTuning(edited));
+  f.now_sec=.5;
   assert(core.StepPerception(f).perception.raw_line_centers.size()==3);
 }
 MissionControllerConfig LineConfig() {

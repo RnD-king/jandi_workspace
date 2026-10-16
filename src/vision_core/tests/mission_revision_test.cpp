@@ -250,7 +250,24 @@ void BallEntryAndReadyQueue(bool already_queued) {
     f=frame(1.1);f.ball_target=Target(380,470);
     f.delivery_feedback={a,true,true,false};r=core.Step(f);
     assert(r.active_mission==MissionType::kBall);
-    assert(r.command.action!=MissionAction::kStepForwardFour);
+    // The post-DONE observer retains A's metadata in HOLD; action alone
+    // cannot distinguish that from issuing another LINE walk.
+    assert(r.post_motion_observing && !r.object_ready_mean_used);
+    assert(r.command.command_type==CommandType::kHold);
+    assert(r.command.action_id==a && r.command.mission==MissionType::kLine);
+    assert(r.command.control_phase==ControlPhase::kWaitingActionDone);
+    for(int i=1;i<=9;++i) {
+      f=frame(1.1+.1*i);f.ball_target=Target(380,470);
+      r=core.Step(f);
+      assert(r.active_mission==MissionType::kBall && r.post_motion_observing);
+      assert(r.command.command_type==CommandType::kHold && r.command.action_id==a);
+    }
+    f=frame(2.11);f.ball_target=Target(380,470);r=core.Step(f);
+    assert(!r.post_motion_observing && !r.object_ready_mean_used);
+    assert(r.command.command_type==CommandType::kAction);
+    assert(r.command.mission==MissionType::kBall);
+    assert(r.command.action==MissionAction::kStepForwardTwo);
+    assert(r.command.action_id!=0 && r.command.action_id!=a);
     return;
   }
   const auto b=r.command.action_id;
@@ -333,7 +350,7 @@ void DirectGoalStartAndReset() {
       assert(r.post_motion_observing && r.command.action_id==0);
     }
     f.now_sec=2.1;r=core.Step(f);
-    assert(!r.post_motion_observing && r.command.action==MissionAction::kStepForwardFour);
+    assert(!r.post_motion_observing && r.command.action==MissionAction::kStepForwardThree);
     assert(r.goal.mode==GoalMode::kApproach);
   }
   MissionController reset(c);reset.BeginPhysicalReset();
@@ -416,20 +433,30 @@ void GoalPairHasOneObservation(bool left) {
 void PoseSettleAndConcurrentObservation() {
   auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kBall;c.test_stage=3;
   c.enable_goal=c.enable_hurdle=false;
+  c.transition_settle_sec=.6;c.post_motion_observation_sec=1;
   MissionController core(c);
   auto f=Frame(0);f.camera_feedback={CameraMode::kDown,true};
   auto r=core.Step(f);assert(r.command.action==MissionAction::kDefaultPoseMode);
   const auto id=r.command.action_id;
-  f.now_sec=.1;f.delivery_feedback={id,true,true,false};r=core.Step(f);
-  for(int i=2;i<=6;++i) {
+  const double pose_done_at=.1;
+  f.now_sec=pose_done_at;f.delivery_feedback={id,true,true,false};r=core.Step(f);
+  // The camera was already settled during setup: there is no new camera
+  // completion edge. Pose DONE starts .6s of settle before observation.
+  const double observe_at=pose_done_at+c.transition_settle_sec;
+  const double decision_at=observe_at+c.post_motion_observation_sec;
+  for(int i=2;.1*i+1e-9<observe_at;++i) {
     f.now_sec=.1*i;f.delivery_feedback={};f.ball_target=Target(345,100);r=core.Step(f);
     assert(r.command.action_id==0 && !r.post_motion_observing);
+    assert(r.post_motion_frames==0 && r.post_motion_window_frames==0);
   }
-  // Startup's fresh near-camera FSM settles before a manual/automatic window.
-  for(int i=7;i<=35 && r.command.action!=MissionAction::kPickBall;++i) {
+  // Fresh evidence and the one-second timer accumulate together after settle.
+  for(int i=7;.1*i+1e-9<decision_at;++i) {
     f.now_sec=.1*i;f.delivery_feedback={};f.ball_target=Target(345,100);r=core.Step(f);
+    assert(r.command.action_id==0 && r.post_motion_observing);
+    assert(r.post_motion_window_frames>0);
   }
-  assert(r.command.action==MissionAction::kPickBall);
+  f.now_sec=decision_at;f.delivery_feedback={};f.ball_target=Target(345,100);r=core.Step(f);
+  assert(!r.post_motion_observing && r.command.action==MissionAction::kPickBall);
 }
 void FineObservationTiming(double extra_settle, bool manual=false) {
   auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kBall;c.test_stage=2;
@@ -694,9 +721,12 @@ void GoalEntryFirstObservation(bool left, bool reacquire, int prior_hits) {
   const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
   assert(g.action.action==turn && goal.RecoveryTurnsCompleted()==0);
   if(reacquire) {
-    for(int i=1;i<=10;++i)
+    // Check the recovery exit itself. Further stable frames may advance
+    // SEARCH to APPROACH once the seven-hit criterion has been met.
+    for(int i=1;i<=10 && g.mode==GoalMode::kRecoveryTurn;++i)
       g=goal.Compute({},board,{true,0,1.5,0,1},640,480,2.85+.05*i,true,camera,{false,true,false});
     assert(g.mode==GoalMode::kSearch && goal.RecoveryTurnsCompleted()==0);
+    assert(g.tracked.visible && g.tracked.stable);
     goal.Compute({},board,{true,0,1.5,0,1},640,480,3.5,true,camera,{true,false,true});
     assert(goal.RecoveryTurnsCompleted()==0);
     return;
