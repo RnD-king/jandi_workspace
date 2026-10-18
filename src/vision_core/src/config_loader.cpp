@@ -65,12 +65,18 @@ void HitsWithinWindow(int hits, int window, const char *hits_key,
 } // namespace
 
 void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
+  PositiveInt(c.line_p2p.left_repetitions, "line_p2p.left_repetitions");
+  PositiveInt(c.line_p2p.straight_repetitions, "line_p2p.straight_repetitions");
+  PositiveInt(c.line_p2p.right_repetitions, "line_p2p.right_repetitions");
+  NonnegativeInt(c.candidate_search_max_turns, "mission.candidate_search_max_turns");
+  Positive(c.candidate_direction_max_age_sec, "mission.candidate_direction_max_age_sec");
   Nonnegative(c.ball.down_one_step_v_px, "ball.down_one_step_v_px");
   Nonnegative(c.ball.fine_mode_v_px, "ball.fine_mode_v_px");
   if (c.ball.down_one_step_v_px >= c.ball.fine_mode_v_px)
     throw std::runtime_error("ball DOWN thresholds must be ordered");
   Nonnegative(c.ball.approach_short_v_px, "ball.approach_short_v_px");
   PositiveInt(c.ball.down_search_max_steps, "ball.down_search_max_steps");
+  Nonnegative(c.ball.down_search_inter_action_hold_sec, "ball.down_search_inter_action_hold_sec");
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
   NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
@@ -87,6 +93,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     throw std::runtime_error("hurdle DOWN thresholds must be ordered");
   Nonnegative(c.hurdle.approach_short_v_px, "hurdle.approach_short_v_px");
   PositiveInt(c.hurdle.down_search_max_steps, "hurdle.down_search_max_steps");
+  Nonnegative(c.hurdle.down_search_inter_action_hold_sec, "hurdle.down_search_inter_action_hold_sec");
   Positive(c.hurdle.recovery_observation_sec, "hurdle.recovery_observation_sec");
   PositiveInt(c.hurdle.recovery_max_observations, "hurdle.recovery_max_observations");
   Nonnegative(c.hurdle.target_u_px, "hurdle.target_u_px");
@@ -350,6 +357,9 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(line, "line_stable_min_hits", c.line.line_stable_min_hits);
 
   const auto lp = a["line_p2p"];
+  Assign(lp, "left_repetitions", c.line_p2p.left_repetitions);
+  Assign(lp, "straight_repetitions", c.line_p2p.straight_repetitions);
+  Assign(lp, "right_repetitions", c.line_p2p.right_repetitions);
   Assign(lp, "offset_gain", c.line_p2p.offset_gain);
   Assign(lp, "heading_gain", c.line_p2p.heading_gain);
   Assign(lp, "steering_deadband", c.line_p2p.steering_deadband);
@@ -368,6 +378,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "fine_mode_v_px", c.ball.fine_mode_v_px);
   Assign(b, "approach_short_v_px", c.ball.approach_short_v_px);
   Assign(b, "down_search_max_steps", c.ball.down_search_max_steps);
+  Assign(b, "down_search_inter_action_hold_sec", c.ball.down_search_inter_action_hold_sec);
   Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
   Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
   Assign(b, "recovery_walk_turn_max", c.ball.recovery_walk_turn_max);
@@ -401,6 +412,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "fine_mode_v_px", c.hurdle.fine_mode_v_px);
   Assign(h, "approach_short_v_px", c.hurdle.approach_short_v_px);
   Assign(h, "down_search_max_steps", c.hurdle.down_search_max_steps);
+  Assign(h, "down_search_inter_action_hold_sec", c.hurdle.down_search_inter_action_hold_sec);
   Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
   Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);
   Assign(h, "target_u_px", c.hurdle.target_u_px);
@@ -487,6 +499,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(cmd, "first_action_id", c.command.first_action_id);
   Assign(cmd, "action_ack_timeout_sec", c.command.action_ack_timeout_sec);
   const auto m = a["mission"];
+  Assign(m, "candidate_search_max_turns", c.candidate_search_max_turns);
+  Assign(m, "candidate_direction_max_age_sec", c.candidate_direction_max_age_sec);
   int test_mission=0;
   Assign(m,"test_mission",test_mission); c.test_mission=static_cast<MissionType>(test_mission);
   Assign(m,"test_stage",c.test_stage);

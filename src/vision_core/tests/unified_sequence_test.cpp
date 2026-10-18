@@ -62,9 +62,9 @@ MissionControllerConfig Config() {
   c.hurdle.contact_steps=3;c.hurdle.contact_inter_action_hold_sec=.5;
   return c;
 }
-Trial BallSearch() {
-  Trial t(Config()); t.in.ball_target=Target(.5,.85);
-  for(int i=0;i<7;++i)t.Tick();
+Trial BallSearch(MissionControllerConfig config=Config()) {
+  Trial t(config); t.in.ball_target=Target(.5,.85);
+  for(int i=0;i<18;++i)t.Tick();
   assert(t.out.ball.mode==BallMode::kApproachTwoBeforeDown);
   assert(t.out.command.action_id==0);
   t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardTwo);
@@ -75,6 +75,24 @@ Trial BallSearch() {
   assert(t.out.ball.mode==BallMode::kDownSearch);
   assert(t.out.command.action_id==0);
   return t;
+}
+void TestDownSearchHoldTuning() {
+  auto c=Config();c.ball.down_search_inter_action_hold_sec=1.0;
+  auto t=BallSearch(c);t.Commit();
+  const auto old_id=t.out.command.action_id;
+  const auto scope=t.permit;
+  assert(scope!=0);t.Tick(true);
+  assert(t.out.command.action_id==0 && t.permit==scope && !t.out.post_motion_observing);
+  t.Tick(false,old_id);
+  assert(t.out.command.action_id==0 && t.permit==scope);
+  c.ball.down_search_inter_action_hold_sec=2.0;
+  t.core.SetLivePerceptionTuning(c);
+  for(int i=0;i<12;++i) {t.Tick();assert(t.out.command.action_id==0 && t.permit==scope);}
+  // The tuning-node path shortens the existing wait without a new COMMIT.
+  c.ball.down_search_inter_action_hold_sec=.5;
+  assert(t.core.UpdateTuning(c));t.Tick();
+  assert(t.out.command.action_id!=0 && t.out.command.action_id!=old_id);
+  assert(t.out.command.action==MissionAction::kStepForwardOne && t.permit==scope);
 }
 void TestCameraLatchSurvivesLoss() {
   auto c=Config(); c.ball.entry_min_hits=1; c.ball.down_search_min_hits=1; c.ball.stable_window=c.ball.stable_min_hits=1; c.ball.lost_frames=1;
@@ -242,7 +260,7 @@ void TestHurdleSearchAndContact() {
   Trial t(c); t.in.hurdle_target=Target(.5,.85);
   // HURDLE now aligns using LINE O/H, so supply a straight guide.
   t.in.line_centers={{410,450},{410,400},{410,350},{410,300},{410,250}};
-  for(int i=0;i<7;++i)t.Tick();
+  for(int i=0;i<18;++i)t.Tick();
   assert(t.out.hurdle.mode==HurdleMode::kApproachTwoBeforeDown);
   t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardTwo);
   t.Tick(true); assert(t.out.command.camera_request==CameraRequest::kDown);
@@ -332,6 +350,6 @@ int main() {
   auto medium=goal.Compute({},Target(),{true,0,.75,0,1},640,480,.4,true,{CameraMode::kGoal,true},{});
   assert(medium.fine_decision_pose_used && medium.action.action==MissionAction::kStepForwardOne);
   TestCameraLatchSurvivesLoss(); TestWindowAndDeadline(); TestAlternatingBoundedRecovery();
-  TestGoalForwardTrial(); TestHurdleSearchAndContact();
+  TestGoalForwardTrial(); TestHurdleSearchAndContact();TestDownSearchHoldTuning();
   for(bool left:{false,true})TestGoalEdgeSingleCommit(left);
 }

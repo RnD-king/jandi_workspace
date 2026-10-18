@@ -36,6 +36,9 @@ static_assert(vision::msg::ActionCommand::STEP_FORWARD_TWO == 21 &&
               vision::msg::ActionCommand::STEP_FORWARD_RIGHT_TWO == 25 &&
               vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE == 26 &&
               vision::msg::ActionCommand::TURN_LEFT_IN_PLACE == 31);
+static_assert(vision::msg::ActionCommand::LINE_LEFT_UNIT == 32 &&
+              vision::msg::ActionCommand::LINE_STRAIGHT_UNIT == 33 &&
+              vision::msg::ActionCommand::LINE_RIGHT_UNIT == 34);
 static_assert(vision::msg::CommandStatus::READY == 3 &&
               vision::msg::CameraCommand::DOWN == 1 &&
               vision::msg::CameraCommand::FORWARD == 2 &&
@@ -303,6 +306,15 @@ private:
 
         case vision::msg::ActionCommand::STEP_FORWARD_ONE:
             return "motions/보행_1걸음_초기X_수정.json";
+
+        case vision::msg::ActionCommand::LINE_LEFT_UNIT:
+            return "motions/보행_좌회전전진_20도_최종_초기X_수정.json";
+
+        case vision::msg::ActionCommand::LINE_STRAIGHT_UNIT:
+            return "motions/보행_1걸음_초기X_수정.json";
+
+        case vision::msg::ActionCommand::LINE_RIGHT_UNIT:
+            return "motions/보행_우회전전진_20도_최종_초기X_찐.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_LEFT_THREE:
             return "missions/좌회전전진_3회.json";
@@ -825,7 +837,8 @@ private:
                 return;
             }
         }
-        // 11/12/13 및 21~26은 미션과 무관하게 READY(관측 종료 이정표)를 보낸다.
+        // Legacy 11/12/13, 21..25 and LINE units 32..34 send READY.
+        // Existing 10/26/27 remain non-READY actions.
         // Queue admission depends only on the currently executing READY action.
         if (motion_in_progress_ && !arm_transition_in_progress_ && !action_transactions_.ready_sent &&
             p2p_player_->IsNearCompletion(ready_lead_sec_, std::chrono::steady_clock::now()) &&

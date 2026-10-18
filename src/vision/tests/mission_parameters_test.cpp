@@ -20,7 +20,9 @@ int main(int argc,char** argv) {
         rclcpp::Parameter("goal_recovery_turn_max",2),
         rclcpp::Parameter("goal_edge_margin_px",75.0),
         rclcpp::Parameter("ball_approach_direct_down_v_px",370.0),
-        rclcpp::Parameter("hurdle_contact_inter_action_hold_sec",.7)});
+        rclcpp::Parameter("hurdle_contact_inter_action_hold_sec",.7),
+        rclcpp::Parameter("ball_down_search_inter_action_hold_sec",.6),
+        rclcpp::Parameter("hurdle_down_search_inter_action_hold_sec",1.2)});
     auto node=std::make_shared<rclcpp::Node>("mission_parameter_test",options);
     vision::DeclareMissionParameters(*node,base);
     auto applied=base;
@@ -33,6 +35,37 @@ int main(int argc,char** argv) {
     Check(applied.goal.edge_margin_px==75,"edge margin startup override was lost");
     Check(applied.ball.approach_direct_down_v_px==370,"BALL direct DOWN startup override was lost");
     Check(applied.hurdle.contact_inter_action_hold_sec==.7,"HURDLE contact hold startup override was lost");
+    Check(applied.ball.down_search_inter_action_hold_sec==.6 &&
+          applied.hurdle.down_search_inter_action_hold_sec==1.2,
+          "independent DOWN search hold startup overrides were lost");
+    for (const auto* name : {"ball_down_search_inter_action_hold_sec",
+                             "hurdle_down_search_inter_action_hold_sec"}) {
+      for (double valid : {0.0, .8}) {
+        Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter(name,valid),applied),
+              "DOWN search hold live setting was not recognized");
+        const double value=std::string(name)=="ball_down_search_inter_action_hold_sec"
+            ? applied.ball.down_search_inter_action_hold_sec
+            : applied.hurdle.down_search_inter_action_hold_sec;
+        Check(value==valid,"DOWN search hold live value was lost");
+      }
+      for (double bad : {-1.0, std::numeric_limits<double>::quiet_NaN(),
+                          std::numeric_limits<double>::infinity()}) {
+        bool rejected=false;
+        try { vision::ApplyLivePerceptionParameter(rclcpp::Parameter(name,bad),applied); }
+        catch (const std::invalid_argument&) { rejected=true; }
+        Check(rejected,"invalid DOWN search hold live value accepted");
+        node->set_parameter(rclcpp::Parameter(name,bad));
+        rejected=false;
+        try { vision::ReadMissionParameters(*node,applied); }
+        catch (const std::invalid_argument&) { rejected=true; }
+        Check(rejected,"invalid DOWN search hold startup value accepted");
+      }
+      node->set_parameter(rclcpp::Parameter(name,0.0));
+      bool wrong_type=false;
+      try { vision::ApplyLivePerceptionParameter(rclcpp::Parameter(name,1),applied); }
+      catch (const std::invalid_argument&) { wrong_type=true; }
+      Check(wrong_type,"integer DOWN search hold value accepted");
+    }
     Check(vision::ApplyLivePerceptionParameter(
         rclcpp::Parameter("hurdle_contact_inter_action_hold_sec",.9),applied) &&
         applied.hurdle.contact_inter_action_hold_sec==.9,"HURDLE contact hold live setting was not applied");

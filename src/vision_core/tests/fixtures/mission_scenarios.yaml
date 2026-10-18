@@ -17,6 +17,9 @@ vision_algorithm:
 
   # 라인 보행 방향 판단과 유실 복구
   line_p2p:
+    left_repetitions: 1 # Single-block timing fixture; production is covered separately.
+    straight_repetitions: 1
+    right_repetitions: 1
     offset_gain: 0.3
     heading_gain: 0.3
     steering_deadband: 0.10
@@ -34,6 +37,7 @@ vision_algorithm:
     test_mission_index: 1
 
     down_search_max_steps: 10
+    down_search_inter_action_hold_sec: 0.0
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
     recovery_walk_turn_max: 3
@@ -73,6 +77,7 @@ vision_algorithm:
 
   hurdle:
     down_search_max_steps: 10
+    down_search_inter_action_hold_sec: 0.0
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
     stable_window: 10
@@ -186,6 +191,8 @@ vision_algorithm:
 
   # 여러 미션에 공통으로 적용되는 설정
   mission:
+    candidate_search_max_turns: 2
+    candidate_direction_max_age_sec: 5.0 # Validated once after the initial stationary window.
     test_mission: 0
     test_stage: 0
 

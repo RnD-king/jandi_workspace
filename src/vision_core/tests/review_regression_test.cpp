@@ -30,7 +30,7 @@ void TestClockAndGoalReservationDrain() {
   f.line_centers={{320,450},{320,350},{320,250}};
   auto r=core.Step(f);
   const auto a=r.command.action_id;
-  assert(a!=0 && r.command.action==MissionAction::kStepForwardFour);
+  assert(a!=0 && r.command.action==MissionAction::kLineStraightUnit);
   assert(r.goal_walk_actions_completed==0);
   // Elapsed wall time without a DONE is not walking progress.
   f.now_sec=20; f.delivery_feedback={a,true,false,false}; r=core.Step(f);

@@ -98,7 +98,7 @@ HurdleResult HurdleController::Compute(
     int image_height, double now_sec, const CameraFeedback &camera,
     const ActionExecutionFeedback &feedback,
     const CruiseDecision &line_decision,
-    bool allow_new_body_actions) {
+    bool allow_new_body_actions, bool allow_mission_entry) {
   if (mode_ == HurdleMode::kLineFollow && now_sec < ignore_until_sec_)
     return {};
   // No tracking/near-evidence from the moving camera view.
@@ -114,7 +114,7 @@ HurdleResult HurdleController::Compute(
   if (mode_ == HurdleMode::kLineFollow) {
     const int acquire_hits = static_cast<int>(std::count(
         acquire_history_.begin(), acquire_history_.end(), true));
-    if (tracked_.stable && tracked_.visible &&
+    if (allow_mission_entry && tracked_.stable && tracked_.visible &&
         acquire_hits >= std::max(1, config_.stable_min_hits)) {
       mode_ = HurdleMode::kApproach;
       state_enter_sec_ = now_sec;
@@ -231,8 +231,10 @@ HurdleResult HurdleController::Compute(
     const int hits=static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true));
     const auto decision=down_search_.Observe(tracked_.visible,hits,
         config_.down_search_min_hits,config_.down_search_max_steps,
-        feedback.action_active,feedback.action_done);
-    if (decision==DownSearchWalk::Decision::kMoving) return result;
+        feedback.action_active,feedback.action_done,
+        now_sec,config_.down_search_inter_action_hold_sec);
+    if (decision==DownSearchWalk::Decision::kMoving ||
+        decision==DownSearchWalk::Decision::kWaiting) return result;
     if (decision==DownSearchWalk::Decision::kFound) {
       mode_=HurdleMode::kCoarseAdjust;
       ClearTracking();
@@ -357,6 +359,17 @@ HurdleResult HurdleController::Compute(
   }
   }
   return result;
+}
+
+bool HurdleController::EntryReady() const {
+  return tracked_.visible && tracked_.stable &&
+      std::count(acquire_history_.begin(), acquire_history_.end(), true) >= config_.stable_min_hits;
+}
+void HurdleController::EnterVerified(const std::optional<ObjectTarget>& mean,
+    const std::deque<bool>& hits, int width, int height, double now) {
+  UseVerifiedObservation(mean, hits, width, height);
+  mode_ = HurdleMode::kApproach;
+  state_enter_sec_ = now;
 }
 
 void HurdleController::ObserveOnly(const std::optional<ObjectTarget> &target,

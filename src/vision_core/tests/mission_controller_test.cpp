@@ -1,5 +1,6 @@
 #include "vision_core/config_loader.hpp"
 #include "vision_core/mission_controller.hpp"
+#include "verified_entry_fixture.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -9,7 +10,7 @@
 #include <stdexcept>
 using namespace vision_core;
 static MissionFrameInput Frame(double now) {
-  MissionFrameInput f; f.image_width=640; f.image_height=480; f.now_sec=now;
+  MissionFrameInput f; f.image_width=640; f.image_height=480; f.now_sec=(now) + 3.0;
   f.command_transport_enabled=true;
   f.line_centers={{320,450},{320,400},{320,350},{320,300},{320,250}};
   return f;
@@ -42,6 +43,7 @@ static void TestNearBallTurnThenDown() {
   config.ball.approach_two_step_v_px=336;
   for (double u : {.3,.7}) for (bool found : {false,true}) {
     MissionController controller(config);
+  AdmitObjectAtRest(controller, Ball(u,.8));
     auto input=Frame(0);
     input.ball_target=Ball(u,.8);
     auto result=controller.Step(input);
@@ -122,10 +124,10 @@ int main() {
   two_point_input=Frame(2.0);
   two_point_result=two_point_controller.Step(two_point_input);
   assert(!two_point_result.line_in_recovery);
-  assert(two_point_result.command.action==MissionAction::kStepForwardFour);
+  assert(two_point_result.command.action==MissionAction::kLineStraightUnit);
   MissionController controller(c);
   auto in=Frame(0); auto r=controller.Step(in);
-  assert(r.command.action==MissionAction::kStepForwardFour);
+  assert(r.command.action==MissionAction::kLineStraightUnit);
   assert(r.command.action_id!=0);
   const auto id=r.command.action_id;
   in=Frame(.1); in.delivery_feedback={id,true,false,false};
@@ -136,7 +138,7 @@ int main() {
   in=Frame(2.55); in.delivery_feedback={id,true,false,true};
   r=controller.Step(in);
   assert(r.command.action_id!=0 && r.command.action_id!=id);
-  assert(r.command.action==MissionAction::kStepForwardFour);
+  assert(r.command.action==MissionAction::kLineStraightUnit);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
   assert(r.line_window_stats && r.line_window_stats->used_frames >= 5);
   // Debug telemetry must report the SAME READY average used to select B.
@@ -160,7 +162,7 @@ int main() {
   }
   in=Frame(2.55); in.delivery_feedback={delayed_ack_id,true,false,true};
   r=controller.Step(in);
-  assert(r.command.action==MissionAction::kStepForwardFour);
+  assert(r.command.action==MissionAction::kLineStraightUnit);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
   assert(r.line_window_stats && r.line_window_stats->used_frames >= 5);
 
@@ -185,7 +187,7 @@ int main() {
   controller.Reset();
   in=Frame(0); in.line_decision_guide_override=Guide(-.2);
   r=controller.Step(in);
-  assert(r.command.action==MissionAction::kStepForwardLeft);
+  assert(r.command.action==MissionAction::kLineLeftUnit);
   const auto left_id=r.command.action_id;
   in=Frame(.1); in.line_centers.clear(); in.line_decision_guide_override.reset();
   in.delivery_feedback={left_id,true,true,false};
@@ -240,7 +242,7 @@ int main() {
   in=Frame(1.0); in.delivery_feedback={right_id,true,false,true};
   r=controller.Step(in);
   const auto straight_id=r.command.action_id;
-  assert(r.command.action==MissionAction::kStepForwardFour);
+  assert(r.command.action==MissionAction::kLineStraightUnit);
   in=Frame(1.1); in.delivery_feedback={straight_id,true,false,false};
   r=controller.Step(in);
   in=Frame(1.2); in.delivery_feedback={right_id,true,true,false};
@@ -391,7 +393,7 @@ int main() {
   assert(rejected);
   in=Frame(0); in.line_decision_guide_override=Guide(.5);
   r=tuning.Step(in);
-  assert(r.command.action==MissionAction::kStepForwardFour);
+  assert(r.command.action==MissionAction::kLineStraightUnit);
 
   // Tuning observations compute features but never start production recovery.
   MissionController frozen(c);
@@ -407,7 +409,7 @@ int main() {
   assert(frozen.UpdateLineP2pTuning(c.line_p2p));
   in=Frame(31); in.line_decision_guide_override=Guide(-.3);
   r=frozen.Step(in);
-  assert(r.command.action==MissionAction::kStepForwardLeft);
+  assert(r.command.action==MissionAction::kLineLeftUnit);
   const auto frozen_id=r.command.action_id;
   in=Frame(32); in.line_centers.clear();
   in.advance_line_fsm=false; in.allow_new_line_action=false;
@@ -415,22 +417,22 @@ int main() {
   r=frozen.Step(in);
   assert(r.command.action_id==frozen_id);
   assert(r.command.control_phase==ControlPhase::kWaitingActionDone);
-  in.now_sec=33; in.delivery_feedback={frozen_id,true,false,true};
+  in.now_sec=(33) + 3.0; in.delivery_feedback={frozen_id,true,false,true};
   r=frozen.Step(in);
   assert(r.command.action_id==frozen_id); // No READY successor.
   assert(r.command.control_phase==ControlPhase::kWaitingActionDone);
   for (int i=34; i<45; ++i) {
-    in.now_sec=i; in.delivery_feedback={};
+    in.now_sec=(i) + 3.0; in.delivery_feedback={};
     r=frozen.Step(in);
     assert(!r.line_in_recovery && r.command.action_id==frozen_id);
   }
-  in.now_sec=45; in.delivery_feedback={frozen_id,true,true,false};
+  in.now_sec=(45) + 3.0; in.delivery_feedback={frozen_id,true,true,false};
   r=frozen.Step(in);
   assert(r.command.action_id==0 && !r.line_in_recovery);
   assert(frozen.UpdateLineP2pTuning(c.line_p2p));
   in=Frame(46); in.line_decision_guide_override=Guide(.3);
   r=frozen.Step(in);
-  assert(r.command.action==MissionAction::kStepForwardRight);
+  assert(r.command.action==MissionAction::kLineRightUnit);
   assert(r.command.action_id>frozen_id); // No Reset between trials.
 
   // PerceptionFrameInput must forward the same freeze contract.
@@ -441,15 +443,15 @@ int main() {
   observation.advance_line_fsm=false;
   // Even with allow_new_line_action=true, a frozen FSM makes no decisions.
   for (int i=0; i<20; ++i) {
-    observation.now_sec=i;
+    observation.now_sec=(i) + 3.0;
     const auto p=frozen_perception.StepPerception(observation);
     assert(p.mission.line_computed && !p.mission.line_in_recovery);
     assert(p.mission.command.action_id==0);
   }
-  observation.now_sec=20; observation.advance_line_fsm=true;
+  observation.now_sec=(20) + 3.0; observation.advance_line_fsm=true;
   observation.line_decision_guide_override=Guide(0);
   const auto p=frozen_perception.StepPerception(observation);
-  assert(p.mission.command.action==MissionAction::kStepForwardFour);
+  assert(p.mission.command.action==MissionAction::kLineStraightUnit);
 
   // One common timeout is injected into all three object controllers. Use a
   // non-default value so an accidental per-mission/default 3s is detectable.
@@ -461,16 +463,17 @@ int main() {
   camera_config.ball.upper_acquire_v_px=480.0;
 
   MissionController ball_timeout(camera_config);
+  AdmitObjectAtRest(ball_timeout, Ball(.5,.8));
   in=Frame(0); in.ball_target=Ball(.5,.8);
   r=ball_timeout.Step(in);
   assert(r.ball.mode==BallMode::kApproachTwoBeforeDown);
   const auto ball_two_id=r.command.action_id;
-  in.now_sec=.01; in.delivery_feedback={ball_two_id,true,true,false};
+  in.now_sec=(.01) + 3.0; in.delivery_feedback={ball_two_id,true,true,false};
   r=ball_timeout.Step(in); in.delivery_feedback={};
   assert(r.ball.mode==BallMode::kWaitCameraDown);
-  in.now_sec=.4; r=ball_timeout.Step(in);
+  in.now_sec=(.4) + 3.0; r=ball_timeout.Step(in);
   assert(r.ball.mode==BallMode::kWaitCameraDown);
-  in.now_sec=.51; r=ball_timeout.Step(in);
+  in.now_sec=(.51) + 3.0; r=ball_timeout.Step(in);
   assert(r.ball.mode==BallMode::kFailed);
 
   camera_config.enable_ball=false; camera_config.enable_hurdle=true;
@@ -479,16 +482,17 @@ int main() {
   camera_config.hurdle.upper_acquire_v_px=480;
 
   MissionController hurdle_timeout(camera_config);
+  AdmitObjectAtRest(hurdle_timeout, Ball(.5,.8), MissionType::kHurdle);
   in=Frame(0); in.hurdle_target=Ball(.5,.8);
   r=hurdle_timeout.Step(in);
   assert(r.hurdle.mode==HurdleMode::kApproachTwoBeforeDown);
   const auto hurdle_two_id=r.command.action_id;
-  in.now_sec=.01; in.delivery_feedback={hurdle_two_id,true,true,false};
+  in.now_sec=(.01) + 3.0; in.delivery_feedback={hurdle_two_id,true,true,false};
   r=hurdle_timeout.Step(in); in.delivery_feedback={};
   assert(r.hurdle.mode==HurdleMode::kWaitCameraDown);
-  in.now_sec=.4; r=hurdle_timeout.Step(in);
+  in.now_sec=(.4) + 3.0; r=hurdle_timeout.Step(in);
   assert(r.hurdle.mode==HurdleMode::kWaitCameraDown);
-  in.now_sec=.51; r=hurdle_timeout.Step(in);
+  in.now_sec=(.51) + 3.0; r=hurdle_timeout.Step(in);
   assert(r.hurdle.mode==HurdleMode::kFailed);
 
   // Suspend association during camera motion and use only fresh settled IDs.
@@ -526,9 +530,9 @@ int main() {
   in=Frame(0); in.backboard_target=Ball(.5,.3); in.backboard_center_depth_m=.7;
   r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
-  in.now_sec=.4; r=goal_timeout.Step(in);
+  in.now_sec=(.4) + 3.0; r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
-  in.now_sec=.5; r=goal_timeout.Step(in);
+  in.now_sec=(.5) + 3.0; r=goal_timeout.Step(in);
   assert(r.goal.mode==GoalMode::kFailed);
   // GOAL camera DONE starts a fresh 1-second observation. Its final mean
   // must also satisfy recent 10/7 object evidence without extending 1 s.
@@ -625,6 +629,7 @@ int main() {
   manual_config.ball.pickup_v1_px=307.2; manual_config.ball.pickup_v2_px=364.8;
   manual_config.post_motion_observation_sec=1;
   MissionController manual(manual_config);
+  AdmitObjectAtRest(manual, Ball(.5,.30));
   auto mi=Frame(0);
   mi.manual_observation_control=true; mi.allow_new_body_actions=false;
   mi.ball_target=Ball(.5,.30);
@@ -638,7 +643,7 @@ int main() {
   mi.manual_observation_control=true; mi.allow_new_body_actions=true;
   mr=manual.Step(mi);
   assert(mr.command.action==MissionAction::kStepForwardTwo);
-  mi.now_sec=.11; mi.manual_observation_control=true; mi.allow_new_body_actions=false;
+  mi.now_sec=(.11) + 3.0; mi.manual_observation_control=true; mi.allow_new_body_actions=false;
   mi.delivery_feedback={mr.command.action_id,true,true,false};
   mr=manual.Step(mi);
   assert(mr.command.camera_request==CameraRequest::kDown);
@@ -651,13 +656,13 @@ int main() {
   mi.ball_target=Ball(.5,.7);
   mr=manual.Step(mi);
   assert(mr.ball.mode==BallMode::kCoarseAdjust);
-  mi.now_sec=.31; mi.manual_observation_control=true; mi.allow_new_body_actions=true;
+  mi.now_sec=(.31) + 3.0; mi.manual_observation_control=true; mi.allow_new_body_actions=true;
   mr=manual.Step(mi);
   assert(mr.command.action==MissionAction::kDefaultPoseMode);
-  mi.now_sec=.32; mi.manual_observation_control=true; mi.allow_new_body_actions=false;
+  mi.now_sec=(.32) + 3.0; mi.manual_observation_control=true; mi.allow_new_body_actions=false;
   mi.delivery_feedback={mr.command.action_id,true,true,false};
   mr=manual.Step(mi);
-  mi.now_sec=.33; mi.delivery_feedback={}; mr=manual.Step(mi);
+  mi.now_sec=(.33) + 3.0; mi.delivery_feedback={}; mr=manual.Step(mi);
   assert(mr.ball.mode==BallMode::kFineAdjustForPickup);
   assert(mr.ball.pickup_attempt_count==0);
   assert(mr.command.action_id==0);
@@ -693,7 +698,7 @@ int main() {
   assert(std::abs(ephemeral.mission.line_decision_guide->offset -
                   ephemeral.mission.line_features.guide.offset) < 1e-9);
   assert(ephemeral.mission.command.action_id==1);
-  assert(ephemeral.mission.command.action==MissionAction::kStepForwardFour);
+  assert(ephemeral.mission.command.action==MissionAction::kLineStraightUnit);
   auto ref_adjust=c;
   ref_adjust.line_features.image_center_u=250.0;
   assert(line_manual.UpdateTuning(ref_adjust));
@@ -703,10 +708,10 @@ int main() {
          ephemeral.mission.line_decision_guide->offset + 0.10);
   assert(std::abs(shifted.mission.line_decision_guide->offset -
                   shifted.mission.line_features.guide.offset) < 1e-9);
-  assert(shifted.mission.command.action==MissionAction::kStepForwardRight);
+  assert(shifted.mission.command.action==MissionAction::kLineRightUnit);
   const auto issued=line_manual.StepPerception(line_frame);
   assert(issued.mission.command.action_id==1);
-  assert(issued.mission.command.action==MissionAction::kStepForwardRight);
+  assert(issued.mission.command.action==MissionAction::kLineRightUnit);
 
   // A 1s post-camera gate must RELEASE even with fewer than seven
   // detections. The object recovery/search FSM, not the observation gate,
@@ -780,10 +785,10 @@ int main() {
   manual_result = explicitly_previewed.Step(manual_input);
   assert(manual_result.post_motion_observing);
   manual_input.begin_manual_observation = false;
-  manual_input.now_sec = 0.7;
+  manual_input.now_sec = (0.7) + 3.0;
   manual_result = explicitly_previewed.Step(manual_input);
   assert(manual_result.post_motion_observing);
-  manual_input.now_sec = 1.2;
+  manual_input.now_sec = (1.2) + 3.0;
   manual_result = explicitly_previewed.Step(manual_input);
   assert(!manual_result.post_motion_observing);
 
@@ -818,6 +823,7 @@ int main() {
   ready_cfg.ball.entry_min_hits=1; ready_cfg.ball.down_search_min_hits=1; ready_cfg.ball.stable_window=ready_cfg.ball.stable_min_hits=1;
   ready_cfg.ball.upper_acquire_v_px=480;
   MissionController ball_ready(ready_cfg);
+  AdmitObjectAtRest(ball_ready, Ball(.5,.2));
   auto ready_frame=Frame(0.0);
   ready_frame.ball_target=Ball(.5,.2);
   auto ready_result=ball_ready.Step(ready_frame);
@@ -860,6 +866,7 @@ int main() {
   // Feedback callbacks can accept A DONE and B DONE before the next image.
   // A's late sensory DONE must NOT create a second B with a fresh ID.
   MissionController early_done(ready_cfg);
+  AdmitObjectAtRest(early_done, Ball(.5,.2));
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
   ready_result=early_done.Step(ready_frame);
   const auto early_a=ready_result.command.action_id;
@@ -871,9 +878,9 @@ int main() {
   }
   const auto early_b=ready_result.command.action_id;
   assert(early_b!=early_a && early_b!=0);
-  early_done.AcceptDeliveryFeedback({early_b,true,false,false},2.8);
-  early_done.AcceptDeliveryFeedback({early_a,true,true,false},2.9);
-  early_done.AcceptDeliveryFeedback({early_b,true,true,false},2.95);
+  early_done.AcceptDeliveryFeedback({early_b,true,false,false},2.8+3.0);
+  early_done.AcceptDeliveryFeedback({early_a,true,true,false},2.9+3.0);
+  early_done.AcceptDeliveryFeedback({early_b,true,true,false},2.95+3.0);
   ready_frame=Frame(3.0); ready_frame.ball_target=Ball(.5,.2);
   ready_frame.delivery_feedback={early_a,true,true,false};
   ready_result=early_done.Step(ready_frame);
@@ -887,6 +894,7 @@ int main() {
 
   // A=22 can reserve B=25. B's number never restricts READY queue admission.
   MissionController turn_successor(ready_cfg);
+  AdmitObjectAtRest(turn_successor, Ball(.5,.2));
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
   ready_result=turn_successor.Step(ready_frame);
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
@@ -923,6 +931,7 @@ int main() {
   // DISCARDED: wait for fresh post-DONE observations in final coordinates.
   for (double lateral_u : {.05, .95}) {
     MissionController directional(ready_cfg);
+  AdmitObjectAtRest(directional, Ball(lateral_u,.2));
     ready_frame=Frame(0.0);
     ready_frame.ball_target=Ball(lateral_u,.2);
     ready_result=directional.Step(ready_frame);
@@ -968,6 +977,7 @@ int main() {
   ValidateAlgorithmConfig(turn_enabled_cfg);
   for (double lateral_u : {.05, .95}) {
     MissionController turn_enabled(turn_enabled_cfg);
+  AdmitObjectAtRest(turn_enabled, Ball(lateral_u,.2));
     ready_frame=Frame(0.0); ready_frame.ball_target=Ball(lateral_u,.2);
     ready_result=turn_enabled.Step(ready_frame);
     assert(ready_result.command.action ==
@@ -994,6 +1004,7 @@ int main() {
   disabled_ready_cfg.object_ready_mean_actions.clear();
   ValidateAlgorithmConfig(disabled_ready_cfg);
   MissionController disabled_ready(disabled_ready_cfg);
+  AdmitObjectAtRest(disabled_ready, Ball(.5,.2));
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
   ready_result=disabled_ready.Step(ready_frame);
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
@@ -1016,7 +1027,7 @@ int main() {
   MissionController line_ready(line_ready_cfg);
   ready_result=line_ready.Step(Frame(0.0));
   assert(ready_result.command.mission==MissionType::kLine);
-  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  assert(ready_result.command.action==MissionAction::kLineStraightUnit);
   const auto line_ready_id=ready_result.command.action_id;
   for (int i=1;i<=27;++i) {
     ready_frame=Frame(i*.1);
@@ -1024,7 +1035,7 @@ int main() {
     ready_result=line_ready.Step(ready_frame);
   }
   assert(ready_result.command.mission==MissionType::kLine);
-  assert(ready_result.command.action==MissionAction::kStepForwardFour);
+  assert(ready_result.command.action==MissionAction::kLineStraightUnit);
   assert(ready_result.command.action_id!=0 && ready_result.command.action_id!=line_ready_id);
   assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
 
@@ -1032,6 +1043,7 @@ int main() {
   // Test the global command gate and the separate body-action gate.
   for (bool pause_commands : {false,true}) {
     MissionController unreserved(ready_cfg);
+  AdmitObjectAtRest(unreserved, Ball(.5,.2));
     ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
     ready_result=unreserved.Step(ready_frame);
     const auto unreserved_id=ready_result.command.action_id;
@@ -1069,6 +1081,7 @@ int main() {
 
   // Straight two-step is deliberately not a moving READY candidate.
   MissionController straight_two(ready_cfg);
+  AdmitObjectAtRest(straight_two, Ball(.5,.85));
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.85);
   ready_result=straight_two.Step(ready_frame);
   assert(ready_result.command.action==MissionAction::kStepForwardTwo);
@@ -1086,6 +1099,7 @@ int main() {
 
   // Missing READY: reject moving samples and retain stationary 1s gate.
   MissionController no_ready(ready_cfg);
+  AdmitObjectAtRest(no_ready, Ball(.5,.2));
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
   ready_result=no_ready.Step(ready_frame);
   const auto no_ready_id=ready_result.command.action_id;
@@ -1128,6 +1142,7 @@ int main() {
   hurdle_ready_cfg.hurdle.down_search_min_hits=1; hurdle_ready_cfg.hurdle.stable_window=hurdle_ready_cfg.hurdle.stable_min_hits=1;
   hurdle_ready_cfg.hurdle.upper_acquire_v_px=480;
   MissionController hurdle_ready(hurdle_ready_cfg);
+  AdmitObjectAtRest(hurdle_ready, Ball(.5,.3), MissionType::kHurdle);
   ready_frame=Frame(0.0); ready_frame.hurdle_target=Ball(.5,.3);
   ready_result=hurdle_ready.Step(ready_frame);
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
@@ -1254,7 +1269,7 @@ int main() {
   MissionController five_step_goal(post_pickup_cfg);
   auto goal_frame=Frame(0.0);
   auto goal_step=five_step_goal.Step(goal_frame);
-  assert(goal_step.command.action==MissionAction::kStepForwardFour);
+  assert(goal_step.command.action==MissionAction::kLineStraightUnit);
   const auto five_id=goal_step.command.action_id;
   goal_frame=Frame(.1); goal_frame.delivery_feedback={five_id,true,false,false};
   goal_step=five_step_goal.Step(goal_frame);
@@ -1282,7 +1297,7 @@ int main() {
   MissionController three_walk_goal(post_pickup_cfg);
   auto three_frame=Frame(0.0); ShiftLine(three_frame,500);
   auto three_result=three_walk_goal.Step(three_frame);
-  assert(three_result.command.action==MissionAction::kStepForwardRight);
+  assert(three_result.command.action==MissionAction::kLineRightUnit);
   std::uint64_t current_walk=three_result.command.action_id;
   const auto send_three = [&](double at, std::uint64_t id,
                               bool ack, bool done, bool ready) {
@@ -1328,7 +1343,7 @@ int main() {
   MissionController rotation_only(post_pickup_cfg);
   auto turn_frame=Frame(0.0); ShiftLine(turn_frame,500);
   auto turn_result=rotation_only.Step(turn_frame);
-  assert(turn_result.command.action==MissionAction::kStepForwardRight);
+  assert(turn_result.command.action==MissionAction::kLineRightUnit);
   const auto first_walk_id=turn_result.command.action_id;
   turn_frame=Frame(.1); turn_frame.line_centers.clear();
   turn_frame.delivery_feedback={first_walk_id,true,false,false};

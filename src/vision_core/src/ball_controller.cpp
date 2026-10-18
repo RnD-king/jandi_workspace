@@ -490,8 +490,10 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     const int hits=static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true));
     const auto decision=down_search_.Observe(tracked_.visible,hits,
         config_.down_search_min_hits,config_.down_search_max_steps,
-        feedback.action_active,feedback.action_done);
-    if (decision==DownSearchWalk::Decision::kMoving) return result;
+        feedback.action_active,feedback.action_done,
+        now_sec,config_.down_search_inter_action_hold_sec);
+    if (decision==DownSearchWalk::Decision::kMoving ||
+        decision==DownSearchWalk::Decision::kWaiting) return result;
     if (decision==DownSearchWalk::Decision::kFound) {
       mode_=BallMode::kCoarseAdjust;
       ClearTracking();
@@ -785,6 +787,21 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     return result;
   }
   return result;
+}
+
+std::optional<double> BallController::EntryDirection() const {
+  double sum = 0; int count = 0;
+  for (const auto& u : entry_u_history_) if (u && std::isfinite(*u)) { sum += *u; ++count; }
+  return count >= config_.entry_min_hits ? std::optional<double>(sum / count) : std::nullopt;
+}
+void BallController::EnterVerified(const std::optional<ObjectTarget>& mean,
+    const std::deque<bool>& hits, int width, int height, double now) {
+  UseVerifiedObservation(mean, hits, width, height);
+  mode_ = BallMode::kApproachBall;
+  state_enter_sec_ = now;
+  pickup_attempt_count_ = 0; pickup_failed_ = false; has_ball_ = false;
+  entry_recovery_u_ = mean ? std::optional<double>(mean->center_px.u) : std::nullopt;
+  entry_recovery_pending_ = true;
 }
 
 void BallController::ObserveOnly(const std::optional<ObjectTarget> &target,

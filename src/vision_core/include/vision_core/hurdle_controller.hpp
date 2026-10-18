@@ -30,6 +30,7 @@ enum class HurdleMode {
 struct HurdleConfig {
   double approach_short_v_px{};
   int down_search_max_steps{10};
+  double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
   double recovery_observation_sec{};
   int recovery_max_observations{};
   double target_u_px{};
@@ -84,8 +85,12 @@ public:
                        const CameraFeedback &camera_feedback,
                        const ActionExecutionFeedback &action_feedback,
                        const CruiseDecision &line_decision,
-                       bool allow_new_body_actions = true);
+                       bool allow_new_body_actions = true,
+                       bool allow_mission_entry = true);
   static const char *ModeName(HurdleMode mode);
+  bool EntryReady() const;
+  void EnterVerified(const std::optional<ObjectTarget>& mean,
+                     const std::deque<bool>& hits, int width, int height, double now);
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
@@ -104,6 +109,7 @@ public:
   }
   void ShiftTimers(double duration) {
     state_enter_sec_+=duration;
+    down_search_.ShiftTimers(duration);
     if (contact_next_step_sec_>0.0) contact_next_step_sec_+=duration;
   }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.

@@ -18,6 +18,8 @@ add_library(shared_vision_core SHARED
   src/line_detection_extractor.cpp
   src/line_feature_extractor.cpp
   src/line_p2p_controller.cpp
+  src/line_plan.cpp
+  src/line_mission_entry.cpp
   src/object_target_extractor.cpp
   src/object_association_tracker.cpp
   src/ball_controller.cpp
@@ -75,6 +77,11 @@ install(FILES
 if(BUILD_TESTING)
   # Fixed scenario data keeps logic tests independent of operator tuning.
   set(VISION_CORE_TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
+  add_executable(shared_vision_core_down_search_hold_test tests/down_search_hold_test.cpp)
+  target_link_libraries(shared_vision_core_down_search_hold_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_down_search_hold_test COMMAND shared_vision_core_down_search_hold_test)
+  set_tests_properties(shared_vision_core_down_search_hold_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_mission_oct16_regression_test tests/mission_oct16_regression_test.cpp)
   target_link_libraries(shared_vision_core_mission_oct16_regression_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_mission_oct16_regression_test COMMAND shared_vision_core_mission_oct16_regression_test)
@@ -232,6 +239,11 @@ if(BUILD_TESTING)
   )
   # Logic tests always use the committed scenario fixture, including default
   # controller constructors. Robot nodes keep their production default path.
+  add_executable(shared_vision_core_line_plan_entry_test tests/line_plan_entry_test.cpp)
+  target_link_libraries(shared_vision_core_line_plan_entry_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_line_plan_entry_test COMMAND shared_vision_core_line_plan_entry_test)
+  set_tests_properties(shared_vision_core_line_plan_entry_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   get_property(_logic_tests DIRECTORY PROPERTY TESTS)
   set_tests_properties(${_logic_tests} PROPERTIES LABELS "logic")
 

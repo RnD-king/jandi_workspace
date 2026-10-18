@@ -13,8 +13,8 @@ DONE = 2
 READY = 3
 LINE = 1
 CAMERA_COMMANDS = frozenset({1, 2, 3})
-# Matches forward_walk's READY-capable walks (legacy 11/12/13 and 21..26).
-READY_ACTIONS = frozenset({11, 12, 13, 21, 22, 23, 24, 25, 26})
+# Matches forward_walk. Existing 10/26/27 never emit READY.
+READY_ACTIONS = frozenset({11, 12, 13, 21, 22, 23, 24, 25, 32, 33, 34})
 
 
 @dataclass
@@ -89,12 +89,11 @@ class MockExecutorProtocol:
         if self.active is None:
             self.active = item
             label = 'active'
-        elif (self.active.ready and self.queued is None and
-              self.active.mission == LINE and mission == LINE):
+        elif self.active.ready and self.queued is None:
             self.queued = item
             label = 'queued'
         else:
-            return f'BODY rejected id={cid}: busy, no READY or not LINE→LINE'
+            return f'BODY rejected id={cid}: busy, no READY or queue full'
         if auto_ack:
             item.acked = True
             self._send('body', cid, ACK)

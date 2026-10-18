@@ -246,6 +246,9 @@ private:
   static const char *ActionName(vision_core::MissionAction action) {
     using vision_core::MissionAction;
     switch (action) {
+    case MissionAction::kLineLeftUnit: return "LINE_LEFT_UNIT";
+    case MissionAction::kLineStraightUnit: return "LINE_STRAIGHT_UNIT";
+    case MissionAction::kLineRightUnit: return "LINE_RIGHT_UNIT";
     case MissionAction::kStepForwardOne: return "STEP_FORWARD_ONE";
     case MissionAction::kStepForwardFive: return "STEP_FORWARD_FIVE";
     case MissionAction::kTurnLeft: return "TURN_LEFT";
@@ -440,6 +443,11 @@ private:
     std::lock_guard<std::mutex> lock(state_mutex_);
     input.allow_new_line_action = false;
     input.advance_line_fsm = false;
+    input.allow_new_line_plan = state_ == State::kDeciding;
+    if (state_ == State::kWaitingDone) {
+      input.advance_line_fsm = true;
+      input.allow_new_line_action = true;
+    }
     if (state_ == State::kIdle) return false;
     if (state_ == State::kHolding) {
       if (now_sec + 1e-9 >= hold_until_sec_) {
@@ -508,6 +516,21 @@ private:
     }
     if (state_ != State::kWaitingDone) return;
 
+    if (result.mission.line_window_stats) {
+      last_window_stats_ = result.mission.line_window_stats;
+      stored_guide_ = controller_->LastReadyLineGuide();
+    }
+    if (vision_core::LinePlan::IsUnit(last_action_)) {
+      if (result.mission.command.action_id != 0) {
+        action_id_ = result.mission.command.action_id;
+        last_action_ = result.mission.command.action;
+      }
+      if (!result.mission.line_plan_active && result.mission.command.action_id == 0) {
+        state_ = State::kIdle;
+        action_id_ = 0;
+      }
+      return; // Shared core owns the BLOCK window; never average each unit.
+    }
     const bool feedback_matches = delivered_feedback.action_id == action_id_;
     if (!motion_window_started_ && feedback_matches &&
         delivered_feedback.acknowledged) {
@@ -678,11 +701,11 @@ private:
       heading_term = gains.heading_gain * preview_guide->heading_rad;
       score = offset_term + heading_term;
       if (decision.direction == vision_core::CruiseDirection::kLeft)
-        next = vision_core::MissionAction::kStepForwardLeft;
+        next = vision_core::MissionAction::kLineLeftUnit;
       else if (decision.direction == vision_core::CruiseDirection::kRight)
-        next = vision_core::MissionAction::kStepForwardRight;
+        next = vision_core::MissionAction::kLineRightUnit;
       else if (decision.direction == vision_core::CruiseDirection::kStraight)
-        next = vision_core::MissionAction::kStepForwardFive;
+        next = vision_core::MissionAction::kLineStraightUnit;
     }
     // The service uses the SAME retained guide and the same shared selector,
     // so modifying gains in IDLE updates this preview immediately.

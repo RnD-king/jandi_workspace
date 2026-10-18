@@ -70,6 +70,8 @@ int main(int argc, char **argv) {
   assert(c.ball.pickup_max_attempts == 100);
   assert(c.hurdle.contact_steps == 3);
   assert(c.hurdle.contact_inter_action_hold_sec == 0.5);
+  assert(c.ball.down_search_inter_action_hold_sec == 0.0);
+  assert(c.hurdle.down_search_inter_action_hold_sec == 0.0);
   assert(c.hurdle.down_one_step_v_px == 100);
   assert(c.hurdle.fine_mode_v_px == 180);
   assert(c.goal.fine_one_step_range_error_m == 0.15);
@@ -108,6 +110,31 @@ int main(int argc, char **argv) {
   Reject(text.str(),"down_search_max_steps: 10","down_search_max_steps: 0");
   Reject(text.str(),"down_search_max_steps: 10","down_search_max_steps: -1");
   Reject(text.str(),"down_search_max_steps: 10","");
+  // Exercise the required key separately in BALL and HURDLE sections.
+  for (const auto* section : {"ball:", "hurdle:"}) {
+    const std::string key="down_search_inter_action_hold_sec: 0.0";
+    const auto section_pos=text.str().find(section);
+    assert(section_pos!=std::string::npos);
+    const auto pos=text.str().find(key,section_pos);
+    assert(pos!=std::string::npos);
+    for (const auto* bad : {"-0.1", ".nan", ".inf", "not_a_number", ""}) {
+      auto yaml=text.str();
+      const std::string replacement=*bad ? std::string("down_search_inter_action_hold_sec: ")+bad : "";
+      yaml.replace(pos,key.size(),replacement);
+      bool rejected=false;
+      try { (void)LoadText(yaml); } catch (const std::runtime_error&) { rejected=true; }
+      assert(rejected);
+    }
+    auto yaml=text.str();
+    yaml.replace(pos,key.size(),"down_search_inter_action_hold_sec: 1.25");
+    const auto configured=LoadText(yaml);
+    if (std::string(section)=="ball:")
+      assert(configured.ball.down_search_inter_action_hold_sec==1.25 &&
+             configured.hurdle.down_search_inter_action_hold_sec==0.0);
+    else
+      assert(configured.hurdle.down_search_inter_action_hold_sec==1.25 &&
+             configured.ball.down_search_inter_action_hold_sec==0.0);
+  }
   for (const auto* value : {"0","11","not_a_number"})
     Reject(text.str(),"down_search_min_hits: 7",std::string("down_search_min_hits: ")+value);
   Reject(text.str(),"down_search_min_hits: 7","");
@@ -262,5 +289,17 @@ int main(int argc, char **argv) {
   try { vision_core::MissionController invalid(direct); }
   catch (const std::runtime_error &) { constructor_rejected = true; }
   assert(constructor_rejected);
+  for (int setting=0;setting<5;++setting) {
+    auto invalid=c;
+    if(setting==0) invalid.line_p2p.left_repetitions=0;
+    if(setting==1) invalid.line_p2p.straight_repetitions=-1;
+    if(setting==2) invalid.line_p2p.right_repetitions=0;
+    if(setting==3) invalid.candidate_search_max_turns=-1;
+    if(setting==4) invalid.candidate_direction_max_age_sec=0;
+    bool rejected=false;
+    try { vision_core::ValidateAlgorithmConfig(invalid); }
+    catch(const std::runtime_error&) { rejected=true; }
+    assert(rejected);
+  }
   return 0;
 }

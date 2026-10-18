@@ -12,6 +12,7 @@ namespace vision_core {
 
 // 정상 P2P LINE의 O/H score와 direct 3-action 구간을 정의한다.
 struct LineP2pConfig {
+  int left_repetitions{}, straight_repetitions{}, right_repetitions{};
   double offset_gain{};
   double heading_gain{};
   double steering_deadband{};

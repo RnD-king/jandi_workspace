@@ -52,7 +52,7 @@ struct BallPipeline {
   }
   void EnterVerification() {
     // Keep the frozen 10/7 acquisition and close-trigger thresholds.
-    for (int i=0;i<7;++i) Tick({BallDetection(.5,.8)});
+    for (int i=0;i<18;++i) Tick({BallDetection(.5,.8)});
     assert(result.mission.ball.mode==BallMode::kApproachTwoBeforeDown);
     Tick({},true);
     assert(result.mission.ball.mode==BallMode::kWaitCameraDown);
@@ -74,7 +74,7 @@ struct BallPipeline {
 
 void TestNormalBallAssociation() {
   BallPipeline pipeline;
-  for (int i=0;i<7;++i) pipeline.Tick({BallDetection(.2,.3)});
+  for (int i=0;i<18;++i) pipeline.Tick({BallDetection(.2,.3)});
   assert(pipeline.result.mission.ball.mode==BallMode::kApproachBall);
   const auto &matched=pipeline.Tick(
       {BallDetection(.2,.3,.61),BallDetection(.9,.3,.99)});
@@ -144,7 +144,10 @@ void TestPauseDoesNotAcquireNewMission() {
   input.now_sec=0.2;
   input.allow_new_commands=true;
   input.allow_new_mission_entry=true;
-  const auto active=controller.StepPerception(input);
+  auto active=controller.StepPerception(input);
+  assert(active.mission.active_mission==MissionType::kLine);
+  assert(active.mission.candidate_mission==MissionType::kBall);
+  for(int i=0;i<12;++i) { input.now_sec=.3+.1*i; active=controller.StepPerception(input); }
   assert(active.mission.active_mission==MissionType::kBall);
 }
 
@@ -160,7 +163,10 @@ void TestGlobalPauseGateForBallAndCamera() {
   }
   // Resume: preserving mission phase must not permanently disable commands.
   pipeline.input.allow_new_commands=true;
-  const auto &resumed=pipeline.Tick({BallDetection(.50,.80)});
+  pipeline.Tick({BallDetection(.50,.80)});
+  for(int i=0;i<12 && pipeline.result.mission.active_mission==MissionType::kLine;++i)
+    pipeline.Tick({BallDetection(.50,.80)});
+  const auto &resumed=pipeline.result;
   assert(resumed.mission.command.camera_request!=CameraRequest::kNone ||
          resumed.mission.command.action_id!=0 ||
          resumed.mission.ball.mode!=BallMode::kLineFollow);
@@ -221,7 +227,7 @@ int main() {
   const auto out=controller.StepPerception(in);
   assert(out.perception.raw_line_centers.size()==5);
   assert(out.mission.line_features.guide.valid);
-  assert(out.mission.command.action==MissionAction::kStepForwardFour);
+  assert(out.mission.command.action==MissionAction::kLineStraightUnit);
   TestNormalBallAssociation();
   TestVerificationBypassesAssociationAndFineReacquires();
   TestVerificationSixHitsSucceeds();

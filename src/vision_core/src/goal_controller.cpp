@@ -379,7 +379,7 @@ GoalResult GoalController::Compute(
     double now_sec, bool line_reference_valid, const CameraFeedback &camera,
     const ActionExecutionFeedback &feedback, bool allow_new_body_actions,
     std::optional<double> center_depth_m, bool post_pickup_line_gate_satisfied,
-    bool backboard_image_without_depth) {
+    bool backboard_image_without_depth, bool allow_mission_entry) {
   const bool board_visible = backboard.has_value() || backboard_image_without_depth;
   const bool pose_valid = pose.valid && std::isfinite(pose.x_m) &&
                           std::isfinite(pose.z_m) && pose.z_m > 0.0 &&
@@ -398,7 +398,7 @@ GoalResult GoalController::Compute(
     UpdatePoseTracker(backboard, pose);
   }
 
-  if (mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_ &&
+  if (allow_mission_entry && mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_ &&
       (post_pickup_line_gate_satisfied ||
        config_.post_pickup_walk_fallback_actions == 0)) {
     // Enter GOAL only after the qualifying LINE motion's actual DONE.

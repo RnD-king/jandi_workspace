@@ -225,65 +225,54 @@ void BallEntryAndReadyQueue(bool already_queued) {
   c.ball.stable_window=10;c.ball.entry_min_hits=6;c.ball.stable_min_hits=7;
   c.ball.upper_acquire_v_px=470;
   MissionController core(c);
-  auto frame=[&](double t) {
-    auto f=Frame(t);f.advance_line_fsm=true;
+  auto frame=[&](double at) {
+    auto f=Frame(at);f.advance_line_fsm=true;
     for(double v:{450.,400.,350.,300.,250.,200.,150.,100.})
       f.line_centers.push_back({c.line_features.image_center_u,v});
     return f;
   };
-  auto f=frame(0);
-  auto r=core.Step(f);
-  assert(r.command.action==MissionAction::kStepForwardFour);
+  auto f=frame(0);auto r=core.Step(f);
+  assert(r.command.action==MissionAction::kLineStraightUnit);
   const auto a=r.command.action_id;
-  // Ten moving samples give the unchanged LINE READY mean enough evidence.
   for(int i=1;i<=10;++i) {
     f=frame(i*.1);
     if(!already_queued && (i<=5 || i==10)) f.ball_target=Target(380,470);
-    f.delivery_feedback={a,true,false,i==10};
-    r=core.Step(f);
-    if(i<10) assert(r.active_mission==MissionType::kLine);
+    f.delivery_feedback={a,true,false,i==10};r=core.Step(f);
+    assert(r.active_mission==MissionType::kLine);
   }
-  if(!already_queued) {
-    assert(r.active_mission==MissionType::kBall);
-    assert(r.ball.entry_hits==6 && r.command.action_id==a);
-    assert(r.command.control_phase!=ControlPhase::kWaitingQueuedActionAck);
-    f=frame(1.1);f.ball_target=Target(380,470);
-    f.delivery_feedback={a,true,true,false};r=core.Step(f);
-    assert(r.active_mission==MissionType::kBall);
-    // The post-DONE observer retains A's metadata in HOLD; action alone
-    // cannot distinguish that from issuing another LINE walk.
-    assert(r.post_motion_observing && !r.object_ready_mean_used);
-    assert(r.command.command_type==CommandType::kHold);
-    assert(r.command.action_id==a && r.command.mission==MissionType::kLine);
-    assert(r.command.control_phase==ControlPhase::kWaitingActionDone);
-    for(int i=1;i<=9;++i) {
-      f=frame(1.1+.1*i);f.ball_target=Target(380,470);
-      r=core.Step(f);
-      assert(r.active_mission==MissionType::kBall && r.post_motion_observing);
-      assert(r.command.command_type==CommandType::kHold && r.command.action_id==a);
+  std::uint64_t last=a;
+  double done_time=1.1;
+  if(already_queued) {
+    const auto b=r.command.action_id;
+    assert(b && b!=a);
+    for(int i=11;i<=16;++i) {
+      f=frame(i*.1);f.ball_target=Target(380,470);
+      f.delivery_feedback={b,true,false,false};r=core.Step(f);
+      assert(r.active_mission==MissionType::kLine && r.command.action_id==b);
     }
-    f=frame(2.11);f.ball_target=Target(380,470);r=core.Step(f);
-    assert(!r.post_motion_observing && !r.object_ready_mean_used);
-    assert(r.command.command_type==CommandType::kAction);
-    assert(r.command.mission==MissionType::kBall);
-    assert(r.command.action==MissionAction::kStepForwardTwo);
-    assert(r.command.action_id!=0 && r.command.action_id!=a);
-    return;
+    assert(r.candidate_mission==MissionType::kBall && r.ball.entry_hits==6);
+    f=frame(1.7);f.delivery_feedback={a,true,true,false};r=core.Step(f);
+    assert(!r.post_motion_observing && r.command.action_id==b);
+    f=frame(1.8);f.delivery_feedback={b,true,false,true};r=core.Step(f);
+    assert(r.command.action_id==b); // No C, even on B READY.
+    last=b;done_time=1.9;
+  } else {
+    assert(r.candidate_mission==MissionType::kBall && r.ball.entry_hits==6);
+    assert(r.command.action_id==a && r.command.control_phase!=ControlPhase::kWaitingQueuedActionAck);
   }
-  const auto b=r.command.action_id;
-  assert(b!=0 && b!=a && r.command.action==MissionAction::kStepForwardFour);
-  for(int i=11;i<=16;++i) {
-    f=frame(i*.1);f.ball_target=Target(380,470);
-    f.delivery_feedback={b,true,false,false};r=core.Step(f);
-    assert(r.active_mission==MissionType::kLine && r.command.action_id==b);
+  f=frame(done_time);f.delivery_feedback={last,true,true,false};r=core.Step(f);
+  assert(r.active_mission==MissionType::kLine && r.post_motion_observing);
+  assert(r.command.action_id==0); // Physical DONE is consumed immediately; observer owns the hold.
+  for(int i=1;i<=9;++i) {
+    f=frame(done_time+.1*i);f.ball_target=Target(380,470);r=core.Step(f);
+    assert(r.active_mission==MissionType::kLine && r.post_motion_observing);
+    assert(r.command.command_type!=CommandType::kAction);
   }
-  assert(r.ball.entry_hits==6);
-  f=frame(1.7);f.ball_target=Target(380,470);
-  f.delivery_feedback={a,true,true,false};r=core.Step(f);
-  assert(r.command.action_id==b && r.active_mission==MissionType::kLine);
-  f=frame(1.8);f.ball_target=Target(380,470);
-  f.delivery_feedback={b,true,false,false};r=core.Step(f);
-  assert(r.active_mission==MissionType::kBall && r.command.action_id==b);
+  f=frame(done_time+1.01);f.ball_target=Target(380,470);r=core.Step(f);
+  assert(r.active_mission==MissionType::kBall && !r.post_motion_observing);
+  f=frame(done_time+1.02);f.ball_target=Target(380,470);r=core.Step(f);
+  assert(r.command.command_type==CommandType::kAction && r.command.mission==MissionType::kBall);
+  assert(r.command.action==MissionAction::kStepForwardTwo && r.command.action_id!=last);
 }
 
 void BallEntryUsesRawCandidates() {
@@ -304,7 +293,8 @@ void BallEntryUsesRawCandidates() {
     const auto out=core.StepPerception(f);
     if(i==5) {
       assert(!out.perception.targets.ball); // Association rejected, detection is real.
-      assert(out.mission.active_mission==MissionType::kBall);
+      assert(out.mission.active_mission==MissionType::kLine);
+      assert(out.mission.candidate_mission==MissionType::kBall);
       assert(out.mission.ball.entry_hits==6);
     } else assert(out.mission.active_mission==MissionType::kLine);
   }
@@ -655,18 +645,20 @@ void EntryDirectionTransport(bool left) {
   auto f=Frame(0);f.advance_line_fsm=true;
   for(double v:{450.,400.,350.,300.})f.line_centers.push_back({c.line_features.image_center_u,v});
   auto r=core.Step(f);const auto a=r.command.action_id;
-  assert(r.command.action==MissionAction::kStepForwardFour);
+  assert(r.command.action==MissionAction::kLineStraightUnit);
   for(int i=1;i<=6;++i) {
     f.now_sec=.1*i;f.ball_target=Target(c.ball.far_u_des_px+(left?-120:120),100);
     f.delivery_feedback={a,true,false,false};r=core.Step(f);
   }
-  assert(r.active_mission==MissionType::kBall && !r.ball.tracked.stable);
+  assert(r.active_mission==MissionType::kLine && r.candidate_mission==MissionType::kBall);
+  assert(!r.ball.tracked.stable);
   f.now_sec=.7;f.ball_target.reset();f.delivery_feedback={a,true,true,false};r=core.Step(f);
   assert(r.post_motion_observing);
   for(int i=1;i<=20;++i) {
     f.now_sec=.7+.05*i;f.delivery_feedback={};r=core.Step(f);
   }
-  assert(r.ball.mode==BallMode::kBallRecoveryWalkTurn);
+  assert(r.active_mission==MissionType::kLine && r.candidate_mission==MissionType::kBall);
+  assert(r.candidate_search_turns==0);
   f.now_sec=1.75;r=core.Step(f);
   assert(r.command.action==(left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle));
 }
@@ -800,7 +792,7 @@ void GoalEntryCameraTransport(bool left, bool manual) {
   auto f=Frame(0);f.advance_line_fsm=true;
   for(double v:{450.,400.,350.,300.})f.line_centers.push_back({c.line_features.image_center_u,v});
   auto r=core.Step(f);const auto id=r.command.action_id;
-  assert(r.command.action==MissionAction::kStepForwardFour);
+  assert(r.command.action==MissionAction::kLineStraightUnit);
   for(int i=1;i<=10;++i) {
     f.now_sec=.1*i;f.backboard_target=Target(c.goal.target_u_px+(left?-140:140));
     f.goal_pose={true,0,1.5,0,1};f.backboard_center_depth_m=1.5;

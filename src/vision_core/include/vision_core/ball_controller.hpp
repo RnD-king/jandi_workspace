@@ -37,6 +37,7 @@ enum class BallMode {
 struct BallConfig {
   double approach_short_v_px{};
   int down_search_max_steps{};
+  double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
   double recovery_observation_sec{};
   int recovery_max_observations{};
   int recovery_walk_turn_max{3}; // General approach loss only.
@@ -112,6 +113,9 @@ public:
                      bool allow_pickup = true,
                      bool allow_fine_pair = true);
   static const char *ModeName(BallMode mode);
+  std::optional<double> EntryDirection() const;
+  void EnterVerified(const std::optional<ObjectTarget>& mean,
+                     const std::deque<bool>& hits, int width, int height, double now);
   bool HasBall() const { return has_ball_; }
   void SetHasBall(bool has_ball) { has_ball_ = has_ball; }
   void CompleteLineRecovery(double now_sec);
@@ -131,7 +135,10 @@ public:
       down_search_.InvalidateDetection();
     config_ = config;
   }
-  void ShiftTimers(double duration) { state_enter_sec_+=duration; }
+  void ShiftTimers(double duration) {
+    state_enter_sec_+=duration;
+    down_search_.ShiftTimers(duration);
+  }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
   void StartTestNear() { Reset(); mode_=BallMode::kWaitCameraDown; test_camera_pending_=true; }
   void StartTestExecute() { Reset(); fine_pose_entered_=true; mode_=BallMode::kFineAdjustForPickup; }

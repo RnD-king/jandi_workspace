@@ -111,6 +111,7 @@ struct GoalResult {
 
 class GoalController {
 public:
+  bool CanEnterFromLine() const { return has_ball_ && goal_entry_armed_ && !ball_consumed_; }
   GoalController();
   GoalController(const GoalConfig &config, double camera_motion_timeout_sec);
   void StartAfterPickup(double now_sec);
@@ -139,7 +140,8 @@ public:
                      bool allow_new_body_actions = true,
                      std::optional<double> center_depth_m = std::nullopt,
                      bool post_pickup_line_gate_satisfied = false,
-                     bool backboard_image_without_depth = false);
+                     bool backboard_image_without_depth = false,
+                     bool allow_mission_entry = true);
   static const char *ModeName(GoalMode mode);
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.

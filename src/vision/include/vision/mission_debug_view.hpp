@@ -112,6 +112,9 @@ inline const char *DebugActionName(vision_core::MissionAction action) {
   case MissionAction::kStepForwardLeftOne: return "STEP_FORWARD_LEFT_ONE";
   case MissionAction::kStepForwardRightOneHurdle: return "TURN_RIGHT_IN_PLACE";
   case MissionAction::kTurnLeftInPlace: return "TURN_LEFT_IN_PLACE";
+  case MissionAction::kLineLeftUnit: return "LINE_LEFT_UNIT";
+  case MissionAction::kLineStraightUnit: return "LINE_STRAIGHT_UNIT";
+  case MissionAction::kLineRightUnit: return "LINE_RIGHT_UNIT";
   case MissionAction::kPickBall: return "PICK_BALL";
   case MissionAction::kRecatch: return "RECATCH";
   case MissionAction::kHurdle: return "HUDDLE";
@@ -132,6 +135,7 @@ inline const char *DebugMissionName(vision_core::MissionType mission) {
   }
 }
 inline std::string DebugRepeatLabel(int scope, const vision_core::MissionControllerConfig& config) {
+  if (scope==101) return "LINE PLAN / ENTRY CANDIDATE";
   using vision_core::BallMode; using vision_core::GoalMode; using vision_core::HurdleMode;
   if (scope==200+static_cast<int>(BallMode::kDownSearch))
     return "SEARCH <="+std::to_string(config.ball.down_search_max_steps)+" steps";
@@ -451,6 +455,15 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   std::snprintf(buf,sizeof(buf),"turns=%d/%d",
       mission_result.recovery_turns_completed,mission_result.recovery_max_turns);
   add_row(header_rows,buf,text_color);
+  if (mission_result.candidate_mission != vision_core::MissionType::kNone) {
+    const char* phase = mission_result.candidate_phase == 1 ? "DRAIN" :
+        mission_result.candidate_phase == 2 ? "OBSERVE" :
+        mission_result.candidate_phase == 3 ? "SEARCH" : "RESTORE";
+    std::snprintf(buf,sizeof(buf),"CANDIDATE %s | %s | search=%d restore=%d",
+        DebugMissionName(mission_result.candidate_mission), phase,
+        mission_result.candidate_search_turns, mission_result.candidate_restore_turns);
+    add_row(header_rows,buf,text_color);
+  }
   add_row(header_rows,"TEST STAGE: "+std::to_string(config.test_stage)+
       (mission_result.trial_complete ? " COMPLETE / SELECT STAGE OR RESET" : mission_result.test_executing ? " EXECUTING / RECOVERY" : mission_result.test_ready ? " READY" : config.test_stage==3 ? " ALIGN IN STAGE 2 FIRST" : ""),text_color);
   add_row(header_rows,view.waiting_action_id
@@ -514,8 +527,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   add_row(ball_approach_rows,buf,ball_color);
   std::snprintf(buf,sizeof(buf),"ZONE 8: v>=%.1fpx -> 1-step DONE then DOWN",bc.approach_direct_down_v_px);
   add_row(ball_approach_rows,buf,ball_color);
-  std::snprintf(buf,sizeof(buf),"DOWN SEARCH: need=%d/%d (FINE stable=%d)",
-      bc.down_search_min_hits,bc.stable_window,bc.stable_min_hits);
+  std::snprintf(buf,sizeof(buf),"DOWN SEARCH: need=%d/%d (FINE stable=%d) | step hold=%.2fs",
+      bc.down_search_min_hits,bc.stable_window,bc.stable_min_hits,bc.down_search_inter_action_hold_sec);
   add_row(ball_approach_rows,buf,ball_color);
   if (selected_ball && ball_cmd.mode == vision_core::BallMode::kApproachBall &&
       ball_cmd.tracked.visible) {
@@ -604,8 +617,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   std::snprintf(buf, sizeof(buf), "entry v<=%.1fpx | 2-step then DOWN v>=%.1fpx",
       hc.upper_acquire_v_px, hc.approach_two_step_v_px);
   add_row(hurdle_approach_rows,buf,hurdle_color);
-  std::snprintf(buf,sizeof(buf),"DOWN SEARCH: need=%d/%d (FINE stable=%d)",
-      hc.down_search_min_hits,hc.stable_window,hc.stable_min_hits);
+  std::snprintf(buf,sizeof(buf),"DOWN SEARCH: need=%d/%d (FINE stable=%d) | step hold=%.2fs",
+      hc.down_search_min_hits,hc.stable_window,hc.stable_min_hits,hc.down_search_inter_action_hold_sec);
   add_row(hurdle_approach_rows,buf,hurdle_color);
   if (selected_hurdle && hurdle_cmd.mode == vision_core::HurdleMode::kApproach &&
       hurdle_target && vis.rows > 1) {

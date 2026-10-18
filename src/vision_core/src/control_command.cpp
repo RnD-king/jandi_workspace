@@ -8,7 +8,10 @@
 namespace vision_core {
 namespace {
 bool IsLongLineAction(MissionAction action) {
-  return action == MissionAction::kStepForwardFive ||
+  return action == MissionAction::kLineLeftUnit ||
+         action == MissionAction::kLineStraightUnit ||
+         action == MissionAction::kLineRightUnit ||
+         action == MissionAction::kStepForwardFive ||
          action == MissionAction::kStepForwardFour ||
          action == MissionAction::kStepForwardLeft ||
          action == MissionAction::kStepForwardRight;

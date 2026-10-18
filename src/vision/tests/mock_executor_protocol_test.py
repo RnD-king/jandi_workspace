@@ -27,7 +27,7 @@ class ProtocolTests(unittest.TestCase):
         self.p.receive_body(10, 1, 13, 0)
         self.assertEqual(self.events(), [StatusEvent('body', 10, DONE)])
 
-    def test_one_slot_queue_only_line_after_ready(self):
+    def test_one_slot_queue_after_current_ready(self):
         self.p.receive_body(1, 1, 13, 0)
         self.events()
         self.p.receive_body(2, 1, 13, 0)
@@ -36,8 +36,7 @@ class ProtocolTests(unittest.TestCase):
         self.p.ready_body()
         self.events()
         self.p.receive_body(2, 2, 13, 0)
-        self.assertIsNone(self.p.queued)
-        self.p.receive_body(2, 1, 13, 0)
+        self.assertEqual(self.p.queued.mission, 2)
         self.assertEqual(self.p.queued.command_id, 2)
         self.assertEqual(self.events(), [StatusEvent('body', 2, ACK)])
         self.p.receive_body(3, 1, 13, 0)
@@ -67,6 +66,15 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(self.events(), [])
         self.p.done_body()
         self.assertEqual(self.events(), [StatusEvent('body', 8, DONE)])
+
+    def test_line_unit_ready_and_legacy_one_step_policy(self):
+        for action in (10, 26, 27, 32, 33, 34):
+            p = MockExecutorProtocol()
+            p.receive_body(100, 1, action, 0)
+            p.take_events()
+            p.ready_body()
+            self.assertEqual(p.take_events(),
+                             [StatusEvent('body', 100, READY)] if action >= 32 else [])
 
     def test_camera_dedup_independent(self):
         self.p.receive_body(1, 1, 13, 0)

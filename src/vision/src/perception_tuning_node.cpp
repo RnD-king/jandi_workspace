@@ -1042,7 +1042,8 @@ private:
     const auto mission = mission_controller_->ActiveMission();
     if (manual_committed_command_.mission != mission) return false;
     if (mission == vision_core::MissionType::kLine)
-      return action == MissionAction::kStepForwardLeft ||
+      return vision_core::LinePlan::IsUnit(action) ||
+             action == MissionAction::kStepForwardLeft ||
              action == MissionAction::kStepForwardFour ||
              action == MissionAction::kStepForwardRight;
     return tuning_config_.UsesObjectReadyMean(action);
@@ -1313,18 +1314,9 @@ private:
   };
 
   static bool IsSimulatedLongWalk(vision_core::MissionAction action) {
-    using vision_core::MissionAction;
-    // Mirror forward_walk's READY protocol independently of the YAML
-    // object-average allowlist, which controls perception only.
-    return action == MissionAction::kStepForwardLeft ||
-           action == MissionAction::kStepForwardRight ||
-           action == MissionAction::kStepForwardFive ||
-           action == MissionAction::kStepForwardTwo ||
-           action == MissionAction::kStepForwardThree ||
-           action == MissionAction::kStepForwardFour ||
-           action == MissionAction::kStepForwardLeftTwo ||
-           action == MissionAction::kStepForwardRightTwo ||
-           action == MissionAction::kStepForwardRightOne;
+    const auto code = static_cast<int>(action);
+    return code == 11 || code == 12 || code == 13 ||
+        (code >= 21 && code <= 25) || (code >= 32 && code <= 34);
   }
 
   void QueueSimulatedActionFeedback(std::uint64_t action_id,
@@ -1400,6 +1392,11 @@ private:
   double SimulatedActionDurationSec(
       vision_core::MissionAction action) const {
     switch (action) {
+    case vision_core::MissionAction::kLineStraightUnit:
+      return simulate_step_forward_one_duration_sec_;
+    case vision_core::MissionAction::kLineLeftUnit:
+    case vision_core::MissionAction::kLineRightUnit:
+      return simulate_curve_step_duration_sec_ / 3.0;
     case vision_core::MissionAction::kStepForwardTwo: return 2.0*simulate_step_forward_one_duration_sec_;
     case vision_core::MissionAction::kStepForwardThree: return 3.0*simulate_step_forward_one_duration_sec_;
     case vision_core::MissionAction::kStepForwardFour: return 4.0*simulate_step_forward_one_duration_sec_;
@@ -1940,6 +1937,9 @@ private:
     const bool continuing_repeat=authorized_repeat_scope_!=0 &&
         mission_controller_->RepeatScope()==authorized_repeat_scope_ && run_state_==RunState::kRunning;
     perception_input.allow_new_body_actions = continuing_repeat;
+    // One manual COMMIT authorizes one complete 3/4/3 block. It does not
+    // authorize the next block at the current block's final READY.
+    perception_input.allow_new_line_plan = !continuing_repeat;
     const bool stage_setup_was_pending =
         dedicated_test_ && mission_controller_->TestSetupPending();
     // Stage START may automatically run its initial WALK/FINE pose only.
@@ -2011,13 +2011,15 @@ private:
 
     const auto capture_preview = [&](const vision_core::PerceptionFrameInput &input,
                                      const cv::Mat &image) {
-      const auto proposed = mission_controller_->PreviewPerception(input);
+      auto preview_input = input;
+      preview_input.allow_new_line_plan = true;
+      const auto proposed = mission_controller_->PreviewPerception(preview_input);
       const auto &candidate = proposed.mission.command;
       if (candidate.command_type != vision_core::CommandType::kAction ||
           candidate.action_id == 0 ||
           candidate.camera_request != vision_core::CameraRequest::kNone)
         return false;
-      preview_input_ = input;
+      preview_input_ = preview_input;
       preview_input_.delivery_feedback = {};
       preview_input_.begin_manual_observation = false;
       preview_result_ = proposed;

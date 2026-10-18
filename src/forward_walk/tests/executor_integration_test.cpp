@@ -177,7 +177,7 @@ int main() {
         Check(cameras.empty(),"automatic FORWARD hold emitted a camera command status");
         std::cout<<"PASS real MainNode startup FORWARD transmission/hold and ordinary P2P override\n";
 
-        for(uint16_t code=1;code<=31;++code) {
+        for(uint16_t code=1;code<=34;++code) {
             const bool excluded=code==14||code==15||code==16||code==17||code==29||code==30;
             Check(MainNode::UsesOutwardArmPose(code)==!excluded,"action arm exclusion mismatch");
         }
@@ -274,7 +274,7 @@ int main() {
         std::cout<<"PASS real MainNode A/READY/queue/B lifecycle, duplicates, rejection, prepared-file persistence\n";
 
         // 신규 6 action은 준비된 JSON/팔 목표를 큐에 저장하고 DONE 직후 자동 실행한다.
-        for(uint16_t code=21;code<=26;++code) {
+        for(uint16_t code : {uint16_t{21},uint16_t{22},uint16_t{23},uint16_t{24},uint16_t{25},uint16_t{32},uint16_t{33},uint16_t{34}}) {
             const auto file=directory/node->ProgramFileForAction(code);
             WriteMotion(file);
             WriteMotion(directory/node->ProgramFileForAction(21));
@@ -301,7 +301,7 @@ int main() {
               "missing action 31 asset was accepted or started");
         WriteMotion(left_in_place);
         // Single turns execute once and do not extend the READY action set.
-        for(uint16_t code:{27,28,31}) {
+        for(uint16_t code:{10,26,27,28,31}) {
             const uint64_t id=35000+code;
             action(id,code);
             Check(node->action_transactions_.active_id==id,

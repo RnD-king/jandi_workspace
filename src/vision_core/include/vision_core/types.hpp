@@ -137,6 +137,9 @@ enum class MissionAction {
   kStepForwardRightOneHurdle = 28,
   // Dedicated WALK-stance left turn; its motion asset is supplied separately.
   kTurnLeftInPlace = 31,
+  kLineLeftUnit = 32,
+  kLineStraightUnit = 33,
+  kLineRightUnit = 34,
 };
 
 enum class CruiseDirection {

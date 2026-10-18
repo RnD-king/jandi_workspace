@@ -790,12 +790,9 @@ private:
   };
 
   bool IsSimulatedLongWalk(vision_core::MissionAction action) const {
-    return action == vision_core::MissionAction::kStepForwardFive ||
-           action == vision_core::MissionAction::kStepForwardFour ||
-           action == vision_core::MissionAction::kStepForwardLeft ||
-           action == vision_core::MissionAction::kStepForwardRight ||
-           action == vision_core::MissionAction::kTurnLeftAndStep ||
-           action == vision_core::MissionAction::kTurnRightAndStep;
+    const auto code = static_cast<int>(action);
+    return code == 11 || code == 12 || code == 13 ||
+        (code >= 21 && code <= 25) || (code >= 32 && code <= 34);
   }
 
   void QueueSimulatedActionFeedback(std::uint64_t action_id,
@@ -868,6 +865,11 @@ private:
   double SimulatedActionDurationSec(
       vision_core::MissionAction action) const {
     switch (action) {
+    case vision_core::MissionAction::kLineStraightUnit:
+      return simulate_step_forward_one_duration_sec_;
+    case vision_core::MissionAction::kLineLeftUnit:
+    case vision_core::MissionAction::kLineRightUnit:
+      return simulate_curve_step_duration_sec_ / 3.0;
     case vision_core::MissionAction::kStepForwardFour:
       return 4.0 * std::max(0.0, simulate_step_forward_one_duration_sec_);
     case vision_core::MissionAction::kStepForwardFive:

@@ -1,4 +1,5 @@
 #include "vision_core/config_loader.hpp"
+#include "verified_entry_fixture.hpp"
 #include "vision_core/object_target_extractor.hpp"
 #ifdef NDEBUG
 #undef NDEBUG
@@ -145,13 +146,15 @@ void BallZoneEightOneStepThenDown() {
     else assert(core.UpdateTuning(changed));
     MissionFrameInput f;f.image_width=640;f.image_height=480;f.command_transport_enabled=true;
     f.ball_target=Target(380,400);
+    AdmitObjectAtRest(core, *f.ball_target);
+    f.now_sec=3;
     auto output=core.Step(f);
     assert(output.command.camera_request==CameraRequest::kNone);
     assert(output.command.action==MissionAction::kStepForwardOne);
     const auto id=output.command.action_id;assert(id!=0);
-    f.now_sec=.1;f.delivery_feedback={id,true,false,false};f.ball_target.reset();
+    f.now_sec=3.1;f.delivery_feedback={id,true,false,false};f.ball_target.reset();
     output=core.Step(f);assert(output.command.camera_request==CameraRequest::kNone);
-    f.now_sec=.2;f.delivery_feedback={id,true,true,false};
+    f.now_sec=3.2;f.delivery_feedback={id,true,true,false};
     output=core.Step(f);
     assert(!output.post_motion_observing && output.command.camera_request==CameraRequest::kDown);
     assert(output.command.action==MissionAction::kNone);
@@ -245,13 +248,13 @@ void CountedDownSearch(bool found_on_last) {
 }
 void SharedSearchCounter() {
   DownSearchWalk search;
-  assert(search.Observe(false,0,5,1,false,false)==DownSearchWalk::Decision::kStep);
+  assert(search.Observe(false,0,5,1,false,false,0,0)==DownSearchWalk::Decision::kStep);
   search.Issued();
-  assert(search.Observe(true,5,5,1,true,false)==DownSearchWalk::Decision::kMoving);
+  assert(search.Observe(true,5,5,1,true,false,1,0)==DownSearchWalk::Decision::kMoving);
   assert(search.Remaining(1)==1);
-  assert(search.Observe(false,0,5,1,false,true)==DownSearchWalk::Decision::kFound);
+  assert(search.Observe(false,0,5,1,false,true,2,0)==DownSearchWalk::Decision::kFound);
   assert(search.Remaining(1)==0);
-  search.Observe(false,0,5,1,false,true); // no pending action: duplicate cannot count
+  search.Observe(false,0,5,1,false,true,3,0); // no pending action: duplicate cannot count
   assert(search.Remaining(1)==0 && search.Remaining(2)==1);
 }
 void ObjectFilters() {
@@ -364,8 +367,8 @@ void LargeLineScore() {
     auto r=line.Step(LineFrame(0,score));
     const auto expected=score<-.5?MissionAction::kTurnLeftInPlace:
         score>.5?MissionAction::kStepForwardRightOneHurdle:
-        score<-.1?MissionAction::kStepForwardLeft:
-        score>.1?MissionAction::kStepForwardRight:MissionAction::kStepForwardFour;
+        score<-.1?MissionAction::kLineLeftUnit:
+        score>.1?MissionAction::kLineRightUnit:MissionAction::kLineStraightUnit;
     assert(r.command.action==expected);
     assert(r.line_score_recovery==(std::abs(score)>.5));
   }
@@ -407,7 +410,7 @@ void ReadyKeepsOneSlot() {
   f=LineFrame(2.5,0);f.delivery_feedback={b,true,true,false};r=line.Step(f);
   assert(r.post_motion_observing);
   for(int i=1;i<=11;++i)r=line.Step(LineFrame(2.5+.1*i,0));
-  assert(r.command.action==MissionAction::kStepForwardFour && !r.post_motion_observing);
+  assert(r.command.action==MissionAction::kLineStraightUnit && !r.post_motion_observing);
 }
 }
 int main() {

@@ -284,13 +284,13 @@ int main() {
         Require(!actions.ready_sent && actions.queued_id == 0, "promotion did not reset state");
         actions.CompleteActive();
         Require(actions.Evaluate(100,1,11) == Admission::CompletedDuplicate, "older completed ID executed again");
-        for (int action : {10,18,19,20}) {
+        for (int action : {10,18,19,20,26,27}) {
             actions.Activate(200,1,action);
             Require(!actions.MarkReady(), "READY on unsupported action");
         }
         // Queue admission depends on the current action's READY, not B's mission or number.
         for (uint8_t mission : {uint8_t{1}, uint8_t{2}, uint8_t{3}, uint8_t{4}}) {
-            for (uint16_t action : {uint16_t{11}, uint16_t{12}, uint16_t{13}}) {
+            for (uint16_t action : {uint16_t{11}, uint16_t{12}, uint16_t{13}, uint16_t{32}, uint16_t{33}, uint16_t{34}}) {
                 actions.Activate(300 + mission*10 + action, mission, action);
                 Require(actions.MarkReady() && !actions.MarkReady(),
                         "READY missing or duplicated for long walk");

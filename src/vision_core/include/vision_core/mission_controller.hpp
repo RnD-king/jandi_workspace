@@ -14,6 +14,7 @@
 #include "vision_core/line_detection_extractor.hpp"
 #include "vision_core/line_feature_extractor.hpp"
 #include "vision_core/line_p2p_controller.hpp"
+#include "vision_core/line_plan.hpp"
 #include "vision_core/object_target_extractor.hpp"
 #include "vision_core/object_association_tracker.hpp"
 
@@ -34,6 +35,8 @@ struct MissionControllerConfig {
   double camera_motion_timeout_sec{};
   // Fresh, post-DONE observation interval for non-queued actions and camera turns.
   double post_motion_observation_sec{};
+  int candidate_search_max_turns{};
+  double candidate_direction_max_age_sec{};
   double transition_settle_sec{};
   double walk_inter_action_hold_sec{};
   double fine_motion_settle_sec{};
@@ -97,6 +100,7 @@ struct MissionFrameInput {
   // false이면 인식/FSM과 기존 feedback 처리는 계속하지만 새 LINE action만
   // 시작하지 않는다. 튜닝 도구의 one-shot gate용이다.
   bool allow_new_line_action{true};
+  bool allow_new_line_plan{true};
   // Block NEW actions/camera requests across all missions while processing
   // already-issued ACK/READY/DONE normally.
   bool allow_new_commands{true};
@@ -134,6 +138,10 @@ struct MissionFrameResult {
   bool has_ball{false};
   // Diagnostics of post-DONE observations, never counting pre-DONE history.
   bool post_motion_observing{false};
+  // Candidate is pre-entry: active_mission remains LINE until fresh 10/7.
+  MissionType candidate_mission{MissionType::kNone};
+  int candidate_phase{0}, candidate_search_turns{0}, candidate_restore_turns{0};
+  bool line_plan_active{false};
   bool object_ready_mean_used{false}; // True only on the real object-action DONE.
   std::size_t post_motion_frames{0};
   std::size_t post_motion_window_frames{0};
@@ -188,6 +196,7 @@ struct PerceptionFrameInput {
   ActionExecutionFeedback action_feedback;
   CommandDeliveryFeedback delivery_feedback;
   bool allow_new_line_action{true};
+  bool allow_new_line_plan{true};
   bool allow_new_commands{true};
   bool allow_new_body_actions{true};
   // Only dedicated Stage START may execute setup pose actions without COMMIT.
@@ -267,6 +276,7 @@ public:
         (active_mission_ == MissionType::kBall ? static_cast<int>(ball_result_.mode) :
          active_mission_ == MissionType::kGoal ? static_cast<int>(goal_result_.mode) :
          active_mission_ == MissionType::kHurdle ? static_cast<int>(hurdle_result_.mode) :
+         candidate_.phase != CandidatePhase::kNone ? 1000 + static_cast<int>(candidate_.phase) :
          static_cast<int>(line_state_));
   }
   // Transport-only advancement: no observations, body requests, or synthetic DONE.
@@ -342,7 +352,31 @@ private:
   bool TestExecutionReady() const;
   bool TestBoundaryReached(const CameraFeedback&) const;
 
+  MissionFrameResult StepPlannedLine(const MissionFrameInput& input,
+                                    std::optional<double> image_center);
+  void ObserveLineFeedback(const CommandDeliveryFeedback& feedback, double now);
+  void BeginCandidateObservation(double now);
+  void ReleaseCandidate();
+  enum class CandidatePhase { kNone, kDrain, kObserve, kSearch, kRestore };
+  struct Candidate {
+    MissionType mission{MissionType::kNone};
+    CandidatePhase phase{CandidatePhase::kNone};
+    std::optional<double> direction_u;
+    double direction_seen_sec{0.0};
+    std::optional<bool> search_left;
+    int searches{0}, restores{0};
+    std::uint64_t turn_id{0};
+    bool turn_is_restore{false};
+    bool observe_after_turn{false};
+  } candidate_;
+  std::uint64_t line_ready_handled_id_{0};
+  std::uint64_t line_auxiliary_id_{0};
+  bool line_auxiliary_done_{false};
+  MissionAction line_auxiliary_action_{MissionAction::kNone};
+  bool line_auxiliary_observing_{false};
+  int line_invalid_frames_{0};
   MissionControllerConfig config_;
+  LinePlan line_plan_;
   bool goal_trial_complete_{false}; // Shared trial completion, retained name for compatibility.
   bool test_entry_pending_{false}, test_setup_pending_{false}, test_execution_started_{false};
   bool fresh_after_search_{false};

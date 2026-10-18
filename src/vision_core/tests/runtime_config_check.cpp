@@ -30,6 +30,9 @@ void CheckConfiguration(const std::string& path) {
   FIELD(line_features, guide_fit_rmse_full_scale_px);
   FIELD(line, line_stable_window);
   FIELD(line, line_stable_min_hits);
+  FIELD(line_p2p, left_repetitions);
+  FIELD(line_p2p, straight_repetitions);
+  FIELD(line_p2p, right_repetitions);
   FIELD(line_p2p, offset_gain);
   FIELD(line_p2p, heading_gain);
   FIELD(line_p2p, steering_deadband);
@@ -42,6 +45,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(line_p2p, recovery_max_turns);
   FIELD(line_p2p, recovery_turn_yaw_deg);
   FIELD(ball, down_search_max_steps);
+  FIELD(ball, down_search_inter_action_hold_sec);
   FIELD(ball, recovery_observation_sec);
   FIELD(ball, recovery_max_observations);
   FIELD(ball, recovery_walk_turn_max);
@@ -72,6 +76,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, recovery_reacquire_min_hits);
   FIELD(ball, recovery_center_tolerance_px);
   FIELD(hurdle, down_search_max_steps);
+  FIELD(hurdle, down_search_inter_action_hold_sec);
   FIELD(hurdle, recovery_observation_sec);
   FIELD(hurdle, recovery_max_observations);
   FIELD(hurdle, stable_window);
@@ -152,6 +157,8 @@ void CheckConfiguration(const std::string& path) {
   CheckField(a["goal"], "trial_start_goal", c.goal_trial_start_goal, "goal");
   CheckField(a["ball"], "test_mission_index", c.test_ball_mission_index, "ball");
   CheckField(a["goal"], "test_mission_index", c.test_goal_mission_index, "goal");
+  MISSION(candidate_search_max_turns);
+  MISSION(candidate_direction_max_age_sec);
   MISSION(mission_recovery_max_turns);
   MISSION(mission_recovery_yaw_deg);
   MISSION(camera_motion_timeout_sec);
