@@ -40,6 +40,8 @@ void MissionController::BeginCandidateObservation(double now) {
 
 void MissionController::ReleaseCandidate() {
   candidate_ = {};
+  ball_candidate_tracker_.Reset(); ball_association_tracker_.Reset();
+  ball_target_id_=0; ball_target_locked_=ball_reacquiring_=ball_recovery_was_active_=false;
   decision_observation_active_ = false;
   decision_observation_restart_pending_ = false;
   ball_controller_.ClearEntryEvidence();
@@ -118,11 +120,15 @@ MissionFrameResult MissionController::StepPlannedLine(
       ball_result_ = ball_controller_.Compute(input.ball_target, input.image_width,
           input.image_height, input.now_sec, input.camera_feedback, {}, false, false,
           input.ball_entry_detected, input.ball_entry_center_u);
+      if(input.ball_entry_track_hits) {
+        ball_result_.entry_hits=*input.ball_entry_track_hits;
+        ball_result_.entry_frames=input.ball_entry_track_frames.value_or(0);
+      }
       if (ball_result_.entry_hits >= config_.ball.entry_min_hits) {
         candidate_.mission = MissionType::kBall;
         const bool new_hit = input.ball_entry_detected.value_or(
             input.ball_target && input.ball_target->center_px.v <= config_.ball.upper_acquire_v_px);
-        const auto direction = ball_controller_.EntryDirection();
+        const auto direction = input.ball_entry_track_hits ? input.ball_entry_center_u : ball_controller_.EntryDirection();
         if (new_hit && direction) {
           candidate_.direction_u = direction;
           candidate_.direction_seen_sec = input.now_sec;

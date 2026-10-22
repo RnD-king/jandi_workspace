@@ -27,6 +27,12 @@ public:
     return Result::kRetry;
   }
   int Completed() const { return completed_; }
+  // A new provisional identity inherits elapsed attempts, never detections.
+  // Keep the window clock/count so target changes cannot reset retry limits.
+  void DiscardDetections() {
+    std::fill(hits_.begin(),hits_.end(),false);
+    last_seen_=-std::numeric_limits<double>::infinity();
+  }
   double Elapsed(double now) const { return std::max(0.0, now - start_); }
 private:
   void BeginWindow(double now) {

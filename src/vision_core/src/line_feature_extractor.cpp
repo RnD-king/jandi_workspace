@@ -5,9 +5,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <utility>
 
 namespace vision_core {
 namespace {
+constexpr double kMinVSpanPx = 5.0;
+constexpr std::size_t kMaxRansacPoints = 8;
 double Clamp(double value, double low, double high) {
   return std::max(low, std::min(high, value));
 }
@@ -21,6 +25,8 @@ struct LineFit {
 LineFit FitLine(const std::vector<Point2> &points, std::size_t begin,
                 std::size_t end) {
   if (end <= begin + 1 || end > points.size())
+    return {};
+  if (points[begin].v - points[end - 1].v <= kMinVSpanPx)
     return {};
 
   double sum_v = 0.0;
@@ -45,6 +51,71 @@ LineFit FitLine(const std::vector<Point2> &points, std::size_t begin,
 
   const double a = cov_vu / var_v;
   return {true, a, mean_u - a * mean_v};
+}
+
+// RANSAC chooses a reference only for ranking suspicious points. Its line
+// is never passed to the O/H calculation, and no consensus refit is needed.
+void RemoveRansacOutliers(std::vector<Point2> &points, const FeatureConfig &cfg) {
+  if (!cfg.ransac_enabled || cfg.ransac_max_outliers == 0 ||
+      points.size() < static_cast<std::size_t>(cfg.ransac_min_input_points))
+    return;
+  LineFit best;
+  int best_hits = -1;
+  double best_error = std::numeric_limits<double>::infinity();
+  unsigned best_near_mask = 0;
+  constexpr double tie_epsilon = 1e-9;
+  for (std::size_t first = 0; first < points.size(); ++first) {
+    for (std::size_t second = first + 1; second < points.size(); ++second) {
+      const double dv = points[first].v - points[second].v;
+      // Reject this pair only, never either point. The five-pixel guard
+      // remains in force even if the configurable gap is tuned smaller.
+      if (dv <= kMinVSpanPx || dv < cfg.ransac_min_sample_v_gap_px)
+        continue;
+      const double a = (points[first].u - points[second].u) / dv;
+      const LineFit candidate{true, a, points[first].u - a * points[first].v};
+      if (!std::isfinite(candidate.a) || !std::isfinite(candidate.b)) continue;
+      int hits = 0;
+      double error = 0.0;
+      unsigned near_mask = 0;
+      for (std::size_t index = 0; index < points.size(); ++index) {
+        const double residual = std::abs(points[index].u -
+            (candidate.a * points[index].v + candidate.b));
+        if (residual <= cfg.ransac_residual_threshold_px) {
+          ++hits;
+          error += residual * residual;
+          near_mask |= 1U << (kMaxRansacPoints - 1 - index);
+        }
+      }
+      if (hits > best_hits ||
+          (hits == best_hits && (error < best_error - tie_epsilon ||
+           (std::abs(error - best_error) <= tie_epsilon && near_mask > best_near_mask)))) {
+        best = candidate;
+        best_hits = hits;
+        best_error = error;
+        best_near_mask = near_mask;
+      }
+    }
+  }
+  // No eligible pair is not a frame failure: retain the original points.
+  if (!best.valid) return;
+  std::vector<std::pair<double, std::size_t>> suspects;
+  for (std::size_t index = 0; index < points.size(); ++index) {
+    const double residual = std::abs(points[index].u - (best.a * points[index].v + best.b));
+    if (residual > cfg.ransac_residual_threshold_px)
+      suspects.emplace_back(residual, index);
+  }
+  std::sort(suspects.begin(), suspects.end(), [](const auto &a, const auto &b) {
+    // Equal residual: retain the nearer point (smaller sorted index).
+    return a.first == b.first ? a.second > b.second : a.first > b.first;
+  });
+  const auto count = std::min({suspects.size(), points.size() - 3,
+      static_cast<std::size_t>(std::max(0, std::min(2, cfg.ransac_max_outliers)))});
+  std::vector<bool> remove(points.size(), false);
+  for (std::size_t i = 0; i < count; ++i) remove[suspects[i].second] = true;
+  std::size_t write = 0;
+  for (std::size_t i = 0; i < points.size(); ++i)
+    if (!remove[i]) points[write++] = points[i];
+  points.resize(write);
 }
 
 double MeanV(const std::vector<Point2> &points, std::size_t begin,
@@ -157,11 +228,16 @@ Features ComputeLineFeatures(const std::vector<Point2> &input, int image_width,
   std::sort(points.begin(), points.end(), [](const Point2 &a, const Point2 &b) {
     return (a.v == b.v) ? (a.u < b.u) : (a.v > b.v);
   });
-  points.resize(std::min(static_cast<std::size_t>(std::max(1, cfg.max_centers)),
-                         points.size()));
+  points.resize(std::min({static_cast<std::size_t>(std::max(1, cfg.max_centers)),
+                         kMaxRansacPoints, points.size()}));
 
   f.n_visible = static_cast<double>(points.size());
-  if (points.empty()) return f;
+  // This input gate applies even when RANSAC is disabled; a filtered
+  // four-point input may still legitimately leave three fitting points.
+  if (points.size() <= 3 || points.front().v - points.back().v <= kMinVSpanPx)
+    return f;
+  RemoveRansacOutliers(points, cfg);
+  f.n_visible = static_cast<double>(points.size());
 
   const double cx = cfg.image_center_u >= 0.0
                         ? cfg.image_center_u

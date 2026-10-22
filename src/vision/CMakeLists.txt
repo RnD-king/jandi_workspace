@@ -216,6 +216,8 @@ install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
 
+install(FILES ROSBAG_RECORDING.md DESTINATION share/${PROJECT_NAME})
+
 # Motor-free manual executor UI (rclpy + tkinter) and its pure protocol model.
 install(PROGRAMS scripts/jandi_mock_executor_ui.py
   DESTINATION lib/${PROJECT_NAME}
@@ -226,6 +228,18 @@ install(FILES scripts/mock_executor_protocol.py
 )
 
 if(BUILD_TESTING)
+  add_executable(vision_object_depth_test tests/object_depth_test.cpp)
+  target_include_directories(vision_object_depth_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(vision_object_depth_test ${OpenCV_LIBS})
+  add_test(NAME vision_object_depth_test COMMAND vision_object_depth_test)
+  set_tests_properties(vision_object_depth_test PROPERTIES LABELS "logic")
+  add_executable(vision_debug_bag_publisher_test tests/debug_bag_publisher_test.cpp)
+  target_include_directories(vision_debug_bag_publisher_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(vision_debug_bag_publisher_test ${OpenCV_LIBS})
+  ament_target_dependencies(vision_debug_bag_publisher_test rclcpp sensor_msgs cv_bridge)
+  add_test(NAME vision_debug_bag_publisher_test COMMAND vision_debug_bag_publisher_test)
+  set_tests_properties(vision_debug_bag_publisher_test PROPERTIES LABELS "recording"
+    ENVIRONMENT "ROS_DOMAIN_ID=88;ROS_LOCALHOST_ONLY=1")
   add_executable(vision_mission_parameters_test tests/mission_parameters_test.cpp)
   target_include_directories(vision_mission_parameters_test PRIVATE include)
   target_link_libraries(vision_mission_parameters_test shared_vision_core::shared_vision_core)

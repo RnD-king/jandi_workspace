@@ -39,6 +39,7 @@ static void TestNearBallTurnThenDown() {
   config.ball.upper_acquire_v_px=480;
   config.ball.far_u_des_px=320;
   config.ball.approach_u_deadband_px=32;
+  config.ball.approach_left_top_u_px=288;config.ball.approach_right_top_u_px=352;
   config.ball.approach_short_v_px=300;
   config.ball.approach_two_step_v_px=336;
   for (double u : {.3,.7}) for (bool found : {false,true}) {
@@ -132,6 +133,12 @@ int main() {
   const auto id=r.command.action_id;
   in=Frame(.1); in.delivery_feedback={id,true,false,false};
   r=controller.Step(in); assert(r.command.command_type==CommandType::kHold);
+  // A single newly-invalid three-point frame during execution must not
+  // bypass the existing READY average or begin an immediate recovery.
+  in=Frame(.2); in.line_centers.resize(3);
+  r=controller.Step(in);
+  assert(!r.line_features.guide.valid && !r.line_in_recovery);
+  assert(r.command.command_type==CommandType::kHold);
   for (double time : {0.8, 1.4, 1.6, 1.8, 2.0, 2.2}) {
     in=Frame(time); r=controller.Step(in);
   }
@@ -1345,9 +1352,12 @@ int main() {
   auto turn_result=rotation_only.Step(turn_frame);
   assert(turn_result.command.action==MissionAction::kLineRightUnit);
   const auto first_walk_id=turn_result.command.action_id;
-  turn_frame=Frame(.1); turn_frame.line_centers.clear();
+  // Keep LINE valid until DONE: with a one-frame stability window, an
+  // earlier loss aborts the logical plan and it must not count as completed.
+  turn_frame=Frame(.1); ShiftLine(turn_frame,500);
   turn_frame.delivery_feedback={first_walk_id,true,false,false};
   turn_result=rotation_only.Step(turn_frame);
+  assert(turn_result.goal_walk_actions_completed==0);
   turn_frame=Frame(.2); turn_frame.line_centers.clear();
   turn_frame.delivery_feedback={first_walk_id,true,true,false};
   turn_result=rotation_only.Step(turn_frame);
@@ -1359,6 +1369,7 @@ int main() {
   turn_frame=Frame(2.4); turn_frame.line_centers.clear();
   turn_frame.delivery_feedback={goal_recovery_pose_id,true,true,false};
   turn_result=rotation_only.Step(turn_frame);
+  assert(turn_result.goal_walk_actions_completed==1);
   turn_frame=Frame(2.5); turn_frame.line_centers.clear();
   turn_result=rotation_only.Step(turn_frame); // pose DONE starts normal 1s observation
   assert(turn_result.command.action_id==0);

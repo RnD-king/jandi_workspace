@@ -333,7 +333,10 @@ double GoalController::LandingErrorM(double rim_x, double rim_z, double angle) c
 
 double GoalController::ComputeShootYawRad(double x_m, double z_m,
                                           double yaw_rad) const {
-  const double rim_x = x_m + config_.hoop_radius_m * std::sin(yaw_rad);
+  // Edge-depth yaw uses atan2(Z_left-Z_right, X_right-X_left).
+  // The board tangent is (cos(yaw),-sin(yaw)), so its robot-facing
+  // normal is (-sin(yaw),-cos(yaw)).
+  const double rim_x = x_m - config_.hoop_radius_m * std::sin(yaw_rad);
   const double rim_z = z_m - config_.hoop_radius_m * std::cos(yaw_rad);
   if (!std::isfinite(rim_x) || !std::isfinite(rim_z) ||
       std::hypot(rim_x, rim_z) <= kEpsilon)
@@ -349,9 +352,31 @@ GoalController::FineAction(const GoalPoseObservation &pose) const {
       pose.z_m <= 0.0 || !std::isfinite(pose.yaw_rad))
     return {};
   const double rim_x =
-      pose.x_m + config_.hoop_radius_m * std::sin(pose.yaw_rad);
+      pose.x_m - config_.hoop_radius_m * std::sin(pose.yaw_rad);
   const double rim_z =
       pose.z_m - config_.hoop_radius_m * std::cos(pose.yaw_rad);
+  // Compare only actually commandable integer waist angles before asking
+  // for translation. An ideal angle outside the limit may still have an
+  // acceptable landing point at the permitted endpoint.
+  const int limit_deg = static_cast<int>(
+      std::floor(std::min(180.0, config_.shoot_yaw_limit_deg)));
+  int best_deg = 0;
+  double best_error = std::numeric_limits<double>::infinity();
+  constexpr double tie_epsilon = 1e-12;
+  for (int degrees = -limit_deg; degrees <= limit_deg; ++degrees) {
+    const double error = LandingErrorM(rim_x, rim_z, degrees * kPi / 180.0);
+    if (error < best_error - tie_epsilon ||
+        (std::abs(error - best_error) <= tie_epsilon &&
+         std::abs(degrees) < std::abs(best_deg))) {
+      best_error = error;
+      best_deg = degrees;
+    }
+  }
+  if (best_error <= config_.position_tolerance_m)
+    return Mission(MissionAction::kShoot, static_cast<std::int16_t>(best_deg));
+
+  // No permitted rotation is sufficient: retain the existing translation
+  // priorities and the ideal-angle side-step direction.
   const double range_error = std::hypot(rim_x, rim_z) - ThrowRangeM();
   if (range_error > config_.position_tolerance_m)
     return Locomotion(MissionAction::kStepForwardHalf);
@@ -360,11 +385,6 @@ GoalController::FineAction(const GoalPoseObservation &pose) const {
   const double yaw_deg =
       ComputeShootYawRad(pose.x_m, pose.z_m, pose.yaw_rad) * 180.0 / kPi;
   if (std::abs(yaw_deg) <= config_.shoot_yaw_limit_deg) {
-    const auto command_deg = static_cast<std::int16_t>(std::lround(yaw_deg));
-    const double predicted_error = LandingErrorM(
-        rim_x, rim_z, static_cast<double>(command_deg) * kPi / 180.0);
-    if (predicted_error <= config_.position_tolerance_m)
-      return Mission(MissionAction::kShoot, command_deg);
     return Locomotion(range_error >= 0.0 ?
                           MissionAction::kStepForwardHalf : MissionAction::kStepBack);
   }
@@ -602,7 +622,7 @@ GoalResult GoalController::Compute(
       return result;
     }
     const double rim_x =
-        pose.x_m + config_.hoop_radius_m * std::sin(pose.yaw_rad);
+        pose.x_m - config_.hoop_radius_m * std::sin(pose.yaw_rad);
     const double rim_z =
         pose.z_m - config_.hoop_radius_m * std::cos(pose.yaw_rad);
     const double error = std::hypot(rim_x, rim_z) - ThrowRangeM();
@@ -688,8 +708,9 @@ GoalResult GoalController::Compute(
       result.action = {};
     if (allow_new_body_actions &&
         result.action.action == MissionAction::kShoot) {
-      shoot_yaw_rad_ = ComputeShootYawRad(mean_pose->x_m, mean_pose->z_m,
-                                          mean_pose->yaw_rad);
+      // Latch the selected, permitted integer command, not the unconstrained
+      // ideal angle. Subsequent SHOOT cycles must repeat this exact angle.
+      shoot_yaw_rad_ = result.action.target_yaw_deg * kPi / 180.0;
       mode_ = GoalMode::kShoot;
       result.mode = mode_;
       result.shoot_yaw_rad = shoot_yaw_rad_;
@@ -761,6 +782,7 @@ GoalResult GoalController::Compute(
     return result;
   }
   case GoalMode::kShoot:
+    result.shoot_yaw_rad = shoot_yaw_rad_;
     result.action = Mission(MissionAction::kShoot,
                             static_cast<std::int16_t>(std::lround(Clamp(
                                 shoot_yaw_rad_ * 180.0 / kPi, -180.0, 180.0))));

@@ -9,6 +9,11 @@ vision_algorithm:
     curve_min_v_span_px: 80.0
     curve_local_fit_points: 4
     guide_fit_rmse_full_scale_px: 20.0
+    ransac_enabled: true
+    ransac_min_input_points: 4
+    ransac_residual_threshold_px: 20.0
+    ransac_min_sample_v_gap_px: 20.0
+    ransac_max_outliers: 2
 
   # 라인 검출 안정성
   line:
@@ -54,6 +59,8 @@ vision_algorithm:
 
     far_u_des_px: 360.0
     approach_u_deadband_px: 110
+    approach_left_top_u_px: 250.0 # Vertical legacy fixture: 360-110.
+    approach_right_top_u_px: 470.0 # Vertical legacy fixture: 360+110.
 
     approach_short_v_px: 100.0
     approach_two_step_v_px: 240.0
@@ -61,6 +68,16 @@ vision_algorithm:
 
     down_one_step_v_px: 0.0
     fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
+    fine_motion:
+      max_repetitions: 3
+      forward_delta_u_px: 0.0
+      forward_delta_v_px: 0.0
+      backward_delta_u_px: 0.0
+      backward_delta_v_px: 0.0
+      left_delta_u_px: 0.0
+      left_delta_v_px: 0.0
+      right_delta_u_px: 0.0
+      right_delta_v_px: 0.0
     fine_mode_v_px: 10
 
     pickup_u1_px: 310
@@ -177,6 +194,28 @@ vision_algorithm:
     backboard_min_box_height: 2.0 # backboard 최소 세로
     hurdle_min_box_width: 2.0 # hurdle 최소 가로
     hurdle_min_box_height: 2.0 # hurdle 최소 세로
+
+    ball_aspect_ratio_min: 0.65
+    ball_aspect_ratio_max: 1.50
+    hurdle_aspect_ratio_min: 2.50
+    ball_depth_enabled: true
+    hurdle_depth_enabled: true
+    ball_allow_missing_depth: true
+    hurdle_allow_missing_depth: true
+    ball_forward_min_depth_m: 0.0
+    ball_forward_max_depth_m: 2.50
+    ball_down_min_depth_m: 0.0
+    ball_down_max_depth_m: 2.50
+    hurdle_min_depth_m: 0.30
+    hurdle_max_depth_m: 2.00
+    depth_roi_size_px: 5
+
+  ball_candidate_tracking:
+    enabled: true
+    max_center_distance_px: 80.0
+    max_size_log_ratio: 0.50
+    missing_frame_limit: 5
+    max_tracks: 16
 
   object_association:
     missing_frame_limit: 5

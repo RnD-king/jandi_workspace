@@ -257,7 +257,7 @@ void ExecuteStageCompletesRecovery(MissionType mission) {
       case MissionAction::kTurnLeft:
       case MissionAction::kTurnRight:
         ++turned;
-        t.in.line_centers={{420,450},{420,350},{420,250}};
+        t.in.line_centers={{420,450},{420,350},{420,250},{420,150}};
         break;
       case MissionAction::kWalkMode: ++walk_pose; break;
       default: break;

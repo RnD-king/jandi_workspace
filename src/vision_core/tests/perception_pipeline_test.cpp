@@ -4,10 +4,40 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cmath>
 #include <utility>
 using namespace vision_core;
 
 namespace {
+void TestSharedLineRansacAfterRectification() {
+  for (bool imu : {false,true}) {
+    auto c=LoadDefaultAlgorithmConfig();
+    c.enable_ball=c.enable_hurdle=c.enable_goal=false;
+    c.line_features.image_center_u=320;
+    MissionController controller(c);
+    PerceptionFrameInput in;in.image_width=640;in.image_height=480;
+    in.intrinsics={600,600,320,240};in.advance_line_fsm=false;
+    in.enable_imu_rectification=imu;in.imu_valid=imu;
+    in.roll_rad=.03;in.pitch_rad=-.02;
+    for (int i=0;i<8;++i) {
+      PerceptionDetection d;
+      d.detection.class_id=c.line_detection.class_id;d.detection.confidence=1;
+      d.detection.box={i==0 ? 550. : 310.,440.-50.*i,20.,20.};
+      in.detections.push_back(d);
+    }
+    const auto result=controller.StepPerception(in);
+    assert(result.perception.raw_line_centers.size()==8);
+    assert(result.perception.imu_rectification_applied==imu);
+    assert(result.mission.line_features.n_visible==7);
+    auto clean=result.perception.line_centers;
+    clean.erase(clean.begin()); // The raw bottom point is the false detection.
+    const auto expected=ComputeLineFeatures(clean,640,480,c.line_features);
+    assert(result.mission.line_features.guide.valid && expected.guide.valid);
+    assert(std::abs(result.mission.line_features.guide.offset-expected.guide.offset)<1e-12);
+    assert(std::abs(result.mission.line_features.guide.heading_rad-expected.guide.heading_rad)<1e-12);
+  }
+}
+
 PerceptionDetection BallDetection(double u, double v, double confidence=1.0,
                                   double size=20.0) {
   PerceptionDetection d;
@@ -212,6 +242,7 @@ void TestBackboardValidDepthCanBeRetuned() {
 } // namespace
 
 int main() {
+  TestSharedLineRansacAfterRectification();
   auto c=LoadDefaultAlgorithmConfig();
   c.enable_ball=c.enable_hurdle=c.enable_goal=false;
   MissionController controller(c);

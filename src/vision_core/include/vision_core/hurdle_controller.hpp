@@ -95,7 +95,11 @@ public:
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
   // A changed bbox filter invalidates the latched search detection as well.
-  void InvalidateDetectionEvidence() { ClearObservationHistory(); down_search_.InvalidateDetection(); }
+  void InvalidateDetectionEvidence() {
+    ClearObservationHistory();
+    down_search_.InvalidateDetection();
+    stationary_recovery_.DiscardDetections();
+  }
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
   void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
       const std::deque<bool>& hits, int width, int height);

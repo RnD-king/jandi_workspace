@@ -17,6 +17,7 @@ void BallMiddleLoss(int zone) {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
   c.far_u_des_px=380;c.approach_u_deadband_px=90;
+  c.approach_left_top_u_px=290;c.approach_right_top_u_px=470;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
   const double u=zone==4?200:zone==6?550:380;
   BallController ball(c,3);
@@ -75,6 +76,7 @@ void BallZoneEightOneStepThenDown() {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
   c.far_u_des_px=380;c.approach_u_deadband_px=90;
+  c.approach_left_top_u_px=290;c.approach_right_top_u_px=470;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
   c.approach_direct_down_v_px=355;
   // Inclusive column edges remain zone 8; its lower part uses one final step.
@@ -164,6 +166,7 @@ void BallTurnDisabled() {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
   c.far_u_des_px=380;c.approach_u_deadband_px=90;
+  c.approach_left_top_u_px=290;c.approach_right_top_u_px=470;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
   c.recovery_walk_turn_max=0;c.entry_recovery_walk_turn_max=0;
   BallController ball(c,3);
@@ -260,6 +263,8 @@ void SharedSearchCounter() {
 void ObjectFilters() {
   auto c=LoadDefaultAlgorithmConfig();
   auto& o=c.object_targets;
+  // Isolate minimum-size behavior from the separate BALL aspect filter.
+  o.ball_aspect_ratio_max=4;
   o.ball_min_box_width=30;o.ball_min_box_height=10;
   o.goal_min_box_width=50;o.goal_min_box_height=12;
   o.backboard_min_box_width=70;o.backboard_min_box_height=14;
@@ -341,7 +346,7 @@ MissionFrameInput LineFrame(double now,double score) {
   MissionFrameInput f;f.image_width=640;f.image_height=480;f.now_sec=now;
   f.command_transport_enabled=true;
   const double u=320+320*score;
-  f.line_centers={{u,100},{u,200},{u,400}};
+  f.line_centers={{u,100},{u,200},{u,300},{u,400}};
   LineGuide guide;guide.valid=true;guide.offset=score;guide.confidence=1;
   f.line_decision_guide_override=guide;
   return f;

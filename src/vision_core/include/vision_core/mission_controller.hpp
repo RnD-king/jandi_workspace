@@ -4,10 +4,12 @@
 #include <cstddef>
 #include <deque>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "vision_core/ball_controller.hpp"
+#include "vision_core/ball_candidate_tracker.hpp"
 #include "vision_core/control_command.hpp"
 #include "vision_core/goal_controller.hpp"
 #include "vision_core/hurdle_controller.hpp"
@@ -31,6 +33,7 @@ struct MissionControllerConfig {
   LineDetectionConfig line_detection;
   ObjectTargetConfig object_targets;
   ObjectAssociationConfig object_association;
+  BallCandidateTrackingConfig ball_candidate_tracking;
   // 모든 object mission의 camera settled 대기 제한 시간이다.
   double camera_motion_timeout_sec{};
   // Fresh, post-DONE observation interval for non-queued actions and camera turns.
@@ -74,9 +77,10 @@ enum class FootPose { kWalk, kFine };
 struct MissionFrameInput {
   std::vector<Point2> line_centers;
   std::optional<ObjectTarget> ball_target;
-  // LINE entry counts raw candidates within upper_acquire_v_px; association
-  // remains for approach. Candidates already passed confidence/size filters.
+  // StepPerception supplies per-ID entry evidence within upper_acquire_v_px.
+  // Candidates already passed confidence, bbox, aspect and optional depth gates.
   // Direct callers may omit this and use ball_target detection presence.
+  std::optional<int> ball_entry_track_hits, ball_entry_track_frames;
   std::optional<bool> ball_entry_detected;
   std::optional<double> ball_entry_center_u; // Actual candidate used for entry-direction memory.
   std::optional<ObjectTarget> hurdle_target;
@@ -179,6 +183,7 @@ struct PerceptionDetection {
   std::optional<double> left_depth_m;
   std::optional<double> right_depth_m;
   std::optional<double> left_depth_u_px, right_depth_u_px;
+  int depth_valid_pixels{};
 };
 
 struct PerceptionFrameInput {
@@ -208,11 +213,20 @@ struct PerceptionFrameInput {
   bool begin_manual_observation{false};
   // Real 10-frame evidence accompanying a manual READY average.
   std::deque<bool> manual_object_hits, manual_pose_hits, manual_near_hits;
+  std::uint64_t ball_target_id{0}; // Identity of a validated MANUAL READY mean.
   // PerceptionFrameInput only: one synthetic 40%-to-READY object mean.
   bool manual_ready_mean{false};
   std::optional<LineGuide> line_decision_guide_override;
 };
 
+struct ObjectFilterDiagnostic {
+  int class_id{};
+  Point2 center;
+  double aspect_ratio{};
+  std::optional<double> depth_m;
+  bool depth_passed{true}, aspect_passed{true};
+  int depth_valid_pixels{};
+};
 struct PreparedPerceptionFrame {
   std::vector<Point2> raw_line_centers;
   std::vector<Point2> line_centers;
@@ -220,10 +234,18 @@ struct PreparedPerceptionFrame {
   // center depth는 후보 검증과 접근 거리 판정에 항상 사용한다. 좌/우 depth
   // 기반 goal_pose는 미세조정 진입 거리 이후에만 유효해진다.
   GoalPoseObservation goal_pose;
+  std::optional<double> ball_center_depth_m, hurdle_center_depth_m;
   std::optional<double> backboard_center_depth_m;
   std::optional<double> backboard_left_depth_m;
   std::optional<double> backboard_right_depth_m;
   std::optional<double> backboard_left_depth_u_px, backboard_right_depth_u_px;
+  std::vector<BallCandidateTrack> ball_tracks;
+  std::vector<ObjectFilterDiagnostic> object_filter_diagnostics;
+  std::uint64_t ball_target_id{};
+  bool ball_target_locked{false}, ball_reacquiring{false};
+  int ball_missing_frames{};
+  std::string ball_tracking_reason;
+  std::optional<double> ball_match_distance_px, ball_match_size_log_ratio;
   bool imu_rectification_applied{false};
 };
 
@@ -488,6 +510,10 @@ private:
   ControlCommandCoordinator command_coordinator_;
   // 서로 다른 클래스의 identity가 섞이지 않도록 상태를 분리한다.
   ObjectAssociationTracker ball_association_tracker_;
+  BallCandidateTracker ball_candidate_tracker_;
+  std::uint64_t ball_target_id_{0};
+  bool ball_target_locked_{false}, ball_reacquiring_{false};
+  bool ball_recovery_was_active_{false};
   ObjectAssociationTracker backboard_association_tracker_;
   ObjectAssociationTracker hurdle_association_tracker_;
   MissionType active_mission_{MissionType::kLine};

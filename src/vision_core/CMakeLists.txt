@@ -21,8 +21,10 @@ add_library(shared_vision_core SHARED
   src/line_plan.cpp
   src/line_mission_entry.cpp
   src/object_target_extractor.cpp
+  src/ball_candidate_tracker.cpp
   src/object_association_tracker.cpp
   src/ball_controller.cpp
+  src/ball_fine_motion.cpp
   src/hurdle_controller.cpp
   src/goal_controller.cpp
   src/control_command.cpp
@@ -77,6 +79,27 @@ install(FILES
 if(BUILD_TESTING)
   # Fixed scenario data keeps logic tests independent of operator tuning.
   set(VISION_CORE_TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
+  add_executable(shared_vision_core_ball_fine_motion_test tests/ball_fine_motion_test.cpp)
+  target_link_libraries(shared_vision_core_ball_fine_motion_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_ball_fine_motion_test COMMAND shared_vision_core_ball_fine_motion_test)
+  set_tests_properties(shared_vision_core_ball_fine_motion_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+  add_executable(shared_vision_core_ball_approach_grid_test tests/ball_approach_grid_test.cpp)
+  target_link_libraries(shared_vision_core_ball_approach_grid_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_ball_approach_grid_test COMMAND shared_vision_core_ball_approach_grid_test)
+  set_tests_properties(shared_vision_core_ball_approach_grid_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+  add_executable(shared_vision_core_ball_tracking_filter_test tests/ball_tracking_filter_test.cpp)
+  target_link_libraries(shared_vision_core_ball_tracking_filter_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_ball_tracking_filter_test COMMAND shared_vision_core_ball_tracking_filter_test)
+  set_tests_properties(shared_vision_core_ball_tracking_filter_test PROPERTIES LABELS "logic" ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+
+  add_executable(shared_vision_core_line_ransac_test tests/line_ransac_test.cpp)
+  target_link_libraries(shared_vision_core_line_ransac_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_line_ransac_test COMMAND shared_vision_core_line_ransac_test)
+  set_tests_properties(shared_vision_core_line_ransac_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_down_search_hold_test tests/down_search_hold_test.cpp)
   target_link_libraries(shared_vision_core_down_search_hold_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_down_search_hold_test COMMAND shared_vision_core_down_search_hold_test)

@@ -1,9 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <deque>
 #include <optional>
+#include <utility>
 
 #include "vision_core/types.hpp"
+#include "vision_core/ball_fine_motion.hpp"
 #include "vision_core/down_search_walk.hpp"
 #include "vision_core/object_observation_window.hpp"
 #include "vision_core/stationary_object_recovery.hpp"
@@ -32,6 +35,7 @@ enum class BallMode {
   kNearTurnBeforeDown, // One extra zone-7/9 turn, reobserve, then DOWN if still lost
   kFineSidePair, // Fixed pair of existing 5/6 actions; append to preserve phase IDs.
   kMidTurnBeforeRecovery, // One WALK turn after zone-4/6 loss, then stationary recovery.
+  kFineMotionRepeat, // Calibrated same-direction FINE chain, at most three actions.
 };
 
 struct BallConfig {
@@ -52,12 +56,25 @@ struct BallConfig {
   double smooth_alpha{}; // Legacy config key; position uses the bounded 1->3 window.
   double far_u_des_px{};
   double approach_u_deadband_px{};
+  double approach_left_top_u_px{};
+  double approach_right_top_u_px{};
+  // Top endpoints are at v=0; bottom endpoints keep the legacy center/band
+  // at v=image_height-1. Use the same interpolation for control and drawing.
+  std::pair<double,double> ApproachBounds(double v, int image_height) const {
+    const double t=std::clamp(v/std::max(1,image_height-1),0.0,1.0);
+    const double left_bottom=far_u_des_px-approach_u_deadband_px;
+    const double right_bottom=far_u_des_px+approach_u_deadband_px;
+    if (t==1.0) return {left_bottom,right_bottom};
+    return {approach_left_top_u_px+t*(left_bottom-approach_left_top_u_px),
+            approach_right_top_u_px+t*(right_bottom-approach_right_top_u_px)};
+  }
   double upper_acquire_v_px{};
   double approach_two_step_v_px{};
   double approach_direct_down_v_px{}; // Zone 8 only: one step instead of two before DOWN.
   double down_one_step_v_px{};
   double fine_mode_v_px{};
   double fine_side_two_step_margin_px{};
+  BallFineMotionConfig fine_motion;
   int pickup_max_attempts{};
   double ball_ignore_duration_sec{};
   // Inclusive pickup rectangle edges, in input-image pixels.
@@ -92,6 +109,10 @@ struct BallResult {
   int recovery_observations_completed{0};
   double recovery_observation_elapsed_sec{0.0};
   int down_search_steps_remaining{0};
+  MissionAction fine_motion_action{MissionAction::kNone};
+  int fine_motion_repetitions{0},fine_motion_remaining{0};
+  bool fine_motion_prediction_valid{false};
+  Point2 fine_motion_predicted_center_px;
   CameraRequest camera_request{CameraRequest::kNone};
   BallMode mode{BallMode::kLineFollow};
   TrackedBall tracked;
@@ -123,13 +144,18 @@ public:
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
+  void InvalidateTargetIdentity() {
+    ClearObservationHistory();
+    down_search_.InvalidateDetection();
+    stationary_recovery_.DiscardDetections();
+  }
   // A changed bbox filter invalidates the latched search detection as well.
-  void InvalidateDetectionEvidence() { ClearObservationHistory(); down_search_.InvalidateDetection(); }
+  void InvalidateDetectionEvidence() { InvalidateTargetIdentity(); }
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
   void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
       const std::deque<bool>& hits, int width, int height);
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
-  // Accepted pairs retain their action/count when parameters change.
+  // Accepted same-direction chains retain their action/count when parameters change.
   void UpdateTuning(const BallConfig &config) {
     if (mode_==BallMode::kDownSearch && config_.down_search_min_hits!=config.down_search_min_hits)
       down_search_.InvalidateDetection();
@@ -149,6 +175,10 @@ public:
   }
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
   int FineSideActionsRemaining() const { return fine_side_remaining_; }
+  int FineMotionActionsRemaining() const { return fine_side_remaining_; }
+  int FineMotionRepetitions() const { return fine_repeat_total_; }
+  MissionAction FineMotionAction() const { return fine_side_action_; }
+  Point2 FineMotionPredictedCenter() const { return fine_repeat_predicted_center_; }
   int RecoveryWalkTurnsCompleted() const { return recovery_walk_turns_completed_; }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   int DownSearchStepsRemaining() const {
@@ -159,7 +189,7 @@ private:
   static double Clamp(double value, double low, double high);
   void UpdateTracker(const std::optional<ObjectTarget> &target,
                      int image_width, int image_height);
-  ActionRequest FarAction() const;
+  ActionRequest FarAction(int image_height) const;
   ActionRequest FineAction() const;
   ActionRequest RecoveryAction() const;
   void ClearTracking();
@@ -178,6 +208,8 @@ private:
   int fine_side_remaining_{0};
   bool fine_side_pending_{false};
   bool fine_side_done_{false};
+  int fine_repeat_total_{0};
+  Point2 fine_repeat_predicted_center_;
   std::deque<std::optional<double>> recent_ball_u_;
   int last_approach_steps_{0};
   int last_approach_zone_{0};

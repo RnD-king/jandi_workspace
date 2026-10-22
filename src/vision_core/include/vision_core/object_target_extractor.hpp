@@ -28,6 +28,32 @@ struct ObjectTargetConfig {
   double hurdle_min_box_width{};
   double hurdle_min_box_height{};
 
+  double ball_aspect_ratio_min{}, ball_aspect_ratio_max{};
+  double hurdle_aspect_ratio_min{};
+  bool ball_depth_enabled{}, hurdle_depth_enabled{};
+  bool ball_allow_missing_depth{}, hurdle_allow_missing_depth{};
+  double ball_forward_min_depth_m{}, ball_forward_max_depth_m{};
+  double ball_down_min_depth_m{}, ball_down_max_depth_m{};
+  double hurdle_min_depth_m{}, hurdle_max_depth_m{};
+  int depth_roi_size_px{};
+  bool SamePerceptionFilters(const ObjectTargetConfig& c) const {
+    return SameBoxFilters(c) && ball_aspect_ratio_min==c.ball_aspect_ratio_min &&
+        ball_aspect_ratio_max==c.ball_aspect_ratio_max && hurdle_aspect_ratio_min==c.hurdle_aspect_ratio_min &&
+        ball_depth_enabled==c.ball_depth_enabled && hurdle_depth_enabled==c.hurdle_depth_enabled &&
+        ball_allow_missing_depth==c.ball_allow_missing_depth && hurdle_allow_missing_depth==c.hurdle_allow_missing_depth &&
+        ball_forward_min_depth_m==c.ball_forward_min_depth_m && ball_forward_max_depth_m==c.ball_forward_max_depth_m &&
+        ball_down_min_depth_m==c.ball_down_min_depth_m && ball_down_max_depth_m==c.ball_down_max_depth_m &&
+        hurdle_min_depth_m==c.hurdle_min_depth_m && hurdle_max_depth_m==c.hurdle_max_depth_m && depth_roi_size_px==c.depth_roi_size_px;
+  }
+  bool AcceptAspect(const Detection& d) const {
+    if (!(d.box.height>0) || !(d.box.width>0)) return false;
+    const double ratio=d.box.width/d.box.height;
+    if(d.class_id==ball_class_id && ball_aspect_ratio_max>0)
+      return ratio>=ball_aspect_ratio_min && ratio<=ball_aspect_ratio_max;
+    if(d.class_id==hurdle_class_id) return ratio>=hurdle_aspect_ratio_min;
+    return true;
+  }
+
   std::pair<double,double> MinimumBoxSize(int class_id) const {
     if (class_id == ball_class_id) return {ball_min_box_width,ball_min_box_height};
     if (class_id == goal_class_id) return {goal_min_box_width,goal_min_box_height};

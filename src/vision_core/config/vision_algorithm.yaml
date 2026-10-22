@@ -4,6 +4,11 @@ vision_algorithm:
     guide_min_points: 3 # 필요한 최소 개수
     image_center_u: 380.0 # 라인 중앙 기준선
     guide_fit_rmse_full_scale_px: 20.0 # 안내선 오차 표시의 기준 크기 (px)
+    ransac_enabled: true
+    ransac_min_input_points: 4
+    ransac_residual_threshold_px: 20.0
+    ransac_min_sample_v_gap_px: 20.0
+    ransac_max_outliers: 2
 
     curve_min_points: 5 # 곡률 계산 최소 개수
     curve_min_v_span_px: 80.0 # 곡률 계산에 세로 분포 폭
@@ -56,8 +61,10 @@ vision_algorithm:
     upper_acquire_v_px: 470.0 # 공이 있을 조건 (중심 v가 이 값 이하인 프레임을 진입 횟수로 계산)
 
     # forward
-    far_u_des_px: 380.0 # 세로선 중심
-    approach_u_deadband_px: 90 # 세로선 반폭
+    far_u_des_px: 380.0 # 접근 경계의 화면 아래쪽 중심 (기존 위치 유지)
+    approach_u_deadband_px: 90 # 접근 경계의 화면 아래쪽 반폭
+    approach_left_top_u_px: 290.0 # 화면 위쪽(v=0) 왼쪽 경계 x; 아래쪽은 380-90=290
+    approach_right_top_u_px: 470.0 # 화면 위쪽(v=0) 오른쪽 경계 x; 아래쪽은 380+90=470
 
     approach_short_v_px: 100.0 # 위 가로선 (4걸음)
     approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
@@ -66,6 +73,16 @@ vision_algorithm:
     # down
     down_one_step_v_px: 0.0 # 위 가로선 (2걸음)
     fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
+    fine_motion:
+      max_repetitions: 3 # 같은 방향만 최대 3회. 아래 값은 DOWN 화면의 공 중심 변화량.
+      forward_delta_u_px: 0.0 # Action 3 1회 후 공의 Δx (오른쪽 +)
+      forward_delta_v_px: 0.0 # Action 3 1회 후 공의 Δy (아래쪽 +)
+      backward_delta_u_px: 0.0 # Action 4
+      backward_delta_v_px: 0.0
+      left_delta_u_px: 0.0 # Action 5
+      left_delta_v_px: 0.0
+      right_delta_u_px: 0.0 # Action 6
+      right_delta_v_px: 0.0 # 방향별 (0,0)은 미측정. 모두 미측정이면 기존 단발/옆걸음 2회 유지.
     fine_mode_v_px: 10 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
 
     pickup_u1_px: 310 # 사각형
@@ -191,6 +208,28 @@ vision_algorithm:
     backboard_min_box_height: 20 # backboard 최소 세로
     hurdle_min_box_width: 200 # hurdle 최소 가로
     hurdle_min_box_height: 10 # hurdle 최소 세로
+
+    ball_aspect_ratio_min: 0.65
+    ball_aspect_ratio_max: 1.50
+    hurdle_aspect_ratio_min: 2.50
+    ball_depth_enabled: true
+    hurdle_depth_enabled: true
+    ball_allow_missing_depth: true
+    hurdle_allow_missing_depth: true
+    ball_forward_min_depth_m: 0.0
+    ball_forward_max_depth_m: 2.50
+    ball_down_min_depth_m: 0.0
+    ball_down_max_depth_m: 2.50
+    hurdle_min_depth_m: 0.30
+    hurdle_max_depth_m: 2.00
+    depth_roi_size_px: 5
+
+  ball_candidate_tracking:
+    enabled: true
+    max_center_distance_px: 80.0
+    max_size_log_ratio: 0.50
+    missing_frame_limit: 5
+    max_tracks: 16
 
   object_association:
     missing_frame_limit: 5 # 같은 물체의 추적을 유지할 미검출 프레임 수

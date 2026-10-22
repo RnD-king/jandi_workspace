@@ -275,7 +275,7 @@ void BallEntryAndReadyQueue(bool already_queued) {
   assert(r.command.action==MissionAction::kStepForwardTwo && r.command.action_id!=last);
 }
 
-void BallEntryUsesRawCandidates() {
+void BallEntryUsesCandidateIdentity() {
   auto c=LoadDefaultAlgorithmConfig();
   c.enable_ball=true;c.enable_goal=c.enable_hurdle=false;
   c.initial_has_ball=false;c.goal_trial_start_goal=false;
@@ -288,16 +288,26 @@ void BallEntryUsesRawCandidates() {
   f.advance_line_fsm=false;f.allow_new_body_actions=false;
   PerceptionDetection d;d.detection.class_id=c.object_targets.ball_class_id;
   d.detection.confidence=1;d.detection.box={90,450,20,20};
+  // A appears once, then B appears five times. Raw detections total six,
+  // but neither identity satisfies 6/10. The approach association's much
+  // tighter distance gate must not be applied to candidate tracklets.
   for(int i=0;i<6;++i) {
     f.now_sec=.1*i;d.detection.box.x=i==0 ? 90 : 490;f.detections={d};
     const auto out=core.StepPerception(f);
     if(i==5) {
-      assert(!out.perception.targets.ball); // Association rejected, detection is real.
-      assert(out.mission.active_mission==MissionType::kLine);
-      assert(out.mission.candidate_mission==MissionType::kBall);
-      assert(out.mission.ball.entry_hits==6);
-    } else assert(out.mission.active_mission==MissionType::kLine);
+      assert(out.perception.targets.ball && out.perception.targets.ball->center_px.u==500);
+      assert(out.mission.ball.entry_hits==5);
+      assert(out.perception.ball_tracks.size()==2);
+    }
+    assert(out.mission.active_mission==MissionType::kLine);
+    assert(out.mission.candidate_mission==MissionType::kNone);
   }
+  f.now_sec=.6;f.detections={d};
+  const auto selected=core.StepPerception(f); // B's sixth actual detection.
+  assert(selected.mission.active_mission==MissionType::kLine);
+  assert(selected.mission.candidate_mission==MissionType::kBall);
+  assert(selected.mission.ball.entry_hits==6);
+  assert(selected.perception.ball_target_locked && selected.perception.targets.ball->center_px.u==500);
   MissionController filtered(c);
   for(int i=0;i<12;++i) {
     f.now_sec=.1*i;d.detection.confidence=c.object_targets.ball_confidence*.5;
@@ -310,6 +320,30 @@ void BallEntryUsesRawCandidates() {
     f.now_sec=.1*i;f.detections={d};const auto out=outside.StepPerception(f);
     assert(out.mission.active_mission==MissionType::kLine && out.mission.ball.entry_hits==0);
   }
+}
+
+void BallEntryRawFallbackIsExplicit() {
+  auto c=LoadDefaultAlgorithmConfig();
+  c.enable_ball=true;c.enable_goal=c.enable_hurdle=false;
+  c.ball.entry_min_hits=6;c.ball.stable_window=10;
+  c.ball_candidate_tracking.enabled=false;
+  c.object_association.max_center_distance_norm=.001;
+  c.object_association.missing_frame_limit=100;
+  MissionController core(c);
+  PerceptionFrameInput f;f.image_width=640;f.image_height=480;
+  f.advance_line_fsm=false;f.allow_new_body_actions=false;
+  PerceptionDetection d;d.detection.class_id=c.object_targets.ball_class_id;
+  d.detection.confidence=1;d.detection.box={90,450,20,20};
+  PerceptionMissionFrameResult out;
+  for(int i=0;i<6;++i) {
+    f.now_sec=.1*i;d.detection.box.x=i==0 ? 90 : 490;f.detections={d};
+    out=core.StepPerception(f);
+  }
+  // Only explicitly disabling candidate tracking retains the old raw-count
+  // admission path, independently of failed approach association.
+  assert(!out.perception.targets.ball);
+  assert(out.mission.active_mission==MissionType::kLine);
+  assert(out.mission.candidate_mission==MissionType::kBall && out.mission.ball.entry_hits==6);
 }
 
 void DirectGoalStartAndReset() {
@@ -872,7 +906,8 @@ int main() {
   }
   EntryDirectionCentralFallback();
   BallEntryCountsOnlyDetections();BallEntryAndReadyQueue(false);BallEntryAndReadyQueue(true);
-  BallEntryUsesRawCandidates();
+  BallEntryUsesCandidateIdentity();
+  BallEntryRawFallbackIsExplicit();
   Defaults();VerifiedFineWindows();InvalidAndNearWindows();GoalEdges();ImageDetectionWithMissingDepth();
   DirectGoalStartAndReset();
   for(bool left:{false,true})GoalPairHasOneObservation(left);

@@ -50,6 +50,7 @@ int main() {
   c.fine_side_two_step_margin_px=1e6; // Isolate legacy single-step decisions.
   c.lost_frames = 2; c.smooth_alpha = 1.0; c.far_u_des_px = 320.0;
   c.approach_u_deadband_px = 32.0; c.upper_acquire_v_px = 480.0;
+  c.approach_left_top_u_px=288;c.approach_right_top_u_px=352; // Vertical scenario.
   c.approach_short_v_px = 300.0;
   c.approach_two_step_v_px = 336.0;
   c.pickup_u1_px=288; c.pickup_u2_px=352;

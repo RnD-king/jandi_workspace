@@ -56,6 +56,7 @@ int main() {
         edge.image.at<cv::Vec3b>(400,90)!=cv::Vec3b(0,0,0),"edge guide ignored new tuning");
 
   c.ball.far_u_des_px=380;c.ball.approach_u_deadband_px=90;
+  c.ball.approach_left_top_u_px=290;c.ball.approach_right_top_u_px=470;
   c.ball.approach_short_v_px=100;c.ball.approach_two_step_v_px=240;
   c.ball.approach_direct_down_v_px=355;
   m.active_mission=vision_core::MissionType::kBall;
@@ -72,6 +73,29 @@ int main() {
   Check(direct.image.at<cv::Vec3b>(355,380)==cv::Vec3b(0,0,0) &&
         direct.image.at<cv::Vec3b>(390,380)!=cv::Vec3b(0,0,0),
         "direct DOWN guide must update while waiting for the camera");
+  c.ball.approach_left_top_u_px=390;c.ball.approach_right_top_u_px=530;
+  direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  Check(direct.image.at<cv::Vec3b>(0,390)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(0,530)!=cv::Vec3b(0,0,0),
+        "slanted grid top endpoints absent");
+  Check(direct.image.at<cv::Vec3b>(479,290)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(479,470)!=cv::Vec3b(0,0,0),
+        "moving top endpoints changed bottom anchors");
+  Check(direct.image.at<cv::Vec3b>(200,348)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(200,505)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(200,290)==cv::Vec3b(0,0,0),
+        "approach guide stayed vertical instead of following endpoints");
+  const auto down_bounds=c.ball.ApproachBounds(390,480);
+  Check(direct.image.at<cv::Vec3b>(390,static_cast<int>(std::ceil(down_bounds.first))+10)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(390,295)==cv::Vec3b(0,0,0),
+        "direct DOWN boundary did not follow the slanted center column");
+  c.ball.approach_left_top_u_px=450;
+  direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  Check(direct.image.at<cv::Vec3b>(0,450)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(0,390)==cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(0,530)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(479,290)!=cv::Vec3b(0,0,0),
+        "left top endpoint tuning changed the right/bottom guide");
   direct=vision::RenderMissionDebug(image,empty,{},c,{},m,camera,{},state);
   Check(direct.image.at<cv::Vec3b>(390,380)==cv::Vec3b(0,0,0),
         "FORWARD direct DOWN boundary leaked into the DOWN view");
@@ -87,6 +111,19 @@ int main() {
   Check(landing.valid && landing.rim_valid && !landing.commanded &&
         std::abs(landing.x_m+.08)<1e-12 && std::abs(landing.z_m-.48)<1e-12 &&
         landing.position_error_m<1e-12,"zero-yaw landing/rim coordinates mismatch");
+  for (double degrees : {-30.0,30.0}) {
+    const double phi=degrees*vision::kDebugPi/180;
+    m.goal.fine_decision_pose={true,.10,.50,phi,1};
+    landing=vision::ComputeGoalLandingDebug(c.goal,m);
+    const double dx=landing.rim_x_m-.10,dz=landing.rim_z_m-.50;
+    Check(landing.rim_valid && std::abs(std::hypot(dx,dz)-.1)<1e-12 && dz<0,
+          "displayed rim is not one radius toward the robot");
+    Check(std::abs(dx*std::cos(phi)-dz*std::sin(phi))<1e-12,
+          "displayed rim correction is not perpendicular to the measured board");
+    Check(degrees>0 ? landing.rim_x_m<.10 : landing.rim_x_m>.10,
+          "displayed rim x correction reversed the edge-depth yaw convention");
+  }
+  m.goal.fine_decision_pose={true,-.08,.58,0,1};
 
   m.goal.mode=vision_core::GoalMode::kShoot;
   m.command.mission=vision_core::MissionType::kGoal;

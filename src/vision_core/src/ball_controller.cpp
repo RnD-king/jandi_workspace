@@ -33,6 +33,8 @@ const char *BallController::ModeName(BallMode mode) {
     return "BALL_MID_TURN_THEN_RECOVERY";
   case BallMode::kFineSidePair:
     return "BALL_FINE_SIDE_PAIR";
+  case BallMode::kFineMotionRepeat:
+    return "BALL_FINE_MOTION_REPEAT";
   case BallMode::kLineFollow:
     return "LINE_FOLLOW";
   case BallMode::kApproachBall:
@@ -136,10 +138,12 @@ void BallController::UpdateTracker(const std::optional<ObjectTarget> &target,
   }
 }
 
-ActionRequest BallController::FarAction() const {
+ActionRequest BallController::FarAction(int image_height) const {
+  const auto bounds=config_.ApproachBounds(tracked_.center_px.v,image_height);
+  const double center=(bounds.first+bounds.second)*0.5;
+  const double half_width=(bounds.second-bounds.first)*0.5;
   const CruiseDecision decision = SelectCruiseDecision(
-      true, tracked_.visible, tracked_.center_px.u - config_.far_u_des_px,
-      config_.approach_u_deadband_px);
+      true, tracked_.visible, tracked_.center_px.u-center,half_width);
   if (decision.direction == CruiseDirection::kNone)
     return {};
   const double v = tracked_.center_px.v;
@@ -246,7 +250,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     ClearTracking();
   if (!verified && mode_ != BallMode::kWaitCameraDown &&
       mode_ != BallMode::kReturnCameraToLine &&
-      !((mode_ == BallMode::kFineAdjustForPickup || mode_ == BallMode::kFineSidePair) &&
+      !((mode_ == BallMode::kFineAdjustForPickup || mode_ == BallMode::kFineSidePair ||
+         mode_ == BallMode::kFineMotionRepeat) &&
         (feedback.action_active || feedback.action_done)))
     UpdateTracker(target, image_width, image_height);
 
@@ -362,7 +367,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       result.mode = mode_;
       return result;
     }
-    result.action = FarAction();
+    result.action = FarAction(image_height);
     // Only the straight near-cell (zone 8) is split. Side cells retain their
     // WALK turns; an active motion was already excluded at this case's entry.
     if (result.action.action == MissionAction::kStepForwardTwo &&
@@ -560,15 +565,33 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     if (!ExecutionObservationReady())
       return result;
     result.action = FineAction();
-    if (result.action.action == MissionAction::kLeftSideStep ||
-        result.action.action == MissionAction::kRightSideStep) {
+    if (result.action.category==ActionCategory::kLocomotion && config_.fine_motion.HasCalibration()) {
+      const auto plan=PlanBallFineMotion(config_.fine_motion,tracked_.center_px,
+          config_.pickup_u1_px,config_.pickup_u2_px,config_.pickup_v1_px,config_.pickup_v2_px,
+          image_width,image_height,allow_fine_pair ? config_.fine_motion.max_repetitions : 1);
+      if (plan.action!=MissionAction::kNone) {
+        result.action=Locomotion(plan.action);
+        if (plan.repetitions>1 && allow_new_body_actions && allow_fine_pair) {
+          fine_side_action_=plan.action;
+          fine_side_remaining_=fine_repeat_total_=plan.repetitions;
+          fine_repeat_predicted_center_=plan.predicted_center_px;
+          fine_side_pending_=true;fine_side_done_=false;
+          mode_=BallMode::kFineMotionRepeat;result.mode=mode_;
+          return result;
+        }
+      }
+      // No valid improving prediction: retain the original single action.
+      // Never append unmeasured motions to a partially calibrated plan.
+    } else if (result.action.action == MissionAction::kLeftSideStep ||
+               result.action.action == MissionAction::kRightSideStep) {
       const double excess = result.action.action == MissionAction::kLeftSideStep
           ? config_.pickup_u1_px - tracked_.center_px.u
           : tracked_.center_px.u - config_.pickup_u2_px;
       if (excess >= config_.fine_side_two_step_margin_px &&
-          allow_new_body_actions && allow_fine_pair) {
+          allow_new_body_actions && allow_fine_pair && config_.fine_motion.max_repetitions>=2) {
         fine_side_action_ = result.action.action;
         fine_side_remaining_ = 2;
+        fine_repeat_total_ = 2;
         fine_side_pending_ = allow_new_body_actions;
         fine_side_done_ = false;
         mode_ = BallMode::kFineSidePair;
@@ -585,6 +608,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     }
     return result;
   case BallMode::kFineSidePair:
+  case BallMode::kFineMotionRepeat:
     if (fine_side_pending_ && feedback.action_done) fine_side_done_ = true;
     if (feedback.action_active && !feedback.action_done) return result;
     if (fine_side_pending_) {
@@ -593,6 +617,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       if (--fine_side_remaining_ == 0) {
         mode_ = BallMode::kFineAdjustForPickup;
         fine_side_action_ = MissionAction::kNone;
+        fine_repeat_total_ = 0;
+        fine_repeat_predicted_center_ = {};
         ClearTracking();
         result.mode = mode_;
         result.tracked = {};
@@ -850,6 +876,8 @@ void BallController::ResetToLine(bool clear_ignore) {
   entry_recovery_pending_ = false;
   fine_side_action_ = MissionAction::kNone;
   fine_side_remaining_ = 0;
+  fine_repeat_total_ = 0;
+  fine_repeat_predicted_center_ = {};
   fine_side_pending_ = fine_side_done_ = false;
   last_stable_ball_u_.reset();
   recovery_turn_left_.reset();

@@ -38,6 +38,17 @@ double SafeSizeLogRatio(const ObjectTarget &previous,
 
 } // namespace
 
+double ObjectCenterDistancePixels(const ObjectTarget& a, const ObjectTarget& b) {
+  return std::hypot(a.center_px.u-b.center_px.u, a.center_px.v-b.center_px.v);
+}
+double ObjectSizeLogRatio(const ObjectTarget& a, const ObjectTarget& b) {
+  return SafeSizeLogRatio(a,b);
+}
+void ObjectAssociationTracker::Seed(const ObjectTarget& target) {
+  previous_target_=target;
+  missing_frames_=0;
+}
+
 ObjectAssociationTracker::ObjectAssociationTracker(
     const ObjectAssociationConfig &config)
     : config_(config) {}
@@ -60,8 +71,8 @@ ObjectAssociationSelection ObjectAssociationTracker::AcquireInitial(
 
 ObjectAssociationSelection ObjectAssociationTracker::Update(
     const std::vector<ObjectTargetCandidate> &candidates,
-    int image_width, int image_height) {
-  if (!previous_target_) return AcquireInitial(candidates);
+    int image_width, int image_height, bool allow_reacquire) {
+  if (!previous_target_) return allow_reacquire ? AcquireInitial(candidates) : ObjectAssociationSelection{};
 
   const double max_center =
       std::max(0.0, config_.max_center_distance_norm);
@@ -102,6 +113,7 @@ ObjectAssociationSelection ObjectAssociationTracker::Update(
     return {};
   }
 
+  if (!allow_reacquire) return {};
   Reset();
   // 유예가 끝난 프레임에 후보가 있었다면 새 identity로 즉시 시작한다.
   return AcquireInitial(candidates);

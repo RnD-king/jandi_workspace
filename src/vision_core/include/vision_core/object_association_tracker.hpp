@@ -8,6 +8,9 @@
 
 namespace vision_core {
 
+double ObjectCenterDistancePixels(const ObjectTarget&, const ObjectTarget&);
+double ObjectSizeLogRatio(const ObjectTarget&, const ObjectTarget&);
+
 // association에만 사용하는 설정이다. controller의 lost_frames와 달리
 // missing_frame_limit은 이전 identity를 후보 비교용으로 보존하는 기간이다.
 struct ObjectAssociationConfig {
@@ -32,11 +35,13 @@ public:
 
   ObjectAssociationSelection
   Update(const std::vector<ObjectTargetCandidate> &candidates,
-         int image_width, int image_height);
+         int image_width, int image_height, bool allow_reacquire = true);
+  void Seed(const ObjectTarget& target);
   void Reset();
 
   bool HasIdentity() const { return previous_target_.has_value(); }
   int MissingFrames() const { return missing_frames_; }
+  const std::optional<ObjectTarget>& Reference() const { return previous_target_; }
 
 private:
   ObjectAssociationSelection

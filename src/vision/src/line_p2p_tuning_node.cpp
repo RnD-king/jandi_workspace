@@ -1,3 +1,4 @@
+#include "vision/debug_bag_publisher.hpp"
 // 실제 로봇 LINE P2P O/H gain과 steering deadband 단발 튜닝 전용 노드.
 // 운영용 line_perception_node와 실행 상태를 공유하지 않으며, YOLO adapter와
 // vision_core::MissionController를 그대로 사용해 알고리즘 중복을 피한다.
@@ -111,6 +112,7 @@ public:
     declare_parameter<double>("imu_abs_limit_deg", 45.0);
     declare_parameter<double>("inference_hz", 15.0);
     declare_parameter<bool>("show_debug_view", true);
+    debug_bag_ = std::make_unique<vision::DebugBagPublisher>(*this, false);
     declare_parameter<double>("line_tuning_observation_sec", 1.0);
 
     declare_parameter<int>("max_centers", config.line_features.max_centers);
@@ -212,8 +214,13 @@ public:
       timer_ = create_wall_timer(period, [this]() { ProcessLatestImage(); });
     }
     if (show_debug_view_) {
-      cv::namedWindow(kWindowName, cv::WINDOW_NORMAL);
-      cv::namedWindow(kStatusWindowName, cv::WINDOW_NORMAL);
+      try {
+        cv::namedWindow(kWindowName, cv::WINDOW_NORMAL);
+        cv::namedWindow(kStatusWindowName, cv::WINDOW_NORMAL);
+      } catch (const cv::Exception &error) {
+        show_debug_view_ = false;
+        RCLCPP_WARN(get_logger(), "[VIEW] debug window disabled: %s", error.what());
+      }
     }
     RCLCPP_INFO(get_logger(),
                 "LINE P2P tuning node ready. Call /%s/start_line_tuning_trial",
@@ -652,12 +659,16 @@ private:
       PublishAction(result.mission.command);
     }
 
-    if (show_debug_view_) DrawDebug(image->image, detections, result);
+    const auto request = debug_bag_->RequestFrame();
+    if (show_debug_view_ || request) {
+      DrawDebug(image->image, detections, message->header, request);
+    }
   }
 
   void DrawDebug(const cv::Mat &image,
                  const std::vector<Detection> &detections,
-                 const vision_core::PerceptionMissionFrameResult &) {
+                 const std_msgs::msg::Header &header,
+                 const vision::DebugBagPublisher::Request &request) {
     // Camera window intentionally contains detections and no text.
     cv::Mat camera = image.clone();
     for (const auto &detection : detections) {
@@ -665,7 +676,6 @@ private:
           detection.confidence < conf_thres_) continue;
       cv::rectangle(camera, detection.box, cv::Scalar(70, 215, 115), 2);
     }
-    cv::imshow(kWindowName, camera);
 
     cv::Mat panel(670, 850, CV_8UC3, cv::Scalar(25, 28, 34));
     const cv::Scalar muted(158, 164, 173);
@@ -756,8 +766,17 @@ private:
                   static_cast<unsigned long long>(active_id));
     label(30, 581, text, 0.58, muted);
     label(24, 630, "IDLE gain updates re-evaluate NEXT from the stored O/H.", 0.55, muted);
-    cv::imshow(kStatusWindowName, panel);
-    cv::waitKey(1);
+    debug_bag_->Submit(request, header, camera, panel);
+    if (show_debug_view_) {
+      try {
+        cv::imshow(kWindowName, camera);
+        cv::imshow(kStatusWindowName, panel);
+        cv::waitKey(1);
+      } catch (const cv::Exception &error) {
+        show_debug_view_ = false;
+        RCLCPP_WARN(get_logger(), "[VIEW] debug window disabled: %s", error.what());
+      }
+    }
   }
 
   std::unique_ptr<YoloTrtEngine> yolo_;
@@ -814,6 +833,7 @@ private:
   bool use_imu_rectification_{false};
   bool assume_zero_imu_{false};
   double inference_hz_{15.0};
+  std::unique_ptr<vision::DebugBagPublisher> debug_bag_;
   bool show_debug_view_{true};
   std::string image_topic_;
   std::string camera_info_topic_;

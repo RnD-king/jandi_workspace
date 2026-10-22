@@ -41,6 +41,7 @@ int main(int argc, char **argv) {
   assert(argc == 2);
   const auto c = vision_core::LoadAlgorithmConfig(argv[1]);
   const auto defaults = vision_core::LoadDefaultAlgorithmConfig();
+  assert(c.ball.fine_motion.max_repetitions==3 && !c.ball.fine_motion.HasCalibration());
   assert(defaults.command.first_action_id != 0);
   assert(c.line_p2p.failure_min_valid_samples == 5);
   assert(c.line_p2p.recovery_max_turns == 5);
@@ -48,6 +49,8 @@ int main(int argc, char **argv) {
   assert(c.goal.shoot_yaw_limit_deg == 30.0);
   assert(c.hurdle.stable_window == 10);
   assert(c.hurdle.stable_min_hits == 7);
+  assert(c.ball.approach_left_top_u_px==250.0);
+  assert(c.ball.approach_right_top_u_px==470.0);
   assert(c.post_motion_observation_sec == 1.0);
   assert(c.object_ready_mean_actions == std::vector<int>({22, 23}));
   assert(defaults.object_ready_mean_actions == c.object_ready_mean_actions);
@@ -80,7 +83,71 @@ int main(int argc, char **argv) {
   assert(c.line_features.image_center_u == 410.0);
   assert(c.camera_motion_timeout_sec == 3.0);
   assert(c.line_features.guide_min_points == 3);
+  assert(c.line_features.ransac_enabled);
+  assert(c.line_features.ransac_min_input_points==4);
+  assert(c.line_features.ransac_residual_threshold_px==20);
+  assert(c.line_features.ransac_min_sample_v_gap_px==20);
+  assert(c.line_features.ransac_max_outliers==2);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
+  for (const auto* value : {"0","4","-1","not_a_number"})
+    Reject(text.str(),"max_repetitions: 3",std::string("max_repetitions: ")+value);
+  Reject(text.str(),"max_repetitions: 3","");
+  for (const auto* key : {"forward_delta_u_px","forward_delta_v_px","backward_delta_u_px",
+      "backward_delta_v_px","left_delta_u_px","left_delta_v_px","right_delta_u_px","right_delta_v_px"}) {
+    const auto from=std::string(key)+": 0.0";
+    Reject(text.str(),from,"");
+    for (const auto* bad : {".nan",".inf","not_a_number"})
+      Reject(text.str(),from,std::string(key)+": "+bad);
+  }
+  auto calibrated_yaml=text.str();
+  const std::string delta_from="right_delta_u_px: 0.0";
+  const auto delta_pos=calibrated_yaml.find(delta_from);assert(delta_pos!=std::string::npos);
+  calibrated_yaml.replace(delta_pos,delta_from.size(),"right_delta_u_px: -50.0");
+  const auto calibrated=LoadText(calibrated_yaml);
+  assert(calibrated.ball.fine_motion.right_delta_px.u==-50 && calibrated.ball.fine_motion.HasCalibration());
+  for (const auto* key : {"approach_left_top_u_px: 250.0", "approach_right_top_u_px: 470.0"}) {
+    Reject(text.str(),key,"");
+    const auto name=std::string(key).substr(0,std::string(key).find(':'));
+    for (const auto* value : {"-1.0", ".nan", ".inf", "not_a_number"})
+      Reject(text.str(),key,name+": "+value);
+  }
+  Reject(text.str(),"approach_left_top_u_px: 250.0","approach_left_top_u_px: 470.0");
+  Reject(text.str(),"approach_left_top_u_px: 250.0","approach_left_top_u_px: 500.0");
+  auto slanted_yaml=text.str();
+  const auto top_pos=slanted_yaml.find("approach_left_top_u_px: 250.0");
+  assert(top_pos!=std::string::npos);
+  slanted_yaml.replace(top_pos,std::string("approach_left_top_u_px: 250.0").size(),
+      "approach_left_top_u_px: 300.0");
+  const auto slanted=LoadText(slanted_yaml);
+  assert(slanted.ball.approach_left_top_u_px==300.0 &&
+         slanted.ball.approach_right_top_u_px==470.0 &&
+         slanted.ball.far_u_des_px==c.ball.far_u_des_px &&
+         slanted.ball.approach_u_deadband_px==c.ball.approach_u_deadband_px);
+  for (const auto* field : {"ransac_enabled: true", "ransac_min_input_points: 4",
+      "ransac_residual_threshold_px: 20.0", "ransac_min_sample_v_gap_px: 20.0",
+      "ransac_max_outliers: 2"})
+    Reject(text.str(),field,"");
+  Reject(text.str(),"ransac_enabled: true","ransac_enabled: not_a_bool");
+  for (const auto* value : {"0","3","9","not_an_int"})
+    Reject(text.str(),"ransac_min_input_points: 4",std::string("ransac_min_input_points: ")+value);
+  for (const auto* field : {"ransac_residual_threshold_px", "ransac_min_sample_v_gap_px"})
+    for (const auto* value : {"0","-1",".nan",".inf","not_a_number"})
+      Reject(text.str(),std::string(field)+": 20.0",std::string(field)+": "+value);
+  for (const auto* value : {"-1","3","not_an_int"})
+    Reject(text.str(),"ransac_max_outliers: 2",std::string("ransac_max_outliers: ")+value);
+  auto ransac_disabled=LoadText([&]() {
+    auto yaml=text.str();const std::string from="ransac_enabled: true";
+    yaml.replace(yaml.find(from),from.size(),"ransac_enabled: false");return yaml;
+  }());
+  assert(!ransac_disabled.line_features.ransac_enabled);
+  auto tuned_ransac=text.str();
+  for (const auto* field : {"ransac_residual_threshold_px", "ransac_min_sample_v_gap_px"}) {
+    const std::string original=std::string(field)+": 20.0";
+    tuned_ransac.replace(tuned_ransac.find(original),original.size(),std::string(field)+": 12.5");
+  }
+  const auto tuned=LoadText(tuned_ransac);
+  assert(tuned.line_features.ransac_residual_threshold_px==12.5);
+  assert(tuned.line_features.ransac_min_sample_v_gap_px==12.5);
   for (const auto value : {"0", "-1", "11", "not_a_number"})
     Reject(text.str(), "entry_min_hits: 7", std::string("entry_min_hits: ") + value);
   Reject(text.str(), "    entry_min_hits: 7", "    removed_entry_min_hits: 7");
@@ -250,6 +317,20 @@ int main(int argc, char **argv) {
          "\n    confidence: .nan\n    min_box_width: 1.0");
   Reject(text.str(), "min_box_width: 1.0", "min_box_width: -1.0");
   Reject(text.str(), "ball_confidence: 0.60", "ball_confidence: 1.1");
+  Reject(text.str(), "ball_aspect_ratio_min: 0.65", "ball_aspect_ratio_min: 1.6");
+  Reject(text.str(), "ball_aspect_ratio_max: 1.50", "ball_aspect_ratio_max: .nan");
+  Reject(text.str(), "hurdle_aspect_ratio_min: 2.50", "hurdle_aspect_ratio_min: -1");
+  Reject(text.str(), "ball_forward_min_depth_m: 0.0", "ball_forward_min_depth_m: 3.0");
+  Reject(text.str(), "ball_down_max_depth_m: 2.50", "ball_down_max_depth_m: 0");
+  Reject(text.str(), "hurdle_min_depth_m: 0.30", "hurdle_min_depth_m: 2.1");
+  Reject(text.str(), "depth_roi_size_px: 5", "depth_roi_size_px: 4");
+  Reject(text.str(), "depth_roi_size_px: 5", "depth_roi_size_px: 33");
+  Reject(text.str(), "max_center_distance_px: 80.0", "max_center_distance_px: 0");
+  Reject(text.str(), "max_size_log_ratio: 0.50", "max_size_log_ratio: .inf");
+  Reject(text.str(), "max_tracks: 16", "max_tracks: 0");
+  Reject(text.str(), "max_tracks: 16", "max_tracks: 129");
+  Reject(text.str(), "ball_depth_enabled: true", "");
+
   Reject(text.str(), "ball_class_id: 1", "ball_class_id: -1");
   Reject(text.str(), "ball_class_id: 1", "ball_class_id: 0");
   Reject(text.str(), "hurdle_class_id: 4", "hurdle_class_id: 0");

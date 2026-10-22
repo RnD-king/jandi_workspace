@@ -20,13 +20,18 @@ struct Intrinsics {
 
 struct FeatureConfig {
   int max_centers{};
-  // O/H guide는 최소 3개의 유한 line center를 요구한다.
+  // O/H fit은 필터 후 최소 3점. 최초 입력은 최소 4점을 요구한다.
   int guide_min_points{};
   double image_center_u{};
   int curve_min_points{};
   double curve_min_v_span_px{};
   int curve_local_fit_points{};
   double guide_fit_rmse_full_scale_px{};
+  bool ransac_enabled{};
+  int ransac_min_input_points{};
+  double ransac_residual_threshold_px{};
+  double ransac_min_sample_v_gap_px{};
+  int ransac_max_outliers{};
 };
 
 // P2P 모션 판단에 필요한 최소 라인 기하 표현이다.

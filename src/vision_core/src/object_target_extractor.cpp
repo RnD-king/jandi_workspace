@@ -40,7 +40,7 @@ IndexedTarget ExtractBest(
     if (detection.class_id != class_id ||
         detection.confidence < confidence_threshold ||
         detection.box.width < minimum.first ||
-        detection.box.height < minimum.second) {
+        detection.box.height < minimum.second || !config.AcceptAspect(detection)) {
       continue;
     }
     const ObjectTarget candidate = MakeTarget(detection);
@@ -71,7 +71,7 @@ std::vector<ObjectTargetCandidate> ExtractObjectTargetCandidates(
         !std::isfinite(detection.box.width) ||
         !std::isfinite(detection.box.height) ||
         detection.box.width < minimum.first ||
-        detection.box.height < minimum.second) {
+        detection.box.height < minimum.second || !config.AcceptAspect(detection)) {
       continue;
     }
     candidates.push_back({MakeTarget(detection), index});

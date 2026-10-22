@@ -17,7 +17,7 @@ ObjectTarget Target(double u, double v) {
 MissionFrameInput Frame(double now) {
   MissionFrameInput f; f.now_sec=now; f.image_width=640; f.image_height=480;
   f.command_transport_enabled=true;
-  f.line_centers={{420,450},{420,350},{420,250}}; return f;
+  f.line_centers={{420,450},{420,350},{420,250},{420,150}}; return f;
 }
 void TestClockAndGoalReservationDrain() {
   auto cfg=LoadDefaultAlgorithmConfig(); cfg.transition_settle_sec=0; cfg.initial_has_ball=true;
@@ -27,7 +27,7 @@ void TestClockAndGoalReservationDrain() {
   cfg.line.line_stable_window=cfg.line.line_stable_min_hits=1;
   MissionController core(cfg);
   auto f=Frame(0);
-  f.line_centers={{320,450},{320,350},{320,250}};
+  f.line_centers={{320,450},{320,350},{320,250},{320,150}};
   auto r=core.Step(f);
   const auto a=r.command.action_id;
   assert(a!=0 && r.command.action==MissionAction::kLineStraightUnit);
@@ -94,7 +94,23 @@ void TestManualPerceptionStationaryRecovery() {
     d.detection.box={310,v*480-10,20,20}; return d;
   };
   PerceptionMissionFrameResult out;
-  for(int i=0;i<10;++i) { in.now_sec+=.1; in.detections={detection(.85)}; out=core.StepPerception(in); }
+  // Entry hits establish a candidate; they do not enter BALL. The subsequent
+  // stationary window must collect fresh 10/7 evidence for at least one second.
+  for(int i=0;i<cfg.ball.entry_min_hits;++i) {
+    in.now_sec+=.1;in.detections={detection(.85)};out=core.StepPerception(in);
+    assert(out.mission.active_mission==MissionType::kLine);
+    assert(out.mission.command.action_id==0);
+  }
+  assert(out.mission.post_motion_observing);
+  assert(out.mission.post_motion_window_frames==1);
+  const double candidate_observation_start=in.now_sec;
+  for(int i=0;i<40 && out.mission.ball.mode!=BallMode::kApproachTwoBeforeDown;++i) {
+    in.now_sec+=.1;in.detections={detection(.85)};out=core.StepPerception(in);
+    assert(out.mission.command.action_id==0);
+    if (in.now_sec-candidate_observation_start+1e-9<cfg.post_motion_observation_sec)
+      assert(out.mission.active_mission==MissionType::kLine);
+  }
+  assert(out.mission.active_mission==MissionType::kBall);
   assert(out.mission.ball.mode==BallMode::kApproachTwoBeforeDown);
   in.allow_new_body_actions=true; out=core.StepPerception(in);
   assert(out.mission.command.action==MissionAction::kStepForwardTwo);

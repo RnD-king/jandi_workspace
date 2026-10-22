@@ -97,7 +97,110 @@ static void CoarseTurnAlignment(double yaw_limit_deg) {
                                      : MissionAction::kStepForwardTwo));
   }
 }
+static GoalPoseObservation BoardPoseFromPhysicalRim(double rim_z,double phi) {
+  // Construct actual board edge positions from an independent tangent/normal
+  // geometry, then pass their pinhole pixels/depths through the real estimator.
+  const double radius=.1,half_width=.1;
+  const double bx=radius*std::sin(phi),bz=rim_z+radius*std::cos(phi);
+  const double lx=bx-half_width*std::cos(phi),lz=bz+half_width*std::sin(phi);
+  const double rx=bx+half_width*std::cos(phi),rz=bz-half_width*std::sin(phi);
+  const Intrinsics intrinsics{600,600,320,240};
+  const auto u=[](double x,double z) {return 320+600*x/z;};
+  const auto pose=EstimateGoalPoseFromBackboardDepths(u(bx,bz),bz,u(lx,lz),lz,u(rx,rz),rz,intrinsics);
+  assert(pose.valid && std::abs(pose.yaw_rad-phi)<1e-12);
+  return pose;
+}
+static void TiltedBackboardNormal() {
+  auto c=LoadDefaultAlgorithmConfig().goal;
+  c.stable_window=c.stable_min_hits=1;c.smooth_alpha=0;
+  c.hoop_radius_m=.1;c.throw_landing_x_m=0;c.throw_landing_z_m=.4;
+  c.position_tolerance_m=.01;c.shoot_yaw_limit_deg=20;
+  c.fine_adjust_start_z_m=.8;
+  c.fine_one_step_range_error_m=.15;c.fine_two_step_range_error_m=.30;
+  const CameraFeedback camera{CameraMode::kGoal,true};
+  for (double degrees : {-30.0,0.0,30.0}) {
+    const double phi=degrees*std::acos(-1.0)/180;
+    const auto pose=BoardPoseFromPhysicalRim(.4,phi);
+    GoalController fine(c,3);fine.StartTestExecute();
+    const auto shot=fine.Compute({},Board(),pose,640,480,0,true,camera,{});
+    // Tilting the board while holding its real rim fixed must not invent
+    // lateral/forward motion or a different waist angle.
+    assert(shot.action.action==MissionAction::kShoot && shot.action.target_yaw_deg==0);
+    const auto distant=BoardPoseFromPhysicalRim(.695,phi);
+    GoalController coarse(c,3);coarse.StartTestNear();
+    coarse.Compute({},{},{},640,480,0,true,camera,{});
+    auto r=coarse.Compute({},Board(),distant,640,480,.1,true,camera,{},true,distant.z_m);
+    assert(r.mode==GoalMode::kCoarseAdjust);
+    r=coarse.Compute({},Board(),distant,640,480,.2,true,camera,{});
+    // Actual radial excess is .295m: one step. The former +sin correction
+    // adds a spurious .10m lateral offset and incorrectly selects two steps.
+    assert(r.action.action==MissionAction::kStepForwardOne);
+  }
+}
+static void RotationBeforeTranslation() {
+  auto c=LoadDefaultAlgorithmConfig().goal;
+  c.stable_window=c.stable_min_hits=1;c.smooth_alpha=0;
+  c.hoop_radius_m=.1;c.throw_landing_x_m=-.08;c.throw_landing_z_m=.4;
+  c.shoot_yaw_limit_deg=20;c.position_tolerance_m=.06;
+  const double pi=std::acos(-1.0);
+  const CameraFeedback camera{CameraMode::kGoal,true};
+  const auto rim_at=[&](double degrees,double scale=1.0) {
+    const double a=degrees*pi/180;
+    return Pose(scale*(std::cos(a)*c.throw_landing_x_m-std::sin(a)*c.throw_landing_z_m),
+                scale*(std::sin(a)*c.throw_landing_x_m+std::cos(a)*c.throw_landing_z_m)+c.hoop_radius_m);
+  };
+  for (int sign : {-1,1}) {
+    GoalController goal(c,3);goal.StartTestExecute();
+    const auto pose=rim_at(sign*22);
+    // Preview can recommend a shot without entering SHOOT.
+    auto r=goal.Compute({},Board(),pose,640,480,0,true,camera,{},false);
+    assert(r.mode==GoalMode::kFineAdjust && r.action.action==MissionAction::kShoot);
+    assert(r.action.target_yaw_deg==sign*20);
+    r=goal.Compute({},Board(),pose,640,480,.1,true,camera,{});
+    assert(r.mode==GoalMode::kShoot && r.action.target_yaw_deg==sign*20);
+    assert(std::abs(r.shoot_yaw_rad-sign*20*pi/180)<1e-12);
+    // A later pose must not replace the accepted endpoint with the ideal
+    // +/-22 degree angle, or recompute a different throw command.
+    r=goal.Compute({},Board(),rim_at(-sign*10),640,480,.2,true,camera,{});
+    assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==sign*20);
+    assert(std::abs(r.shoot_yaw_rad-sign*20*pi/180)<1e-12);
+
+    GoalController too_far_sideways(c,3);too_far_sideways.StartTestExecute();
+    r=too_far_sideways.Compute({},Board(),rim_at(sign*40),640,480,0,true,camera,{});
+    assert(r.action.action==(sign<0 ? MissionAction::kRightSideStep : MissionAction::kLeftSideStep));
+  }
+  for (double half_degree : {-.5,.5}) {
+    GoalController tied(c,3);tied.StartTestExecute();
+    const auto r=tied.Compute({},Board(),rim_at(half_degree),640,480,0,true,camera,{});
+    assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==0);
+  }
+  // A fractional configured limit must not round up to a prohibited integer.
+  auto fractional=c;fractional.shoot_yaw_limit_deg=19.6;fractional.position_tolerance_m=.006;
+  GoalController within(fractional,3);within.StartTestExecute();
+  auto r=within.Compute({},Board(),rim_at(19.6),640,480,0,true,camera,{});
+  assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==19);
+  fractional.position_tolerance_m=.001;
+  GoalController outside(fractional,3);outside.StartTestExecute();
+  r=outside.Compute({},Board(),rim_at(19.6),640,480,0,true,camera,{});
+  assert(r.action.action!=MissionAction::kShoot);
+
+  // Rotation preserves radius; large range errors still need translation.
+  for (double scale : {.7,1.3}) {
+    GoalController goal(c,3);goal.StartTestExecute();
+    r=goal.Compute({},Board(),rim_at(0,scale),640,480,0,true,camera,{});
+    assert(r.action.action==(scale>1 ? MissionAction::kStepForwardHalf : MissionAction::kStepBack));
+  }
+  // A missing stationary window must not be bypassed by the new selector.
+  c.stable_window=c.stable_min_hits=2;
+  GoalController stable(c,3);stable.StartTestExecute();
+  r=stable.Compute({},Board(),rim_at(22),640,480,0,true,camera,{});
+  assert(r.action.action==MissionAction::kNone);
+  r=stable.Compute({},Board(),rim_at(22),640,480,.1,true,camera,{});
+  assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==20);
+}
 int main() {
+  TiltedBackboardNormal();
+  RotationBeforeTranslation();
   CoarseTurnAlignment(15);
   CoarseTurnAlignment(30);
   Intrinsics k{640,480,50,50};

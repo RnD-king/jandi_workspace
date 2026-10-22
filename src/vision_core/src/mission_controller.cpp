@@ -557,7 +557,7 @@ void MissionController::BeginDecisionObservation(
   decision_line_confidence_sum_ = 0.0;
   if (!camera_only) {
     // Never reuse target stability or O/H evidence from the moving action.
-    ball_association_tracker_.Reset();
+    if (!ball_target_locked_ && !ball_reacquiring_) ball_association_tracker_.Reset();
     hurdle_association_tracker_.Reset();
     backboard_association_tracker_.Reset();
     ball_controller_.ClearObservationHistory();
@@ -833,13 +833,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     const bool transition = action == MissionAction::kDefaultPoseMode ||
                             action == MissionAction::kWalkMode ||
                             action == MissionAction::kHurdle;
-    const bool intermediate_side =
+    const bool intermediate_fine =
         active_mission_ == MissionType::kBall &&
-        ball_result_.mode == BallMode::kFineSidePair &&
-        ball_controller_.FineSideActionsRemaining() > 1;
+        (ball_result_.mode == BallMode::kFineSidePair ||
+         ball_result_.mode == BallMode::kFineMotionRepeat) &&
+        ball_controller_.FineMotionActionsRemaining() > 1;
     const double delay = transition
                              ? config_.transition_settle_sec
-                             : (number >= 3 && number <= 6 && !intermediate_side
+                             : (number >= 3 && number <= 6 && !intermediate_fine
                                     ? config_.fine_motion_settle_sec
                                     : 0.0);
     settle_until_sec_ = std::max(settle_until_sec_, input.now_sec + delay);
@@ -1404,8 +1405,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
           config_.test_stage == 2),
         !(config_.test_mission != MissionType::kNone &&
           config_.test_stage == 3 && !test_execution_started_));
-    if (before == BallMode::kFineSidePair &&
-        ball_result_.mode != BallMode::kFineSidePair &&
+    if ((before == BallMode::kFineSidePair || before == BallMode::kFineMotionRepeat) &&
+        ball_result_.mode != before &&
         !input.manual_observation_control &&
         config_.post_motion_observation_sec > 0.0) {
       BeginDecisionObservation(input.now_sec, active_mission_, false, {});
@@ -1757,6 +1758,11 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
       ball_controller_.RecoveryObservationElapsed(now);
   output.ball.down_search_steps_remaining =
       ball_controller_.DownSearchStepsRemaining();
+  output.ball.fine_motion_action=ball_controller_.FineMotionAction();
+  output.ball.fine_motion_repetitions=ball_controller_.FineMotionRepetitions();
+  output.ball.fine_motion_remaining=ball_controller_.FineMotionActionsRemaining();
+  output.ball.fine_motion_prediction_valid=ball_result_.mode==BallMode::kFineMotionRepeat;
+  output.ball.fine_motion_predicted_center_px=ball_controller_.FineMotionPredictedCenter();
   output.hurdle.recovery_observations_completed =
       hurdle_controller_.RecoveryObservationsCompleted();
   output.hurdle.recovery_observation_elapsed_sec =
@@ -1784,6 +1790,29 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
           *observation.center_depth_m < lo || *observation.center_depth_m > hi)
         detection.confidence = -std::numeric_limits<double>::infinity();
     }
+    if (detection.class_id==config_.object_targets.ball_class_id ||
+        detection.class_id==config_.object_targets.hurdle_class_id) {
+      const auto& cfg=config_.object_targets;
+      ObjectFilterDiagnostic diag;
+      diag.class_id=detection.class_id;
+      diag.center={detection.box.x+0.5*detection.box.width,detection.box.y+0.5*detection.box.height};
+      diag.aspect_ratio=detection.box.height>0 ? detection.box.width/detection.box.height : 0;
+      diag.aspect_passed=cfg.AcceptAspect(detection);
+      diag.depth_valid_pixels=observation.depth_valid_pixels;
+      if(observation.center_depth_m && std::isfinite(*observation.center_depth_m) && *observation.center_depth_m>0)
+        diag.depth_m=observation.center_depth_m;
+      const bool ball=detection.class_id==cfg.ball_class_id;
+      const bool enabled=ball ? cfg.ball_depth_enabled : cfg.hurdle_depth_enabled;
+      const auto mode=input.camera_feedback.actual_mode;
+      if(enabled && (mode==CameraMode::kForward || mode==CameraMode::kDown)) {
+        const double lo=ball ? (mode==CameraMode::kDown ? cfg.ball_down_min_depth_m : cfg.ball_forward_min_depth_m) : cfg.hurdle_min_depth_m;
+        const double hi=ball ? (mode==CameraMode::kDown ? cfg.ball_down_max_depth_m : cfg.ball_forward_max_depth_m) : cfg.hurdle_max_depth_m;
+        diag.depth_passed=diag.depth_m ? (*diag.depth_m>=lo && *diag.depth_m<=hi) :
+            (ball ? cfg.ball_allow_missing_depth : cfg.hurdle_allow_missing_depth);
+      }
+      if(!diag.depth_passed) detection.confidence=-std::numeric_limits<double>::infinity();
+      output.perception.object_filter_diagnostics.push_back(diag);
+    }
     detections.push_back(detection);
   }
   output.perception.raw_line_centers =
@@ -1794,7 +1823,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   // associating it to a raw mid-walk position.
   if (input.manual_observation_control && input.manual_ready_mean) {
     if (active_mission_ == MissionType::kBall) {
-      ball_association_tracker_.Reset();
+      if (!ball_target_locked_ && !ball_reacquiring_) ball_association_tracker_.Reset();
       ball_controller_.UseNextObservationAsMean();
     } else if (active_mission_ == MissionType::kGoal) {
       backboard_association_tracker_.Reset();
@@ -1812,6 +1841,10 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   if (camera_moving || object_tracking_camera_moving_ ||
       current_mode != object_tracking_camera_mode_) {
     ball_association_tracker_.Reset();
+    ball_candidate_tracker_.Reset();
+    ball_target_id_=0;
+    ball_target_locked_=false;
+    ball_reacquiring_=config_.ball_candidate_tracking.enabled && active_mission_==MissionType::kBall;
     backboard_association_tracker_.Reset();
     hurdle_association_tracker_.Reset();
   }
@@ -1837,22 +1870,88 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   const auto ball_candidates = ExtractObjectTargetCandidates(
       detections, config_.object_targets.ball_class_id,
       config_.object_targets.ball_confidence, config_.object_targets);
+  const bool manual_ball_identity_valid=!input.manual_ready_mean || !config_.ball_candidate_tracking.enabled ||
+      active_mission_!=MissionType::kBall || (input.ball_target_id && input.ball_target_id==ball_target_id_);
   ObjectAssociationSelection ball;
-  if (camera_moving) {
-    // No candidates may become tracked targets until the camera settles.
+  std::optional<BallCandidateTrack> entry_track;
+  const auto mode_before=ball_result_.mode;
+  const bool recovery_mode=active_mission_==MissionType::kBall &&
+      (mode_before==BallMode::kBallRecoveryDown || mode_before==BallMode::kBallRecoveryForward ||
+       mode_before==BallMode::kBallRecoveryWalkTurn || mode_before==BallMode::kDownSearch);
+  const bool candidate_search=candidate_.mission==MissionType::kBall &&
+      (candidate_.phase==CandidatePhase::kSearch || candidate_.phase==CandidatePhase::kRestore);
+  const bool acquisition_episode=recovery_mode || candidate_search;
+  const bool needs_initial_target=active_mission_==MissionType::kBall && !ball_target_locked_ &&
+      !ball_reacquiring_ && ball_target_id_==0 && mode_before!=BallMode::kVerifyPickupObservation;
+  if (config_.ball_candidate_tracking.enabled &&
+      ((acquisition_episode && !ball_recovery_was_active_ && !ball_reacquiring_) || needs_initial_target)) {
+    ball_reacquiring_=true; ball_target_locked_=false; ball_target_id_=0;
+    ball_candidate_tracker_.Reset(); ball_association_tracker_.Reset();
+  }
+  ball_recovery_was_active_=acquisition_episode;
+  const auto ball_reference=ball_association_tracker_.Reference();
+  if (camera_moving || !manual_ball_identity_valid) {
+    // No intermediate camera frame or foreign READY mean can update IDs/hits.
   } else if (active_mission_ == MissionType::kBall &&
              ball_result_.mode == BallMode::kVerifyPickupObservation) {
-    // Verification asks whether a ball remains, not whether its old identity
-    // matches. Reset so the next normal frame can acquire the new position.
-    ball_association_tracker_.Reset();
+    ball_target_locked_=ball_reacquiring_=false; ball_target_id_=0;
+    ball_candidate_tracker_.Reset(); ball_association_tracker_.Reset();
     if (!ball_candidates.empty()) {
-      const auto best = std::max_element(ball_candidates.begin(),
-                                         ball_candidates.end(), lower_raw_rank);
-      ball = {best->target, best->detection_index};
+      const auto best=std::max_element(ball_candidates.begin(),ball_candidates.end(),lower_raw_rank);
+      ball={best->target,best->detection_index};
+    }
+  } else if(config_.ball_candidate_tracking.enabled &&
+      ((active_mission_==MissionType::kLine && candidate_.phase==CandidatePhase::kNone && !has_ball_) || ball_reacquiring_)) {
+    const bool entry=active_mission_==MissionType::kLine && candidate_.phase==CandidatePhase::kNone;
+    ball_candidate_tracker_.Update(ball_candidates,config_.ball_candidate_tracking,config_.object_association,
+        config_.ball.stable_window,entry ? config_.ball.upper_acquire_v_px : std::numeric_limits<double>::infinity());
+    const auto* chosen=ball_reacquiring_ ? ball_candidate_tracker_.Find(ball_target_id_) : nullptr;
+    if(!chosen) chosen=ball_candidate_tracker_.Best();
+    if(chosen) {
+      entry_track=*chosen;
+      if(ball_reacquiring_ && ball_target_id_!=chosen->id) {
+        ball_target_id_=chosen->id;
+        ball_controller_.InvalidateTargetIdentity();
+        moving_object_samples_.clear(); moving_object_ready_mean_.reset();
+        if(decision_observation_active_ && decision_observation_mission_==MissionType::kBall) {
+          std::fill(decision_object_hits_.begin(),decision_object_hits_.end(),false);
+          decision_object_weight_=0; decision_last_target_.reset();
+          decision_target_u_sum_=decision_target_v_sum_=0;
+          decision_rect_u_sum_=decision_rect_v_sum_=0;
+          decision_target_count_=0; decision_last_seen_sec_=0;
+        }
+      }
+      if(chosen->detection_index) ball={chosen->target,chosen->detection_index};
     }
   } else {
-    ball = ball_association_tracker_.Update(ball_candidates, input.image_width,
-                                            input.image_height);
+    // Locked targets retain the last reference after missing_frame_limit;
+    // only explicit recovery/camera episodes may acquire another identity.
+    if(input.manual_ready_mean && input.ball_target_id && input.ball_target_id==ball_target_id_ && ball_candidates.size()==1)
+      ball_association_tracker_.Seed(ball_candidates.front().target);
+    if(!(input.manual_ready_mean && input.ball_target_id && ball_target_locked_ && input.ball_target_id!=ball_target_id_))
+      ball=ball_association_tracker_.Update(ball_candidates,input.image_width,input.image_height,!ball_target_locked_);
+  }
+  output.perception.ball_tracking_reason=camera_moving ? "camera moving" :
+      !manual_ball_identity_valid ? "foreign READY identity" :
+      mode_before==BallMode::kVerifyPickupObservation ? "pickup verification bypass" :
+      ball_reacquiring_ ? "recovery/camera revalidation" :
+      ball_target_locked_ ? (ball.target ? "locked match" :
+          (ball_candidates.empty() ? "no detection" : "identity gate rejected")) : "per-ID entry evidence";
+  if(ball_reference && !ball_candidates.empty()) {
+    const ObjectTargetCandidate* nearest=nullptr;
+    double best=std::numeric_limits<double>::infinity();
+    const double diagonal=std::max(1.0,std::hypot(input.image_width,input.image_height));
+    for(const auto& candidate:ball_candidates) {
+      const double d=ObjectCenterDistancePixels(*ball_reference,candidate.target);
+      const double size=ObjectSizeLogRatio(*ball_reference,candidate.target);
+      const double score=config_.object_association.center_distance_weight*d/diagonal+
+          config_.object_association.size_change_weight*size;
+      if(score<best) {best=score;nearest=&candidate;}
+    }
+    if(nearest) {
+      output.perception.ball_match_distance_px=ObjectCenterDistancePixels(*ball_reference,nearest->target);
+      output.perception.ball_match_size_log_ratio=ObjectSizeLogRatio(*ball_reference,nearest->target);
+    }
   }
   const auto board =
       camera_moving
@@ -1879,6 +1978,10 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   selection.targets.hurdle = hurdle.target;
   selection.indices.hurdle = hurdle.detection_index;
   output.perception.targets = selection.targets;
+  if(selection.indices.ball && *selection.indices.ball<input.detections.size())
+    output.perception.ball_center_depth_m=input.detections[*selection.indices.ball].center_depth_m;
+  if(selection.indices.hurdle && *selection.indices.hurdle<input.detections.size())
+    output.perception.hurdle_center_depth_m=input.detections[*selection.indices.hurdle].center_depth_m;
 
   if (input.enable_imu_rectification && input.imu_valid) {
     output.perception.line_centers =
@@ -1937,17 +2040,29 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   MissionFrameInput prepared;
   prepared.line_centers = output.perception.line_centers;
   prepared.ball_target = output.perception.targets.ball;
-  prepared.ball_entry_detected = false;
-  const ObjectTargetCandidate *entry_candidate = nullptr;
-  if (!camera_moving)
-    for (const auto &candidate : ball_candidates) {
-      if (candidate.target.center_px.v <= config_.ball.upper_acquire_v_px &&
-          (!entry_candidate || lower_raw_rank(*entry_candidate, candidate)))
-        entry_candidate = &candidate;
+  if(config_.ball_candidate_tracking.enabled && active_mission_==MissionType::kLine && candidate_.phase==CandidatePhase::kNone) {
+    prepared.ball_entry_track_hits=entry_track ? entry_track->HitCount() : 0;
+    prepared.ball_entry_track_frames=entry_track ? static_cast<int>(entry_track->hits.size()) : 0;
+    prepared.ball_entry_detected=entry_track && entry_track->detection_index && entry_track->target.center_px.v<=config_.ball.upper_acquire_v_px;
+    if(entry_track) prepared.ball_entry_center_u=entry_track->MeanU();
+  } else if(config_.ball_candidate_tracking.enabled && candidate_.mission==MissionType::kBall) {
+    // During draining, only the pinned identity may update search direction;
+    // an unrelated raw detection must not overwrite the selected A evidence.
+    prepared.ball_entry_detected=ball.target && ball.target->center_px.v<=config_.ball.upper_acquire_v_px;
+    if(ball.target) prepared.ball_entry_center_u=ball.target->center_px.u;
+  } else {
+    prepared.ball_entry_detected = false;
+    const ObjectTargetCandidate *entry_candidate = nullptr;
+    if (!camera_moving)
+      for (const auto &candidate : ball_candidates) {
+        if (candidate.target.center_px.v <= config_.ball.upper_acquire_v_px &&
+            (!entry_candidate || lower_raw_rank(*entry_candidate, candidate)))
+          entry_candidate = &candidate;
+      }
+    if (entry_candidate) {
+      prepared.ball_entry_detected = true;
+      prepared.ball_entry_center_u = entry_candidate->target.center_px.u;
     }
-  if (entry_candidate) {
-    prepared.ball_entry_detected = true;
-    prepared.ball_entry_center_u = entry_candidate->target.center_px.u;
   }
   prepared.hurdle_target = output.perception.targets.hurdle;
   prepared.goal_target = output.perception.targets.goal;
@@ -1976,7 +2091,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   prepared.allow_new_line_plan = input.allow_new_line_plan;
   prepared.allow_new_commands = input.allow_new_commands;
   const bool manual_evidence_valid =
-      input.manual_object_hits.size() == 10 &&
+      manual_ball_identity_valid && input.manual_object_hits.size() == 10 &&
       std::count(input.manual_object_hits.begin(),
                  input.manual_object_hits.end(), true) >= 7;
   prepared.allow_new_body_actions =
@@ -1989,12 +2104,38 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   prepared.begin_manual_observation = input.begin_manual_observation;
   prepared.manual_ready_mean = input.manual_ready_mean;
   prepared.manual_object_hits = input.manual_object_hits;
+  if(!manual_ball_identity_valid) std::fill(prepared.manual_object_hits.begin(),prepared.manual_object_hits.end(),false);
   prepared.manual_pose_hits = input.manual_pose_hits;
   prepared.manual_near_hits = input.manual_near_hits;
   prepared.line_decision_guide_override = input.line_decision_guide_override;
   // Line robot-reference is independent from the camera optical cx.
   std::optional<double> center = config_.line_features.image_center_u;
   output.mission = StepWithLineImageCenter(prepared, center);
+  if(config_.ball_candidate_tracking.enabled) {
+    const bool selected_ball=candidate_.mission==MissionType::kBall || active_mission_==MissionType::kBall;
+    if(selected_ball && entry_track && !ball_target_locked_ &&
+        ((!ball_reacquiring_ && candidate_.mission==MissionType::kBall) ||
+         (active_mission_==MissionType::kBall && ball_result_.mode!=BallMode::kWaitCameraDown &&
+          ball_result_.mode!=BallMode::kDownSearch && ball_result_.mode!=BallMode::kBallRecoveryDown &&
+          ball_result_.mode!=BallMode::kBallRecoveryForward && ball_result_.mode!=BallMode::kBallRecoveryWalkTurn &&
+          ball_result_.mode!=BallMode::kVerifyPickupObservation))) {
+      ball_target_id_=entry_track->id; ball_target_locked_=true; ball_reacquiring_=false;
+      ball_association_tracker_.Seed(entry_track->target);
+      ball_candidate_tracker_.Reset();
+      if(candidate_.mission==MissionType::kBall) ball_controller_.ClearEntryEvidence();
+    }
+    if(!selected_ball && ball_target_locked_) {
+      ball_target_locked_=ball_reacquiring_=false; ball_target_id_=0;
+      ball_candidate_tracker_.Reset(); ball_association_tracker_.Reset();
+    }
+  }
+  output.perception.ball_tracks=ball_candidate_tracker_.Tracks();
+  if(entry_track && output.perception.ball_tracks.empty()) output.perception.ball_tracks.push_back(*entry_track);
+  output.perception.ball_target_id=ball_target_id_;
+  output.perception.ball_target_locked=ball_target_locked_;
+  output.perception.ball_reacquiring=ball_reacquiring_;
+  output.perception.ball_missing_frames=ball_target_locked_ ? ball_association_tracker_.MissingFrames() :
+      (entry_track ? entry_track->missing_frames : 0);
   return output;
 }
 
@@ -2015,6 +2156,7 @@ int MissionController::RepeatScope() const {
   if (active_mission_ == MissionType::kBall) {
     if (ball_result_.mode == BallMode::kMidTurnBeforeRecovery ||
         ball_result_.mode == BallMode::kFineSidePair ||
+        ball_result_.mode == BallMode::kFineMotionRepeat ||
         ball_result_.mode == BallMode::kDownSearch ||
         ball_result_.mode == BallMode::kPostPickupBackAway ||
         ball_result_.mode == BallMode::kPostPickupLineRecovery)
@@ -2165,6 +2307,9 @@ void MissionController::SetLivePerceptionTuning(
   auto updated = config_;
   updated.ball.approach_direct_down_v_px =
       candidate.ball.approach_direct_down_v_px;
+  updated.ball.approach_left_top_u_px = candidate.ball.approach_left_top_u_px;
+  updated.ball.approach_right_top_u_px = candidate.ball.approach_right_top_u_px;
+  updated.ball.fine_motion = candidate.ball.fine_motion;
   updated.ball.down_search_max_steps = candidate.ball.down_search_max_steps;
   updated.ball.down_search_inter_action_hold_sec =
       candidate.ball.down_search_inter_action_hold_sec;
@@ -2179,25 +2324,12 @@ void MissionController::SetLivePerceptionTuning(
   updated.line_detection.min_box_width = candidate.line_detection.min_box_width;
   updated.line_detection.min_box_height =
       candidate.line_detection.min_box_height;
-  updated.object_targets.ball_min_box_width =
-      candidate.object_targets.ball_min_box_width;
-  updated.object_targets.ball_min_box_height =
-      candidate.object_targets.ball_min_box_height;
-  updated.object_targets.goal_min_box_width =
-      candidate.object_targets.goal_min_box_width;
-  updated.object_targets.goal_min_box_height =
-      candidate.object_targets.goal_min_box_height;
-  updated.object_targets.backboard_min_box_width =
-      candidate.object_targets.backboard_min_box_width;
-  updated.object_targets.backboard_min_box_height =
-      candidate.object_targets.backboard_min_box_height;
-  updated.object_targets.hurdle_min_box_width =
-      candidate.object_targets.hurdle_min_box_width;
-  updated.object_targets.hurdle_min_box_height =
-      candidate.object_targets.hurdle_min_box_height;
+  updated.object_targets=candidate.object_targets;
+  updated.ball_candidate_tracking=candidate.ball_candidate_tracking;
   ValidateAlgorithmConfig(updated);
   const bool changed =
-      !config_.object_targets.SameBoxFilters(updated.object_targets) ||
+      !config_.object_targets.SamePerceptionFilters(updated.object_targets) ||
+      !(config_.ball_candidate_tracking==updated.ball_candidate_tracking) ||
       config_.line_detection.min_box_width !=
           updated.line_detection.min_box_width ||
       config_.line_detection.min_box_height !=
@@ -2206,6 +2338,11 @@ void MissionController::SetLivePerceptionTuning(
   ball_controller_.UpdateTuning(config_.ball);
   hurdle_controller_.UpdateTuning(config_.hurdle);
   if (changed) {
+    if(!config_.ball_candidate_tracking.enabled) {
+      ball_target_locked_=ball_reacquiring_=false; ball_association_tracker_.Reset();
+    }
+    ball_candidate_tracker_.Reset();
+    if(!ball_target_locked_) ball_target_id_=0;
     ClearObservationEvidence();
     ball_controller_.InvalidateDetectionEvidence();
     hurdle_controller_.InvalidateDetectionEvidence();
@@ -2235,6 +2372,7 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.hurdle = candidate.hurdle;
   updated.goal = candidate.goal;
   updated.object_targets = candidate.object_targets;
+  updated.ball_candidate_tracking=candidate.ball_candidate_tracking;
   updated.line_detection.min_box_width = candidate.line_detection.min_box_width;
   updated.line_detection.min_box_height =
       candidate.line_detection.min_box_height;
@@ -2245,7 +2383,8 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
       candidate.backboard_depth_strip_width_px;
   ValidateAlgorithmConfig(updated);
   const bool box_filter_changed =
-      !config_.object_targets.SameBoxFilters(updated.object_targets) ||
+      !config_.object_targets.SamePerceptionFilters(updated.object_targets) ||
+      !(config_.ball_candidate_tracking==updated.ball_candidate_tracking) ||
       config_.line_detection.min_box_width !=
           updated.line_detection.min_box_width ||
       config_.line_detection.min_box_height !=
@@ -2275,6 +2414,11 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   goal_controller_.UpdateTuning(config_.goal);
   hurdle_controller_.UpdateTuning(config_.hurdle);
   if (box_filter_changed) {
+    if(!config_.ball_candidate_tracking.enabled) {
+      ball_target_locked_=ball_reacquiring_=false; ball_association_tracker_.Reset();
+    }
+    ball_candidate_tracker_.Reset();
+    if(!ball_target_locked_) ball_target_id_=0;
     ClearObservationEvidence();
     ball_controller_.InvalidateDetectionEvidence();
     hurdle_controller_.InvalidateDetectionEvidence();
@@ -2311,7 +2455,9 @@ void MissionController::ClearObservationEvidence() {
   moving_object_samples_.clear();
   moving_object_ready_mean_.reset();
   line_stability_history_.clear();
-  ball_association_tracker_.Reset();
+  if(!ball_target_locked_ && !ball_reacquiring_) {
+    ball_association_tracker_.Reset(); ball_candidate_tracker_.Reset(); ball_target_id_=0;
+  }
   hurdle_association_tracker_.Reset();
   backboard_association_tracker_.Reset();
   ball_controller_.ClearObservationHistory();
@@ -2400,6 +2546,8 @@ void MissionController::Reset(bool preserve_action_ids) {
   hurdle_controller_.Reset();
   goal_controller_.Reset();
   command_coordinator_.Reset(preserve_action_ids);
+  ball_candidate_tracker_.Reset(); ball_target_id_=0;
+  ball_target_locked_=ball_reacquiring_=ball_recovery_was_active_=false;
   ball_association_tracker_.Reset();
   backboard_association_tracker_.Reset();
   hurdle_association_tracker_.Reset();

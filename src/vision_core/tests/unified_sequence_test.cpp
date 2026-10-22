@@ -184,11 +184,11 @@ void TestAlternatingBoundedRecovery() {
   for(int i=0;i<11;++i)right.Tick();
   assert(right.out.recovery_failed);
   assert(right.out.command.action_id==0 && right.permit==0);
-  right.in.line_centers={{420,450},{420,350},{420,250}};
+  right.in.line_centers={{420,450},{420,350},{420,250},{420,150}};
   for(int i=0;i<10;++i)right.Tick();
   assert(right.out.recovery_failed && right.out.command.action_id==0);
   for(int i=0;i<9;++i)found_on_last.Tick(true);
-  found_on_last.in.line_centers={{420,450},{420,350},{420,250}};
+  found_on_last.in.line_centers={{420,450},{420,350},{420,250},{420,150}};
   for(int i=0;i<7;++i)found_on_last.Tick();
   assert(found_on_last.out.command.action_id!=0);
   found_on_last.Tick(true);
@@ -241,7 +241,7 @@ void TestGoalForwardTrial() {
   assert(t.out.command.action==MissionAction::kNone);
   t.in.camera_feedback={CameraMode::kForward,true}; t.Tick();
   t.Commit(); assert(t.out.command.action==MissionAction::kTurnLeft);
-  t.in.line_centers={{420,450},{420,350},{420,250}};
+  t.in.line_centers={{420,450},{420,350},{420,250},{420,150}};
   for(int i=0;i<7;++i)t.Tick(); t.Tick(true);
   assert(t.out.recovery_verifying && !t.out.trial_complete);
   for(int i=0;i<11;++i)t.Tick();

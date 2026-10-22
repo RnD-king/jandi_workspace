@@ -21,6 +21,9 @@ line_perception_node:
     imu_abs_limit_deg: 45.0
     max_depth_age_sec: 0.20
 
+    # 디버깅 토픽 발행만 제어한다. 실제 저장은 ~/ros2_bag/record.sh에서 선택.
+    rosbag: false
+    rosbag_fps: 10.0
     show_debug_view: false
     show_yolo_debug_view: false
     enable_ball_controller: true
@@ -59,5 +62,26 @@ line_p2p_tuning_node:
     use_imu_rectification: false
     assume_zero_imu: false
     imu_abs_limit_deg: 45.0
+    # 디버깅 토픽 발행만 제어한다. 실제 저장은 ~/ros2_bag/record.sh에서 선택.
+    rosbag: false
+    rosbag_fps: 10.0
     show_debug_view: true
     line_tuning_observation_sec: 1.5
+
+# 모든 튜닝 실행 파일에도 동일한 녹화 기본값을 적용한다.
+perception_tuning_node:
+  ros__parameters:
+    rosbag: false
+    rosbag_fps: 10.0
+ball_tuning_node:
+  ros__parameters:
+    rosbag: false
+    rosbag_fps: 10.0
+hurdle_tuning_node:
+  ros__parameters:
+    rosbag: false
+    rosbag_fps: 10.0
+goal_tuning_node:
+  ros__parameters:
+    rosbag: false
+    rosbag_fps: 10.0

@@ -1,7 +1,9 @@
+#include "vision/debug_bag_publisher.hpp"
 #include "vision/mission_debug_view.hpp"
 #include "vision/debug_guides.hpp"
 #include "vision/mission_parameters.hpp"
 #include "vision/backboard_depth.hpp"
+#include "vision/object_depth.hpp"
 // vision/src/perception_tuning_node.cpp
 //
 // 1. perception_tuning_node.cpp
@@ -177,6 +179,7 @@ public:
     declare_parameter<bool>("show_debug_view", true);
     // YOLO의 필터 전 raw detection bbox를 별도 창에서 확인할 때만 켠다.
     declare_parameter<bool>("show_yolo_debug_view", false);
+    debug_bag_ = std::make_unique<vision::DebugBagPublisher>(*this);
     declare_parameter<double>("inference_hz", 15.0);
     declare_parameter<int>("max_centers", algorithm_defaults.line_features.max_centers);
     // Runtime-only tuning: values are intentionally not written to YAML.
@@ -986,7 +989,8 @@ private:
       // speculative FSM on a zero-dimension/default PerceptionFrameInput.
       std::optional<vision_core::PerceptionMissionFrameResult> updated;
       const bool depth_observation_changed =
-          !candidate.object_targets.SameBoxFilters(tuning_config_.object_targets) ||
+          !candidate.object_targets.SamePerceptionFilters(tuning_config_.object_targets) ||
+          !(candidate.ball_candidate_tracking==tuning_config_.ball_candidate_tracking) ||
           candidate.line_detection.min_box_width != tuning_config_.line_detection.min_box_width ||
           candidate.line_detection.min_box_height != tuning_config_.line_detection.min_box_height ||
           candidate.backboard_depth_strip_width_px != backboard_depth_strip_width_px_ ||
@@ -1033,7 +1037,7 @@ private:
   }
 
   std::string RepeatLabel(int scope) const {
-    return vision::DebugRepeatLabel(scope,tuning_config_);
+    return vision::DebugRepeatLabel(scope,tuning_config_,&preview_result_.mission.ball);
   }
   bool IsReadyWalk(vision_core::MissionAction action) const {
     using vision_core::MissionAction;
@@ -1133,6 +1137,14 @@ private:
     for (std::size_t j = window.size() - 10; j < window.size(); ++j)
       if (target_of(*window[j])) ++last_ten_hits;
     if (last_ten_hits < 7) return std::nullopt;
+    if(mission==vision_core::MissionType::kBall && tuning_config_.ball_candidate_tracking.enabled) {
+      const auto id=window.back()->prepared.ball_target_id;
+      if(!id) return std::nullopt;
+      for(const auto* sample:window) if(sample->prepared.targets.ball && sample->prepared.ball_target_id!=id)
+        return std::nullopt;
+      result.ball_target_id=id;
+    }
+
     result.manual_object_hits.clear();
     result.manual_pose_hits.clear();
     result.manual_near_hits.clear();
@@ -1163,6 +1175,10 @@ private:
       sx += weight*obj->box_px.x; sy += weight*obj->box_px.y;
       sw += weight*obj->box_px.width; sh += weight*obj->box_px.height;
       confidence += weight*obj->confidence;
+      if(mission==vision_core::MissionType::kBall || mission==vision_core::MissionType::kHurdle) {
+        const auto depth=mission==vision_core::MissionType::kBall ? sample->prepared.ball_center_depth_m : sample->prepared.hurdle_center_depth_m;
+        if(depth && std::isfinite(*depth) && *depth>0) { center_depth+=*depth; ++center_hits; }
+      }
       if (mission == vision_core::MissionType::kGoal) {
         const auto &prepared = sample->prepared;
         if (prepared.backboard_center_depth_m &&
@@ -1265,8 +1281,46 @@ private:
     return view;
   }
 
-  bool ShouldDrawDebugView() const {
-    return show_debug_view_ || show_yolo_debug_view_;
+  void DisplayDebugFrame(const std_msgs::msg::Header &header,
+                         const cv::Mat &bgr, const std::vector<Detection> &dets,
+                         const cv::Mat &aligned_depth,
+                         const vision_core::PerceptionMissionFrameResult &result,
+                         bool imu_ready, double roll, double pitch) {
+    const auto request = debug_bag_->RequestFrame();
+    if (!show_debug_view_ && !show_yolo_debug_view_ && !request) return;
+    vision::MissionDebugImages views;
+    cv::Mat yolo_view;
+    try {
+      if (show_yolo_debug_view_ || request.yolo) {
+        yolo_view = bgr.clone();
+        DrawYoloDetections(yolo_view, dets);
+      }
+      if (show_debug_view_ || request.image || request.panel) {
+        views = vision::RenderMissionDebug(bgr, dets, aligned_depth, tuning_config_,
+            result.perception, result.mission, camera_feedback_, camera_intrinsics_,
+            DebugContext(imu_ready, roll, pitch));
+      }
+      debug_bag_->Submit(request, header, views.image, views.panel, yolo_view);
+    } catch (const cv::Exception &error) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                          "[VIEW] debug render error: %s", error.what());
+      return;
+    }
+    // GUI failure must not disable headless rosbag publication.
+    if (show_debug_view_ || show_yolo_debug_view_) {
+      try {
+        if (show_yolo_debug_view_) cv::imshow(kYoloDebugWindowName, yolo_view);
+        if (show_debug_view_) {
+          cv::imshow(kDebugWindowName, views.image);
+          cv::imshow(kStateWindowName, views.panel);
+        }
+        cv::waitKey(1);
+      } catch (const cv::Exception &error) {
+        show_debug_view_ = false;
+        show_yolo_debug_view_ = false;
+        RCLCPP_WARN(get_logger(), "[VIEW] debug window disabled: %s", error.what());
+      }
+    }
   }
   static double Clamp(double v, double lo, double hi) {
     return std::max(lo, std::min(hi, v));
@@ -1297,6 +1351,12 @@ private:
         observation.right_depth_m=vision::MedianRegionMeters(depth,region.right);
         if (!region.left.empty()) observation.left_depth_u_px=region.left_u;
         if (!region.right.empty()) observation.right_depth_u_px=region.right_u;
+      }
+      if ((detection.class_id==ball_class_id_ && tuning_config_.object_targets.ball_depth_enabled) ||
+          (detection.class_id==hurdle_class_id_ && tuning_config_.object_targets.hurdle_depth_enabled)) {
+        const auto sample=vision::SampleObjectCenterDepth(depth,detection.box,tuning_config_.object_targets.depth_roi_size_px);
+        observation.center_depth_m=sample.median_m;
+        observation.depth_valid_pixels=sample.valid_pixels;
       }
       output.push_back(observation);
     }
@@ -1822,12 +1882,14 @@ private:
       return;
     }
     // YOLO first: subscribe to depth continuously but convert/read it only
-    // when an actual BACKBOARD candidate exists. Keep RGB/Depth timestamp
+    // when a BACKBOARD or enabled BALL/HURDLE candidate exists. Keep RGB/Depth timestamp
     // and image-size gates identical in AUTO and MANUAL executables.
     cv::Mat aligned_depth;
     const bool need_board_depth = std::any_of(
         dets.begin(), dets.end(), [this](const Detection &d) {
-          return d.class_id == backboard_class_id_;
+          return d.class_id == backboard_class_id_ ||
+              (d.class_id==ball_class_id_ && tuning_config_.object_targets.ball_depth_enabled) ||
+              (d.class_id==hurdle_class_id_ && tuning_config_.object_targets.hurdle_depth_enabled);
         });
     if (need_board_depth && run_state_ != RunState::kWaitStart &&
         run_state_ != RunState::kPaused) {
@@ -1856,26 +1918,8 @@ private:
         run_state_ == RunState::kResettingCamera) {
       // Disarmed/paused/reset-camera: freeze MissionController. RESET may
       // retransmit only its already assigned FORWARD CameraCommand ID.
-      if (show_debug_view_ || show_yolo_debug_view_) {
-        try {
-          if (show_yolo_debug_view_) {
-            cv::Mat raw_view = bgr.clone();
-            DrawYoloDetections(raw_view, dets);
-            cv::imshow(kYoloDebugWindowName, raw_view);
-          }
-          if (show_debug_view_) {
-            const auto views=vision::RenderMissionDebug(bgr,dets,aligned_depth,tuning_config_,
-              last_debug_result_.perception,last_debug_result_.mission,camera_feedback_,camera_intrinsics_,
-              DebugContext(imu_ready_snapshot,roll,pitch));
-          cv::imshow(kDebugWindowName,views.image);
-          cv::imshow(kStateWindowName,views.panel);
-          }
-          cv::waitKey(1);
-        } catch (const cv::Exception &error) {
-          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                               "[VIEW] disarmed debug error: %s", error.what());
-        }
-      }
+      DisplayDebugFrame(msg->header, bgr, dets, aligned_depth, last_debug_result_,
+                        imu_ready_snapshot, roll, pitch);
       UpdatePerfOverlayOncePerSecond(
           static_cast<double>(dt_yolo_us) * 1e-6,
           std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
@@ -2294,28 +2338,8 @@ private:
 
     last_debug_result_=perception_result;
     // ---- 시각화 ----
-    if (ShouldDrawDebugView()) {
-      try {
-        if (show_yolo_debug_view_) {
-          cv::Mat yolo_vis = bgr.clone();
-          DrawYoloDetections(yolo_vis, dets);
-          cv::imshow(kYoloDebugWindowName, yolo_vis);
-        }
-
-        if (show_debug_view_) {
-          const auto views=vision::RenderMissionDebug(bgr,dets,aligned_depth,tuning_config_,
-              perception_result.perception,perception_result.mission,camera_feedback_,camera_intrinsics_,
-              DebugContext(imu_ready_snapshot,roll,pitch));
-          cv::imshow(kDebugWindowName,views.image);
-          cv::imshow(kStateWindowName,views.panel);
-        }
-        cv::waitKey(1);
-      } catch (const cv::Exception &e) {
-        show_debug_view_ = false;
-        show_yolo_debug_view_ = false;
-        RCLCPP_WARN(get_logger(), "[VIEW] debug window disabled: %s", e.what());
-      }
-    }
+    DisplayDebugFrame(msg->header, bgr, dets, aligned_depth, perception_result,
+                      imu_ready_snapshot, roll, pitch);
 
     const auto t_end = std::chrono::steady_clock::now();
     const auto dt_loop_us = std::chrono::duration_cast<std::chrono::microseconds>(t_end - t0).count();
@@ -2486,6 +2510,7 @@ private:
   float goal_conf_thres_{0.60f};
   float backboard_conf_thres_{0.60f};
   float hurdle_conf_thres_{0.60f};
+  std::unique_ptr<vision::DebugBagPublisher> debug_bag_;
   bool show_debug_view_{false};
   bool show_yolo_debug_view_{false};
   double inference_hz_{5.0};

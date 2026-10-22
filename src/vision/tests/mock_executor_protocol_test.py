@@ -146,7 +146,10 @@ class GoalTrialParameterWiringTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         for name in ('line_perception_node.cpp', 'perception_tuning_node.cpp'):
             src = (root / 'src' / name).read_text()
-            self.assertEqual(src.count('vision::RenderMissionDebug('), 2)
+            self.assertEqual(src.count('vision::RenderMissionDebug('), 1)
+            self.assertIn('aligned_depth, last_debug_result_,', src)
+            self.assertIn('aligned_depth, perception_result,', src)
+            self.assertEqual(src.count('DisplayDebugFrame(msg->header,'), 2)
             self.assertIn('vision::DrawRawDebugDetections(', src)
             self.assertNotIn('void DrawConfirmedDetections(', src)
             self.assertNotIn('draw_decision_center', src)

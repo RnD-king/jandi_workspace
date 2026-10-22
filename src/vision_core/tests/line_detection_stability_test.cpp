@@ -8,7 +8,7 @@
 using namespace vision_core;
 int main() {
   FeatureConfig c{8,3,50,5,20,3,10};
-  auto f=ComputeLineFeatures({{50,90},{50,70},{50,50}},100,100,c);
+  auto f=ComputeLineFeatures({{50,90},{50,70},{50,50},{50,30}},100,100,c);
   assert(f.guide.valid); assert(std::abs(f.guide.offset)<1e-12);
   assert(std::abs(f.guide.heading_rad)<1e-12);
   assert(!f.guide.curvature_valid);  // curve_min_points 미달
@@ -30,14 +30,19 @@ int main() {
   auto two=ComputeLineFeatures({{50,90},{50,70}},100,100,c);
   assert(!two.guide.valid);
 
-  // Default local fit 4 still uses all three points when only three exist.
+  // Initial three-point frames are invalid, even with RANSAC disabled.
   c.curve_local_fit_points=4;
-  const LineP2pController selector(LineP2pConfig{1.0,1.0,.10});
+  LineP2pConfig selector_config;
+  selector_config.offset_gain=1.0;
+  selector_config.heading_gain=1.0;
+  selector_config.steering_deadband=.10;
+  const LineP2pController selector(selector_config);
   for (const int count : {3,4}) {
     for (const double u : {30.0,50.0,70.0}) {
       std::vector<Point2> points;
       for (int i=0;i<count;++i) points.push_back({u,90.0-i*20.0});
       const auto guide=ComputeLineFeatures(points,100,100,c).guide;
+      if (count==3) {assert(!guide.valid);continue;}
       assert(guide.valid);
       assert(std::abs(guide.offset-(u-50.0)/50.0)<1e-12);
       assert(std::abs(guide.heading_rad)<1e-12);

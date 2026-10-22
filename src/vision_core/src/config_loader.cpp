@@ -161,6 +161,16 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
               "line_features.curve_local_fit_points");
   Positive(c.line_features.guide_fit_rmse_full_scale_px,
            "line_features.guide_fit_rmse_full_scale_px");
+  if (c.line_features.ransac_min_input_points < 4 ||
+      c.line_features.ransac_min_input_points > 8)
+    throw std::runtime_error("line_features.ransac_min_input_points must be in [4,8]");
+  Positive(c.line_features.ransac_residual_threshold_px,
+           "line_features.ransac_residual_threshold_px");
+  Positive(c.line_features.ransac_min_sample_v_gap_px,
+           "line_features.ransac_min_sample_v_gap_px");
+  if (c.line_features.ransac_max_outliers < 0 ||
+      c.line_features.ransac_max_outliers > 2)
+    throw std::runtime_error("line_features.ransac_max_outliers must be in [0,2]");
 
   HitsWithinWindow(c.line.line_stable_min_hits, c.line.line_stable_window,
                    "line.line_stable_min_hits", "line.line_stable_window");
@@ -198,8 +208,22 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Unit(c.ball.smooth_alpha, "ball.smooth_alpha");
   Nonnegative(c.ball.far_u_des_px, "ball.far_u_des_px");
   Nonnegative(c.ball.approach_u_deadband_px, "ball.approach_u_deadband_px");
+  Nonnegative(c.ball.approach_left_top_u_px, "ball.approach_left_top_u_px");
+  Nonnegative(c.ball.approach_right_top_u_px, "ball.approach_right_top_u_px");
+  if (c.ball.approach_left_top_u_px>=c.ball.approach_right_top_u_px)
+    throw std::runtime_error("ball approach top endpoints must be ordered left < right");
   Nonnegative(c.ball.upper_acquire_v_px, "ball.upper_acquire_v_px");
   Nonnegative(c.ball.fine_side_two_step_margin_px, "ball.fine_side_two_step_margin_px");
+  if (c.ball.fine_motion.max_repetitions<1 || c.ball.fine_motion.max_repetitions>3)
+    throw std::runtime_error("ball.fine_motion.max_repetitions must be in [1,3]");
+  const std::array<std::pair<const char*,Point2>,4> fine_effects{{
+      {"forward",c.ball.fine_motion.forward_delta_px},
+      {"backward",c.ball.fine_motion.backward_delta_px},
+      {"left",c.ball.fine_motion.left_delta_px},{"right",c.ball.fine_motion.right_delta_px}}};
+  for (const auto& effect : fine_effects) {
+    Finite(effect.second.u,(std::string("ball.fine_motion.")+effect.first+"_delta_u_px").c_str());
+    Finite(effect.second.v,(std::string("ball.fine_motion.")+effect.first+"_delta_v_px").c_str());
+  }
   Nonnegative(c.ball.approach_two_step_v_px, "ball.approach_two_step_v_px");
   Nonnegative(c.ball.approach_direct_down_v_px, "ball.approach_direct_down_v_px");
   if (c.ball.approach_direct_down_v_px <= c.ball.approach_two_step_v_px)
@@ -295,6 +319,31 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.object_targets.hurdle_min_box_height,"object_targets.hurdle_min_box_height");
 
 
+  Nonnegative(c.object_targets.ball_aspect_ratio_min,"object_targets.ball_aspect_ratio_min");
+  Nonnegative(c.object_targets.ball_aspect_ratio_max,"object_targets.ball_aspect_ratio_max");
+  Nonnegative(c.object_targets.hurdle_aspect_ratio_min,"object_targets.hurdle_aspect_ratio_min");
+  Nonnegative(c.object_targets.ball_forward_min_depth_m,"object_targets.ball_forward_min_depth_m");
+  Nonnegative(c.object_targets.ball_forward_max_depth_m,"object_targets.ball_forward_max_depth_m");
+  Nonnegative(c.object_targets.ball_down_min_depth_m,"object_targets.ball_down_min_depth_m");
+  Nonnegative(c.object_targets.ball_down_max_depth_m,"object_targets.ball_down_max_depth_m");
+  Nonnegative(c.object_targets.hurdle_min_depth_m,"object_targets.hurdle_min_depth_m");
+  Nonnegative(c.object_targets.hurdle_max_depth_m,"object_targets.hurdle_max_depth_m");
+  if(c.object_targets.ball_aspect_ratio_min<=0 || c.object_targets.ball_aspect_ratio_min>c.object_targets.ball_aspect_ratio_max ||
+      c.object_targets.hurdle_aspect_ratio_min<=0)
+    throw std::runtime_error("invalid BALL/HURDLE aspect ratio range");
+  if(c.object_targets.ball_forward_min_depth_m>c.object_targets.ball_forward_max_depth_m ||
+      c.object_targets.ball_down_min_depth_m>c.object_targets.ball_down_max_depth_m ||
+      c.object_targets.hurdle_min_depth_m>c.object_targets.hurdle_max_depth_m ||
+      c.object_targets.ball_forward_max_depth_m<=0 || c.object_targets.ball_down_max_depth_m<=0 || c.object_targets.hurdle_max_depth_m<=0)
+    throw std::runtime_error("invalid BALL/HURDLE depth range");
+  if(c.object_targets.depth_roi_size_px<3 || c.object_targets.depth_roi_size_px>31 || c.object_targets.depth_roi_size_px%2==0)
+    throw std::runtime_error("depth_roi_size_px must be odd in [3,31]");
+  Positive(c.ball_candidate_tracking.max_center_distance_px,"ball_candidate_tracking.max_center_distance_px");
+  Positive(c.ball_candidate_tracking.max_size_log_ratio,"ball_candidate_tracking.max_size_log_ratio");
+  NonnegativeInt(c.ball_candidate_tracking.missing_frame_limit,"ball_candidate_tracking.missing_frame_limit");
+  if(c.ball_candidate_tracking.max_tracks<1 || c.ball_candidate_tracking.max_tracks>128)
+    throw std::runtime_error("ball_candidate_tracking.max_tracks must be in [1,128]");
+
   NonnegativeInt(c.object_association.missing_frame_limit,
                  "object_association.missing_frame_limit");
   // pixel center distance / image diagonal이므로 화면 내부에서는 일반적으로
@@ -351,6 +400,11 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(f, "curve_min_v_span_px", c.line_features.curve_min_v_span_px);
   Assign(f, "curve_local_fit_points", c.line_features.curve_local_fit_points);
   Assign(f, "guide_fit_rmse_full_scale_px", c.line_features.guide_fit_rmse_full_scale_px);
+  Assign(f, "ransac_enabled", c.line_features.ransac_enabled);
+  Assign(f, "ransac_min_input_points", c.line_features.ransac_min_input_points);
+  Assign(f, "ransac_residual_threshold_px", c.line_features.ransac_residual_threshold_px);
+  Assign(f, "ransac_min_sample_v_gap_px", c.line_features.ransac_min_sample_v_gap_px);
+  Assign(f, "ransac_max_outliers", c.line_features.ransac_max_outliers);
 
   const auto line = a["line"];
   Assign(line, "line_stable_window", c.line.line_stable_window);
@@ -393,8 +447,20 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "smooth_alpha", c.ball.smooth_alpha);
   Assign(b, "far_u_des_px", c.ball.far_u_des_px);
   Assign(b, "approach_u_deadband_px", c.ball.approach_u_deadband_px);
+  Assign(b, "approach_left_top_u_px", c.ball.approach_left_top_u_px);
+  Assign(b, "approach_right_top_u_px", c.ball.approach_right_top_u_px);
   Assign(b, "upper_acquire_v_px", c.ball.upper_acquire_v_px);
   Assign(b, "fine_side_two_step_margin_px", c.ball.fine_side_two_step_margin_px);
+  const auto fine_motion=b["fine_motion"];
+  Assign(fine_motion,"max_repetitions",c.ball.fine_motion.max_repetitions);
+  Assign(fine_motion,"forward_delta_u_px",c.ball.fine_motion.forward_delta_px.u);
+  Assign(fine_motion,"forward_delta_v_px",c.ball.fine_motion.forward_delta_px.v);
+  Assign(fine_motion,"backward_delta_u_px",c.ball.fine_motion.backward_delta_px.u);
+  Assign(fine_motion,"backward_delta_v_px",c.ball.fine_motion.backward_delta_px.v);
+  Assign(fine_motion,"left_delta_u_px",c.ball.fine_motion.left_delta_px.u);
+  Assign(fine_motion,"left_delta_v_px",c.ball.fine_motion.left_delta_px.v);
+  Assign(fine_motion,"right_delta_u_px",c.ball.fine_motion.right_delta_px.u);
+  Assign(fine_motion,"right_delta_v_px",c.ball.fine_motion.right_delta_px.v);
   Assign(b, "approach_two_step_v_px", c.ball.approach_two_step_v_px);
   Assign(b, "approach_direct_down_v_px", c.ball.approach_direct_down_v_px);
   Assign(b, "pickup_max_attempts", c.ball.pickup_max_attempts);
@@ -488,6 +554,27 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(t,"backboard_min_box_height",c.object_targets.backboard_min_box_height);
   Assign(t,"hurdle_min_box_width",c.object_targets.hurdle_min_box_width);
   Assign(t,"hurdle_min_box_height",c.object_targets.hurdle_min_box_height);
+
+  Assign(t,"ball_aspect_ratio_min",c.object_targets.ball_aspect_ratio_min);
+  Assign(t,"ball_aspect_ratio_max",c.object_targets.ball_aspect_ratio_max);
+  Assign(t,"hurdle_aspect_ratio_min",c.object_targets.hurdle_aspect_ratio_min);
+  Assign(t,"ball_forward_min_depth_m",c.object_targets.ball_forward_min_depth_m);
+  Assign(t,"ball_forward_max_depth_m",c.object_targets.ball_forward_max_depth_m);
+  Assign(t,"ball_down_min_depth_m",c.object_targets.ball_down_min_depth_m);
+  Assign(t,"ball_down_max_depth_m",c.object_targets.ball_down_max_depth_m);
+  Assign(t,"hurdle_min_depth_m",c.object_targets.hurdle_min_depth_m);
+  Assign(t,"hurdle_max_depth_m",c.object_targets.hurdle_max_depth_m);
+  Assign(t,"ball_depth_enabled",c.object_targets.ball_depth_enabled);
+  Assign(t,"hurdle_depth_enabled",c.object_targets.hurdle_depth_enabled);
+  Assign(t,"ball_allow_missing_depth",c.object_targets.ball_allow_missing_depth);
+  Assign(t,"hurdle_allow_missing_depth",c.object_targets.hurdle_allow_missing_depth);
+  Assign(t,"depth_roi_size_px",c.object_targets.depth_roi_size_px);
+  const auto bt=a["ball_candidate_tracking"];
+  Assign(bt,"enabled",c.ball_candidate_tracking.enabled);
+  Assign(bt,"max_center_distance_px",c.ball_candidate_tracking.max_center_distance_px);
+  Assign(bt,"max_size_log_ratio",c.ball_candidate_tracking.max_size_log_ratio);
+  Assign(bt,"missing_frame_limit",c.ball_candidate_tracking.missing_frame_limit);
+  Assign(bt,"max_tracks",c.ball_candidate_tracking.max_tracks);
 
   const auto oa = a["object_association"];
   Assign(oa, "missing_frame_limit", c.object_association.missing_frame_limit);
