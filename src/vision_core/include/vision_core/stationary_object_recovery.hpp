@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <deque>
-#include <limits>
 
 namespace vision_core {
 // Each stationary attempt owns fresh detection evidence. No body command or
@@ -15,13 +14,11 @@ public:
                  double duration, int max_observations) {
     hits_.push_back(detected);
     while (hits_.size() > static_cast<std::size_t>(window)) hits_.pop_front();
-    if (detected) last_seen_ = now;
     if (Elapsed(now) + 1e-9 < duration || hits_.size()<static_cast<std::size_t>(window))
       return Result::kWaiting;
     ++completed_;
     if (hits_.size() == static_cast<std::size_t>(window) &&
-        std::count(hits_.begin(), hits_.end(), true) >= min_hits &&
-        now - last_seen_ <= 0.30) return Result::kFound;
+        std::count(hits_.begin(), hits_.end(), true) >= min_hits) return Result::kFound;
     if (completed_ >= max_observations) return Result::kFailed;
     BeginWindow(now);
     return Result::kRetry;
@@ -31,16 +28,14 @@ public:
   // Keep the window clock/count so target changes cannot reset retry limits.
   void DiscardDetections() {
     std::fill(hits_.begin(),hits_.end(),false);
-    last_seen_=-std::numeric_limits<double>::infinity();
   }
   double Elapsed(double now) const { return std::max(0.0, now - start_); }
 private:
   void BeginWindow(double now) {
     start_ = now; hits_.clear();
-    last_seen_ = -std::numeric_limits<double>::infinity();
   }
   std::deque<bool> hits_;
   int completed_{0};
-  double start_{0.0}, last_seen_{0.0};
+  double start_{0.0};
 };
 } // namespace vision_core

@@ -870,6 +870,31 @@ int main() {
   ready_result=ball_ready.Step(ready_frame);
   assert(ready_result.command.action_id==ball_queued_id);
 
+  // READY may reserve with 7/10 even when trailing misses leave the latest
+  // detection more than 0.3 s old. The existing hit gate remains mandatory.
+  auto missing_ready_cfg=ready_cfg;
+  missing_ready_cfg.ball.stable_window=10;missing_ready_cfg.ball.stable_min_hits=7;
+  MissionController missing_ready(missing_ready_cfg);
+  AdmitObjectAtRest(missing_ready,Ball(.5,.2));
+  ready_frame=Frame(0);ready_frame.ball_target=Ball(.5,.2);
+  ready_result=missing_ready.Step(ready_frame);
+  assert(ready_result.command.action==MissionAction::kStepForwardThree);
+  const auto missing_ready_id=ready_result.command.action_id;
+  for(int i=1;i<=27;++i) {
+    ready_frame=Frame(i==27?2.85:i*.1);
+    if(i<25)ready_frame.ball_target=Ball(.5,i>=12?.8:.2);
+    ready_frame.delivery_feedback={missing_ready_id,true,false,i==27};
+    ready_result=missing_ready.Step(ready_frame);
+  }
+  const auto missing_queued_id=ready_result.command.action_id;
+  assert(missing_queued_id!=0 && missing_queued_id!=missing_ready_id);
+  assert(ready_result.command.action==MissionAction::kStepForwardTwo);
+  assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
+  ready_frame=Frame(3);ready_frame.delivery_feedback={missing_ready_id,true,true,false};
+  ready_result=missing_ready.Step(ready_frame);
+  assert(ready_result.object_ready_mean_used && !ready_result.post_motion_observing);
+  assert(ready_result.command.action_id==missing_queued_id);
+
   // Feedback callbacks can accept A DONE and B DONE before the next image.
   // A's late sensory DONE must NOT create a second B with a fresh ID.
   MissionController early_done(ready_cfg);

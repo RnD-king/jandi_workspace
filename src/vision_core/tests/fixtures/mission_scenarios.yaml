@@ -217,6 +217,20 @@ vision_algorithm:
     missing_frame_limit: 5
     max_tracks: 16
 
+  hurdle_candidate_tracking:
+    enabled: true
+    max_center_distance_px: 200.0
+    max_size_log_ratio: 0.80
+    missing_frame_limit: 5
+    max_tracks: 16
+
+  backboard_candidate_tracking:
+    enabled: true
+    max_center_distance_px: 200.0
+    max_size_log_ratio: 0.80
+    missing_frame_limit: 5
+    max_tracks: 16
+
   object_association:
     missing_frame_limit: 5
     max_center_distance_norm: 0.25

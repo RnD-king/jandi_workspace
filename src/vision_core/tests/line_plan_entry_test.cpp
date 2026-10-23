@@ -287,6 +287,60 @@ void SparseUnitsAndFreshVerification() {
   }
 }
 
+void CandidateWithoutLastDetectionDeadline(bool hurdle, int hits) {
+  auto c=Configuration();c.enable_ball=!hurdle;c.enable_hurdle=hurdle;
+  Driver d(c);d.Tick();const auto id=d.out.command.action_id;
+  d.Tick(.01,{id,true,false,false});
+  auto& target=hurdle?d.frame.hurdle_target:d.frame.ball_target;
+  target=Target();
+  for(int i=0;i<(hurdle?7:6);++i)d.Tick();
+  target.reset();d.Tick(.01,{id,true,true,false});
+  // The initial missing frame plus nine new frames form the complete window.
+  // The last two frames miss, making the final detection 0.4 s old.
+  for(int i=1;i<=9;++i) {
+    target=i<=hits ? std::optional<ObjectTarget>(Target()) : std::nullopt;
+    d.Tick(.2);
+    if(i<9)assert(d.out.active_mission==MissionType::kLine);
+  }
+  const auto mission=hurdle?MissionType::kHurdle:MissionType::kBall;
+  assert((d.out.active_mission==mission)==(hits==7));
+}
+
+void FineRecoveryTurnSettle(bool left) {
+  auto c=Configuration();c.fine_motion_settle_sec=.25;
+  c.line_p2p.failure_observation_sec=1;c.line_p2p.recovery_observation_sec=1;
+  Driver d(c);d.Line(left?256:384);d.Tick();
+  assert(d.out.command.action_id!=0);
+  d.frame.line_centers.clear();
+  const auto turn=left?MissionAction::kTurnLeft:MissionAction::kTurnRight;
+  std::uint64_t completed=0;
+  for(int i=0;i<200;++i) {
+    CommandDeliveryFeedback feedback;
+    if(d.out.command.action_id!=0 && d.out.command.action_id!=completed) {
+      completed=d.out.command.action_id;feedback={completed,true,true,false};
+    }
+    d.Tick(.05,feedback);
+    if(d.out.command.action==turn && d.out.command.action_id!=0)break;
+  }
+  assert(d.out.command.action==turn && d.out.command.action_id!=0);
+  const auto id=d.out.command.action_id;
+  d.Tick(.05,{id,true,true,false});
+  const double decision_at=d.frame.now_sec+c.fine_motion_settle_sec+
+      c.line_p2p.recovery_observation_sec;
+  bool decided=false;
+  for(int i=0;i<40;++i) {
+    d.Tick(.05);
+    if(d.frame.now_sec+1e-9<decision_at) {
+      assert(d.out.command.action_id==0);
+    } else {
+      assert(d.out.command.action==turn && d.out.command.action_id!=0 &&
+             d.out.command.action_id!=id);
+      decided=true;break;
+    }
+  }
+  assert(decided);
+}
+
 void PauseDuringSearch() {
   auto c=Configuration(); c.enable_ball=true;
   Driver d(c); d.Tick(); auto walk=d.out.command.action_id;
@@ -311,4 +365,7 @@ int main() {
   SearchAndRestore(false,1,true); SearchAndRestore(false,0,true);
   GoalBlocks(true,3); GoalBlocks(false,1); GoalBlocks(false,3); GoalBlocks(true,0);
   PauseDuringSearch();
+  for(bool left:{false,true})FineRecoveryTurnSettle(left);
+  for(bool hurdle:{false,true})for(int hits:{6,7})
+    CandidateWithoutLastDetectionDeadline(hurdle,hits);
 }

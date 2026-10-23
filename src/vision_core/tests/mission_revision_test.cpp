@@ -482,14 +482,16 @@ void PoseSettleAndConcurrentObservation() {
   f.now_sec=decision_at;f.delivery_feedback={};f.ball_target=Target(345,100);r=core.Step(f);
   assert(!r.post_motion_observing && r.command.action==MissionAction::kPickBall);
 }
-void FineObservationTiming(double extra_settle, bool manual=false) {
+void FineObservationTiming(double extra_settle, bool manual=false,
+                            double observation_sec=1.0, bool trailing_misses=false) {
   auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kBall;c.test_stage=2;
   c.enable_goal=c.enable_hurdle=false;c.fine_motion_settle_sec=extra_settle;
+  c.post_motion_observation_sec=observation_sec;
   MissionController core(c);
   auto f=Frame(0);f.camera_feedback={CameraMode::kDown,true};
   MissionFrameResult r;
   std::uint64_t setup_done=0;
-  for(int i=0;i<=160;++i) {
+  for(int i=0;i<=240;++i) {
     f.now_sec=.05*i;f.ball_target=Target(345,50);f.delivery_feedback={};
     if(r.command.action_id!=0 && r.command.action_id!=setup_done) {
       setup_done=r.command.action_id;f.delivery_feedback={setup_done,true,true,false};
@@ -503,10 +505,11 @@ void FineObservationTiming(double extra_settle, bool manual=false) {
   f.manual_observation_control=manual;
   f.delivery_feedback={motion_id,true,true,false};f.ball_target=Target(345,150);
   r=core.Step(f);if(!manual)assert(r.post_motion_observing);
-  const double decision_at=done_at+std::max(extra_settle,manual?.05:0.0)+1;
+  const double decision_at=done_at+std::max(extra_settle,manual?.05:0.0)+observation_sec;
   bool decided=false;
-  for(int i=1;i<=40;++i) {
-    f.now_sec=done_at+.05*i;
+  for(int i=1;i<=80;++i) {
+    f.now_sec=done_at+(trailing_misses ? .1*i+(i>=7?.1:0.0) : .05*i);
+    if(trailing_misses && i>=7)f.ball_target.reset();
     f.begin_manual_observation=manual && i==1;
     f.delivery_feedback=i==2 ? CommandDeliveryFeedback{motion_id,true,true,false} : CommandDeliveryFeedback{};
     r=core.Step(f);
@@ -519,6 +522,72 @@ void FineObservationTiming(double extra_settle, bool manual=false) {
     }
   }
   assert(decided); // No extra ten-frame/FINE wait after the completed window.
+}
+void RecoveryWithoutLastDetectionDeadline() {
+  for(int hits:{6,7}) {
+    StationaryObjectRecovery recovery;recovery.Begin(0);
+    StationaryObjectRecovery::Result result{};
+    // Seven hits followed by three misses: the final detection is 0.4 s old.
+    for(int i=0;i<10;++i) {
+      const double now=i<7?.1*i:.1*(i+1);
+      result=recovery.Observe(i<hits,now,10,7,1,2);
+      if(i<9)assert(result==StationaryObjectRecovery::Result::kWaiting);
+    }
+    assert(result==(hits==7 ? StationaryObjectRecovery::Result::kFound :
+                             StationaryObjectRecovery::Result::kRetry));
+  }
+}
+void FineTurnObservationTiming(bool left) {
+  auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kGoal;c.test_stage=3;
+  c.enable_ball=c.enable_hurdle=false;c.transition_settle_sec=0;
+  c.fine_motion_settle_sec=.25;c.post_motion_observation_sec=1;
+  c.goal.lost_frames=1;c.goal.smooth_alpha=1;
+  MissionController core(c);
+  auto f=Frame(0);f.camera_feedback={CameraMode::kGoal,true};
+  f.allow_new_body_actions=false;f.allow_test_setup_body_actions=true;
+  f.backboard_target=Target(left?150:550);f.goal_pose={true,0,1.5,0,1};
+  f.backboard_center_depth_m=1.5;
+  MissionFrameResult r;
+  std::uint64_t setup_done=0;
+  for(int i=0;i<=100;++i) {
+    f.now_sec=.05*i;f.delivery_feedback={};
+    if(r.command.action_id!=0 && r.command.action_id!=setup_done) {
+      setup_done=r.command.action_id;f.delivery_feedback={setup_done,true,true,false};
+    }
+    r=core.Step(f);
+    if(r.goal.mode==GoalMode::kFineAdjust && r.goal.tracked.stable &&
+       !r.post_motion_observing)break;
+  }
+  assert(r.goal.mode==GoalMode::kFineAdjust && r.goal.tracked.stable);
+  f.allow_new_body_actions=true;f.backboard_target.reset();
+  f.goal_pose={};f.backboard_center_depth_m.reset();
+  const auto turn=left?MissionAction::kTurnLeft:MissionAction::kTurnRight;
+  for(int i=0;i<100;++i) {
+    f.now_sec+=.05;f.delivery_feedback={};r=core.Step(f);
+    if(r.command.action==turn && r.command.action_id!=0)break;
+  }
+  assert(r.command.action==turn && r.command.action_id!=0);
+  const auto motion_id=r.command.action_id;
+  f.now_sec+=.1;const double done_at=f.now_sec;
+  f.delivery_feedback={motion_id,true,true,false};r=core.Step(f);
+  assert(r.post_motion_observing && r.post_motion_frames==0);
+  const double decision_at=done_at+c.fine_motion_settle_sec+c.post_motion_observation_sec;
+  bool decided=false;
+  for(int i=1;i<=40;++i) {
+    f.now_sec=done_at+.05*i;f.delivery_feedback={};r=core.Step(f);
+    if(f.now_sec+1e-9<decision_at) {
+      assert(r.post_motion_observing);
+      assert(r.command.action_id==0 || r.command.action_id==motion_id);
+      if(f.now_sec+1e-9<done_at+c.fine_motion_settle_sec)
+        assert(r.post_motion_frames==0);
+    } else {
+      assert(!r.post_motion_observing);
+      assert(r.command.action==turn && r.command.action_id!=0 &&
+             r.command.action_id!=motion_id);
+      decided=true;break;
+    }
+  }
+  assert(decided);
 }
 void ImageDetectionWithMissingDepth() {
   auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kGoal;c.test_stage=3;
@@ -914,4 +983,8 @@ int main() {
   for(bool fine:{false,true})for(bool left:{false,true})GoalRecovery(fine,left);
   PoseSettleAndConcurrentObservation();
   FineObservationTiming(0);FineObservationTiming(.25);FineObservationTiming(.25,true);
+  FineObservationTiming(.25,false,2.0);
+  FineObservationTiming(0,false,1.0,true);
+  RecoveryWithoutLastDetectionDeadline();
+  for(bool left:{false,true})FineTurnObservationTiming(left);
 }

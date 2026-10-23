@@ -146,6 +146,11 @@ public:
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
+  void InvalidateDetectionEvidence() {
+    ClearObservationHistory();
+    stationary_recovery_.DiscardDetections();
+    ClearMovingApproachTriggers();
+  }
   // When validated moving READY evidence replaces in-motion samples at
   // DONE, its depth/pose alone must decide the next camera/fine transition.
   void ClearMovingApproachTriggers() {

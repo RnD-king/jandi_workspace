@@ -15,6 +15,7 @@ struct BallCandidateTrackingConfig {
         max_size_log_ratio==c.max_size_log_ratio && missing_frame_limit==c.missing_frame_limit && max_tracks==c.max_tracks;
   }
 };
+using ObjectCandidateTrackingConfig = BallCandidateTrackingConfig;
 struct BallCandidateTrack {
   std::uint64_t id{};
   ObjectTarget target;

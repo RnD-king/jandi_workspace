@@ -102,6 +102,36 @@ int main(int argc,char** argv) {
         applied.ball_candidate_tracking.max_size_log_ratio==.6,"candidate size gate live setting lost");
     Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter("ball_candidate_tracking_enabled",true),applied) &&
         applied.ball_candidate_tracking.enabled,"candidate enable live setting lost");
+    for (const auto& group : vision::kAdditionalCandidateTracking) {
+      const std::string prefix=group.prefix;
+      auto& tracking=applied.*(group.field);
+      Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter(prefix+"tracking_enabled",true),applied),
+          "object candidate enable not recognized");
+      Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter(prefix+"max_center_distance_px",123.0),applied),
+          "object candidate distance not recognized");
+      Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter(prefix+"max_size_log_ratio",.6),applied),
+          "object candidate size not recognized");
+      Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter(prefix+"missing_frame_limit",7),applied),
+          "object candidate missing limit not recognized");
+      Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter(prefix+"max_tracks",8),applied),
+          "object candidate capacity not recognized");
+      Check(tracking.enabled && tracking.max_center_distance_px==123 && tracking.max_size_log_ratio==.6 &&
+          tracking.missing_frame_limit==7 && tracking.max_tracks==8,"object candidate live values lost");
+      node->set_parameter(rclcpp::Parameter(prefix+"tracking_enabled",true));
+      node->set_parameter(rclcpp::Parameter(prefix+"max_center_distance_px",150.0));
+      node->set_parameter(rclcpp::Parameter(prefix+"max_size_log_ratio",.7));
+      node->set_parameter(rclcpp::Parameter(prefix+"missing_frame_limit",6));
+      node->set_parameter(rclcpp::Parameter(prefix+"max_tracks",9));
+      vision::ReadMissionParameters(*node,applied);
+      Check(tracking.enabled && tracking.max_center_distance_px==150 && tracking.max_size_log_ratio==.7 &&
+          tracking.missing_frame_limit==6 && tracking.max_tracks==9,"object candidate startup values lost");
+      for (const auto* suffix : {"max_center_distance_px", "max_size_log_ratio"}) {
+        bool rejected=false;
+        try {vision::ApplyLivePerceptionParameter(rclcpp::Parameter(prefix+suffix,0.0),applied);}
+        catch(const std::invalid_argument&) {rejected=true;}
+        Check(rejected,"zero object candidate threshold accepted");
+      }
+    }
 
     Check(applied.ball.recovery_walk_turn_max==5,"BALL startup override was lost");
     Check(applied.goal.recovery_turn_max==2,"GOAL startup override was lost");

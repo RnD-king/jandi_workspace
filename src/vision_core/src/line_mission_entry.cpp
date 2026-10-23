@@ -25,6 +25,9 @@ void MissionController::ObserveLineFeedback(const CommandDeliveryFeedback& feedb
           line_auxiliary_action_ == MissionAction::kDefaultPoseMode) {
         foot_pose_ = line_auxiliary_action_ == MissionAction::kWalkMode ? FootPose::kWalk : FootPose::kFine;
         settle_until_sec_ = std::max(settle_until_sec_, now + config_.transition_settle_sec);
+      } else if (line_auxiliary_action_ == MissionAction::kTurnLeft ||
+                 line_auxiliary_action_ == MissionAction::kTurnRight) {
+        settle_until_sec_ = std::max(settle_until_sec_, now + config_.fine_motion_settle_sec);
       }
     }
   }
@@ -39,6 +42,7 @@ void MissionController::BeginCandidateObservation(double now) {
 }
 
 void MissionController::ReleaseCandidate() {
+  if (candidate_.mission == MissionType::kHurdle) hurdle_target_tracker_.Reset();
   candidate_ = {};
   ball_candidate_tracker_.Reset(); ball_association_tracker_.Reset();
   ball_target_id_=0; ball_target_locked_=ball_reacquiring_=ball_recovery_was_active_=false;
@@ -109,9 +113,11 @@ MissionFrameResult MissionController::StepPlannedLine(
       hurdle_result_ = hurdle_controller_.Compute(input.hurdle_target, input.image_width,
           input.image_height, input.now_sec, input.camera_feedback, {},
           line_p2p_controller_.Compute(raw), false, false);
-      if (hurdle_result_.tracked.visible && hurdle_controller_.EntryReady()) {
+      if (hurdle_result_.tracked.visible &&
+          (input.hurdle_entry_track_hits ? *input.hurdle_entry_track_hits >= config_.hurdle.stable_min_hits :
+                                           hurdle_controller_.EntryReady())) {
         candidate_.mission = MissionType::kHurdle;
-        candidate_.direction_u = hurdle_result_.tracked.center_px.u;
+        candidate_.direction_u = input.hurdle_entry_center_u.value_or(hurdle_result_.tracked.center_px.u);
         candidate_.direction_seen_sec = input.now_sec;
       }
     }
@@ -172,8 +178,7 @@ MissionFrameResult MissionController::StepPlannedLine(
         output.post_motion_elapsed_sec = std::max(0.0, input.now_sec - decision_observation_start_sec_);
         if (DecisionObservationReady(input.now_sec) && input.allow_new_commands) {
           const bool verified = decision_object_hits_.size() == 10 && output.post_motion_valid >= 7 &&
-              decision_last_target_ && decision_object_weight_ > 0 &&
-              input.now_sec - decision_last_seen_sec_ <= 0.30;
+              decision_last_target_ && decision_object_weight_ > 0;
           decision_observation_active_ = false;
           output.post_motion_observing = false;
           if (verified) {

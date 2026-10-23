@@ -37,6 +37,7 @@ public:
   Update(const std::vector<ObjectTargetCandidate> &candidates,
          int image_width, int image_height, bool allow_reacquire = true);
   void Seed(const ObjectTarget& target);
+  void UpdateConfig(const ObjectAssociationConfig& config) { config_ = config; }
   void Reset();
 
   bool HasIdentity() const { return previous_target_.has_value(); }

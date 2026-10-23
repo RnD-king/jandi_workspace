@@ -252,6 +252,150 @@ void EntryAndRecoveryRegressions() {
   manual.Tick({DetectionAt(120)});
   assert(manual.result.perception.targets.ball && manual.result.perception.ball_target_id==locked_id);
 }
+void SharedObjectTrackingRegressions() {
+  const auto c=LoadDefaultAlgorithmConfig();
+  for(auto tracking:{c.hurdle_candidate_tracking,c.backboard_candidate_tracking}) {
+    ObjectTargetTracker tracker;
+    auto observe=[&](std::vector<ObjectTargetCandidate> detections,bool recovery=false) {
+      return tracker.Observe(detections,tracking,c.object_association,640,480,10,470,true,recovery);
+    };
+    for(int i=0;i<7;++i)assert(observe({Candidate(100)}).target);
+    assert(tracker.Selected()->HitCount()==7);
+    const auto id=tracker.TargetId();tracker.Lock();
+    assert(tracker.Locked());
+    // A different, high-confidence object cannot replace a locked target.
+    for(int i=0;i<20;++i) {
+      assert(!observe({Candidate(520)}).target);
+      assert(tracker.TargetId()==id && tracker.Locked());
+    }
+    assert(observe({Candidate(105)}).target && tracker.TargetId()==id);
+    assert(observe({Candidate(520)},true).target);
+    assert(tracker.TargetId()!=id && tracker.Selected()->HitCount()==1);
+    assert(tracker.IdentityChanged() && tracker.Reacquiring());
+    const auto replacement=tracker.TargetId();
+    for(int i=0;i<6;++i)observe({Candidate(520)},true);
+    assert(tracker.Selected()->HitCount()==7);tracker.Lock();
+    assert(!tracker.Observe({Candidate(520)},tracking,c.object_association,
+        640,480,10,470,true,false,true,id).target);
+    assert(tracker.Observe({Candidate(520)},tracking,c.object_association,
+        640,480,10,470,true,false,true,replacement).target);
+    tracker.Reset();observe({Candidate(100)});
+    assert(tracker.TargetId()>replacement && tracker.Selected()->HitCount()==1);
+  }
+  auto strict=c.hurdle_candidate_tracking,loose=c.backboard_candidate_tracking;
+  strict.max_center_distance_px=10;loose.max_center_distance_px=60;
+  ObjectTargetTracker hurdle,board;
+  for(auto* tracker:{&hurdle,&board}) {
+    const auto& settings=tracker==&hurdle?strict:loose;
+    tracker->Observe({Candidate(100)},settings,c.object_association,640,480,10,470,true,false);
+    tracker->Lock();
+    const auto result=tracker->Observe({Candidate(130)},settings,c.object_association,640,480,10,470,true,false);
+    assert(result.target.has_value()==(tracker==&board));
+  }
+  strict.max_center_distance_px=loose.max_center_distance_px=200;
+  strict.max_size_log_ratio=.1;loose.max_size_log_ratio=1;
+  hurdle.Reset();board.Reset();
+  for(auto* tracker:{&hurdle,&board}) {
+    const auto& settings=tracker==&hurdle?strict:loose;
+    tracker->Observe({Candidate(100)},settings,c.object_association,640,480,10,470,true,false);
+    tracker->Lock();
+    const auto result=tracker->Observe({Candidate(100,120,60)},settings,c.object_association,640,480,10,470,true,false);
+    assert(result.target.has_value()==(tracker==&board));
+  }
+}
+void HurdleIdentityEntryAndCameraReset() {
+  auto c=LoadDefaultAlgorithmConfig();c.enable_ball=c.enable_goal=false;c.enable_hurdle=true;
+  c.transition_settle_sec=0;c.hurdle.stable_window=10;c.hurdle.stable_min_hits=7;
+  MissionController controller(c);
+  PerceptionFrameInput in;in.image_width=640;in.image_height=480;
+  in.camera_feedback={CameraMode::kForward,true};in.command_transport_enabled=true;
+  in.advance_line_fsm=false;in.allow_new_body_actions=false;
+  PerceptionMissionFrameResult out;
+  auto tick=[&](std::vector<PerceptionDetection> detections) {
+    in.now_sec+=.1;in.detections=std::move(detections);out=controller.StepPerception(in);
+  };
+  const auto a=DetectionAt(120,4,200,60),b=DetectionAt(520,4,200,60);
+  for(int i=0;i<12;++i)tick({i%2?a:b});
+  assert(out.mission.candidate_mission==MissionType::kNone);
+  assert(out.perception.hurdle_tracks.size()==2);
+  for(const auto& track:out.perception.hurdle_tracks)assert(track.HitCount()==5);
+  for(int i=0;i<25;++i)tick({a});
+  assert(out.mission.active_mission==MissionType::kHurdle);
+  assert(out.perception.hurdle_target_locked);
+  const auto id=out.perception.hurdle_target_id;
+  for(int i=0;i<10;++i) {
+    tick({b,a});assert(out.perception.targets.hurdle->center_px.u==120);
+    assert(out.perception.hurdle_target_id==id);
+  }
+  in.manual_observation_control=true;in.manual_ready_mean=true;
+  in.manual_object_hits=std::deque<bool>(10,true);in.hurdle_target_id=id+100;
+  tick({a});assert(!out.perception.targets.hurdle && !out.mission.command.action_id);
+  in.hurdle_target_id=id;tick({a});assert(out.perception.targets.hurdle);
+  in.manual_ready_mean=false;in.manual_observation_control=false;
+  in.camera_feedback={CameraMode::kTransition,false};tick({a});
+  assert(out.perception.hurdle_tracks.empty() && !out.perception.hurdle_target_id);
+  in.camera_feedback={CameraMode::kDown,true};tick({a});
+  assert(out.perception.hurdle_target_id>id && !out.perception.hurdle_target_locked);
+  assert(out.perception.hurdle_tracks.size()==1 && out.perception.hurdle_tracks.front().HitCount()==1);
+}
+void HurdleObservationRestartsAfterCamera() {
+  auto c=LoadDefaultAlgorithmConfig();c.enable_ball=c.enable_goal=false;c.enable_hurdle=true;
+  c.transition_settle_sec=0;c.hurdle.stable_window=10;c.hurdle.stable_min_hits=7;
+  MissionController controller(c);
+  PerceptionFrameInput in;in.image_width=640;in.image_height=480;
+  in.camera_feedback={CameraMode::kForward,true};in.command_transport_enabled=true;
+  in.advance_line_fsm=false;in.allow_new_body_actions=false;
+  in.detections={DetectionAt(120,4,200,60)};
+  PerceptionMissionFrameResult out;
+  for(int i=0;i<13;++i) {in.now_sec+=.1;out=controller.StepPerception(in);}
+  assert(out.mission.candidate_mission==MissionType::kHurdle && out.mission.post_motion_observing);
+  const auto id=out.perception.hurdle_target_id;
+  in.camera_feedback={CameraMode::kTransition,false};in.now_sec+=.5;
+  out=controller.StepPerception(in);
+  assert(out.mission.active_mission==MissionType::kLine);
+  in.camera_feedback={CameraMode::kDown,true};in.now_sec+=.1;
+  out=controller.StepPerception(in);
+  assert(out.perception.hurdle_target_id>id && out.mission.post_motion_valid==1);
+  const double begin=in.now_sec;
+  for(int i=1;i<=10;++i) {
+    in.now_sec=begin+.1*i;out=controller.StepPerception(in);
+    if(i<10)assert(out.mission.active_mission==MissionType::kLine);
+  }
+  assert(out.mission.active_mission==MissionType::kHurdle && out.perception.hurdle_target_locked);
+}
+void BackboardIdentityAndCameraReset() {
+  auto c=LoadDefaultAlgorithmConfig();c.enable_ball=c.enable_hurdle=false;c.enable_goal=true;
+  c.goal_trial_start_goal=true;c.transition_settle_sec=0;
+  c.goal.stable_window=10;c.goal.stable_min_hits=7;
+  MissionController controller(c);
+  PerceptionFrameInput in;in.image_width=640;in.image_height=480;
+  in.intrinsics={600,600,320,240};in.camera_feedback={CameraMode::kGoal,true};
+  in.command_transport_enabled=true;in.allow_new_body_actions=false;
+  PerceptionMissionFrameResult out;
+  auto tick=[&](std::vector<PerceptionDetection> detections) {
+    in.now_sec+=.1;in.detections=std::move(detections);out=controller.StepPerception(in);
+  };
+  auto a=DetectionAt(180,3,80,40,.6),b=DetectionAt(540,3,80,40,.6);
+  a.left_depth_m=a.right_depth_m=.6;b.left_depth_m=b.right_depth_m=.6;
+  for(int i=0;i<30;++i)tick({a});
+  assert(out.mission.active_mission==MissionType::kGoal && out.perception.backboard_target_locked);
+  const auto id=out.perception.backboard_target_id;
+  for(int i=0;i<10;++i) {
+    tick({b,a});assert(out.perception.targets.backboard->center_px.u==180);
+    assert(out.perception.backboard_target_id==id);
+  }
+  in.manual_observation_control=true;in.manual_ready_mean=true;
+  in.manual_object_hits=std::deque<bool>(10,true);in.manual_pose_hits=in.manual_object_hits;
+  in.backboard_target_id=id+100;tick({a});
+  assert(!out.perception.targets.backboard && !out.mission.command.action_id);
+  in.backboard_target_id=id;tick({a});assert(out.perception.targets.backboard);
+  in.manual_ready_mean=false;in.manual_observation_control=false;
+  in.camera_feedback={CameraMode::kTransition,false};tick({a});
+  assert(!out.perception.backboard_target_id && out.perception.backboard_tracks.empty());
+  in.camera_feedback={CameraMode::kForward,true};tick({a});
+  assert(out.perception.backboard_target_id>id && !out.perception.backboard_target_locked);
+  assert(out.perception.backboard_tracks.front().HitCount()==1);
+}
 void CandidateWinsReadyAndUsesFreshDoneWindow() {
   auto c=LoadDefaultAlgorithmConfig();
   c.enable_hurdle=c.enable_goal=false; c.transition_settle_sec=0;
@@ -295,6 +439,8 @@ void CandidateWinsReadyAndUsesFreshDoneWindow() {
 }
 }
 int main() {
+  SharedObjectTrackingRegressions();HurdleIdentityEntryAndCameraReset();BackboardIdentityAndCameraReset();
+  HurdleObservationRestartsAfterCamera();
   TrackletRegressions(); LockedAssociationDoesNotAutoAcquire();
   RecoveryIdentityChangeRetainsBudget();
   FilterRegressions(); EntryAndRecoveryRegressions();

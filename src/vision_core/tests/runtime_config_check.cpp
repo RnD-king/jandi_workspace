@@ -180,6 +180,16 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball_candidate_tracking, max_size_log_ratio);
   FIELD(ball_candidate_tracking, missing_frame_limit);
   FIELD(ball_candidate_tracking, max_tracks);
+  FIELD(hurdle_candidate_tracking, enabled);
+  FIELD(hurdle_candidate_tracking, max_center_distance_px);
+  FIELD(hurdle_candidate_tracking, max_size_log_ratio);
+  FIELD(hurdle_candidate_tracking, missing_frame_limit);
+  FIELD(hurdle_candidate_tracking, max_tracks);
+  FIELD(backboard_candidate_tracking, enabled);
+  FIELD(backboard_candidate_tracking, max_center_distance_px);
+  FIELD(backboard_candidate_tracking, max_size_log_ratio);
+  FIELD(backboard_candidate_tracking, missing_frame_limit);
+  FIELD(backboard_candidate_tracking, max_tracks);
   FIELD(object_association, missing_frame_limit);
   FIELD(object_association, max_center_distance_norm);
   FIELD(object_association, max_size_log_ratio);

@@ -793,6 +793,14 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   summary(ball_rows,"BALL BBOX",ball_target,ball_color);
   summary(hurdle_rows,"HURDLE BBOX",hurdle_target,hurdle_color);
   summary(goal_rows,"BACKBOARD BBOX",backboard_target,goal_color);
+  std::snprintf(buf,sizeof(buf),"HURDLE ID=%llu lock=%s reacquire=%s tracks=%zu",
+      static_cast<unsigned long long>(prepared.hurdle_target_id),
+      prepared.hurdle_target_locked?"yes":"no",prepared.hurdle_reacquiring?"yes":"no",prepared.hurdle_tracks.size());
+  add_row(hurdle_rows,buf,hurdle_color);
+  std::snprintf(buf,sizeof(buf),"BACKBOARD ID=%llu lock=%s reacquire=%s tracks=%zu",
+      static_cast<unsigned long long>(prepared.backboard_target_id),
+      prepared.backboard_target_locked?"yes":"no",prepared.backboard_reacquiring?"yes":"no",prepared.backboard_tracks.size());
+  add_row(goal_rows,buf,goal_color);
   {
     const auto minimum=config.object_targets.MinimumBoxSize(config.object_targets.ball_class_id);
     std::snprintf(buf,sizeof(buf),"BALL BBOX MIN: width=%.1fpx height=%.1fpx",minimum.first,minimum.second);

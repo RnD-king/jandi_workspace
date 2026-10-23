@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include <yaml-cpp/yaml.h>
 
@@ -343,6 +344,16 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   NonnegativeInt(c.ball_candidate_tracking.missing_frame_limit,"ball_candidate_tracking.missing_frame_limit");
   if(c.ball_candidate_tracking.max_tracks<1 || c.ball_candidate_tracking.max_tracks>128)
     throw std::runtime_error("ball_candidate_tracking.max_tracks must be in [1,128]");
+  for (const auto& item : {std::make_pair("hurdle_candidate_tracking", &c.hurdle_candidate_tracking),
+                           std::make_pair("backboard_candidate_tracking", &c.backboard_candidate_tracking)}) {
+    const std::string prefix = item.first;
+    const auto& tracking = *item.second;
+    Positive(tracking.max_center_distance_px, (prefix + ".max_center_distance_px").c_str());
+    Positive(tracking.max_size_log_ratio, (prefix + ".max_size_log_ratio").c_str());
+    NonnegativeInt(tracking.missing_frame_limit, (prefix + ".missing_frame_limit").c_str());
+    if (tracking.max_tracks < 1 || tracking.max_tracks > 128)
+      throw std::runtime_error(prefix + ".max_tracks must be in [1,128]");
+  }
 
   NonnegativeInt(c.object_association.missing_frame_limit,
                  "object_association.missing_frame_limit");
@@ -575,6 +586,16 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(bt,"max_size_log_ratio",c.ball_candidate_tracking.max_size_log_ratio);
   Assign(bt,"missing_frame_limit",c.ball_candidate_tracking.missing_frame_limit);
   Assign(bt,"max_tracks",c.ball_candidate_tracking.max_tracks);
+  for (const auto& item : {std::make_pair("hurdle_candidate_tracking", &c.hurdle_candidate_tracking),
+                           std::make_pair("backboard_candidate_tracking", &c.backboard_candidate_tracking)}) {
+    const auto node = a[item.first];
+    auto& tracking = *item.second;
+    Assign(node, "enabled", tracking.enabled);
+    Assign(node, "max_center_distance_px", tracking.max_center_distance_px);
+    Assign(node, "max_size_log_ratio", tracking.max_size_log_ratio);
+    Assign(node, "missing_frame_limit", tracking.missing_frame_limit);
+    Assign(node, "max_tracks", tracking.max_tracks);
+  }
 
   const auto oa = a["object_association"];
   Assign(oa, "missing_frame_limit", c.object_association.missing_frame_limit);

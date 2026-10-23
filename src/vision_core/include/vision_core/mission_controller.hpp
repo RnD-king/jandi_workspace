@@ -19,6 +19,7 @@
 #include "vision_core/line_plan.hpp"
 #include "vision_core/object_target_extractor.hpp"
 #include "vision_core/object_association_tracker.hpp"
+#include "vision_core/object_target_tracker.hpp"
 
 namespace vision_core {
 
@@ -34,6 +35,7 @@ struct MissionControllerConfig {
   ObjectTargetConfig object_targets;
   ObjectAssociationConfig object_association;
   BallCandidateTrackingConfig ball_candidate_tracking;
+  ObjectCandidateTrackingConfig hurdle_candidate_tracking, backboard_candidate_tracking;
   // 모든 object mission의 camera settled 대기 제한 시간이다.
   double camera_motion_timeout_sec{};
   // Fresh, post-DONE observation interval for non-queued actions and camera turns.
@@ -84,6 +86,8 @@ struct MissionFrameInput {
   std::optional<bool> ball_entry_detected;
   std::optional<double> ball_entry_center_u; // Actual candidate used for entry-direction memory.
   std::optional<ObjectTarget> hurdle_target;
+  std::optional<int> hurdle_entry_track_hits;
+  std::optional<double> hurdle_entry_center_u;
   std::optional<ObjectTarget> goal_target;
   std::optional<ObjectTarget> backboard_target;
   GoalPoseObservation goal_pose;
@@ -214,6 +218,7 @@ struct PerceptionFrameInput {
   // Real 10-frame evidence accompanying a manual READY average.
   std::deque<bool> manual_object_hits, manual_pose_hits, manual_near_hits;
   std::uint64_t ball_target_id{0}; // Identity of a validated MANUAL READY mean.
+  std::uint64_t hurdle_target_id{0}, backboard_target_id{0};
   // PerceptionFrameInput only: one synthetic 40%-to-READY object mean.
   bool manual_ready_mean{false};
   std::optional<LineGuide> line_decision_guide_override;
@@ -240,8 +245,12 @@ struct PreparedPerceptionFrame {
   std::optional<double> backboard_right_depth_m;
   std::optional<double> backboard_left_depth_u_px, backboard_right_depth_u_px;
   std::vector<BallCandidateTrack> ball_tracks;
+  std::vector<BallCandidateTrack> hurdle_tracks, backboard_tracks;
   std::vector<ObjectFilterDiagnostic> object_filter_diagnostics;
   std::uint64_t ball_target_id{};
+  std::uint64_t hurdle_target_id{}, backboard_target_id{};
+  bool hurdle_target_locked{false}, backboard_target_locked{false};
+  bool hurdle_reacquiring{false}, backboard_reacquiring{false};
   bool ball_target_locked{false}, ball_reacquiring{false};
   int ball_missing_frames{};
   std::string ball_tracking_reason;
@@ -493,11 +502,9 @@ private:
   double decision_target_u_sum_{0.0}, decision_target_v_sum_{0.0};
   double decision_rect_u_sum_{0.0}, decision_rect_v_sum_{0.0};
   int decision_target_count_{0};
-  double decision_last_seen_sec_{0.0};
   double decision_pose_x_sum_{0.0}, decision_pose_z_sum_{0.0};
   double decision_pose_sin_sum_{0.0}, decision_pose_cos_sum_{0.0};
   int decision_pose_count_{0};
-  double decision_pose_last_seen_sec_{0.0};
   int decision_line_valid_count_{0};
   double decision_line_offset_sum_{0.0};
   double decision_line_heading_sum_{0.0};
@@ -514,8 +521,7 @@ private:
   std::uint64_t ball_target_id_{0};
   bool ball_target_locked_{false}, ball_reacquiring_{false};
   bool ball_recovery_was_active_{false};
-  ObjectAssociationTracker backboard_association_tracker_;
-  ObjectAssociationTracker hurdle_association_tracker_;
+  ObjectTargetTracker backboard_target_tracker_, hurdle_target_tracker_;
   MissionType active_mission_{MissionType::kLine};
   bool has_ball_{false};
   bool object_tracking_camera_moving_{false};

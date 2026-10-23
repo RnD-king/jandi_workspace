@@ -41,6 +41,10 @@ int main(int argc, char **argv) {
   assert(argc == 2);
   const auto c = vision_core::LoadAlgorithmConfig(argv[1]);
   const auto defaults = vision_core::LoadDefaultAlgorithmConfig();
+  for (const auto* tracking : {&c.hurdle_candidate_tracking, &c.backboard_candidate_tracking}) {
+    assert(tracking->enabled && tracking->max_center_distance_px==200);
+    assert(tracking->max_size_log_ratio==.80 && tracking->missing_frame_limit==5 && tracking->max_tracks==16);
+  }
   assert(c.ball.fine_motion.max_repetitions==3 && !c.ball.fine_motion.HasCalibration());
   assert(defaults.command.first_action_id != 0);
   assert(c.line_p2p.failure_min_valid_samples == 5);
@@ -89,6 +93,22 @@ int main(int argc, char **argv) {
   assert(c.line_features.ransac_min_sample_v_gap_px==20);
   assert(c.line_features.ransac_max_outliers==2);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
+  for (const auto* section : {"hurdle_candidate_tracking", "backboard_candidate_tracking"}) {
+    const auto prefix=std::string(section)+":\n    enabled: true\n    max_center_distance_px: 200.0";
+    Reject(text.str(), prefix, std::string(section)+":\n    enabled: true\n    max_center_distance_px: 0");
+    Reject(text.str(), prefix, std::string(section)+":\n    enabled: true\n    max_center_distance_px: .nan");
+    Reject(text.str(), prefix, std::string(section)+":\n    enabled: true");
+    auto yaml=text.str();
+    const auto start=yaml.find(prefix);assert(start!=std::string::npos);
+    yaml.replace(start,prefix.size(),std::string(section)+":\n    enabled: false\n    max_center_distance_px: 123.0");
+    const auto changed=LoadText(yaml);
+    const auto& tracking=std::string(section)=="hurdle_candidate_tracking" ?
+        changed.hurdle_candidate_tracking : changed.backboard_candidate_tracking;
+    assert(!tracking.enabled && tracking.max_center_distance_px==123);
+    const auto& other=std::string(section)=="hurdle_candidate_tracking" ?
+        changed.backboard_candidate_tracking : changed.hurdle_candidate_tracking;
+    assert(other.enabled && other.max_center_distance_px==200);
+  }
   for (const auto* value : {"0","4","-1","not_a_number"})
     Reject(text.str(),"max_repetitions: 3",std::string("max_repetitions: ")+value);
   Reject(text.str(),"max_repetitions: 3","");

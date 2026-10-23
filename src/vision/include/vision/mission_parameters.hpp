@@ -44,6 +44,14 @@ inline const ObjectFilterBoolParameter kObjectFilterBools[] = {
   {"ball_allow_missing_depth",&vision_core::ObjectTargetConfig::ball_allow_missing_depth},
   {"hurdle_allow_missing_depth",&vision_core::ObjectTargetConfig::hurdle_allow_missing_depth},
 };
+struct CandidateTrackingParameterGroup {
+  const char* prefix;
+  vision_core::ObjectCandidateTrackingConfig vision_core::MissionControllerConfig::*field;
+};
+inline const CandidateTrackingParameterGroup kAdditionalCandidateTracking[] = {
+  {"hurdle_candidate_", &vision_core::MissionControllerConfig::hurdle_candidate_tracking},
+  {"backboard_candidate_", &vision_core::MissionControllerConfig::backboard_candidate_tracking},
+};
 inline void DeclareMissionParameters(rclcpp::Node& node,
                                     const vision_core::MissionControllerConfig& c) {
   node.declare_parameter<int>("ball_fine_max_repetitions",c.ball.fine_motion.max_repetitions);
@@ -59,6 +67,15 @@ inline void DeclareMissionParameters(rclcpp::Node& node,
   node.declare_parameter<double>("ball_candidate_max_size_log_ratio",c.ball_candidate_tracking.max_size_log_ratio);
   node.declare_parameter<int>("ball_candidate_missing_frame_limit",c.ball_candidate_tracking.missing_frame_limit);
   node.declare_parameter<int>("ball_candidate_max_tracks",c.ball_candidate_tracking.max_tracks);
+  for (const auto& group : kAdditionalCandidateTracking) {
+    const std::string prefix = group.prefix;
+    const auto& tracking = c.*(group.field);
+    node.declare_parameter<bool>(prefix+"tracking_enabled", tracking.enabled);
+    node.declare_parameter<double>(prefix+"max_center_distance_px", tracking.max_center_distance_px);
+    node.declare_parameter<double>(prefix+"max_size_log_ratio", tracking.max_size_log_ratio);
+    node.declare_parameter<int>(prefix+"missing_frame_limit", tracking.missing_frame_limit);
+    node.declare_parameter<int>(prefix+"max_tracks", tracking.max_tracks);
+  }
   node.declare_parameter<int>("ball_down_search_max_steps",c.ball.down_search_max_steps);
   node.declare_parameter<double>("ball_down_search_inter_action_hold_sec",c.ball.down_search_inter_action_hold_sec);
   node.declare_parameter<double>("ball_approach_direct_down_v_px",c.ball.approach_direct_down_v_px);
@@ -111,6 +128,15 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   c.ball_candidate_tracking.max_size_log_ratio=node.get_parameter("ball_candidate_max_size_log_ratio").as_double();
   c.ball_candidate_tracking.missing_frame_limit=read_int("ball_candidate_missing_frame_limit");
   c.ball_candidate_tracking.max_tracks=read_int("ball_candidate_max_tracks");
+  for (const auto& group : kAdditionalCandidateTracking) {
+    const std::string prefix = group.prefix;
+    auto& tracking = c.*(group.field);
+    tracking.enabled = node.get_parameter(prefix+"tracking_enabled").as_bool();
+    tracking.max_center_distance_px = node.get_parameter(prefix+"max_center_distance_px").as_double();
+    tracking.max_size_log_ratio = node.get_parameter(prefix+"max_size_log_ratio").as_double();
+    tracking.missing_frame_limit = read_int((prefix+"missing_frame_limit").c_str());
+    tracking.max_tracks = read_int((prefix+"max_tracks").c_str());
+  }
   c.transition_settle_sec = node.get_parameter("transition_settle_sec").as_double();
   c.fine_motion_settle_sec = node.get_parameter("fine_motion_settle_sec").as_double();
   const auto turns = [&](const char* name) {
@@ -201,6 +227,31 @@ inline bool ApplyLivePerceptionParameter(const rclcpp::Parameter& p,
   if(name=="ball_candidate_tracking_enabled") {
     if(p.get_type()!=rclcpp::ParameterType::PARAMETER_BOOL) throw std::invalid_argument(name+" must be bool");
     c.ball_candidate_tracking.enabled=p.as_bool(); return true;
+  }
+  for (const auto& group : kAdditionalCandidateTracking) {
+    const std::string prefix = group.prefix;
+    auto& tracking = c.*(group.field);
+    if (name == prefix+"tracking_enabled") {
+      if (p.get_type()!=rclcpp::ParameterType::PARAMETER_BOOL)
+        throw std::invalid_argument(name+" must be bool");
+      tracking.enabled=p.as_bool(); return true;
+    }
+    if (name == prefix+"max_center_distance_px" || name == prefix+"max_size_log_ratio") {
+      if (p.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
+          !std::isfinite(p.as_double()) || p.as_double()<=0)
+        throw std::invalid_argument(name+" must be a finite positive double");
+      if (name == prefix+"max_center_distance_px") tracking.max_center_distance_px=p.as_double();
+      else tracking.max_size_log_ratio=p.as_double();
+      return true;
+    }
+    if (name == prefix+"missing_frame_limit" || name == prefix+"max_tracks") {
+      if (p.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || p.as_int()<0 ||
+          p.as_int()>std::numeric_limits<int>::max())
+        throw std::invalid_argument(name+" must be a bounded nonnegative integer");
+      if (name == prefix+"missing_frame_limit") tracking.missing_frame_limit=static_cast<int>(p.as_int());
+      else tracking.max_tracks=static_cast<int>(p.as_int());
+      return true;
+    }
   }
   if(name=="ball_candidate_max_center_distance_px" || name=="ball_candidate_max_size_log_ratio") {
     if(p.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE || !std::isfinite(p.as_double()) || p.as_double()<=0)

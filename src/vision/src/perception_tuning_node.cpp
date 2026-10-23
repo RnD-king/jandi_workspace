@@ -991,6 +991,8 @@ private:
       const bool depth_observation_changed =
           !candidate.object_targets.SamePerceptionFilters(tuning_config_.object_targets) ||
           !(candidate.ball_candidate_tracking==tuning_config_.ball_candidate_tracking) ||
+          !(candidate.hurdle_candidate_tracking==tuning_config_.hurdle_candidate_tracking) ||
+          !(candidate.backboard_candidate_tracking==tuning_config_.backboard_candidate_tracking) ||
           candidate.line_detection.min_box_width != tuning_config_.line_detection.min_box_width ||
           candidate.line_detection.min_box_height != tuning_config_.line_detection.min_box_height ||
           candidate.backboard_depth_strip_width_px != backboard_depth_strip_width_px_ ||
@@ -1137,12 +1139,21 @@ private:
     for (std::size_t j = window.size() - 10; j < window.size(); ++j)
       if (target_of(*window[j])) ++last_ten_hits;
     if (last_ten_hits < 7) return std::nullopt;
-    if(mission==vision_core::MissionType::kBall && tuning_config_.ball_candidate_tracking.enabled) {
-      const auto id=window.back()->prepared.ball_target_id;
+    const bool identity_tracking = mission==vision_core::MissionType::kBall ? tuning_config_.ball_candidate_tracking.enabled :
+        mission==vision_core::MissionType::kHurdle ? tuning_config_.hurdle_candidate_tracking.enabled :
+        tuning_config_.backboard_candidate_tracking.enabled;
+    if(identity_tracking) {
+      const auto id_of = [mission](const vision_core::PreparedPerceptionFrame& frame) {
+        return mission==vision_core::MissionType::kBall ? frame.ball_target_id :
+            mission==vision_core::MissionType::kHurdle ? frame.hurdle_target_id : frame.backboard_target_id;
+      };
+      const auto id=id_of(window.back()->prepared);
       if(!id) return std::nullopt;
-      for(const auto* sample:window) if(sample->prepared.targets.ball && sample->prepared.ball_target_id!=id)
+      for(const auto* sample:window) if(target_of(*sample) && id_of(sample->prepared)!=id)
         return std::nullopt;
-      result.ball_target_id=id;
+      if(mission==vision_core::MissionType::kBall) result.ball_target_id=id;
+      else if(mission==vision_core::MissionType::kHurdle) result.hurdle_target_id=id;
+      else result.backboard_target_id=id;
     }
 
     result.manual_object_hits.clear();
@@ -1161,13 +1172,11 @@ private:
     double center_depth=0, left_depth=0, right_depth=0, left_u=0, right_u=0;
     int hits=0, center_hits=0, left_hits=0, right_hits=0;
     double object_weight=0.0;
-    double last_seen_sec = -1.0;
     int class_id=0;
     for (const auto *sample : window) {
       const auto &obj = target_of(*sample);
       if (!obj) continue;
       ++hits;
-      last_seen_sec = sample->now_sec;
       class_id = obj->class_id;
       const double weight=mission==vision_core::MissionType::kGoal ? 1.0 :
           1.0+2.0*std::clamp((sample->now_sec-cutoff)/std::max(1e-9,ready_sec-cutoff),0.0,1.0);
@@ -1196,8 +1205,7 @@ private:
         }
       }
     }
-    if (hits < 7 || last_seen_sec < 0.0 ||
-        ready_sec - last_seen_sec > 0.30) return std::nullopt;
+    if (hits < 7) return std::nullopt;
     if (mission == vision_core::MissionType::kGoal && center_hits < 7)
       return std::nullopt;
     vision_core::PerceptionDetection mean;
