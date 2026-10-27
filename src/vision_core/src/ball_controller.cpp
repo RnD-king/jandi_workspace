@@ -519,6 +519,19 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       return result;
     if (feedback.action_done && !verified)
       return result;
+    if (feedback.observation_complete && down_search_.Found()) {
+      // The moving-view vote only stopped search. Its first stationary
+      // confirmation must reacquire the ball before ordinary DOWN approach.
+      // Retain completed steps and the last DONE/hold when searching again.
+      down_search_.InvalidateDetection();
+      if (!tracked_.visible || !tracked_.stable) {
+        mode_ = BallMode::kDownSearch;
+        ClearTracking();
+        result.mode = mode_;
+        result.tracked = {};
+        return result;
+      }
+    }
     if (!tracked_.visible) {
       if (lost_count_ >= config_.lost_frames) {
         mode_ = BallMode::kBallRecoveryDown;

@@ -179,7 +179,8 @@ inline void DrawRawDebugDetections(cv::Mat &vis, const DetectionRange& dets,
 }
 template<class DetectionType>
 inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
-    const vision_core::MissionControllerConfig& config,std::uint64_t id=0) {
+    const vision_core::MissionControllerConfig& config,std::uint64_t id=0,
+    bool mission_target=false) {
   if (!std::isfinite(det.box.x) || !std::isfinite(det.box.y) ||
       !std::isfinite(det.box.width) || !std::isfinite(det.box.height)) return;
   const cv::Rect box(static_cast<int>(std::lround(det.box.x)),static_cast<int>(std::lround(det.box.y)),
@@ -187,23 +188,21 @@ inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
   const auto clipped=box & cv::Rect(0,0,vis.cols,vis.rows);
   if (clipped.empty()) return;
   cv::Scalar color(0,0,255); // GOAL and BACKBOARD
-  if (det.class_id==config.line_detection.class_id) color=cv::Scalar(255,0,0);
+  const bool is_line=det.class_id==config.line_detection.class_id;
+  if (is_line) color=cv::Scalar(0,255,0);
   else if (det.class_id==config.object_targets.ball_class_id) color=cv::Scalar(0,165,255);
   else if (det.class_id==config.object_targets.hurdle_class_id) color=cv::Scalar(0,255,255);
   cv::rectangle(vis,clipped,color,2);
-  cv::circle(vis,{clipped.x+clipped.width/2,clipped.y+clipped.height/2},3,color,-1);
-  if (id) cv::putText(vis,std::to_string(id),{clipped.x+2,std::min(vis.rows-1,clipped.y+14)},
-      cv::FONT_HERSHEY_SIMPLEX,.5,cv::Scalar(0,0,0),1,cv::LINE_AA);
-}
-inline void DrawConfirmedLineCenters(
-    cv::Mat &vis, const std::vector<vision_core::Point2> &line_centers,
-    bool line_confirmed) {
-  if (line_confirmed) {
-    for (const auto &point : line_centers) {
-      cv::circle(vis,
-                 cv::Point(static_cast<int>(std::round(point.u)),
-                           static_cast<int>(std::round(point.v))),
-                 5, cv::Scalar(255, 0, 0), 2);
+  // A center belongs to a displayed tracking ID, not filter acceptance alone.
+  // LINE has neither an ID label nor a detection center marker.
+  if (id && !is_line) {
+    cv::circle(vis,{clipped.x+clipped.width/2,clipped.y+clipped.height/2},3,color,-1);
+    cv::putText(vis,std::to_string(id),{clipped.x+2,std::min(vis.rows-1,clipped.y+14)},
+        cv::FONT_HERSHEY_SIMPLEX,.5,cv::Scalar(0,0,0),1,cv::LINE_AA);
+    if (mission_target) {
+      const auto outer=cv::Rect(clipped.x-3,clipped.y-3,clipped.width+6,clipped.height+6)
+          & cv::Rect(0,0,vis.cols,vis.rows);
+      cv::rectangle(vis,outer,cv::Scalar(255,255,255),1);
     }
   }
 }
@@ -223,7 +222,6 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   const bool selected_ball=mission_result.active_mission==vision_core::MissionType::kBall;
   const bool selected_goal=mission_result.active_mission==vision_core::MissionType::kGoal;
   const bool selected_hurdle=mission_result.active_mission==vision_core::MissionType::kHurdle;
-  const bool line_confirmed=mission_result.line_computed && feats.guide.valid && (!mission_result.line_in_recovery || mission_result.line_score_recovery);
   cv::Mat vis = bgr.clone();
   DrawRawDebugDetections(vis,dets,config);
   // Colored boxes are the exact pre-vote core filter results. ID labels join
@@ -247,7 +245,16 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         vision::DrawDepthRegions(vis,cv::Rect(static_cast<int>(std::lround(detection.box.x)),
             static_cast<int>(std::lround(detection.box.y)),static_cast<int>(std::lround(detection.box.width)),
             static_cast<int>(std::lround(detection.box.height))),config.backboard_depth_strip_width_px,aligned_depth);
-      DrawFilteredDebugDetection(vis,detection,config,id);
+      // A qualifying candidate can already be locked while LINE drains and
+      // observes. Only the active mission's confirmed identity gets white.
+      const bool mission_target=id && (
+          (selected_ball && detection.class_id==config.object_targets.ball_class_id &&
+           prepared.ball_target_locked && id==prepared.ball_target_id) ||
+          (selected_hurdle && detection.class_id==config.object_targets.hurdle_class_id &&
+           prepared.hurdle_target_locked && id==prepared.hurdle_target_id) ||
+          (selected_goal && detection.class_id==config.object_targets.backboard_class_id &&
+           prepared.backboard_target_locked && id==prepared.backboard_target_id));
+      DrawFilteredDebugDetection(vis,detection,config,id,mission_target);
     }
   }
   const int ref_u = static_cast<int>(std::lround(
@@ -259,20 +266,6 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     cv::line(vis, cv::Point(ref_u, 0), cv::Point(ref_u, vis.rows - 1),
              cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
   }
-  // Retained decision centers remain separate from live filter-pass boxes.
-  DrawConfirmedLineCenters(vis, prepared.line_centers, line_confirmed);
-
-  const auto draw_decision_center = [&vis](
-      const vision_core::Point2 &point, const cv::Scalar &color) {
-    if (!std::isfinite(point.u) || !std::isfinite(point.v) ||
-        point.u < 0.0 || point.u >= vis.cols ||
-        point.v < 0.0 || point.v >= vis.rows) return;
-    const cv::Point center(
-        std::clamp(static_cast<int>(std::lround(point.u)),0,vis.cols-1),
-        std::clamp(static_cast<int>(std::lround(point.v)),0,vis.rows-1));
-    cv::circle(vis, center, 7, color, 2, cv::LINE_AA);
-  };
-
   // LINE uses an O/H guide: it has a horizontal decision reference,
   // but no unique 2D object center. Do not invent a vertical point.
   if (mission_result.active_mission ==
@@ -291,10 +284,6 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     }
   }
 
-  if (selected_ball && ball_cmd.tracked.visible)
-    draw_decision_center(ball_cmd.tracked.center_px,
-                         cv::Scalar(0, 165, 255));
-
   if (selected_goal) {
     const auto &fine = goal_cmd.fine_decision_pose;
     if (goal_cmd.fine_decision_pose_used && fine.valid &&
@@ -311,17 +300,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         cv::line(vis, cv::Point(x, 0), cv::Point(x, vis.rows - 1),
                  cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
       }
-    } else if (goal_cmd.tracked.visible &&
-               !goal_cmd.fine_decision_pose_used) {
-      draw_decision_center(goal_cmd.tracked.center_px,
-                           cv::Scalar(0, 0, 255));
     }
   }
-
-  // The marker is the recent weighted coordinate used for step size
-  // and fine distance. Raw DOWN trigger values are shown in the panel.
-  if (selected_hurdle && hurdle_cmd.tracked.visible)
-    draw_decision_center(hurdle_cmd.tracked.center_px, cv::Scalar(0, 255, 255));
 
 
   const auto draw_v_line=[&](double v,const cv::Scalar& color) {

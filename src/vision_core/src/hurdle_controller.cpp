@@ -253,6 +253,18 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kCoarseAdjust:
     if (feedback.action_active && !feedback.action_done) return result;
     if (feedback.action_done && !verified) return result;
+    if (feedback.observation_complete && down_search_.Found()) {
+      // Retry only the first stationary confirmation after search stopped.
+      // Invalidate its found vote, not the completed-step budget or hold.
+      down_search_.InvalidateDetection();
+      if (!tracked_.visible || !tracked_.stable) {
+        mode_ = HurdleMode::kDownSearch;
+        ClearTracking();
+        result.mode = mode_;
+        result.tracked = {};
+        return result;
+      }
+    }
     if (!tracked_.visible) {
       if (lost_count_>=config_.lost_frames) {
         mode_=HurdleMode::kRecoveryDown; ClearTracking(); stationary_recovery_.Begin(now_sec); result.mode=mode_;

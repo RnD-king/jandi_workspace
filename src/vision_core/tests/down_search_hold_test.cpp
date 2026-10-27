@@ -33,6 +33,14 @@ struct SearchPair {
   void NoStep() const {
     assert(b.action.action==MissionAction::kNone && h.action.action==MissionAction::kNone);
   }
+  void Verify(double now,const std::optional<ObjectTarget>& mean,const std::deque<bool>& hits) {
+    ball.UseVerifiedObservation(mean,hits,640,480);
+    hurdle.UseVerifiedObservation(mean,hits,640,480);
+    ActionExecutionFeedback feedback;feedback.observation_complete=true;
+    const CameraFeedback down{CameraMode::kDown,true};
+    b=ball.Compute({},640,480,now,down,feedback);
+    h=hurdle.Compute({},640,480,now,down,feedback,{});
+  }
 };
 void IndependentWaits() {
   auto c=Config(1,2);
@@ -105,5 +113,66 @@ void FoundSurvivesIdentityChangeUntilDone() {
   s.ball.StartTestNear();s.hurdle.StartTestNear();
   assert(!s.ball.DownSearchFound() && !s.hurdle.DownSearchFound());
 }
+void FailedSearchConfirmationResumes(bool partial_hits) {
+  auto c=Config(.5,.5);
+  c.ball.stable_window=c.hurdle.stable_window=10;
+  c.ball.stable_min_hits=c.hurdle.stable_min_hits=7;
+  c.ball.down_search_min_hits=3;c.hurdle.down_search_min_hits=5;
+  c.ball.down_search_max_steps=c.hurdle.down_search_max_steps=3;
+  c.ball.lost_frames=c.hurdle.lost_frames=1;
+  c.ball.down_one_step_v_px=c.hurdle.down_one_step_v_px=100;
+  c.ball.fine_mode_v_px=c.hurdle.fine_mode_v_px=180;
+  c.ball.pickup_v1_px=200;
+  c.ball.pickup_v2_px=250;
+  SearchPair s(c);s.Tick(.1);
+  ObjectTarget target;target.center_px={320,50};target.box_px={300,30,40,40};
+  target.width_px=target.height_px=40;target.area_px=1600;target.confidence=1;
+  for(int i=0;i<7;++i)s.Tick(.2+.1*i,true,false,target);
+  s.Tick(1,false,true);s.NoStep();
+  assert(s.b.mode==BallMode::kCoarseAdjust && s.h.mode==HurdleMode::kCoarseAdjust);
+  std::deque<bool> failed(10,false);
+  if(partial_hits)for(int i=0;i<5;++i)failed[i]=true;
+  // Core passes no stationary mean both for total loss and insufficient 7/10.
+  s.Verify(2.1,{},failed);s.NoStep();
+  assert(s.b.mode==BallMode::kDownSearch && s.h.mode==HurdleMode::kDownSearch);
+  assert(!s.ball.DownSearchFound() && !s.hurdle.DownSearchFound());
+  assert(s.ball.DownSearchStepsRemaining()==2 && s.hurdle.DownSearchStepsRemaining()==2);
+  s.Tick(2.2);
+  assert(s.b.action.action==MissionAction::kStepForwardOne && s.h.action.action==s.b.action.action);
+  s.Tick(2.3,true);s.NoStep();
+  assert(s.ball.DownSearchStepsRemaining()==2 && s.hurdle.DownSearchStepsRemaining()==2);
+  for(int i=0;i<7;++i)s.Tick(2.4+.1*i,true,false,target);
+  s.Tick(3.2,false,true);s.NoStep();
+  assert(s.b.mode==BallMode::kCoarseAdjust && s.h.mode==HurdleMode::kCoarseAdjust);
+  s.Verify(4.3,target,std::deque<bool>(10,true));
+  assert(s.b.action.action==MissionAction::kStepForwardTwo && s.h.action.action==s.b.action.action);
+  assert(!s.ball.DownSearchFound() && !s.hurdle.DownSearchFound());
+  assert(s.ball.DownSearchStepsRemaining()==1 && s.hurdle.DownSearchStepsRemaining()==1);
+  // A later ordinary approach loss still uses the existing recovery FSM.
+  s.Verify(5.4,{},std::deque<bool>(10,false));s.NoStep();
+  assert(s.b.mode==BallMode::kBallRecoveryDown && s.h.mode==HurdleMode::kRecoveryDown);
 }
-int main() { IndependentWaits();RetuneAndDetection();ExhaustedAndZero();ShiftAndReset();FoundSurvivesIdentityChangeUntilDone(); }
+void FailedSearchConfirmationRetainsLimitAndHold() {
+  auto c=Config(.5,.5);
+  c.ball.down_search_max_steps=c.hurdle.down_search_max_steps=1;
+  SearchPair s(c);s.Tick(.1);
+  ObjectTarget target;target.center_px={320,50};target.box_px={300,30,40,40};
+  target.width_px=target.height_px=40;target.area_px=1600;target.confidence=1;
+  s.Tick(.2,true,false,target);s.Tick(1,false,true);s.NoStep();
+  s.Verify(2,{},std::deque<bool>(10,false));s.NoStep();s.Tick(2.1);s.NoStep();
+  assert(s.b.mode==BallMode::kFailed && s.h.mode==HurdleMode::kFailed);
+  assert(s.ball.DownSearchStepsRemaining()==0 && s.hurdle.DownSearchStepsRemaining()==0);
+  // Even an early manual confirmation cannot discard the last DONE's hold.
+  c.ball.down_search_max_steps=c.hurdle.down_search_max_steps=2;
+  SearchPair held(c);held.Tick(.1);held.Tick(.2,true,false,target);held.Tick(1,false,true);
+  held.Verify(1.1,{},std::deque<bool>(10,false));held.Tick(1.49);held.NoStep();
+  held.Tick(1.5);
+  assert(held.b.action.action==MissionAction::kStepForwardOne && held.h.action.action==held.b.action.action);
+}
+}
+int main() {
+  IndependentWaits();RetuneAndDetection();ExhaustedAndZero();ShiftAndReset();
+  FoundSurvivesIdentityChangeUntilDone();
+  FailedSearchConfirmationResumes(false);FailedSearchConfirmationResumes(true);
+  FailedSearchConfirmationRetainsLimitAndHold();
+}

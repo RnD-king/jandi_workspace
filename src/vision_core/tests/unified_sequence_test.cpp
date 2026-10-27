@@ -94,6 +94,32 @@ void TestDownSearchHoldTuning() {
   assert(t.out.command.action_id!=0 && t.out.command.action_id!=old_id);
   assert(t.out.command.action==MissionAction::kStepForwardOne && t.permit==scope);
 }
+void TestSearchConfirmationRetriesThroughObservationGate(bool manual) {
+  auto t=BallSearch();t.Commit();
+  const auto first_id=t.out.command.action_id;
+  t.in.ball_target=Target();
+  for(int i=0;i<7;++i)t.Tick();
+  t.Tick(true);
+  assert(t.out.ball.mode==BallMode::kCoarseAdjust && t.permit==0);
+  const int remaining=t.out.ball.down_search_steps_remaining;
+  // The same post-search check is automatic in real execution and explicitly
+  // requested by PREVIEW in manual tuning. Both use the core's real window.
+  t.in.manual_observation_control=manual;
+  t.in.begin_manual_observation=manual;
+  t.in.ball_target.reset();t.Tick();
+  t.in.begin_manual_observation=false;
+  assert(t.out.post_motion_observing && t.out.command.action_id==0);
+  for(int i=0;i<9;++i) {
+    t.Tick();assert(t.out.post_motion_observing && t.out.command.action_id==0);
+  }
+  t.Tick();
+  assert(!t.out.post_motion_observing && t.out.ball.mode==BallMode::kDownSearch);
+  assert(!t.out.ball.down_search_found && t.out.ball.down_search_steps_remaining==remaining);
+  assert(t.out.command.action_id==0 && t.permit==0);
+  assert(t.Preview().command.action==MissionAction::kStepForwardOne);
+  t.Commit();
+  assert(t.out.command.action==MissionAction::kStepForwardOne && t.out.command.action_id!=first_id);
+}
 void TestCameraLatchSurvivesLoss() {
   auto c=Config(); c.ball.entry_min_hits=1; c.ball.down_search_min_hits=1; c.ball.stable_window=c.ball.stable_min_hits=1; c.ball.lost_frames=1;
   BallController ball(c.ball,3); ActionExecutionFeedback busy; busy.action_active=true;
@@ -351,5 +377,7 @@ int main() {
   assert(medium.fine_decision_pose_used && medium.action.action==MissionAction::kStepForwardOne);
   TestCameraLatchSurvivesLoss(); TestWindowAndDeadline(); TestAlternatingBoundedRecovery();
   TestGoalForwardTrial(); TestHurdleSearchAndContact();TestDownSearchHoldTuning();
+  TestSearchConfirmationRetriesThroughObservationGate(false);
+  TestSearchConfirmationRetriesThroughObservationGate(true);
   for(bool left:{false,true})TestGoalEdgeSingleCommit(left);
 }

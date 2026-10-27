@@ -41,7 +41,7 @@ int main() {
   Check(cv::norm(a.image,b.image,cv::NORM_INF)==0 && cv::norm(a.panel,b.panel,cv::NORM_INF)==0,
         "adapter/core detection representations render differently");
   Check(a.image.at<cv::Vec3b>(260,600)!=cv::Vec3b(0,0,0),"FINE CONTACT line absent");
-  Check(a.image.at<cv::Vec3b>(200,307)!=cv::Vec3b(0,0,0),"retained decision circle absent");
+  Check(a.image.at<cv::Vec3b>(200,307)==cv::Vec3b(0,0,0),"retained target drew a center without a live ID");
   Check(cv::norm(image,cv::NORM_INF)==0,"renderer changed the source RGB frame");
   vision_core::PreparedPerceptionFrame filtered;
   filtered.accepted_object_detections={{{120,300,40,40},.9,c.object_targets.ball_class_id}};
@@ -61,8 +61,8 @@ int main() {
         filtered_view.image.at<cv::Vec3b>(301,21)==cv::Vec3b(0,0,0),
         "raw YOLO box must be thin green");
   Check(filtered_view.image.at<cv::Vec3b>(300,120)==cv::Vec3b(0,165,255) &&
-        filtered_view.image.at<cv::Vec3b>(320,140)==cv::Vec3b(0,165,255),
-        "filter-pass box/center must be orange");
+        filtered_view.image.at<cv::Vec3b>(320,140)==cv::Vec3b(0,0,0),
+        "filter acceptance alone must draw an orange box without a center");
   Check(filtered_view.image.at<cv::Vec3b>(300,220)==cv::Vec3b(0,0,0),
         "retained target drew a second object box");
   const cv::Mat label_image(480,640,CV_8UC3,cv::Scalar(180,180,180));
@@ -74,12 +74,19 @@ int main() {
   Check(cv::norm(id_view.image(cv::Rect(122,302,24,12)),
         label_baseline.image(cv::Rect(122,302,24,12)),cv::NORM_INF)>0,
         "real candidate ID was not drawn on its matching detection");
+  Check(id_view.image.at<cv::Vec3b>(320,140)==cv::Vec3b(0,165,255),
+        "a displayed ID must have a center in its box color");
   for(const auto& entry:std::vector<std::pair<int,cv::Vec3b>>{
-      {0,{255,0,0}},{1,{0,165,255}},{2,{0,0,255}},{3,{0,0,255}},{4,{0,255,255}}}) {
+      {0,{0,255,0}},{1,{0,165,255}},{2,{0,0,255}},{3,{0,0,255}},{4,{0,255,255}}}) {
     auto colors=image.clone();vision_core::Detection detection{{20,300,40,40},1,entry.first};
     vision::DrawFilteredDebugDetection(colors,detection,c);
-    Check(colors.at<cv::Vec3b>(300,20)==entry.second && colors.at<cv::Vec3b>(320,40)==entry.second,
-          "filter-pass class color/center mismatch");
+    Check(colors.at<cv::Vec3b>(300,20)==entry.second &&
+          colors.at<cv::Vec3b>(301,21)==entry.second &&
+          colors.at<cv::Vec3b>(320,40)==cv::Vec3b(0,0,0),
+          "filter-pass class must have a thick colored box without a center");
+    vision::DrawFilteredDebugDetection(colors,detection,c,47);
+    Check(colors.at<cv::Vec3b>(320,40)==(entry.first==0 ? cv::Vec3b(0,0,0) : entry.second),
+          "only an object ID may draw a center; LINE must never have one");
   }
   vision::MissionStateLog state_log;
   vision_core::PerceptionMissionFrameResult log_result;
