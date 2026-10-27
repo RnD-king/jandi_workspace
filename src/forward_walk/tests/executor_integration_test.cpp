@@ -471,6 +471,28 @@ int main() {
         pump([&]{return node->action_transactions_.completed.Contains(4102);});flush();
         Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"arm transition recovery missed LINE targets");
         std::cout<<"PASS queued-start/write failures stop consistently without fake DONE\n";
+        // Neither elapsed playback nor a failed read is camera completion.
+        Dxl::measured={{21,2077},{22,1537}};
+        camera(61001,1);
+        const auto verify_start=std::chrono::steady_clock::now();
+        pump([&]{return std::chrono::steady_clock::now()-verify_start>300ms;});flush();
+        Check(node->camera_motion_->Active() && Count(cameras,61001,Status::DONE)==0,
+              "unmoved camera received DONE");
+        camera(61001,1);flush();
+        Check(Count(cameras,61001,Status::ACK)==2 && Count(cameras,61001,Status::DONE)==0,
+              "duplicate ACK bypassed encoder verification");
+        Dxl::measured={{21,2036},{22,2013}};Dxl::fail_camera_read=true;
+        const auto failed_read_at=std::chrono::steady_clock::now();
+        pump([&]{return std::chrono::steady_clock::now()-failed_read_at>200ms;});flush();
+        Check(Count(cameras,61001,Status::DONE)==0,"failed encoder read emitted DONE");
+        Dxl::fail_camera_read=false;
+        pump([&]{return node->camera_transactions_.completed.Contains(61001);});flush();
+        Check(Count(cameras,61001,Status::DONE)==1 && !node->camera_motion_->Active(),
+              "verified camera did not complete exactly once");
+        Check(std::all_of(Dxl::camera_read_ids.begin(),Dxl::camera_read_ids.end(),
+              [](int id){return id==21 || id==22;}),"camera verification read unrelated motors");
+        Dxl::measured.clear();
+        std::cout<<"PASS camera encoder mismatch, duplicate, read failure and measured arrival\n";
         rclcpp::shutdown();fs::remove_all(directory);return 0;
     } catch(const std::exception& e) {
         if(rclcpp::ok())rclcpp::shutdown();fs::remove_all(directory);

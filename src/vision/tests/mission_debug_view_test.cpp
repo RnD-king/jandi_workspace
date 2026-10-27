@@ -1,4 +1,5 @@
 #include "vision/mission_debug_view.hpp"
+#include "vision/mission_state_log.hpp"
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -40,8 +41,59 @@ int main() {
   Check(cv::norm(a.image,b.image,cv::NORM_INF)==0 && cv::norm(a.panel,b.panel,cv::NORM_INF)==0,
         "adapter/core detection representations render differently");
   Check(a.image.at<cv::Vec3b>(260,600)!=cv::Vec3b(0,0,0),"FINE CONTACT line absent");
-  Check(a.image.at<cv::Vec3b>(200,300)!=cv::Vec3b(0,0,0),"retained decision marker absent");
+  Check(a.image.at<cv::Vec3b>(200,307)!=cv::Vec3b(0,0,0),"retained decision circle absent");
   Check(cv::norm(image,cv::NORM_INF)==0,"renderer changed the source RGB frame");
+  vision_core::PreparedPerceptionFrame filtered;
+  filtered.accepted_object_detections={{{120,300,40,40},.9,c.object_targets.ball_class_id}};
+  vision_core::ObjectTarget retained;
+  retained.box_px={220,300,40,40};retained.center_px={240,320};
+  retained.width_px=retained.height_px=40;retained.confidence=.9;
+  filtered.targets.ball=retained;
+  const std::vector<vision_core::Detection> raw_objects{
+      {{20,300,40,40},.9,c.object_targets.ball_class_id},
+      filtered.accepted_object_detections.front()};
+  vision_core::MissionFrameResult line_view;
+  line_view.active_mission=vision_core::MissionType::kLine;
+  const auto filtered_view=vision::RenderMissionDebug(
+      image,raw_objects,{},c,filtered,line_view,
+      {vision_core::CameraMode::kForward,true},{},state);
+  Check(filtered_view.image.at<cv::Vec3b>(300,20)==cv::Vec3b(0,255,0) &&
+        filtered_view.image.at<cv::Vec3b>(301,21)==cv::Vec3b(0,0,0),
+        "raw YOLO box must be thin green");
+  Check(filtered_view.image.at<cv::Vec3b>(300,120)==cv::Vec3b(0,165,255) &&
+        filtered_view.image.at<cv::Vec3b>(320,140)==cv::Vec3b(0,165,255),
+        "filter-pass box/center must be orange");
+  Check(filtered_view.image.at<cv::Vec3b>(300,220)==cv::Vec3b(0,0,0),
+        "retained target drew a second object box");
+  const cv::Mat label_image(480,640,CV_8UC3,cv::Scalar(180,180,180));
+  const auto label_baseline=vision::RenderMissionDebug(label_image,raw_objects,{},c,filtered,line_view,
+      {vision_core::CameraMode::kForward,true},{},state);
+  filtered.accepted_object_indices={1};filtered.detection_track_ids={0,47};
+  const auto id_view=vision::RenderMissionDebug(label_image,raw_objects,{},c,filtered,line_view,
+      {vision_core::CameraMode::kForward,true},{},state);
+  Check(cv::norm(id_view.image(cv::Rect(122,302,24,12)),
+        label_baseline.image(cv::Rect(122,302,24,12)),cv::NORM_INF)>0,
+        "real candidate ID was not drawn on its matching detection");
+  for(const auto& entry:std::vector<std::pair<int,cv::Vec3b>>{
+      {0,{255,0,0}},{1,{0,165,255}},{2,{0,0,255}},{3,{0,0,255}},{4,{0,255,255}}}) {
+    auto colors=image.clone();vision_core::Detection detection{{20,300,40,40},1,entry.first};
+    vision::DrawFilteredDebugDetection(colors,detection,c);
+    Check(colors.at<cv::Vec3b>(300,20)==entry.second && colors.at<cv::Vec3b>(320,40)==entry.second,
+          "filter-pass class color/center mismatch");
+  }
+  vision::MissionStateLog state_log;
+  vision_core::PerceptionMissionFrameResult log_result;
+  log_result.mission.active_mission=vision_core::MissionType::kBall;
+  log_result.mission.ball.mode=vision_core::BallMode::kDownSearch;
+  auto log=state_log.Update(0,"RUNNING",log_result,camera,c,42,0);
+  Check(log && log->find("mission=BALL phase=BALL_DOWN_SEARCH")!=std::string::npos,
+        "state log did not use the active mission");
+  Check(!state_log.Update(.1,"RUNNING",log_result,camera,c,42,0),"unchanged state logged every frame");
+  log_result.mission.ball.down_search_found=true;
+  log=state_log.Update(.2,"RUNNING",log_result,camera,c,42,0);
+  Check(log && log->find("found=1")!=std::string::npos,"found edge was not logged immediately");
+  log=state_log.Update(1.3,"RUNNING",log_result,camera,c,42,0);
+  Check(log && log->find("STATUS ")==0,"state heartbeat was not emitted");
   m.foot_pose=vision_core::FootPose::kWalk;
   auto walk=vision::RenderMissionDebug(image,adapter,{},c,p,m,camera,{},state);
   Check(walk.image.at<cv::Vec3b>(260,600)==cv::Vec3b(0,0,0),"CONTACT drawn in WALK");

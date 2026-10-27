@@ -1,6 +1,7 @@
 #include "dynamixel.hpp"
 #include <iostream>  
 #include <stdexcept>
+#include <cmath>
 #include <string>
 
 namespace {
@@ -324,6 +325,27 @@ std::unordered_map<int, int32_t> Dxl::GetRawPositions()
                    static_cast<int32_t>(position[i]));
   }
   return result;
+}
+
+int32_t Dxl::ReadRawPosition(int motor_id, double timeout_ms)
+{
+  if (motor_id<0 || motor_id>252 || !std::isfinite(timeout_ms) || timeout_ms<=0 || timeout_ms>10)
+    throw std::invalid_argument("invalid position read ID/timeout");
+  uint8_t data[4]={0}, error=0;
+  int result=packetHandler->readTx(portHandler,static_cast<uint8_t>(motor_id),DxlReg_PresentPosition,4);
+  if (result==COMM_SUCCESS) {
+    portHandler->setPacketTimeout(timeout_ms);
+    result=packetHandler->readRx(portHandler,static_cast<uint8_t>(motor_id),4,data,&error);
+  }
+  if (result!=COMM_SUCCESS)
+    throw std::runtime_error(packetHandler->getTxRxResult(result));
+  // The Alert bit does not invalidate position data; access/length errors do.
+  if (error & 0x7f) throw std::runtime_error(packetHandler->getRxPacketError(error));
+  const uint32_t raw=static_cast<uint32_t>(data[0]) |
+      (static_cast<uint32_t>(data[1])<<8) | (static_cast<uint32_t>(data[2])<<16) |
+      (static_cast<uint32_t>(data[3])<<24);
+  if (raw>4095) throw std::runtime_error("camera Present Position outside 0..4095");
+  return static_cast<int32_t>(raw);
 }
 
 void Dxl::SyncWriteRawPositions(

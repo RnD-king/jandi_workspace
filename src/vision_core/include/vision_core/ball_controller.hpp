@@ -109,6 +109,8 @@ struct BallResult {
   int recovery_observations_completed{0};
   double recovery_observation_elapsed_sec{0.0};
   int down_search_steps_remaining{0};
+  bool down_search_found{false};
+  int detection_hits{0}, detection_frames{0}, lost_frames{0};
   MissionAction fine_motion_action{MissionAction::kNone};
   int fine_motion_repetitions{0},fine_motion_remaining{0};
   bool fine_motion_prediction_valid{false};
@@ -146,11 +148,15 @@ public:
   void ClearObservationHistory();
   void InvalidateTargetIdentity() {
     ClearObservationHistory();
-    down_search_.InvalidateDetection();
+    // A completed detection vote still stops DOWN search after the real DONE.
+    // A new identity must rebuild its own observations, not revoke that stop.
     stationary_recovery_.DiscardDetections();
   }
   // A changed bbox filter invalidates the latched search detection as well.
-  void InvalidateDetectionEvidence() { InvalidateTargetIdentity(); }
+  void InvalidateDetectionEvidence() {
+    InvalidateTargetIdentity();
+    down_search_.InvalidateDetection();
+  }
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
   void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
       const std::deque<bool>& hits, int width, int height);
@@ -174,6 +180,10 @@ public:
         hit_history_.size()>=static_cast<std::size_t>(config_.stable_window);
   }
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
+  bool DownSearchFound() const { return down_search_.Found(); }
+  int LostFrames() const { return lost_count_; }
+  int DetectionFrames() const { return static_cast<int>(hit_history_.size()); }
+  int DetectionHits() const { return static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true)); }
   int FineSideActionsRemaining() const { return fine_side_remaining_; }
   int FineMotionActionsRemaining() const { return fine_side_remaining_; }
   int FineMotionRepetitions() const { return fine_repeat_total_; }

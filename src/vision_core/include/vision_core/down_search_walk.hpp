@@ -25,6 +25,7 @@ public:
     return Decision::kStep;
   }
   void Issued() { pending_=true; }
+  bool Found() const { return found_; }
   void InvalidateDetection() { found_=false; }
   int Remaining(int max_steps) const { return std::max(0,max_steps-completed_); }
   void ShiftTimers(double duration) {

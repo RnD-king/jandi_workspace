@@ -69,6 +69,8 @@ struct HurdleResult {
   int recovery_observations_completed{0};
   double recovery_observation_elapsed_sec{0.0};
   int down_search_steps_remaining{0};
+  bool down_search_found{false};
+  int detection_hits{0}, detection_frames{0}, lost_frames{0};
   bool active{false};
   CameraRequest camera_request{CameraRequest::kNone};
   HurdleMode mode{HurdleMode::kLineFollow};
@@ -95,10 +97,13 @@ public:
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
   // A changed bbox filter invalidates the latched search detection as well.
-  void InvalidateDetectionEvidence() {
+  void InvalidateTargetIdentity() {
     ClearObservationHistory();
-    down_search_.InvalidateDetection();
     stationary_recovery_.DiscardDetections();
+  }
+  void InvalidateDetectionEvidence() {
+    InvalidateTargetIdentity();
+    down_search_.InvalidateDetection();
   }
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
   void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
@@ -125,6 +130,10 @@ public:
         hit_history_.size()>=static_cast<std::size_t>(config_.stable_window);
   }
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
+  bool DownSearchFound() const { return down_search_.Found(); }
+  int LostFrames() const { return lost_count_; }
+  int DetectionFrames() const { return static_cast<int>(hit_history_.size()); }
+  int DetectionHits() const { return static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true)); }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   int DownSearchStepsRemaining() const {
     return down_search_.Remaining(config_.down_search_max_steps);

@@ -239,6 +239,43 @@ void TestBackboardValidDepthCanBeRetuned() {
   assert(!rejected_again.perception.targets.backboard);
 }
 
+void TestDebugCandidatesUseCoreFiltersBeforeTemporalVoting() {
+  auto config=LoadDefaultAlgorithmConfig();
+  config.object_targets.ball_min_box_width=20;
+  config.object_targets.ball_min_box_height=30;
+  config.object_targets.hurdle_min_box_width=200;
+  config.object_targets.hurdle_min_box_height=10;
+  config.object_targets.ball_forward_min_depth_m=.5;
+  config.object_targets.ball_forward_max_depth_m=2.2;
+  MissionController controller(config);
+  PerceptionFrameInput input;
+  input.image_width=640; input.image_height=480;
+  input.camera_feedback={CameraMode::kForward,true};
+  const auto add=[&](int class_id, Box2 box, double confidence, double depth) {
+    PerceptionDetection detection;
+    detection.detection={box,confidence,class_id};
+    detection.center_depth_m=depth;
+    input.detections.push_back(detection);
+  };
+  const int ball=config.object_targets.ball_class_id;
+  const int hurdle=config.object_targets.hurdle_class_id;
+  add(ball,{100,200,40,40},.95,1.0);  // Filter pass, before 6/10.
+  add(ball,{150,200,40,40},.95,3.0);  // Depth reject.
+  add(ball,{200,200,80,30},.95,1.0);  // Aspect reject.
+  add(ball,{250,200,10,10},.95,1.0);  // BBox reject.
+  add(hurdle,{300,250,220,20},.95,1.0); // Filter pass.
+  const auto result=controller.StepPerception(input);
+  const auto &accepted=result.perception.accepted_object_detections;
+  assert(accepted.size()==2);
+  assert(accepted[0].class_id==ball && accepted[0].box.x==100);
+  assert(accepted[1].class_id==hurdle && accepted[1].box.x==300);
+  assert(result.perception.accepted_object_indices==std::vector<std::size_t>({0,4}));
+  assert(result.perception.detection_track_ids.size()==5);
+  assert(result.perception.detection_track_ids[0] && result.perception.detection_track_ids[4]);
+  for(int index:{1,2,3})assert(result.perception.detection_track_ids[index]==0);
+  assert(result.mission.active_mission==MissionType::kLine);
+}
+
 } // namespace
 
 int main() {
@@ -265,5 +302,6 @@ int main() {
   TestGlobalPauseGateForBallAndCamera();
   TestPauseDoesNotAcquireNewMission();
   TestBackboardValidDepthCanBeRetuned();
+  TestDebugCandidatesUseCoreFiltersBeforeTemporalVoting();
   return 0;
 }

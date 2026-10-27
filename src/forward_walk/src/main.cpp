@@ -57,7 +57,7 @@ public:
         // 5) MotionLoop()가 몸/카메라 목표 tick을 합쳐 20 ms 간격으로 한 패킷씩 전송한다.
         // 6) 모든 미션의 11/12/13 및 21~25에 READY를 전송한다. 선예약 접수는 현재 A의 READY와 빈 큐로만 결정한다.
         // 7) 마지막 이동/유지가 끝나면 DONE(재생 완료)을 보내고 대기 동작을 이어 시작한다.
-        // DONE은 재생 시간표 완료를 뜻하며, encoder로 실제 도착을 재확인한 결과는 아니다.
+        // 몸 DONE은 시간표 완료, 카메라 DONE은 이동 후 두 encoder의 목표 오차 확인을 뜻한다.
 
         // motions/와 missions/를 포함한 패키지 share 루트다.
         declare_parameter<std::string>(
@@ -139,6 +139,7 @@ public:
         if (legacy_camera_settle != 0.0)
             throw std::invalid_argument("camera_settle_sec is replaced by mission.transition_settle_sec; leave it at zero");
         camera_config_.settle_sec=0.0;
+        camera_config_.position_tolerance_ratio = declare_parameter<double>("camera_position_tolerance_ratio",0.10);
         camera_config_.Validate();
         camera_motion_ = std::make_unique<motion_executor::CameraMotion>(camera_config_);
 
@@ -700,6 +701,11 @@ private:
             return;
         }
         camera_transactions_.active_id = message->command_id;
+        next_camera_verify_at_={};
+        const auto target=camera_config_.Target(message->request);
+        RCLCPP_INFO(get_logger(),"[CAMERA] ACK id=%llu request=%u target=(%d,%d) tolerance=%.1f%%",
+            static_cast<unsigned long long>(message->command_id),unsigned(message->request),
+            target.yaw,target.pitch,100*camera_config_.position_tolerance_ratio);
         PublishCameraStatus(message->command_id, vision::msg::CommandStatus::ACK);
         EnsureMotionLoop();
     }
@@ -806,7 +812,7 @@ private:
         // 이후 몸 JSON에 머리 tick이 있어도 Merge()가 이 기본 자세로 덮어쓴다.
         if (startup_completed) camera_motion_->HoldForward();
         // camera_result: Idle=재생 없음, Running=다음 단계/안정화 대기,
-        // Command=새 카메라 목표 계산됨, Finished=이동 및 안정화 시간 완료.
+        // Command=새 카메라 목표 계산됨, Verify=encoder 도착 확인 대기.
         const auto camera_result = camera_motion_->Update(now);
         // camera_command는 위치 데이터가 아니라 "카메라 목표를 전송해야 하는가"라는 bool이다.
         // 시작 자세 완료 시 FORWARD 유지 목표도 이 경로로 한 번 전송한다.
@@ -845,10 +851,33 @@ private:
             action_transactions_.MarkReady()) {
             PublishActionStatus(action_transactions_.active_id, vision::msg::CommandStatus::READY);
         }
-        // 카메라 이동과 settle 대기가 끝나면 카메라 ID만 완료 처리한다. 몸 동작은 계속될 수 있다.
-        if (camera_result == motion_executor::CameraMotion::Result::Finished) {
-            PublishCameraStatus(camera_transactions_.active_id, vision::msg::CommandStatus::DONE);
-            camera_transactions_.CompleteActive();
+        // End-of-playback is not arrival. Read only the two camera encoders,
+        // at most every 100 ms with a bounded 5 ms timeout per motor.
+        if (camera_result == motion_executor::CameraMotion::Result::Verify &&
+            now>=next_camera_verify_at_) {
+            next_camera_verify_at_=now+100ms;
+            const auto target=camera_motion_->TargetPose();
+            try {
+                const motion_executor::CameraPose measured{
+                    dxl_->ReadRawPosition(camera_config_.yaw_id,5.0),
+                    dxl_->ReadRawPosition(camera_config_.pitch_id,5.0)};
+                if (camera_motion_->ConfirmArrival(measured)) {
+                    RCLCPP_INFO(get_logger(),"[CAMERA] DONE id=%llu target=(%d,%d) measured=(%d,%d)",
+                        static_cast<unsigned long long>(camera_transactions_.active_id),
+                        target.yaw,target.pitch,measured.yaw,measured.pitch);
+                    PublishCameraStatus(camera_transactions_.active_id, vision::msg::CommandStatus::DONE);
+                    camera_transactions_.CompleteActive();
+                } else {
+                    RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),1000,
+                        "[CAMERA] waiting for encoder arrival id=%llu target=(%d,%d) measured=(%d,%d); no DONE",
+                        static_cast<unsigned long long>(camera_transactions_.active_id),
+                        target.yaw,target.pitch,measured.yaw,measured.pitch);
+                }
+            } catch (const std::exception& e) {
+                RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),1000,
+                    "[CAMERA] encoder read failed id=%llu: %s; no DONE",
+                    static_cast<unsigned long long>(camera_transactions_.active_id),e.what());
+            }
         }
         if (body_result == P2PMotionPlayer::UpdateResult::kFinished) {
             if (startup_pose_in_progress_) {
@@ -1024,6 +1053,7 @@ private:
     std::optional<QueuedAction> queued_action_;        // 비어 있으면 다음 동작 없음, 값이 있으면 1개 대기
     motion_executor::CameraTransactions camera_transactions_; // 몸과 독립인 카메라 활성/완료 ID 기록
     motion_executor::CameraConfig camera_config_;     // 카메라 모터 ID, 세 자세 tick, 이동/안정화 시간
+    std::chrono::steady_clock::time_point next_camera_verify_at_{};
     std::unique_ptr<motion_executor::CameraMotion> camera_motion_; // 머리 보간 및 완료 후 자세 유지 상태
     // 마지막으로 전송 호출에 성공한 전체 목표 tick. 실제 encoder 측정값과 구분해야 한다.
     P2PMotionPlayer::RawPositions last_sent_positions_;

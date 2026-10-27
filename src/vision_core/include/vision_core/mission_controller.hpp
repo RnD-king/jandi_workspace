@@ -247,6 +247,12 @@ struct PreparedPerceptionFrame {
   std::vector<BallCandidateTrack> ball_tracks;
   std::vector<BallCandidateTrack> hurdle_tracks, backboard_tracks;
   std::vector<ObjectFilterDiagnostic> object_filter_diagnostics;
+  // Current-frame objects after class/confidence/box/aspect/depth filtering,
+  // before identity association or temporal entry/stability votes.
+  std::vector<Detection> accepted_object_detections;
+  // Original-frame indices join filter-pass boxes to real tracker identities.
+  std::vector<std::size_t> accepted_object_indices;
+  std::vector<std::uint64_t> detection_track_ids;
   std::uint64_t ball_target_id{};
   std::uint64_t hurdle_target_id{}, backboard_target_id{};
   bool hurdle_target_locked{false}, backboard_target_locked{false};

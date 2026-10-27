@@ -351,14 +351,18 @@ int main() {
         for (int i=2;i<25;++i) { now+=20ms; camera.Update(now); }
         camera.Merge(base);
         Require(base.at(21)==2054 && base.at(22)==966, "camera target not reached");
-        Require(camera.Update(now+20ms)==CameraMotion::Result::Finished, "camera DONE gained an extra settle delay");
+        Require(camera.Update(now+20ms)==CameraMotion::Result::Verify && camera.Active(), "camera completed without encoder verification");
+        Require(!camera.ConfirmArrival({2054,1200}) && camera.Active(),"out-of-range pitch was accepted");
+        Require(!camera.ConfirmArrival({1800,966}),"out-of-range yaw was accepted");
+        Require(!camera.ConfirmArrival({2054,-1}),"invalid encoder value was accepted");
+        Require(camera.ConfirmArrival({2259,1062}),"target-value ten-percent tolerance was not inclusive");
         Require(camera.Update(now+220ms)==CameraMotion::Result::Idle, "completed camera emitted completion again");
         auto next_body = InitialPose(); camera.Merge(next_body);
         for (int id : Dxl::MotorIds()) {
             Require(next_body.at(id)==(id==21?2054:id==22?966:2048), "override changed body motor or was cleared after DONE");
         }
         Require(!camera.Active() && camera.OverrideEnabled(), "persistent override lost");
-        pass("camera calibration, delayed interpolation, immediate DONE, persistent full-packet merge");
+        pass("camera calibration, encoder-gated completion, target-relative tolerance and persistent merge");
 
         fs::remove_all(temporary);
         std::cout << "All " << groups << " test groups passed without hardware.\n";

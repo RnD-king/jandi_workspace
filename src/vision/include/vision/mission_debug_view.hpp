@@ -16,6 +16,7 @@ inline constexpr double kDebugPi=3.14159265358979323846;
 struct MissionDebugContext {
   std::string control_state{"RUNNING"},control_hint,performance;
   bool preview_ready{false},imu_enabled{false},imu_ready{false};
+  bool live_object_detections{true}; // PAUSE/RESET retains FSM state, not live boxes.
   int approved_repeat_scope{0};
   std::uint64_t waiting_action_id{0},last_received_done_id{0},last_processed_done_id{0};
   double roll_rad{0},pitch_rad{0};
@@ -162,11 +163,10 @@ inline std::string DebugRepeatLabel(int scope, const vision_core::MissionControl
 template<class DetectionRange>
 inline void DrawRawDebugDetections(cv::Mat &vis, const DetectionRange& dets,
                                    const vision_core::MissionControllerConfig& config) {
+  (void)config;
   for (const auto &det : dets) {
-    if (det.confidence < config.line_detection.confidence) {
-      continue;
-    }
-
+    if (!std::isfinite(det.box.x) || !std::isfinite(det.box.y) ||
+        !std::isfinite(det.box.width) || !std::isfinite(det.box.height)) continue;
     const cv::Rect box(static_cast<int>(std::lround(det.box.x)), static_cast<int>(std::lround(det.box.y)),
                        static_cast<int>(std::lround(det.box.width)), static_cast<int>(std::lround(det.box.height)));
     cv::Rect clipped = box & cv::Rect(0, 0, vis.cols, vis.rows);
@@ -174,87 +174,38 @@ inline void DrawRawDebugDetections(cv::Mat &vis, const DetectionRange& dets,
       continue;
     }
 
-    const int cx = clipped.x + clipped.width / 2;
-    const int cy = clipped.y + clipped.height / 2;
-
-    cv::Scalar box_color(160, 160, 160);
-    cv::Scalar center_color(80, 80, 80);
-    if (det.class_id == config.line_detection.class_id) {
-      box_color = cv::Scalar(0, 255, 0);
-      center_color = cv::Scalar(0, 0, 255);
-    } else if (det.class_id == config.object_targets.ball_class_id) {
-      box_color = cv::Scalar(0, 165, 255);
-      center_color = cv::Scalar(255, 0, 0);
-    } else if (det.class_id == config.object_targets.goal_class_id) {
-      box_color = cv::Scalar(255, 255, 0);
-      center_color = cv::Scalar(0, 255, 255);
-    } else if (det.class_id == config.object_targets.backboard_class_id) {
-      box_color = cv::Scalar(255, 128, 0);
-      center_color = cv::Scalar(0, 128, 255);
-    } else if (det.class_id == config.object_targets.hurdle_class_id) {
-      box_color = cv::Scalar(255, 0, 255);
-      center_color = cv::Scalar(255, 255, 255);
-    }
-
-    cv::rectangle(vis, clipped, box_color, 2);
-    cv::circle(vis, cv::Point(cx, cy), 3, center_color, -1);
-
-    char buf[40];
-    std::snprintf(buf, sizeof(buf), "%s %.2f", DebugClassLabel(det.class_id,config), det.confidence);
-
-    int tx = clipped.x;
-    int ty = clipped.y - 6;
-    if (ty < 12)
-      ty = clipped.y + 16;
-
-    cv::putText(vis, buf, cv::Point(tx, ty), cv::FONT_HERSHEY_SIMPLEX,
-                0.52, box_color, 1);
+    cv::rectangle(vis, clipped, cv::Scalar(0,255,0), 1);
   }
 }
-inline void DrawDecisionDetections(
+template<class DetectionType>
+inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
+    const vision_core::MissionControllerConfig& config,std::uint64_t id=0) {
+  if (!std::isfinite(det.box.x) || !std::isfinite(det.box.y) ||
+      !std::isfinite(det.box.width) || !std::isfinite(det.box.height)) return;
+  const cv::Rect box(static_cast<int>(std::lround(det.box.x)),static_cast<int>(std::lround(det.box.y)),
+      static_cast<int>(std::lround(det.box.width)),static_cast<int>(std::lround(det.box.height)));
+  const auto clipped=box & cv::Rect(0,0,vis.cols,vis.rows);
+  if (clipped.empty()) return;
+  cv::Scalar color(0,0,255); // GOAL and BACKBOARD
+  if (det.class_id==config.line_detection.class_id) color=cv::Scalar(255,0,0);
+  else if (det.class_id==config.object_targets.ball_class_id) color=cv::Scalar(0,165,255);
+  else if (det.class_id==config.object_targets.hurdle_class_id) color=cv::Scalar(0,255,255);
+  cv::rectangle(vis,clipped,color,2);
+  cv::circle(vis,{clipped.x+clipped.width/2,clipped.y+clipped.height/2},3,color,-1);
+  if (id) cv::putText(vis,std::to_string(id),{clipped.x+2,std::min(vis.rows-1,clipped.y+14)},
+      cv::FONT_HERSHEY_SIMPLEX,.5,cv::Scalar(0,0,0),1,cv::LINE_AA);
+}
+inline void DrawConfirmedLineCenters(
     cv::Mat &vis, const std::vector<vision_core::Point2> &line_centers,
-    bool line_confirmed,
-    const std::optional<vision_core::ObjectTarget> &ball_target,
-    bool ball_confirmed,
-    const std::optional<vision_core::ObjectTarget> &backboard_target,
-    bool backboard_confirmed,
-    const std::optional<vision_core::ObjectTarget> &hurdle_target,
-    bool hurdle_confirmed) {
+    bool line_confirmed) {
   if (line_confirmed) {
     for (const auto &point : line_centers) {
       cv::circle(vis,
                  cv::Point(static_cast<int>(std::round(point.u)),
                            static_cast<int>(std::round(point.v))),
-                 5, cv::Scalar(0, 255, 0), 2);
+                 5, cv::Scalar(255, 0, 0), 2);
     }
   }
-
-  const auto draw_target = [&vis](
-                               const std::optional<vision_core::ObjectTarget> &target,
-                               bool confirmed, const char *label,
-                               const cv::Scalar &color) {
-    if (!confirmed || !target) return;
-    const auto &box = target->box_px;
-    const cv::Rect raw_box(static_cast<int>(std::round(box.x)),
-                           static_cast<int>(std::round(box.y)),
-                           static_cast<int>(std::round(box.width)),
-                           static_cast<int>(std::round(box.height)));
-    const cv::Rect clipped = raw_box & cv::Rect(0, 0, vis.cols, vis.rows);
-    if (clipped.width <= 0 || clipped.height <= 0) return;
-    cv::rectangle(vis, clipped, color, 2);
-    // Boxes show recognition evidence; the controller's decision center is
-    // drawn separately, matching the tuning node.
-    const int text_y = clipped.y >= 14 ? clipped.y - 4 : clipped.y + 14;
-    cv::putText(vis, label, cv::Point(clipped.x, text_y),
-                cv::FONT_HERSHEY_SIMPLEX, 0.60, color, 2);
-  };
-
-  draw_target(ball_target, ball_confirmed, "BALL",
-              cv::Scalar(0, 165, 255));
-  draw_target(backboard_target, backboard_confirmed, "BACKBOARD APPROACH",
-              cv::Scalar(255, 128, 0));
-  draw_target(hurdle_target, hurdle_confirmed, "HURDLE",
-              cv::Scalar(255, 0, 255));
 }
 template<class DetectionRange>
 inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionRange& dets,
@@ -274,9 +225,31 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   const bool selected_hurdle=mission_result.active_mission==vision_core::MissionType::kHurdle;
   const bool line_confirmed=mission_result.line_computed && feats.guide.valid && (!mission_result.line_in_recovery || mission_result.line_score_recovery);
   cv::Mat vis = bgr.clone();
-  for (const auto& detection:dets) if (detection.class_id==config.object_targets.backboard_class_id)
-    vision::DrawDepthRegions(vis,cv::Rect(static_cast<int>(std::lround(detection.box.x)), static_cast<int>(std::lround(detection.box.y)), static_cast<int>(std::lround(detection.box.width)), static_cast<int>(std::lround(detection.box.height))),config.backboard_depth_strip_width_px,aligned_depth);
-  DrawRawDebugDetections(vis, dets, config);
+  DrawRawDebugDetections(vis,dets,config);
+  // Colored boxes are the exact pre-vote core filter results. ID labels join
+  // original detection indices, never a second visual association algorithm.
+  for (const auto& detection:dets) {
+    if (detection.class_id==config.line_detection.class_id &&
+        detection.confidence>=config.line_detection.confidence &&
+        detection.box.width>config.line_detection.min_box_width &&
+        detection.box.height>config.line_detection.min_box_height)
+      DrawFilteredDebugDetection(vis,detection,config);
+  }
+  if (view.live_object_detections && camera.settled && camera.actual_mode!=vision_core::CameraMode::kTransition) {
+    for (std::size_t i=0;i<prepared.accepted_object_detections.size();++i) {
+      std::uint64_t id=0;
+      if (i<prepared.accepted_object_indices.size()) {
+        const auto index=prepared.accepted_object_indices[i];
+        if (index<prepared.detection_track_ids.size()) id=prepared.detection_track_ids[index];
+      }
+      const auto& detection=prepared.accepted_object_detections[i];
+      if (detection.class_id==config.object_targets.backboard_class_id)
+        vision::DrawDepthRegions(vis,cv::Rect(static_cast<int>(std::lround(detection.box.x)),
+            static_cast<int>(std::lround(detection.box.y)),static_cast<int>(std::lround(detection.box.width)),
+            static_cast<int>(std::lround(detection.box.height))),config.backboard_depth_strip_width_px,aligned_depth);
+      DrawFilteredDebugDetection(vis,detection,config,id);
+    }
+  }
   const int ref_u = static_cast<int>(std::lround(
       config.line_features.image_center_u));
   const bool line_view=mission_result.active_mission==vision_core::MissionType::kLine ||
@@ -286,13 +259,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     cv::line(vis, cv::Point(ref_u, 0), cv::Point(ref_u, vis.rows - 1),
              cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
   }
-  // Overlay the retained decision boxes/centers on the live detections.
-  // READY object boxes may be moving-window averages.
-  DrawDecisionDetections(
-      vis, prepared.line_centers, line_confirmed, ball_target,
-      ball_target.has_value(), backboard_target,
-      backboard_target.has_value(), hurdle_target,
-      hurdle_target.has_value());
+  // Retained decision centers remain separate from live filter-pass boxes.
+  DrawConfirmedLineCenters(vis, prepared.line_centers, line_confirmed);
 
   const auto draw_decision_center = [&vis](
       const vision_core::Point2 &point, const cv::Scalar &color) {
@@ -303,7 +271,6 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         std::clamp(static_cast<int>(std::lround(point.u)),0,vis.cols-1),
         std::clamp(static_cast<int>(std::lround(point.v)),0,vis.rows-1));
     cv::circle(vis, center, 7, color, 2, cv::LINE_AA);
-    cv::drawMarker(vis, center, color, cv::MARKER_CROSS, 14, 2, cv::LINE_AA);
   };
 
   // LINE uses an O/H guide: it has a horizontal decision reference,
@@ -326,7 +293,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
 
   if (selected_ball && ball_cmd.tracked.visible)
     draw_decision_center(ball_cmd.tracked.center_px,
-                         cv::Scalar(0, 0, 255));
+                         cv::Scalar(0, 165, 255));
 
   if (selected_goal) {
     const auto &fine = goal_cmd.fine_decision_pose;
@@ -347,14 +314,14 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     } else if (goal_cmd.tracked.visible &&
                !goal_cmd.fine_decision_pose_used) {
       draw_decision_center(goal_cmd.tracked.center_px,
-                           cv::Scalar(0, 255, 255));
+                           cv::Scalar(0, 0, 255));
     }
   }
 
   // The marker is the recent weighted coordinate used for step size
   // and fine distance. Raw DOWN trigger values are shown in the panel.
   if (selected_hurdle && hurdle_cmd.tracked.visible)
-    draw_decision_center(hurdle_cmd.tracked.center_px, cv::Scalar(255, 0, 255));
+    draw_decision_center(hurdle_cmd.tracked.center_px, cv::Scalar(0, 255, 255));
 
 
   const auto draw_v_line=[&](double v,const cv::Scalar& color) {

@@ -438,7 +438,26 @@ void CandidateWinsReadyAndUsesFreshDoneWindow() {
   assert(out.mission.post_motion_valid==7);
 }
 }
+void ExtendedCandidateGraceAndDistance() {
+  auto config=LoadDefaultAlgorithmConfig();
+  auto tracking=config.ball_candidate_tracking;
+  tracking.max_center_distance_px=180;tracking.missing_frame_limit=15;
+  BallCandidateTracker tracker;
+  auto update=[&](std::vector<ObjectTargetCandidate> ds) {
+    tracker.Update(ds,tracking,config.object_association,10,470);
+  };
+  update({Candidate(100)});const auto id=tracker.Best()->id;
+  update({Candidate(279)});
+  assert(tracker.Find(id) && tracker.Find(id)->target.center_px.u==279);
+  for(int i=0;i<15;++i)update({});
+  assert(tracker.Find(id) && tracker.Find(id)->missing_frames==15);
+  update({Candidate(280)});assert(tracker.Find(id)->missing_frames==0);
+  for(int i=0;i<16;++i)update({});
+  assert(!tracker.Find(id));
+  update({Candidate(280)});assert(tracker.Best()->id!=id);
+}
 int main() {
+  ExtendedCandidateGraceAndDistance();
   SharedObjectTrackingRegressions();HurdleIdentityEntryAndCameraReset();BackboardIdentityAndCameraReset();
   HurdleObservationRestartsAfterCamera();
   TrackletRegressions(); LockedAssociationDoesNotAutoAcquire();

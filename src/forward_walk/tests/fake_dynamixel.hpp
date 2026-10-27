@@ -26,6 +26,14 @@ public:
     inline static std::vector<std::chrono::steady_clock::time_point> packet_times;
     inline static int reads{0};
     inline static bool fail_read{false}, fail_write{false};
+    inline static bool fail_camera_read{false};
+    inline static Positions measured;
+    inline static std::vector<int> camera_read_ids;
+    int32_t ReadRawPosition(int id,double) {
+        camera_read_ids.push_back(id);
+        if(fail_camera_read) throw std::runtime_error("injected camera read failure");
+        return measured.count(id) ? measured.at(id) : current.at(id);
+    }
     inline static std::unordered_map<int,MotorHealth> health;
     MotorHealth ReadMotorHealth(int id, double) {
         if(health.count(id)) return health.at(id);

@@ -95,6 +95,7 @@ struct TrackedGoal {
 };
 
 struct GoalResult {
+  int detection_hits{0}, detection_frames{0}, lost_frames{0}, pose_lost_frames{0};
   int recovery_observations_completed{0};
   double recovery_observation_elapsed_sec{0.0};
   bool active{false};
@@ -129,6 +130,10 @@ public:
   }
   int RecoveryTurnsCompleted() const { return recovery_turns_completed_; }
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
+  int LostFrames() const { return lost_count_; }
+  int PoseLostFrames() const { return pose_lost_count_; }
+  int DetectionFrames() const { return static_cast<int>(hit_history_.size()); }
+  int DetectionHits() const { return static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true)); }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   GoalResult Compute(const std::optional<ObjectTarget> &goal_target,
                      const std::optional<ObjectTarget> &backboard_target,

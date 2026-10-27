@@ -1,5 +1,6 @@
 #include "vision/debug_bag_publisher.hpp"
 #include "vision/mission_debug_view.hpp"
+#include "vision/mission_state_log.hpp"
 #include "vision/debug_guides.hpp"
 #include "vision/mission_parameters.hpp"
 #include "vision/backboard_depth.hpp"
@@ -641,6 +642,7 @@ public:
     });
     // ---- heartbeat(1Hz) ----
     hb_timer_ = create_wall_timer(std::chrono::seconds(1), [this]() {
+      LogMissionState(last_debug_result_);
       RCLCPP_INFO(get_logger(), "[HB] frames=%zu imu=%zu action_pub=%zu (last_img_stamp=%.9f)", frames_count_, imu_count_,
                   action_pub_count_, last_img_stamp_sec_);
     });
@@ -732,6 +734,8 @@ private:
   vision::MissionDebugContext DebugContext(bool imu_ready,double roll,double pitch) const {
     vision::MissionDebugContext view;
     view.control_state=RunStateName(run_state_);
+    view.live_object_detections=run_state_!=RunState::kWaitStart &&
+        run_state_!=RunState::kPaused && run_state_!=RunState::kResetting;
     view.performance=perf_text_;
     view.waiting_action_id=outstanding_actions_.empty() ? 0 : *outstanding_actions_.begin();
     view.last_received_done_id=last_received_done_id_;
@@ -744,11 +748,19 @@ private:
     return view;
   }
 
+  void LogMissionState(const vision_core::PerceptionMissionFrameResult& result) {
+    const auto line=mission_state_log_.Update(get_clock()->now().seconds(),RunStateName(run_state_),
+        result,camera_feedback_,debug_config_,outstanding_actions_.empty() ? 0 : *outstanding_actions_.begin(),
+        pending_camera_id_);
+    if(line) RCLCPP_INFO(get_logger(),"[STATE] %s",line->c_str());
+  }
+
   void DisplayDebugFrame(const std_msgs::msg::Header &header,
                          const cv::Mat &bgr, const std::vector<Detection> &dets,
                          const cv::Mat &aligned_depth,
                          const vision_core::PerceptionMissionFrameResult &result,
                          bool imu_ready, double roll, double pitch) {
+    LogMissionState(result);
     const auto request = debug_bag_->RequestFrame();
     if (!show_debug_view_ && !show_yolo_debug_view_ && !request) return;
     vision::MissionDebugImages views;
@@ -1496,11 +1508,11 @@ private:
     const auto &goal_cmd = mission_result.goal;
     const auto &feats = mission_result.line_features;
     const bool selected_ball =
-        control_command.mission == vision_core::MissionType::kBall;
+        mission_result.active_mission == vision_core::MissionType::kBall;
     const bool selected_hurdle =
-        control_command.mission == vision_core::MissionType::kHurdle;
+        mission_result.active_mission == vision_core::MissionType::kHurdle;
     const bool selected_goal =
-        control_command.mission == vision_core::MissionType::kGoal;
+        mission_result.active_mission == vision_core::MissionType::kGoal;
     const char *selected_mode =
         selected_ball
             ? vision_core::BallController::ModeName(ball_cmd.mode)
@@ -1545,7 +1557,7 @@ private:
 
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
                          "[ACTION] %s -> %s | id=%lu action=%u yaw=%d | line_n=%.0f ball_stable=%d request_cam_down=%d",
-                         selected_goal ? "GOAL" : (selected_hurdle ? "HURDLE" : (selected_ball ? "BALL" : "LINE")),
+                         vision::DebugMissionName(control_command.mission),
                          action_cmd_topic_.c_str(), control_command.action_id,
                          static_cast<unsigned int>(control_command.action),
                          static_cast<int>(control_command.target_yaw_deg),
@@ -1558,6 +1570,7 @@ private:
 
 private:
   // ROS Sub/Pub
+  vision::MissionStateLog mission_state_log_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_sub_;
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_;

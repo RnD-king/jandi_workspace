@@ -219,6 +219,8 @@ class Dxl
         // P2P JSON의 motor ID -> raw encoder tick 값을 직접 입출력한다.
         virtual MotorHealth ReadMotorHealth(int motor_id, double timeout_ms);
         virtual std::unordered_map<int, int32_t> GetRawPositions();
+        // Bounded, read-only Present Position query for camera verification.
+        virtual int32_t ReadRawPosition(int motor_id, double timeout_ms);
         virtual void SyncWriteRawPositions(
             const std::unordered_map<int, int32_t>& raw_positions);
         void SetPIDGain(VectorXd PID_Gain);

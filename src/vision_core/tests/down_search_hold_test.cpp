@@ -83,5 +83,27 @@ void ShiftAndReset() {
   s.Reset();assert(s.Remaining(2)==2);
   assert(s.Observe(false,0,1,2,false,false,5,10)==D::kStep);
 }
+void FoundSurvivesIdentityChangeUntilDone() {
+  auto c=Config(.5,.5);
+  c.ball.stable_window=c.hurdle.stable_window=10;
+  c.ball.stable_min_hits=c.hurdle.stable_min_hits=7;
+  c.ball.down_search_min_hits=3;c.hurdle.down_search_min_hits=5;
+  SearchPair s(c);s.Tick(.1);
+  ObjectTarget target;target.center_px={320,200};target.box_px={300,180,40,40};
+  target.width_px=target.height_px=40;target.area_px=1600;target.confidence=1;
+  for(int i=0;i<7;++i)s.Tick(.2+.1*i,true,false,target);
+  assert(s.ball.DownSearchFound() && s.hurdle.DownSearchFound());
+  s.ball.InvalidateTargetIdentity();s.hurdle.InvalidateTargetIdentity();
+  for(int i=0;i<6;++i){s.Tick(1+.1*i,true);s.NoStep();}
+  assert(s.ball.DownSearchFound() && s.hurdle.DownSearchFound());
+  s.Tick(2,false,true);
+  assert(s.b.mode==BallMode::kCoarseAdjust && s.h.mode==HurdleMode::kCoarseAdjust);
+  s.NoStep();
+  // Filter invalidation and a new search still discard old-view decisions.
+  s.ball.InvalidateDetectionEvidence();s.hurdle.InvalidateDetectionEvidence();
+  assert(!s.ball.DownSearchFound() && !s.hurdle.DownSearchFound());
+  s.ball.StartTestNear();s.hurdle.StartTestNear();
+  assert(!s.ball.DownSearchFound() && !s.hurdle.DownSearchFound());
 }
-int main() { IndependentWaits();RetuneAndDetection();ExhaustedAndZero();ShiftAndReset(); }
+}
+int main() { IndependentWaits();RetuneAndDetection();ExhaustedAndZero();ShiftAndReset();FoundSurvivesIdentityChangeUntilDone(); }

@@ -55,7 +55,7 @@ vision_algorithm:
     stable_min_hits: 7 # 미세 조정
     down_search_min_hits: 3 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
     entry_min_hits: 6 # LINE → BALL 진입
-    lost_frames: 5
+    lost_frames: 15
     smooth_alpha: 0.45
 
     upper_acquire_v_px: 470.0 # 공이 있을 조건 (중심 v가 이 값 이하인 프레임을 진입 횟수로 계산)
@@ -99,13 +99,13 @@ vision_algorithm:
 
   hurdle:
     down_search_max_steps: 10 # 번까지 직진
-    down_search_inter_action_hold_sec: 0.0 # DOWN 탐색 1걸음 DONE 후 다음 걸음까지 최소 정지 시간 (초)
+    down_search_inter_action_hold_sec: 0.5 # DOWN 탐색 1걸음 DONE 후 다음 걸음까지 최소 정지 시간 (초)
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
     stable_window: 10
     stable_min_hits: 7
     down_search_min_hits: 5 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
-    lost_frames: 5
+    lost_frames: 15
     smooth_alpha: 0.45
 
     upper_acquire_v_px: 470.0 # 허들이 있을 조건
@@ -147,7 +147,7 @@ vision_algorithm:
     recovery_max_observations: 5
     stable_window: 10
     stable_min_hits: 7
-    lost_frames: 5
+    lost_frames: 15
     smooth_alpha: 0.45
 
     post_pickup_walk_fallback_actions: 1 # 라인 복귀 후 13번(5걸음) DONE 우선 / 없으면 보행 3회 DONE 후 GOAL 카메라
@@ -211,7 +211,7 @@ vision_algorithm:
 
     ball_aspect_ratio_min: 0.65
     ball_aspect_ratio_max: 1.50
-    hurdle_aspect_ratio_min: 2.50
+    hurdle_aspect_ratio_min: 1.50
     ball_depth_enabled: true
     hurdle_depth_enabled: true
     ball_allow_missing_depth: true
@@ -226,27 +226,27 @@ vision_algorithm:
 
   ball_candidate_tracking:
     enabled: true
-    max_center_distance_px: 80.0
+    max_center_distance_px: 180.0
     max_size_log_ratio: 0.50
-    missing_frame_limit: 5
+    missing_frame_limit: 15
     max_tracks: 16
 
   hurdle_candidate_tracking:
     enabled: true
     max_center_distance_px: 200.0
     max_size_log_ratio: 0.60
-    missing_frame_limit: 5
+    missing_frame_limit: 15
     max_tracks: 16
 
   backboard_candidate_tracking:
     enabled: true
     max_center_distance_px: 200.0
     max_size_log_ratio: 0.80
-    missing_frame_limit: 5
+    missing_frame_limit: 15
     max_tracks: 16
 
   object_association:
-    missing_frame_limit: 5 # 같은 물체의 추적을 유지할 미검출 프레임 수
+    missing_frame_limit: 15 # 같은 물체의 추적을 유지할 미검출 프레임 수
     max_center_distance_norm: 0.25 # 같은 물체로 연결할 정규화 중심 거리 한계
     max_size_log_ratio: 0.80 # 같은 물체로 연결할 크기 변화 한계
 

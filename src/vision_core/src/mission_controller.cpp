@@ -1751,6 +1751,18 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
       ball_controller_.RecoveryObservationElapsed(now);
   output.ball.down_search_steps_remaining =
       ball_controller_.DownSearchStepsRemaining();
+  output.ball.down_search_found = ball_controller_.DownSearchFound();
+  output.ball.detection_hits = ball_controller_.DetectionHits();
+  output.ball.detection_frames = ball_controller_.DetectionFrames();
+  output.ball.lost_frames = ball_controller_.LostFrames();
+  output.hurdle.down_search_found = hurdle_controller_.DownSearchFound();
+  output.hurdle.detection_hits = hurdle_controller_.DetectionHits();
+  output.hurdle.detection_frames = hurdle_controller_.DetectionFrames();
+  output.hurdle.lost_frames = hurdle_controller_.LostFrames();
+  output.goal.detection_hits = goal_controller_.DetectionHits();
+  output.goal.detection_frames = goal_controller_.DetectionFrames();
+  output.goal.lost_frames = goal_controller_.LostFrames();
+  output.goal.pose_lost_frames = goal_controller_.PoseLostFrames();
   output.ball.fine_motion_action=ball_controller_.FineMotionAction();
   output.ball.fine_motion_repetitions=ball_controller_.FineMotionRepetitions();
   output.ball.fine_motion_remaining=ball_controller_.FineMotionActionsRemaining();
@@ -1767,6 +1779,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
 PerceptionMissionFrameResult
 MissionController::StepPerception(const PerceptionFrameInput &input) {
   PerceptionMissionFrameResult output;
+  output.perception.detection_track_ids.resize(input.detections.size(),0);
   std::vector<Detection> detections;
   std::vector<Detection> image_detections;
   detections.reserve(input.detections.size());
@@ -1808,6 +1821,22 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
     }
     detections.push_back(detection);
   }
+  const auto append_accepted_objects = [&](int class_id, double confidence) {
+    for (const auto &candidate : ExtractObjectTargetCandidates(
+             detections, class_id, confidence, config_.object_targets)) {
+      output.perception.accepted_object_detections.push_back(
+          detections[candidate.detection_index]);
+      output.perception.accepted_object_indices.push_back(candidate.detection_index);
+    }
+  };
+  append_accepted_objects(config_.object_targets.ball_class_id,
+                          config_.object_targets.ball_confidence);
+  append_accepted_objects(config_.object_targets.goal_class_id,
+                          config_.object_targets.goal_confidence);
+  append_accepted_objects(config_.object_targets.backboard_class_id,
+                          config_.object_targets.backboard_confidence);
+  append_accepted_objects(config_.object_targets.hurdle_class_id,
+                          config_.object_targets.hurdle_confidence);
   output.perception.raw_line_centers =
       ExtractLineCenters(detections, config_.line_detection);
   output.perception.line_centers = output.perception.raw_line_centers;
@@ -2002,7 +2031,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   // Evidence belongs to one identity; a replacement inherits clocks/retry
   // budgets but never detection counts, READY means, or coordinate averages.
   const auto invalidate_identity = [&](MissionType mission) {
-    if (mission == MissionType::kHurdle) hurdle_controller_.InvalidateDetectionEvidence();
+    if (mission == MissionType::kHurdle) hurdle_controller_.InvalidateTargetIdentity();
     else goal_controller_.InvalidateDetectionEvidence();
     if (active_mission_ == mission || candidate_.mission == mission) {
       moving_object_samples_.clear(); moving_object_ready_mean_.reset();
@@ -2223,6 +2252,21 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   output.perception.backboard_target_locked = backboard_target_tracker_.Locked();
   output.perception.hurdle_reacquiring = hurdle_target_tracker_.Reacquiring();
   output.perception.backboard_reacquiring = backboard_target_tracker_.Reacquiring();
+  const auto record_track_ids = [&](const std::vector<BallCandidateTrack>& tracks) {
+    for (const auto& track:tracks)
+      if (track.detection_index && *track.detection_index<input.detections.size())
+        output.perception.detection_track_ids[*track.detection_index]=track.id;
+  };
+  record_track_ids(output.perception.ball_tracks);
+  record_track_ids(output.perception.hurdle_tracks);
+  record_track_ids(output.perception.backboard_tracks);
+  const auto record_selected_id = [&](std::optional<std::size_t> index, std::uint64_t id) {
+    if (index && *index<input.detections.size() && id)
+      output.perception.detection_track_ids[*index]=id;
+  };
+  record_selected_id(selection.indices.ball,output.perception.ball_target_id);
+  record_selected_id(selection.indices.hurdle,output.perception.hurdle_target_id);
+  record_selected_id(selection.indices.backboard,output.perception.backboard_target_id);
   return output;
 }
 

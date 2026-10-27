@@ -163,11 +163,13 @@ struct CameraConfig {
     CameraPose goal{2054, 966};
     double move_sec{0.5};
     double settle_sec{0.0};
+    double position_tolerance_ratio{0.10};
     void Validate() const {
         if (yaw_id < 0 || yaw_id > 22 || pitch_id < 0 || pitch_id > 22 || yaw_id == pitch_id ||
             !std::isfinite(move_sec) || move_sec <= 0 ||
             move_sec * 50.0 >= static_cast<double>(std::numeric_limits<std::size_t>::max()) ||
-            !std::isfinite(settle_sec) || settle_sec < 0) {
+            !std::isfinite(settle_sec) || settle_sec < 0 ||
+            !std::isfinite(position_tolerance_ratio) || position_tolerance_ratio<0 || position_tolerance_ratio>1) {
             throw std::invalid_argument("invalid camera IDs/timing");
         }
         for (const auto pose : {forward, down, goal}) {
@@ -188,7 +190,7 @@ struct CameraConfig {
 
 class CameraMotion {
 public:
-    enum class Result { Idle, Running, Command, Finished };
+    enum class Result { Idle, Running, Command, Verify };
     explicit CameraMotion(CameraConfig config = {}) : config_(config) { config_.Validate(); }
     void Start(uint8_t request, const RawPositions& base, Clock::time_point now) {
         const auto target = config_.Target(request);
@@ -210,8 +212,7 @@ public:
             if (std::chrono::duration<double>(now - settle_started_at_).count() < config_.settle_sec) {
                 return Result::Running;
             }
-            active_ = false;
-            return Result::Finished;
+            return Result::Verify; // Only measured arrival may finish this command.
         }
         const double x = static_cast<double>(++step_) / steps_;
         const double alpha = x*x*(3.0 - 2.0*x);
@@ -229,6 +230,18 @@ public:
         full_command.at(config_.pitch_id) = current_.pitch;
     }
     bool Active() const { return active_; }
+    CameraPose TargetPose() const { return target_; }
+    bool ConfirmArrival(CameraPose measured) {
+        if (!active_ || step_!=steps_ || !settling_) return false;
+        const auto close=[this](int32_t actual,int32_t target) {
+            return actual>=0 && actual<=4095 &&
+                std::abs(static_cast<double>(actual)-target)<=
+                    std::abs(static_cast<double>(target))*config_.position_tolerance_ratio;
+        };
+        if (!close(measured.yaw,target_.yaw) || !close(measured.pitch,target_.pitch)) return false;
+        active_=false;
+        return true;
+    }
     bool OverrideEnabled() const { return override_enabled_; }
     // 시작 자세 완료 후 기본 FORWARD 목표를 유지한다. 외부 카메라 명령/상태 ID는 만들지 않는다.
     // 실제 전송은 MainNode의 단일 writer가 수행하고, 이후 DOWN/GOAL 명령은 이 자세를 변경할 수 있다.
