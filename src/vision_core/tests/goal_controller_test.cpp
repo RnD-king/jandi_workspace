@@ -15,6 +15,59 @@ static ObjectTarget Board(double u=.5) {
 static GoalPoseObservation Pose(double x,double z,double yaw=0) {
   return {true,x,z,yaw,1};
 }
+static void EmptyEntryViewRetriesLine() {
+  auto c=LoadDefaultAlgorithmConfig().goal;
+  c.stable_window=10;c.stable_min_hits=7;
+  c.post_pickup_walk_fallback_actions=0; // Must not bypass the fresh retry walk.
+  c.entry_line_retry_max_attempts=2;
+  const CameraFeedback forward{CameraMode::kForward,true}, goal_view{CameraMode::kGoal,true};
+  const std::deque<bool> misses(10,false);
+  GoalController goal(c,3);goal.StartGoalTrial();
+  double now=0;
+  for(int attempt=0;attempt<=2;++attempt) {
+    auto g=goal.Compute({},{},{},640,480,now,true,goal_view,{});
+    assert(g.mode==GoalMode::kSearch);
+    assert(goal.EntryLineRetries()==attempt && !goal.EntryLineRetryPending());
+    g=goal.Compute({},{},{},640,480,now+.1,true,goal_view,{});
+    assert(g.mode==GoalMode::kSearch); // No transition before a completed window.
+    goal.UseVerifiedObservation({}, {},misses,misses,640,480);
+    g=goal.Compute({},{},{},640,480,now+1.1,true,goal_view,{false,false,true});
+    assert(g.action.action==MissionAction::kNone && goal.HasBall());
+    if(attempt==2) {
+      assert(g.mode==GoalMode::kFailed && g.camera_request==CameraRequest::kNone);
+      assert(goal.EntryLineRetries()==2);
+      break;
+    }
+    assert(g.mode==GoalMode::kEntryRetryCameraForward);
+    assert(g.camera_request==CameraRequest::kForward);
+    assert(goal.EntryLineRetries()==attempt+1 && goal.EntryLineRetryPending());
+    g=goal.Compute({},{},{},640,480,now+1.2,true,{CameraMode::kTransition,false},{});
+    assert(g.mode==GoalMode::kEntryRetryCameraForward);
+    g=goal.Compute({},{},{},640,480,now+1.3,true,forward,{});
+    assert(g.mode==GoalMode::kLineFollow && !g.active && goal.HasBall());
+    assert(goal.RequiredLineWalkActions()==1);
+    g=goal.Compute({},{},{},640,480,now+1.4,true,forward,{},true,{},false);
+    assert(g.mode==GoalMode::kLineFollow); // Old/zero fallback is not a completed retry block.
+    g=goal.Compute({},{},{},640,480,now+1.5,true,forward,{},true,{},true);
+    assert(g.mode==GoalMode::kWaitCameraGoal && g.camera_request==CameraRequest::kGoal);
+    now+=2;
+  }
+  goal.Reset();
+  assert(goal.EntryLineRetries()==0 && !goal.EntryLineRetryPending());
+
+  // An intermittent valid board or image-only Depth failure is not an empty
+  // view, even when the last frame and the final stationary mean are absent.
+  for(bool image_only:{false,true}) {
+    GoalController partial(c,3);partial.StartGoalTrial();
+    partial.Compute({},{},{},640,480,0,true,goal_view,{});
+    if(image_only) partial.ObserveEntryBackboard(true);
+    else partial.ObserveOnly(Board(),{},640,480);
+    partial.UseVerifiedObservation({}, {},misses,misses,640,480);
+    auto g=partial.Compute({},{},{},640,480,1.1,true,goal_view,{false,false,true},true,{},false,image_only);
+    assert(g.mode==GoalMode::kRecoverySearch && partial.EntryLineRetries()==0);
+    assert(g.camera_request==CameraRequest::kNone);
+  }
+}
 static void CoarseTurnAlignment(double yaw_limit_deg) {
   auto c=LoadDefaultAlgorithmConfig().goal;
   c.stable_window=c.stable_min_hits=1;
@@ -199,6 +252,7 @@ static void RotationBeforeTranslation() {
   assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==20);
 }
 int main() {
+  EmptyEntryViewRetriesLine();
   TiltedBackboardNormal();
   RotationBeforeTranslation();
   CoarseTurnAlignment(15);
@@ -213,7 +267,6 @@ int main() {
   c.target_u_px=320; c.approach_u_deadband_px=32; c.fine_adjust_start_z_m=.8;
   c.hoop_radius_m=.1; c.throw_landing_x_m=0; c.throw_landing_z_m=.5; c.position_tolerance_m=.05;
    c.shoot_yaw_limit_deg=30;
-  c.recovery_timeout_sec=5; c.recovery_reacquire_min_hits=3;
   c.recovery_center_tolerance_px=76.8;
   GoalController controller(c, 3.0); controller.StartAfterPickup(0);
   BallResult carrying; carrying.has_ball=true; carrying.mode=BallMode::kLineFollow;

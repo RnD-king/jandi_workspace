@@ -278,7 +278,9 @@ void MissionController::EnterMission(MissionType mission) {
     // Do not carry post-pickup booking limits into LINE after the later shot.
     post_pickup_goal_line_gate_active_ = false;
     post_pickup_line_actions_.clear();
-    ++goal_mission_index_;
+    // Looking again after one LINE block is still the same carrying mission.
+    if (!goal_controller_.EntryLineRetryPending())
+      ++goal_mission_index_;
     hurdle_controller_.Reset();
     hurdle_result_ = {};
   }
@@ -591,6 +593,8 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
     while (decision_object_hits_.size() > 10)
       decision_object_hits_.pop_front();
     if (decision_observation_mission_ == MissionType::kGoal) {
+      goal_controller_.ObserveEntryBackboard(
+          detected || input.backboard_image_without_depth);
       const bool pose_valid = detected && input.goal_pose.valid &&
                               std::isfinite(input.goal_pose.x_m) &&
                               std::isfinite(input.goal_pose.z_m) &&
@@ -713,7 +717,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   }
   // Normal LINE planning and pre-entry candidates share the existing
   // coordinator; object/test mission FSMs below retain their execution path.
-  if (active_mission_ == MissionType::kLine && config_.test_mission == MissionType::kNone &&
+  if (active_mission_ == MissionType::kLine &&
+      (config_.test_mission == MissionType::kNone || goal_controller_.EntryLineRetryPending()) &&
       !goal_trial_complete_ && !physical_reset_pending_)
     return StepPlannedLine(input, line_image_center_u);
   TrackMovingObjectReadyWindow(input);
@@ -1319,10 +1324,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 
   const auto hurdle_line_decision = [&]() {
     // Compute LINE O/H steering during HURDLE without advancing LINE FSM.
+    const auto features=ComputeLineFeatures(input.line_centers, input.image_width,
+                                            input.image_height, config_.line_features);
+    if (!output.line_computed) {
+      output.line_features=features;
+      output.line_computed=true;
+    }
     const LineGuide guide = input.line_decision_guide_override.value_or(
-        ComputeLineFeatures(input.line_centers, input.image_width,
-                            input.image_height, config_.line_features)
-            .guide);
+        features.guide);
     return line_p2p_controller_.Compute(guide);
   };
   switch (active_mission_) {
@@ -1354,7 +1363,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                 line_state_ == LineState::kNormal &&
                 (post_pickup_five_step_completed_ ||
                  post_pickup_line_actions_completed_ >=
-                     config_.goal.post_pickup_walk_fallback_actions),
+                     goal_controller_.RequiredLineWalkActions()),
             input.backboard_image_without_depth);
         if (goal_result_.mode != GoalMode::kLineFollow)
           EnterMission(MissionType::kGoal);
@@ -1418,7 +1427,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       BeginLineReacquisition();
     if (ball_result_.mode == BallMode::kPostPickupLineRecovery &&
         line_reference_valid) {
-      ball_controller_.CompleteLineRecovery(input.now_sec);
+      ball_controller_.CompleteLineRecovery();
       if (has_ball_ && config_.enable_goal)
         goal_controller_.UpdateBallState(ball_result_);
       FinishMission();
@@ -1483,8 +1492,26 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     if (before != GoalMode::kHeadingRecovery &&
         goal_result_.mode == GoalMode::kHeadingRecovery)
       BeginLineReacquisition();
-    if (goal_result_.mode == GoalMode::kLineFollow && !goal_result_.active)
-      FinishMission();
+    if (goal_result_.mode == GoalMode::kLineFollow && !goal_result_.active) {
+      if (before == GoalMode::kEntryRetryCameraForward) {
+        // Camera FORWARD is physically settled. Reuse normal LINE recovery
+        // and its READY/DONE planner, with no evidence from an earlier walk.
+        active_mission_ = MissionType::kLine;
+        BeginLineReacquisition();
+        line_plan_.Reset();
+        line_auxiliary_id_ = line_ready_handled_id_ = 0;
+        line_auxiliary_done_ = line_auxiliary_observing_ = false;
+        line_invalid_frames_ = 0;
+        decision_observation_active_ = decision_observation_restart_pending_ = false;
+        deferred_done_ = {};
+        post_pickup_goal_line_gate_active_ = true;
+        post_pickup_line_actions_issued_ = post_pickup_line_actions_completed_ = 0;
+        post_pickup_five_step_completed_ = false;
+        post_pickup_line_actions_.clear();
+      } else {
+        FinishMission();
+      }
+    }
     break;
   }
   default:
@@ -1584,7 +1611,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       request.category == ActionCategory::kLocomotion &&
       IsLongLineAction(request.action) &&
       (post_pickup_line_actions_issued_ >=
-           config_.goal.post_pickup_walk_fallback_actions ||
+           goal_controller_.RequiredLineWalkActions() ||
        (last_command_.mission == MissionType::kLine &&
         last_command_.action_id != 0 &&
         last_command_.action == MissionAction::kStepForwardFour)))
@@ -1722,7 +1749,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
              : ball_mission_index_ + 1);
   output.goal_mission_index = std::max(
       1,
-      (active_mission_ == MissionType::kGoal ||
+      (active_mission_ == MissionType::kGoal || goal_controller_.EntryLineRetryPending() ||
        (goal_trial_complete_ && (config_.test_mission == MissionType::kGoal ||
                                  (config_.test_mission == MissionType::kNone &&
                                   config_.goal_trial_start_goal))))
@@ -1733,7 +1760,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
   output.recovery_verifying = mission_recovery_verifying_;
   output.goal_walk_actions_completed = post_pickup_line_actions_completed_;
   output.goal_walk_actions_remaining =
-      std::max(0, config_.goal.post_pickup_walk_fallback_actions -
+      std::max(0, goal_controller_.RequiredLineWalkActions() -
                       post_pickup_line_actions_completed_);
   output.goal_five_step_completed = post_pickup_five_step_completed_;
   output.goal_walk_gate_active =
@@ -1743,6 +1770,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
         goal_result_.mode == GoalMode::kWaitCameraGoal));
   output.goal.recovery_observations_completed =
       goal_controller_.RecoveryObservationsCompleted();
+  output.goal.entry_line_retries = goal_controller_.EntryLineRetries();
   output.goal.recovery_observation_elapsed_sec =
       goal_controller_.RecoveryObservationElapsed(now);
   output.ball.recovery_observations_completed =
@@ -1838,7 +1866,8 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   append_accepted_objects(config_.object_targets.hurdle_class_id,
                           config_.object_targets.hurdle_confidence);
   output.perception.raw_line_centers =
-      ExtractLineCenters(detections, config_.line_detection);
+      ExtractLineCenters(detections, config_.line_detection,
+                         &output.perception.line_detection_indices);
   output.perception.line_centers = output.perception.raw_line_centers;
   // A valid READY window is already associated and 10/7-filtered by
   // the manual adapter. Reacquire its averaged single detection instead of
@@ -2153,12 +2182,14 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   }
   prepared.goal_target = output.perception.targets.goal;
   prepared.backboard_target = output.perception.targets.backboard;
+  const bool backboard_in_image = !ExtractObjectTargetCandidates(
+      image_detections, config_.object_targets.backboard_class_id,
+      config_.object_targets.backboard_confidence, config_.object_targets).empty();
+  if (input.camera_feedback.settled &&
+      input.camera_feedback.actual_mode == CameraMode::kGoal)
+    goal_controller_.ObserveEntryBackboard(backboard_in_image);
   prepared.backboard_image_without_depth =
-      input.camera_feedback.settled &&
-      !ExtractObjectTargetCandidates(
-           image_detections, config_.object_targets.backboard_class_id,
-           config_.object_targets.backboard_confidence, config_.object_targets)
-           .empty() &&
+      input.camera_feedback.settled && backboard_in_image &&
       ExtractObjectTargetCandidates(
           detections, config_.object_targets.backboard_class_id,
           config_.object_targets.backboard_confidence, config_.object_targets)
@@ -2298,6 +2329,7 @@ int MissionController::RepeatScope() const {
       return 400 + static_cast<int>(hurdle_result_.mode);
   } else if (active_mission_ == MissionType::kGoal) {
     if (goal_result_.mode == GoalMode::kPostShootBackAway ||
+        goal_result_.mode == GoalMode::kEntryRetryCameraForward ||
         goal_result_.mode == GoalMode::kHeadingRecovery ||
         goal_result_.mode == GoalMode::kEdgeTurn)
       return 300 + static_cast<int>(goal_result_.mode);

@@ -131,6 +131,8 @@ const char *GoalController::ModeName(GoalMode mode) {
     return "GOAL_CLOSE_RECOVERY";
   case GoalMode::kPostShootBackAway:
     return "GOAL_BACK_AWAY";
+  case GoalMode::kEntryRetryCameraForward:
+    return "GOAL_RETRY_CAMERA_FORWARD";
   }
   return "UNKNOWN";
 }
@@ -406,7 +408,10 @@ GoalResult GoalController::Compute(
                           std::isfinite(pose.yaw_rad);
   // Intermediate camera angles must not add object evidence to either tracker.
   const bool camera_switching = mode_ == GoalMode::kWaitCameraGoal ||
+                                mode_ == GoalMode::kEntryRetryCameraForward ||
                                 mode_ == GoalMode::kReturnCameraToLine;
+  if (camera.actual_mode == CameraMode::kGoal && camera.settled)
+    ObserveEntryBackboard(board_visible);
   const bool verified = verified_observation_pending_;
   verified_observation_pending_ = false;
   if (!verified && mode_ == GoalMode::kFineAdjust && feedback.action_done)
@@ -420,7 +425,7 @@ GoalResult GoalController::Compute(
 
   if (allow_mission_entry && mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_ &&
       (post_pickup_line_gate_satisfied ||
-       config_.post_pickup_walk_fallback_actions == 0)) {
+       (!entry_line_retry_pending_ && config_.post_pickup_walk_fallback_actions == 0))) {
     // Enter GOAL only after the qualifying LINE motion's actual DONE.
     // A zero fallback is an explicit immediate-entry override (used by tests).
     CaptureEntryDirection();
@@ -432,6 +437,7 @@ GoalResult GoalController::Compute(
   result.active =
       mode_ != GoalMode::kLineFollow && mode_ != GoalMode::kHeadingRecovery;
   result.mode = mode_;
+  result.entry_line_retries = entry_line_retries_;
   result.tracked = tracked_;
   result.pose = tracked_pose_;
   result.shoot_yaw_rad =
@@ -445,7 +451,20 @@ GoalResult GoalController::Compute(
       feedback.observation_complete) {
     entry_recovery_pending_ = false;
     if (!tracked_.visible || !tracked_.stable) {
-      if (board_visible) {
+      if (!entry_view_board_seen_ && !seen_after_camera_goal_ &&
+          config_.entry_line_retry_max_attempts > 0) {
+        if (entry_line_retries_ >= config_.entry_line_retry_max_attempts) {
+          mode_ = GoalMode::kFailed;
+        } else {
+          ++entry_line_retries_;
+          entry_line_retry_pending_ = true;
+          mode_ = GoalMode::kEntryRetryCameraForward;
+          state_enter_sec_ = now_sec;
+          result.camera_request = CameraRequest::kForward;
+          ClearTracking();
+        }
+        result.entry_line_retries = entry_line_retries_;
+      } else if (board_visible) {
         // Image present but Depth/association observation invalid: observe
         // in place rather than rotating to search for a visible board.
         mode_ = GoalMode::kRecoverySearch;
@@ -534,12 +553,32 @@ GoalResult GoalController::Compute(
       last_seen_u_px_ = config_.target_u_px;
       last_stable_u_px_.reset();
       entry_recovery_pending_ = true;
+      entry_view_board_seen_ = false;
+      entry_line_retry_pending_ = false;
       seen_after_camera_goal_ = false;
       recovery_visible_count_ = 0;
       result.mode = mode_;
       result.camera_request = CameraRequest::kNone;
       result.tracked = {};
       result.pose = {};
+    } else if (now_sec - state_enter_sec_ >= camera_motion_timeout_sec_) {
+      mode_ = GoalMode::kFailed;
+      result.mode = mode_;
+      result.camera_request = CameraRequest::kNone;
+    }
+    return result;
+  case GoalMode::kEntryRetryCameraForward:
+    if (feedback.action_active && !feedback.action_done)
+      return result;
+    result.camera_request = CameraRequest::kForward;
+    if (camera.actual_mode == CameraMode::kForward && camera.settled) {
+      // The coordinator owns LINE recovery/planning and will start a fresh
+      // completed-block gate; this is not GOAL completion or a new mission.
+      mode_ = GoalMode::kLineFollow;
+      ClearTracking();
+      result.mode = mode_;
+      result.active = false;
+      result.camera_request = CameraRequest::kNone;
     } else if (now_sec - state_enter_sec_ >= camera_motion_timeout_sec_) {
       mode_ = GoalMode::kFailed;
       result.mode = mode_;
@@ -868,7 +907,9 @@ ActionRequest GoalController::SearchRecoveryAction() const {
 void GoalController::ObserveOnly(const std::optional<ObjectTarget> &target,
                                  const GoalPoseObservation &pose, int width,
                                  int height) {
+  ObserveEntryBackboard(target.has_value());
   if (mode_ != GoalMode::kWaitCameraGoal &&
+      mode_ != GoalMode::kEntryRetryCameraForward &&
       mode_ != GoalMode::kReturnCameraToLine) {
     UpdateGoalTracker(target, width, height);
     UpdatePoseTracker(target, pose);
@@ -879,6 +920,8 @@ void GoalController::UseVerifiedObservation(
     const std::optional<ObjectTarget>& mean, const GoalPoseObservation& pose,
     const std::deque<bool>& hits, const std::deque<bool>& pose_hits,
     int width, int height, const std::deque<bool>& near_hits) {
+  ObserveEntryBackboard(mean.has_value() ||
+      std::find(hits.begin(), hits.end(), true) != hits.end());
   ClearTracking();
   UpdateGoalTracker(mean, width, height);
   UpdatePoseTracker(mean, pose);
@@ -950,6 +993,8 @@ void GoalController::ClearTracking() {
 }
 
 void GoalController::Reset() {
+  entry_view_board_seen_ = entry_line_retry_pending_ = false;
+  entry_line_retries_ = 0;
   edge_turns_completed_ = 0;
   entry_recovery_u_.reset();
   entry_recovery_pending_ = false;

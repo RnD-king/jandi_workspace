@@ -11,6 +11,7 @@ MissionControllerConfig Config(double ball_hold, double hurdle_hold) {
   c.ball.down_search_inter_action_hold_sec=ball_hold;
   c.hurdle.down_search_inter_action_hold_sec=hurdle_hold;
   c.ball.stable_window=c.ball.stable_min_hits=c.ball.entry_min_hits=c.ball.down_search_min_hits=1;
+  c.ball.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.hurdle.stable_window=c.hurdle.stable_min_hits=c.hurdle.down_search_min_hits=1;
   return c;
 }

@@ -47,8 +47,9 @@ static BallResult EnterPickupVerification(BallController &controller,
 }
 int main() {
   BallConfig c=LoadDefaultAlgorithmConfig().ball;   c.entry_min_hits=1; c.down_search_min_hits=1; c.stable_window = c.stable_min_hits = 1;
+  c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.fine_side_two_step_margin_px=1e6; // Isolate legacy single-step decisions.
-  c.lost_frames = 2; c.smooth_alpha = 1.0; c.far_u_des_px = 320.0;
+  c.lost_frames = 2;  c.far_u_des_px = 320.0;
   c.approach_u_deadband_px = 32.0; c.upper_acquire_v_px = 480.0;
   c.approach_left_top_u_px=288;c.approach_right_top_u_px=352; // Vertical scenario.
   c.approach_short_v_px = 300.0;
@@ -56,7 +57,6 @@ int main() {
   c.pickup_u1_px=288; c.pickup_u2_px=352;
   c.pickup_v1_px=312; c.pickup_v2_px=360;
   c.pickup_max_attempts = 2;
-  c.recovery_timeout_sec = 5.0; c.recovery_reacquire_min_hits = 1;
   c.recovery_center_tolerance_px = 32.0;
   // Ball approach grid: NORMAL LINE cruise actions 11/12/13 are forbidden.
   for (const auto& scenario : std::vector<std::pair<ObjectTarget,MissionAction>>{
@@ -238,6 +238,7 @@ int main() {
   BallConfig verify_config = c;
   verify_config.stable_window = 10;
   verify_config.stable_min_hits = 7;
+  verify_config.pickup_verify_min_hits = 3;
   auto fine_window = [&](BallController& ctrl,double u,double v,double& time) {
     BallResult observed, first;
     for(int i=0;i<10;++i) {
@@ -249,57 +250,57 @@ int main() {
     return observed;
   };
 
-  // 9 frame까지는 7회 검출됐더라도 판정하지 않고, 10번째 frame에서만
+  // 9 frame까지는 3회 검출됐더라도 판정하지 않고, 10번째 frame에서만
   // 공이 남아 있다고 판단하여 fine으로 복귀한다.
-  BallController seven_hits(verify_config, 3.0);
-  r = EnterPickupVerification(seven_hits, 10.0);
-  for (int i = 0; i < 7; ++i)
-    r = seven_hits.Compute(Ball(0.5, 0.7), 640,480, 12.0 + 0.1 * i,
+  BallController three_hits(verify_config, 3.0);
+  r = EnterPickupVerification(three_hits, 10.0);
+  for (int i = 0; i < 3; ++i)
+    r = three_hits.Compute(Ball(0.5, 0.7), 640,480, 12.0 + 0.1 * i,
                            down, {});
-  for (int i = 0; i < 2; ++i)
-    r = seven_hits.Compute(std::nullopt, 640,480, 12.7 + 0.1 * i,
+  for (int i = 0; i < 6; ++i)
+    r = three_hits.Compute(std::nullopt, 640,480, 12.3 + 0.1 * i,
                            down, {});
   assert(r.mode == BallMode::kVerifyPickupObservation);
   assert(!r.has_ball && !r.pickup_failed);
-  r = seven_hits.Compute(std::nullopt, 640,480, 12.9, down, {});
+  r = three_hits.Compute(std::nullopt, 640,480, 12.9, down, {});
   assert(r.mode == BallMode::kFineAdjustForPickup);
   assert(r.action.action == MissionAction::kNone);
   assert(r.pickup_attempt_count == 1);
-  double seven_time=13.0;
-  r=fine_window(seven_hits,0.2,0.7,seven_time);
+  double three_time=13.0;
+  r=fine_window(three_hits,0.2,0.7,three_time);
   assert(r.action.action == MissionAction::kLeftSideStep);
   assert(r.pickup_attempt_count == 1);
-  seven_hits.ClearObservationHistory(); // Fresh post-lateral-motion coordinates.
-  r=fine_window(seven_hits,0.5,0.7,seven_time);
+  three_hits.ClearObservationHistory(); // Fresh post-lateral-motion coordinates.
+  r=fine_window(three_hits,0.5,0.7,three_time);
   assert(r.action.action == MissionAction::kPickBall);
   assert(r.pickup_attempt_count == 2);
 
-  // 두 번째 attempt에서도 10 frame 중 7회 검출이면 기존 max-attempt
+  // 두 번째 attempt에서도 10 frame 중 3회 검출이면 기존 max-attempt
   // 실패 흐름으로 종료한다.
-  r = seven_hits.Compute(Ball(0.5, 0.7), 640,480, seven_time, down, done);
-  seven_time+=.1;
-  for (int i = 0; i < 7; ++i)
-    r = seven_hits.Compute(Ball(0.5, 0.7), 640,480,
-                           seven_time + 0.1 * i, down, {});
+  r = three_hits.Compute(Ball(0.5, 0.7), 640,480, three_time, down, done);
+  three_time+=.1;
   for (int i = 0; i < 3; ++i)
-    r = seven_hits.Compute(std::nullopt, 640,480,
-                           seven_time + 0.7 + 0.1 * i, down, {});
+    r = three_hits.Compute(Ball(0.5, 0.7), 640,480,
+                           three_time + 0.1 * i, down, {});
+  for (int i = 0; i < 7; ++i)
+    r = three_hits.Compute(std::nullopt, 640,480,
+                           three_time + 0.3 + 0.1 * i, down, {});
   assert(r.mode == BallMode::kStandUpAfterPickup);
   assert(r.pickup_failed && !r.has_ball);
 
-  // 정확히 10 frame 중 6회만 검출되면 7-hit 실패 조건의 여집합으로
+  // 정확히 10 frame 중 2회만 검출되면 3-hit 잔존 공 기준 미만이므로
   // pickup 성공을 확정한다.
-  BallController six_hits(verify_config, 3.0);
-  r = EnterPickupVerification(six_hits, 20.0);
-  for (int i = 0; i < 6; ++i)
-    r = six_hits.Compute(Ball(0.5, 0.7), 640,480, 22.0 + 0.1 * i,
+  BallController two_hits(verify_config, 3.0);
+  r = EnterPickupVerification(two_hits, 20.0);
+  for (int i = 0; i < 2; ++i)
+    r = two_hits.Compute(Ball(0.5, 0.7), 640,480, 22.0 + 0.1 * i,
                          down, {});
-  for (int i = 0; i < 3; ++i)
-    r = six_hits.Compute(std::nullopt, 640,480, 22.6 + 0.1 * i,
+  for (int i = 0; i < 7; ++i)
+    r = two_hits.Compute(std::nullopt, 640,480, 22.2 + 0.1 * i,
                          down, {});
   assert(r.mode == BallMode::kVerifyPickupObservation);
   assert(!r.has_ball && !r.pickup_failed);
-  r = six_hits.Compute(std::nullopt, 640,480, 22.9, down, {});
+  r = two_hits.Compute(std::nullopt, 640,480, 22.9, down, {});
   assert(r.mode == BallMode::kStandUpAfterPickup);
   assert(r.has_ball && !r.pickup_failed);
   assert(r.action.action == MissionAction::kDefaultPosition);

@@ -16,6 +16,7 @@ ObjectTarget Target(double u,double v) {
 void BallMiddleLoss(int zone) {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
+  c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.far_u_des_px=380;c.approach_u_deadband_px=90;
   c.approach_left_top_u_px=290;c.approach_right_top_u_px=470;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
@@ -75,6 +76,7 @@ void BallMiddleLoss(int zone) {
 void BallZoneEightOneStepThenDown() {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
+  c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.far_u_des_px=380;c.approach_u_deadband_px=90;
   c.approach_left_top_u_px=290;c.approach_right_top_u_px=470;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
@@ -165,6 +167,7 @@ void BallZoneEightOneStepThenDown() {
 void BallTurnDisabled() {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
+  c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.far_u_des_px=380;c.approach_u_deadband_px=90;
   c.approach_left_top_u_px=290;c.approach_right_top_u_px=470;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
@@ -218,6 +221,7 @@ void CountedDownSearch(bool found_on_last) {
   auto c=LoadDefaultAlgorithmConfig();
   c.ball.down_search_max_steps=c.hurdle.down_search_max_steps=3;
   c.ball.down_search_min_hits=c.ball.stable_min_hits=c.ball.stable_window=1;
+  c.ball.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.hurdle.down_search_min_hits=c.hurdle.stable_min_hits=c.hurdle.stable_window=1;
   BallController ball(c.ball,3);HurdleController hurdle(c.hurdle,3);
   ball.StartTestNear();hurdle.StartTestNear();

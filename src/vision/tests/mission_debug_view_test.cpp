@@ -88,6 +88,25 @@ int main() {
     Check(colors.at<cv::Vec3b>(320,40)==(entry.first==0 ? cv::Vec3b(0,0,0) : entry.second),
           "only an object ID may draw a center; LINE must never have one");
   }
+  const std::vector<vision_core::Detection> line_boxes{
+      {{20,300,40,40},1,c.line_detection.class_id},
+      {{120,300,40,40},1,c.line_detection.class_id}};
+  vision_core::PreparedPerceptionFrame line_prepared;
+  line_prepared.line_detection_indices={1,0}; // Center ordering differs from YOLO order.
+  auto line_result=line_view;line_result.line_computed=true;
+  line_result.line_features.ransac_outlier_indices={0};
+  auto outliers=vision::RenderMissionDebug(image,line_boxes,{},c,line_prepared,line_result,
+      {vision_core::CameraMode::kForward,true},{},state);
+  Check(outliers.image.at<cv::Vec3b>(300,120)==cv::Vec3b(255,0,255) &&
+        outliers.image.at<cv::Vec3b>(300,20)==cv::Vec3b(0,255,0),
+        "RANSAC outlier did not map to its original YOLO box");
+  Check(outliers.image.at<cv::Vec3b>(320,140)==cv::Vec3b(0,0,0),
+        "RANSAC outlier must not draw a LINE center");
+  auto paused=state;paused.live_object_detections=false;
+  outliers=vision::RenderMissionDebug(image,line_boxes,{},c,line_prepared,line_result,
+      {vision_core::CameraMode::kForward,true},{},paused);
+  Check(outliers.image.at<cv::Vec3b>(300,120)==cv::Vec3b(0,255,0),
+        "paused renderer reused an old outlier on a new frame");
   vision::MissionStateLog state_log;
   vision_core::PerceptionMissionFrameResult log_result;
   log_result.mission.active_mission=vision_core::MissionType::kBall;

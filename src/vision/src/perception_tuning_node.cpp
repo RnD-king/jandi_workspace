@@ -195,7 +195,6 @@ public:
     declare_parameter<double>("hurdle_fine_mode_v_px", algorithm_defaults.hurdle.fine_mode_v_px);
     declare_parameter<double>("hurdle_approach_short_v_px", algorithm_defaults.hurdle.approach_short_v_px);
     declare_parameter<double>("hurdle_target_u_px", algorithm_defaults.hurdle.target_u_px);
-    declare_parameter<double>("hurdle_u_deadband_px", algorithm_defaults.hurdle.u_deadband_px);
     declare_parameter<double>("hurdle_contact_v_px", algorithm_defaults.hurdle.contact_v_px);
     declare_parameter<double>("goal_fine_one_step_range_error_m",algorithm_defaults.goal.fine_one_step_range_error_m);
     declare_parameter<double>("goal_fine_two_step_range_error_m",algorithm_defaults.goal.fine_two_step_range_error_m);
@@ -421,7 +420,6 @@ public:
     mission_config.hurdle.fine_mode_v_px=get_parameter("hurdle_fine_mode_v_px").as_double();
     mission_config.hurdle.approach_short_v_px=get_parameter("hurdle_approach_short_v_px").as_double();
     mission_config.hurdle.target_u_px=get_parameter("hurdle_target_u_px").as_double();
-    mission_config.hurdle.u_deadband_px=get_parameter("hurdle_u_deadband_px").as_double();
     mission_config.hurdle.contact_v_px=get_parameter("hurdle_contact_v_px").as_double();
     mission_config.goal.fine_one_step_range_error_m=get_parameter("goal_fine_one_step_range_error_m").as_double();
     mission_config.goal.fine_two_step_range_error_m=get_parameter("goal_fine_two_step_range_error_m").as_double();
@@ -911,7 +909,6 @@ private:
       else if (name == "hurdle_fine_mode_v_px") target=&candidate.hurdle.fine_mode_v_px;
       else if (name == "hurdle_approach_short_v_px") target = &candidate.hurdle.approach_short_v_px;
       else if (name == "hurdle_target_u_px") target = &candidate.hurdle.target_u_px;
-      else if (name == "hurdle_u_deadband_px") target = &candidate.hurdle.u_deadband_px;
       else if (name == "hurdle_contact_v_px") target = &candidate.hurdle.contact_v_px;
       else if (name == "goal_approach_short_z_m") target = &candidate.goal.approach_short_z_m;
       else if (name == "goal_camera_goal_start_z_m") target = &candidate.goal.camera_goal_start_z_m;

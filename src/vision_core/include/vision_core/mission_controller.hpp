@@ -41,7 +41,6 @@ struct MissionControllerConfig {
   // Fresh, post-DONE observation interval for non-queued actions and camera turns.
   double post_motion_observation_sec{};
   int candidate_search_max_turns{};
-  double candidate_direction_max_age_sec{};
   double transition_settle_sec{};
   double walk_inter_action_hold_sec{};
   double fine_motion_settle_sec{};
@@ -235,6 +234,8 @@ struct ObjectFilterDiagnostic {
 struct PreparedPerceptionFrame {
   std::vector<Point2> raw_line_centers;
   std::vector<Point2> line_centers;
+  // Center order is retained by IMU rectification; these map back to YOLO.
+  std::vector<std::size_t> line_detection_indices;
   ObjectTargets targets;
   // center depth는 후보 검증과 접근 거리 판정에 항상 사용한다. 좌/우 depth
   // 기반 goal_pose는 미세조정 진입 거리 이후에만 유효해진다.
@@ -399,7 +400,6 @@ private:
     MissionType mission{MissionType::kNone};
     CandidatePhase phase{CandidatePhase::kNone};
     std::optional<double> direction_u;
-    double direction_seen_sec{0.0};
     std::optional<bool> search_left;
     int searches{0}, restores{0};
     std::uint64_t turn_id{0};

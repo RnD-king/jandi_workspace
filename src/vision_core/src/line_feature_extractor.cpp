@@ -55,7 +55,9 @@ LineFit FitLine(const std::vector<Point2> &points, std::size_t begin,
 
 // RANSAC chooses a reference only for ranking suspicious points. Its line
 // is never passed to the O/H calculation, and no consensus refit is needed.
-void RemoveRansacOutliers(std::vector<Point2> &points, const FeatureConfig &cfg) {
+void RemoveRansacOutliers(std::vector<Point2> &points, const FeatureConfig &cfg,
+                         const std::vector<std::size_t> &source_indices,
+                         std::vector<std::size_t> &removed_indices) {
   if (!cfg.ransac_enabled || cfg.ransac_max_outliers == 0 ||
       points.size() < static_cast<std::size_t>(cfg.ransac_min_input_points))
     return;
@@ -113,8 +115,10 @@ void RemoveRansacOutliers(std::vector<Point2> &points, const FeatureConfig &cfg)
   std::vector<bool> remove(points.size(), false);
   for (std::size_t i = 0; i < count; ++i) remove[suspects[i].second] = true;
   std::size_t write = 0;
-  for (std::size_t i = 0; i < points.size(); ++i)
-    if (!remove[i]) points[write++] = points[i];
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    if (remove[i]) removed_indices.push_back(source_indices[i]);
+    else points[write++] = points[i];
+  }
   points.resize(write);
 }
 
@@ -217,26 +221,34 @@ Features ComputeLineFeatures(const std::vector<Point2> &input, int image_width,
   Features f{};
   if (image_width <= 1 || image_height <= 1) return f;
 
-  std::vector<Point2> points;
-  points.reserve(input.size());
-  for (const Point2 &point : input) {
+  std::vector<std::pair<Point2,std::size_t>> indexed;
+  indexed.reserve(input.size());
+  for (std::size_t index=0;index<input.size();++index) {
+    const auto &point=input[index];
     if (std::isfinite(point.u) && std::isfinite(point.v)) {
-      points.push_back({Clamp(point.u, 0.0, image_width - 1.0),
-                        Clamp(point.v, 0.0, image_height - 1.0)});
+      indexed.push_back({{Clamp(point.u, 0.0, image_width - 1.0),
+                         Clamp(point.v, 0.0, image_height - 1.0)},index});
     }
   }
-  std::sort(points.begin(), points.end(), [](const Point2 &a, const Point2 &b) {
+  std::sort(indexed.begin(), indexed.end(), [](const auto &left, const auto &right) {
+    const auto &a=left.first,&b=right.first;
     return (a.v == b.v) ? (a.u < b.u) : (a.v > b.v);
   });
-  points.resize(std::min({static_cast<std::size_t>(std::max(1, cfg.max_centers)),
-                         kMaxRansacPoints, points.size()}));
+  indexed.resize(std::min({static_cast<std::size_t>(std::max(1, cfg.max_centers)),
+                          kMaxRansacPoints, indexed.size()}));
+  std::vector<Point2> points;
+  std::vector<std::size_t> source_indices;
+  points.reserve(indexed.size());source_indices.reserve(indexed.size());
+  for (const auto &item:indexed) {
+    points.push_back(item.first);source_indices.push_back(item.second);
+  }
 
   f.n_visible = static_cast<double>(points.size());
   // This input gate applies even when RANSAC is disabled; a filtered
   // four-point input may still legitimately leave three fitting points.
   if (points.size() <= 3 || points.front().v - points.back().v <= kMinVSpanPx)
     return f;
-  RemoveRansacOutliers(points, cfg);
+  RemoveRansacOutliers(points, cfg, source_indices, f.ransac_outlier_indices);
   f.n_visible = static_cast<double>(points.size());
 
   const double cx = cfg.image_center_u >= 0.0

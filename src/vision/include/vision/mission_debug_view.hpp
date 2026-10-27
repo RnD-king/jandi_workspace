@@ -180,7 +180,7 @@ inline void DrawRawDebugDetections(cv::Mat &vis, const DetectionRange& dets,
 template<class DetectionType>
 inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
     const vision_core::MissionControllerConfig& config,std::uint64_t id=0,
-    bool mission_target=false) {
+    bool mission_target=false,bool line_outlier=false) {
   if (!std::isfinite(det.box.x) || !std::isfinite(det.box.y) ||
       !std::isfinite(det.box.width) || !std::isfinite(det.box.height)) return;
   const cv::Rect box(static_cast<int>(std::lround(det.box.x)),static_cast<int>(std::lround(det.box.y)),
@@ -189,7 +189,7 @@ inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
   if (clipped.empty()) return;
   cv::Scalar color(0,0,255); // GOAL and BACKBOARD
   const bool is_line=det.class_id==config.line_detection.class_id;
-  if (is_line) color=cv::Scalar(0,255,0);
+  if (is_line) color=line_outlier ? cv::Scalar(255,0,255) : cv::Scalar(0,255,0);
   else if (det.class_id==config.object_targets.ball_class_id) color=cv::Scalar(0,165,255);
   else if (det.class_id==config.object_targets.hurdle_class_id) color=cv::Scalar(0,255,255);
   cv::rectangle(vis,clipped,color,2);
@@ -226,12 +226,21 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   DrawRawDebugDetections(vis,dets,config);
   // Colored boxes are the exact pre-vote core filter results. ID labels join
   // original detection indices, never a second visual association algorithm.
+  std::size_t detection_index=0;
   for (const auto& detection:dets) {
     if (detection.class_id==config.line_detection.class_id &&
         detection.confidence>=config.line_detection.confidence &&
         detection.box.width>config.line_detection.min_box_width &&
-        detection.box.height>config.line_detection.min_box_height)
-      DrawFilteredDebugDetection(vis,detection,config);
+        detection.box.height>config.line_detection.min_box_height) {
+      bool outlier=false;
+      if (view.live_object_detections && mission_result.line_computed) {
+        for (const auto index:feats.ransac_outlier_indices)
+          if (index<prepared.line_detection_indices.size() &&
+              prepared.line_detection_indices[index]==detection_index) outlier=true;
+      }
+      DrawFilteredDebugDetection(vis,detection,config,0,false,outlier);
+    }
+    ++detection_index;
   }
   if (view.live_object_detections && camera.settled && camera.actual_mode!=vision_core::CameraMode::kTransition) {
     for (std::size_t i=0;i<prepared.accepted_object_detections.size();++i) {

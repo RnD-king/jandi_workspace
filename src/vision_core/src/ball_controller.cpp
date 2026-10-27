@@ -656,7 +656,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       return result;
     if (static_cast<int>(
             std::count(hit_history_.begin(), hit_history_.end(), true)) <
-        std::max(1, config_.stable_min_hits)) {
+        std::max(1, config_.pickup_verify_min_hits)) {
       has_ball_ = true;
       mode_ = BallMode::kStandUpAfterPickup;
       result.mode = mode_;
@@ -883,7 +883,7 @@ void BallController::ClearTracking() {
   tracked_ = {};
 }
 
-void BallController::ResetToLine(bool clear_ignore) {
+void BallController::ResetToLine() {
   mode_ = BallMode::kLineFollow;
   entry_recovery_u_.reset();
   entry_recovery_pending_ = false;
@@ -916,8 +916,6 @@ void BallController::ResetToLine(bool clear_ignore) {
   completed_back_steps_ = 0;
   down_search_.Reset();
   stationary_recovery_.Begin(0.0);
-  if (clear_ignore)
-    ignore_ball_until_sec_ = 0.0;
   ClearTracking();
 }
 
@@ -926,18 +924,17 @@ void BallController::ClearEntryEvidence() {
     ClearTracking();
 }
 
-void BallController::CompleteLineRecovery(double now_sec) {
+void BallController::CompleteLineRecovery() {
   if (mode_ != BallMode::kPostPickupLineRecovery)
     return;
-  ignore_ball_until_sec_ = now_sec + config_.ball_ignore_duration_sec;
-  ResetToLine(false);
+  ResetToLine();
 }
 
 void BallController::Reset() {
   has_ball_ = false;
   pickup_failed_ = false;
   pickup_attempt_count_ = 0;
-  ResetToLine(true);
+  ResetToLine();
 }
 
 } // namespace vision_core

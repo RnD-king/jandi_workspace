@@ -3,12 +3,53 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <utility>
 using namespace vision_core;
 
 namespace {
+void TestGoalEntryImagePresenceSurvivesInvalidDepthAndWindow() {
+  for(bool missing_depth:{false,true})for(int seen_frames:{0,1,6}) {
+    auto c=LoadDefaultAlgorithmConfig();
+    c.initial_has_ball=c.goal_trial_start_goal=c.enable_goal=true;
+    c.enable_ball=c.enable_hurdle=false;
+    c.transition_settle_sec=0;c.post_motion_observation_sec=1;
+    MissionController controller(c);
+    PerceptionFrameInput in;in.image_width=640;in.image_height=480;
+    in.command_transport_enabled=true;
+    in.camera_feedback={CameraMode::kForward,true};
+    controller.StepPerception(in);
+    in.now_sec=.05;in.camera_feedback={CameraMode::kTransition,false};
+    controller.StepPerception(in);
+    in.now_sec=.1;in.camera_feedback={CameraMode::kGoal,true};
+    auto result=controller.StepPerception(in);
+    assert(result.mission.goal.mode==GoalMode::kSearch);
+    for(int i=1;i<=40 && result.mission.goal.mode==GoalMode::kSearch;++i) {
+      in.now_sec=.1+.05*i;in.detections.clear();
+      if(i<=seen_frames) {
+        PerceptionDetection board;
+        board.detection.class_id=c.object_targets.backboard_class_id;
+        board.detection.confidence=1;
+        board.detection.box={c.goal.target_u_px-20,100,40,40};
+        if(!missing_depth)board.center_depth_m=1.5;
+        in.detections.push_back(board);
+      }
+      result=controller.StepPerception(in);
+    }
+    assert(result.mission.has_ball && result.mission.command.action_id==0);
+    if(seen_frames==0) {
+      assert(result.mission.goal.mode==GoalMode::kEntryRetryCameraForward);
+      assert(result.mission.goal.entry_line_retries==1);
+    } else {
+      assert(result.mission.goal.mode==GoalMode::kRecoverySearch);
+      assert(result.mission.goal.entry_line_retries==0);
+      assert(result.mission.command.camera_request==CameraRequest::kNone);
+    }
+  }
+}
+
 void TestSharedLineRansacAfterRectification() {
   for (bool imu : {false,true}) {
     auto c=LoadDefaultAlgorithmConfig();
@@ -25,10 +66,15 @@ void TestSharedLineRansacAfterRectification() {
       d.detection.box={i==0 ? 550. : 310.,440.-50.*i,20.,20.};
       in.detections.push_back(d);
     }
+    auto rejected=in.detections.front();rejected.detection.confidence=0;
+    in.detections.push_back(rejected);
+    std::reverse(in.detections.begin(),in.detections.end());
     const auto result=controller.StepPerception(in);
     assert(result.perception.raw_line_centers.size()==8);
+    assert(result.perception.line_detection_indices==std::vector<std::size_t>({8,7,6,5,4,3,2,1}));
     assert(result.perception.imu_rectification_applied==imu);
     assert(result.mission.line_features.n_visible==7);
+    assert(result.mission.line_features.ransac_outlier_indices==std::vector<std::size_t>({0}));
     auto clean=result.perception.line_centers;
     clean.erase(clean.begin()); // The raw bottom point is the false detection.
     const auto expected=ComputeLineFeatures(clean,640,480,c.line_features);
@@ -50,7 +96,7 @@ PerceptionDetection BallDetection(double u, double v, double confidence=1.0,
 MissionControllerConfig BallPipelineConfig() {
   auto c=LoadDefaultAlgorithmConfig();
   c.enable_hurdle=c.enable_goal=false;
-  c.ball.smooth_alpha=1.0;
+
   c.ball.upper_acquire_v_px=480.0;
   // Exercise the historical pickup rectangle independently of YAML tuning.
   c.ball.pickup_u1_px=281.6; c.ball.pickup_u2_px=358.4;
@@ -120,7 +166,7 @@ void TestVerificationBypassesAssociationAndFineReacquires() {
   BallPipeline pipeline;
   pipeline.EnterVerification();
   // All highest-ranked raw candidates are outside the previous identity gate.
-  for (int i=0;i<7;++i) {
+  for (int i=0;i<3;++i) {
     const auto &r=pipeline.Tick({BallDetection(.2,.7,.98,50),
                                 BallDetection(.9,.7,.99,20),
                                 BallDetection(.85,.7,.99,30)});
@@ -129,7 +175,7 @@ void TestVerificationBypassesAssociationAndFineReacquires() {
     assert(r.perception.targets.ball->area_px==900.0);
     assert(r.mission.ball.mode==BallMode::kVerifyPickupObservation);
   }
-  pipeline.Tick({}); pipeline.Tick({});
+  for (int i=0;i<6;++i) pipeline.Tick({});
   assert(pipeline.result.mission.ball.mode==BallMode::kVerifyPickupObservation);
   pipeline.Tick({});
   assert(pipeline.result.mission.ball.mode==BallMode::kFineAdjustForPickup);
@@ -156,6 +202,7 @@ void TestVerificationBypassesAssociationAndFineReacquires() {
 void TestPauseDoesNotAcquireNewMission() {
   auto config=BallPipelineConfig();
   config.ball.entry_min_hits=1; config.ball.down_search_min_hits=1; config.ball.stable_window=1;
+  config.ball.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   config.ball.stable_min_hits=1;
   config.line.line_stable_window=1;
   config.line.line_stable_min_hits=1;
@@ -202,11 +249,11 @@ void TestGlobalPauseGateForBallAndCamera() {
          resumed.mission.ball.mode!=BallMode::kLineFollow);
 }
 
-void TestVerificationSixHitsSucceeds() {
+void TestVerificationTwoHitsSucceeds() {
   BallPipeline pipeline;
   pipeline.EnterVerification();
-  for (int i=0;i<6;++i) pipeline.Tick({BallDetection(.9,.7)});
-  for (int i=0;i<3;++i) pipeline.Tick({});
+  for (int i=0;i<2;++i) pipeline.Tick({BallDetection(.9,.7)});
+  for (int i=0;i<7;++i) pipeline.Tick({});
   assert(pipeline.result.mission.ball.mode==BallMode::kVerifyPickupObservation);
   pipeline.Tick({});
   assert(pipeline.result.mission.ball.has_ball);
@@ -279,6 +326,7 @@ void TestDebugCandidatesUseCoreFiltersBeforeTemporalVoting() {
 } // namespace
 
 int main() {
+  TestGoalEntryImagePresenceSurvivesInvalidDepthAndWindow();
   TestSharedLineRansacAfterRectification();
   auto c=LoadDefaultAlgorithmConfig();
   c.enable_ball=c.enable_hurdle=c.enable_goal=false;
@@ -298,7 +346,7 @@ int main() {
   assert(out.mission.command.action==MissionAction::kLineStraightUnit);
   TestNormalBallAssociation();
   TestVerificationBypassesAssociationAndFineReacquires();
-  TestVerificationSixHitsSucceeds();
+  TestVerificationTwoHitsSucceeds();
   TestGlobalPauseGateForBallAndCamera();
   TestPauseDoesNotAcquireNewMission();
   TestBackboardValidDepthCanBeRetuned();

@@ -53,7 +53,6 @@ struct BallConfig {
   int down_search_min_hits{}; // DOWN search only, within stable_window.
   int entry_min_hits{}; // LINE entry only; independent of FINE stability.
   int lost_frames{};
-  double smooth_alpha{}; // Legacy config key; position uses the bounded 1->3 window.
   double far_u_des_px{};
   double approach_u_deadband_px{};
   double approach_left_top_u_px{};
@@ -76,15 +75,13 @@ struct BallConfig {
   double fine_side_two_step_margin_px{};
   BallFineMotionConfig fine_motion;
   int pickup_max_attempts{};
-  double ball_ignore_duration_sec{};
+  int pickup_verify_min_hits{}; // Residual ball votes after PICK DONE; independent of stability.
   // Inclusive pickup rectangle edges, in input-image pixels.
   double pickup_u1_px{}, pickup_u2_px{}, pickup_v1_px{}, pickup_v2_px{};
   double PickupCenterU() const { return (pickup_u1_px + pickup_u2_px) * 0.5; }
   double PickupCenterV() const { return (pickup_v1_px + pickup_v2_px) * 0.5; }
   double PickupHalfWidth() const { return (pickup_u2_px - pickup_u1_px) * 0.5; }
   double PickupHalfHeight() const { return (pickup_v2_px - pickup_v1_px) * 0.5; }
-  double recovery_timeout_sec{};
-  int recovery_reacquire_min_hits{};
   double recovery_center_tolerance_px{};
 };
 
@@ -141,7 +138,7 @@ public:
                      const std::deque<bool>& hits, int width, int height, double now);
   bool HasBall() const { return has_ball_; }
   void SetHasBall(bool has_ball) { has_ball_ = has_ball; }
-  void CompleteLineRecovery(double now_sec);
+  void CompleteLineRecovery();
   void ClearEntryEvidence();
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
@@ -204,7 +201,7 @@ private:
   ActionRequest RecoveryAction() const;
   void ClearTracking();
   void BeginForwardRecovery(double now, std::optional<double> u, bool immediate_turn);
-  void ResetToLine(bool clear_ignore);
+  void ResetToLine();
 
   BallConfig config_;
   double camera_motion_timeout_sec_{};
@@ -252,7 +249,6 @@ private:
   bool recovery_walk_turn_done_{false};
   bool recovery_turn_search_exhausted_{false};
   double state_enter_sec_{0.0};
-  double ignore_ball_until_sec_{0.0};
   bool back_away_issued_{false};
   bool has_ball_{false};
   bool pickup_failed_{false};

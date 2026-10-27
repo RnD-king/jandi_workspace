@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <yaml-cpp/yaml.h>
 
 static void Reject(const std::string &yaml, const std::string &from,
                    const std::string &to) {
@@ -33,6 +34,100 @@ static vision_core::MissionControllerConfig LoadText(const std::string &yaml) {
     std::remove(path);
     throw;
   }
+}
+
+// Transform the fixed legacy fixture, never the operator's tuning values.
+static YAML::Node GroupedFixture(const std::string &text) {
+  const auto old=YAML::Load(text)["vision_algorithm"];
+  YAML::Node root;
+  auto a=root["vision_algorithm"];
+  a["line"]["detection"]=old["line_detection"];
+  a["line"]["features"]=old["line_features"];
+  a["line"]["stability"]=old["line"];
+  a["line"]["walk"]=old["line_p2p"];
+  for(const auto* name:{"ball","hurdle","goal"}) {
+    a[name]["enabled"]=old["mission"][std::string("enable_")+name];
+    a[name]["control"]=YAML::Clone(old[name]);
+  }
+  for(const auto* name:{"ball","hurdle","goal","backboard"}) {
+    auto object=std::string(name)=="backboard" ? a["goal"]["backboard"] : a[name];
+    const auto prefix=std::string(name)+"_";
+    for(const auto& field:old["object_targets"]) {
+      const auto key=field.first.as<std::string>();
+      if(key.find(prefix)==0) object["detection"][key.substr(prefix.size())]=field.second;
+    }
+    if(std::string(name)!="goal") object["candidate_tracking"]=old[prefix+"candidate_tracking"];
+  }
+  for(const auto* key:{"depth_strip_width_px","min_depth_m","max_depth_m"}) {
+    const auto previous=std::string("backboard_")+key;
+    a["goal"]["backboard"]["depth"][key]=old["goal"][previous];
+    a["goal"]["control"].remove(previous);
+  }
+  a["common"]["depth_roi_size_px"]=old["object_targets"]["depth_roi_size_px"];
+  a["common"]["object_association"]=old["object_association"];
+  a["common"]["command"]=old["command"];
+  a["common"]["mission"]=YAML::Clone(old["mission"]);
+  for(const auto* name:{"ball","hurdle","goal"})
+    a["common"]["mission"].remove(std::string("enable_")+name);
+  return root;
+}
+
+static void CheckGroupedConfiguration(const std::string &text) {
+  const auto baseline=LoadText(text);
+  auto root=GroupedFixture(text);
+  auto c=LoadText(YAML::Dump(root));
+  assert(c.line_detection.confidence==baseline.line_detection.confidence);
+  assert(c.line_features.image_center_u==baseline.line_features.image_center_u);
+  assert(c.line.line_stable_window==baseline.line.line_stable_window);
+  assert(c.line_p2p.ready_lead_sec==baseline.line_p2p.ready_lead_sec);
+  assert(c.ball.pickup_v2_px==baseline.ball.pickup_v2_px);
+  assert(c.hurdle.contact_steps==baseline.hurdle.contact_steps);
+  assert(c.goal.throw_landing_z_m==baseline.goal.throw_landing_z_m);
+  assert(c.object_association.max_center_distance_norm==baseline.object_association.max_center_distance_norm);
+  assert(c.command.first_action_id==baseline.command.first_action_id);
+  assert(c.object_ready_mean_actions==baseline.object_ready_mean_actions);
+  auto a=root["vision_algorithm"];
+  // Distinct values detect accidental cross-object filter/tracker wiring.
+  a["ball"]["detection"]["class_id"]=11;
+  a["hurdle"]["detection"]["class_id"]=14;
+  a["goal"]["detection"]["class_id"]=12;
+  a["goal"]["backboard"]["detection"]["class_id"]=13;
+  a["ball"]["detection"]["confidence"]=.61;
+  a["hurdle"]["detection"]["confidence"]=.62;
+  a["goal"]["detection"]["confidence"]=.63;
+  a["goal"]["backboard"]["detection"]["confidence"]=.64;
+  a["ball"]["candidate_tracking"]["max_center_distance_px"]=181;
+  a["hurdle"]["candidate_tracking"]["max_center_distance_px"]=202;
+  a["goal"]["backboard"]["candidate_tracking"]["max_center_distance_px"]=203;
+  a["goal"]["backboard"]["depth"]["depth_strip_width_px"]=7;
+  a["goal"]["backboard"]["depth"]["min_depth_m"]=.2;
+  a["goal"]["backboard"]["depth"]["max_depth_m"]=2.2;
+  a["common"]["depth_roi_size_px"]=7;
+  a["ball"]["enabled"]=false;
+  c=LoadText(YAML::Dump(root));
+  assert(c.object_targets.ball_class_id==11 && c.object_targets.hurdle_class_id==14);
+  assert(c.object_targets.goal_class_id==12 && c.object_targets.backboard_class_id==13);
+  assert(c.object_targets.ball_confidence==.61 && c.object_targets.hurdle_confidence==.62);
+  assert(c.object_targets.goal_confidence==.63 && c.object_targets.backboard_confidence==.64);
+  assert(c.ball_candidate_tracking.max_center_distance_px==181);
+  assert(c.hurdle_candidate_tracking.max_center_distance_px==202);
+  assert(c.backboard_candidate_tracking.max_center_distance_px==203);
+  assert(c.backboard_depth_strip_width_px==7 && c.backboard_min_depth_m==.2 && c.backboard_max_depth_m==2.2);
+  assert(c.object_targets.depth_roi_size_px==7 && !c.enable_ball && c.enable_hurdle && c.enable_goal);
+  const auto reject=[](const YAML::Node& bad) {
+    bool rejected=false;
+    try { (void)LoadText(YAML::Dump(bad)); }
+    catch(const std::runtime_error&) { rejected=true; }
+    assert(rejected);
+  };
+  auto bad=YAML::Clone(root);
+  bad["vision_algorithm"]["ball"]["detection"].remove("class_id");reject(bad);
+  bad=YAML::Clone(root);
+  bad["vision_algorithm"]["goal"]["backboard"]["depth"].remove("min_depth_m");reject(bad);
+  bad=YAML::Clone(root);
+  bad["vision_algorithm"]["hurdle"].remove("candidate_tracking");reject(bad);
+  bad=YAML::Clone(root);
+  bad["vision_algorithm"]["common"].remove("depth_roi_size_px");reject(bad);
 }
 
 int main(int argc, char **argv) {
@@ -64,8 +159,6 @@ int main(int argc, char **argv) {
   assert(c.test_stage==0 && c.test_mission==vision_core::MissionType::kNone);
   assert(c.backboard_depth_strip_width_px==5);
   assert(c.line_p2p.recovery_observation_sec == 1.0);
-  assert(c.goal.recovery_timeout_sec == 5.0);
-  assert(c.goal.recovery_reacquire_min_hits == 3);
   assert(c.goal.recovery_center_tolerance_px == 76.8);
   assert(c.ball.entry_recovery_walk_turn_max == 10);
   assert(c.ball.pickup_u1_px == 310);
@@ -75,6 +168,8 @@ int main(int argc, char **argv) {
   assert(c.ball.down_one_step_v_px == 0);
   assert(c.ball.fine_mode_v_px == 10);
   assert(c.ball.pickup_max_attempts == 100);
+  assert(c.ball.pickup_verify_min_hits == 3);
+  assert(c.goal.entry_line_retry_max_attempts == 3);
   assert(c.hurdle.contact_steps == 3);
   assert(c.hurdle.contact_inter_action_hold_sec == 0.5);
   assert(c.ball.down_search_inter_action_hold_sec == 0.0);
@@ -93,6 +188,7 @@ int main(int argc, char **argv) {
   assert(c.line_features.ransac_min_sample_v_gap_px==20);
   assert(c.line_features.ransac_max_outliers==2);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
+  CheckGroupedConfiguration(text.str());
   for (const auto* section : {"hurdle_candidate_tracking", "backboard_candidate_tracking"}) {
     const auto prefix=std::string(section)+":\n    enabled: true\n    max_center_distance_px: 200.0";
     Reject(text.str(), prefix, std::string(section)+":\n    enabled: true\n    max_center_distance_px: 0");
@@ -319,6 +415,20 @@ int main(int argc, char **argv) {
     assert(LoadText(contact_yaml).hurdle.contact_inter_action_hold_sec==std::stod(value));
   }
   Reject(text.str(), "pickup_max_attempts: 100", "pickup_max_attempts: 0");
+  for (const auto* value : {"0", "11", ".nan"})
+    Reject(text.str(), "pickup_verify_min_hits: 3",
+           std::string("pickup_verify_min_hits: ")+value);
+  Reject(text.str(), "pickup_verify_min_hits: 3", "");
+  Reject(text.str(), "entry_line_retry_max_attempts: 3", "entry_line_retry_max_attempts: -1");
+  Reject(text.str(), "entry_line_retry_max_attempts: 3", "");
+  assert(LoadText([&] {
+    auto modified=text.str();
+    const auto position=modified.find("entry_line_retry_max_attempts: 3");
+    assert(position!=std::string::npos);
+    modified.replace(position, std::string("entry_line_retry_max_attempts: 3").size(),
+                     "entry_line_retry_max_attempts: 0");
+    return modified;
+  }()).goal.entry_line_retry_max_attempts==0);
   Reject(text.str(), "upper_acquire_v_px: 470.0", "upper_acquire_v_px: -0.1");
   Reject(text.str(), "target_u_px: 380", "target_u_px: .inf");
   Reject(text.str(), "throw_landing_z_m: 0.40", "throw_landing_z_m: 0.0");
@@ -376,7 +486,7 @@ int main(int argc, char **argv) {
   assert(direct_rejected);
 
   auto invalid_goal = c;
-  invalid_goal.goal.recovery_reacquire_min_hits = 0;
+  invalid_goal.goal.stable_min_hits = 0;
   bool rejected_goal = false;
   try { vision_core::ValidateAlgorithmConfig(invalid_goal); }
   catch (const std::runtime_error &) { rejected_goal = true; }
@@ -390,13 +500,12 @@ int main(int argc, char **argv) {
   try { vision_core::MissionController invalid(direct); }
   catch (const std::runtime_error &) { constructor_rejected = true; }
   assert(constructor_rejected);
-  for (int setting=0;setting<5;++setting) {
+  for (int setting=0;setting<4;++setting) {
     auto invalid=c;
     if(setting==0) invalid.line_p2p.left_repetitions=0;
     if(setting==1) invalid.line_p2p.straight_repetitions=-1;
     if(setting==2) invalid.line_p2p.right_repetitions=0;
     if(setting==3) invalid.candidate_search_max_turns=-1;
-    if(setting==4) invalid.candidate_direction_max_age_sec=0;
     bool rejected=false;
     try { vision_core::ValidateAlgorithmConfig(invalid); }
     catch(const std::runtime_error&) { rejected=true; }

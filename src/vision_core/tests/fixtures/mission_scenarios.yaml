@@ -53,7 +53,6 @@ vision_algorithm:
     down_search_min_hits: 7 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
     entry_min_hits: 7 # Frozen historical scenarios; production YAML uses 6.
     lost_frames: 5
-    smooth_alpha: 0.45
 
     upper_acquire_v_px: 470.0
 
@@ -86,10 +85,8 @@ vision_algorithm:
     pickup_v2_px: 130
 
     pickup_max_attempts: 100
-    ball_ignore_duration_sec: 5.0
+    pickup_verify_min_hits: 3 # 픽업 DONE 후 stable_window 중 잔존 공 검출 기준; 이상이면 재픽업
 
-    recovery_timeout_sec: 5.0
-    recovery_reacquire_min_hits: 3
     recovery_center_tolerance_px: 76.8
 
   hurdle:
@@ -101,7 +98,6 @@ vision_algorithm:
     stable_min_hits: 7
     down_search_min_hits: 7 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
     lost_frames: 5
-    smooth_alpha: 0.45
 
     upper_acquire_v_px: 470.0
 
@@ -109,7 +105,6 @@ vision_algorithm:
     approach_two_step_v_px: 330.0
 
     target_u_px: 380
-    u_deadband_px: 160
 
     down_one_step_v_px: 100.0
     fine_mode_v_px: 180
@@ -119,11 +114,10 @@ vision_algorithm:
     contact_inter_action_hold_sec: 0.5
 
     hurdle_ignore_duration_sec: 5.0
-    recovery_reacquire_min_hits: 3
-    recovery_timeout_sec: 5.0
     recovery_center_tolerance_px: 76.8
 
   goal:
+    entry_line_retry_max_attempts: 3
     # 화면 이탈 방지: 좌우 끝에서 이 픽셀 이내에 박스가 닿으면 연속 2회 회전
     edge_margin_px: 50.0 # rqt: goal_edge_margin_px, 양쪽에 동시에 닿으면 HOLD
 
@@ -165,8 +159,6 @@ vision_algorithm:
 
     post_shoot_back_steps: 0
 
-    recovery_timeout_sec: 5.0
-    recovery_reacquire_min_hits: 3
     recovery_center_tolerance_px: 76.8
 
   line_detection:
@@ -245,7 +237,6 @@ vision_algorithm:
   # 여러 미션에 공통으로 적용되는 설정
   mission:
     candidate_search_max_turns: 2
-    candidate_direction_max_age_sec: 5.0 # Validated once after the initial stationary window.
     test_mission: 0
     test_stage: 0
 

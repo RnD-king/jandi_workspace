@@ -785,6 +785,7 @@ void EntryDirectionCentralFallback() {
 
 void GoalEntryFirstObservation(bool left, bool reacquire, int prior_hits) {
   auto c=LoadDefaultAlgorithmConfig().goal;
+  c.entry_line_retry_max_attempts=0; // Explicitly exercise the legacy directional recovery option.
   c.stable_window=10;c.stable_min_hits=7;c.post_pickup_walk_fallback_actions=1;
   c.recovery_turn_max=3;c.recovery_max_observations=5;c.recovery_observation_sec=1;
   c.edge_margin_px=50;
@@ -841,6 +842,7 @@ void GoalEntryFirstObservation(bool left, bool reacquire, int prior_hits) {
 
 void GoalEntryFallbackAndDepth() {
   auto c=LoadDefaultAlgorithmConfig().goal;c.stable_window=10;c.stable_min_hits=7;
+  c.entry_line_retry_max_attempts=0; // Legacy fallback remains available when LINE retries are disabled.
   c.recovery_turn_max=3;c.lost_frames=1;
   const CameraFeedback forward{CameraMode::kForward,true}, camera{CameraMode::kGoal,true};
   const std::deque<bool> misses(10,false), hits(10,true);
@@ -888,6 +890,7 @@ void GoalEntryFallbackAndDepth() {
 
 void GoalEntryCameraTransport(bool left, bool manual) {
   auto c=LoadDefaultAlgorithmConfig();c.initial_has_ball=true;c.goal_trial_start_goal=false;
+  c.goal.entry_line_retry_max_attempts=0; // This case tests the existing directional turn transport.
   c.enable_ball=c.enable_hurdle=false;c.enable_goal=true;
   c.goal.post_pickup_walk_fallback_actions=1;c.transition_settle_sec=.5;
   c.goal.stable_window=10;c.goal.stable_min_hits=7;c.goal.edge_margin_px=50;
@@ -924,6 +927,7 @@ void GoalEntryCameraTransport(bool left, bool manual) {
 
 void GoalEntryForwardCameraTrigger() {
   auto c=LoadDefaultAlgorithmConfig().goal;c.stable_window=10;c.stable_min_hits=7;
+  c.entry_line_retry_max_attempts=0; // Isolate the FORWARD-depth trigger and legacy recovery.
   c.camera_goal_start_z_m=.8;c.edge_margin_px=50;c.recovery_turn_max=3;
   GoalController goal(c,3);goal.StartForwardTrial();
   const CameraFeedback forward{CameraMode::kForward,true}, camera{CameraMode::kGoal,true};

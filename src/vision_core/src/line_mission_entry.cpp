@@ -118,7 +118,6 @@ MissionFrameResult MissionController::StepPlannedLine(
                                            hurdle_controller_.EntryReady())) {
         candidate_.mission = MissionType::kHurdle;
         candidate_.direction_u = input.hurdle_entry_center_u.value_or(hurdle_result_.tracked.center_px.u);
-        candidate_.direction_seen_sec = input.now_sec;
       }
     }
     if (config_.enable_ball && (candidate_.mission == MissionType::kNone ||
@@ -137,7 +136,6 @@ MissionFrameResult MissionController::StepPlannedLine(
         const auto direction = input.ball_entry_track_hits ? input.ball_entry_center_u : ball_controller_.EntryDirection();
         if (new_hit && direction) {
           candidate_.direction_u = direction;
-          candidate_.direction_seen_sec = input.now_sec;
         }
       }
     }
@@ -207,11 +205,10 @@ MissionFrameResult MissionController::StepPlannedLine(
               hurdle_result_.mode = HurdleMode::kApproach; hurdle_result_.active = true;
             }
           } else {
-            // Validate age only at the start of an episode. After this, fixed
-            // search direction survives turn/observation time, and no single
-            // late detection can invert the restoration direction.
-            if (!candidate_.search_left && candidate_.direction_u &&
-                input.now_sec - candidate_.direction_seen_sec <= config_.candidate_direction_max_age_sec) {
+            // Fix the saved candidate direction when search starts. It
+            // survives DONE/observation waits and remains paired with the
+            // inverse restoration, regardless of how long draining took.
+            if (!candidate_.search_left && candidate_.direction_u) {
               const double center = candidate_.mission == MissionType::kBall ?
                   config_.ball.far_u_des_px : config_.hurdle.target_u_px;
               const double tolerance = candidate_.mission == MissionType::kBall ?
@@ -258,7 +255,7 @@ MissionFrameResult MissionController::StepPlannedLine(
           input.backboard_center_depth_m,
           idle && post_pickup_goal_line_gate_active_ && line_valid && line_state_ == LineState::kNormal &&
               (post_pickup_five_step_completed_ || post_pickup_line_actions_completed_ >=
-                   config_.goal.post_pickup_walk_fallback_actions), input.backboard_image_without_depth,
+                   goal_controller_.RequiredLineWalkActions()), input.backboard_image_without_depth,
           idle && input.allow_new_commands);
       if (goal_result_.mode != GoalMode::kLineFollow && idle && input.allow_new_commands) {
         line_plan_.Abort();
@@ -281,7 +278,7 @@ MissionFrameResult MissionController::StepPlannedLine(
           post_pickup_goal_line_gate_active_ && line_valid && final_edge &&
           (post_pickup_five_step_completed_ ||
            post_pickup_line_actions_completed_ + (line_plan_.Done(id) ? 0 : 1) >=
-               config_.goal.post_pickup_walk_fallback_actions);
+               goal_controller_.RequiredLineWalkActions());
       // Straight-block completion also satisfies GOAL regardless of fallback.
       const bool straight_goal = has_ball_ && config_.enable_goal &&
           goal_controller_.CanEnterFromLine() &&

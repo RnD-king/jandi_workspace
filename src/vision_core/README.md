@@ -5,6 +5,60 @@ ROS와 하드웨어에 의존하지 않는 C++ perception·mission-control 라�
 `config/vision_algorithm.yaml`이 단일 원본이다. 필수 키가 없거나 범위를
 벗어나면 설정 로딩 단계에서 예외를 발생시킨다.
 
+## 객체별 YAML 구성
+
+운영 `config/vision_algorithm.yaml`은 다음 다섯 묶음을 사용한다.
+
+```text
+vision_algorithm
+├─ line
+│  ├─ detection       클래스·신뢰도·BBox 최소 크기
+│  ├─ features        중심점·최소제곱·RANSAC
+│  ├─ stability       LINE 검출 누적
+│  └─ walk            보행 점수·READY·라인 복구
+├─ ball
+│  ├─ enabled         공 미션 사용 여부
+│  ├─ detection       신뢰도·BBox·비율·FORWARD/DOWN Depth
+│  ├─ candidate_tracking
+│  └─ control         검출 누적·DOWN 탐색·접근·픽업·복구
+├─ hurdle
+│  ├─ enabled
+│  ├─ detection       신뢰도·BBox·비율·Depth
+│  ├─ candidate_tracking
+│  └─ control         검출 누적·DOWN 탐색·접근·넘기·복구
+├─ goal
+│  ├─ enabled
+│  ├─ detection       GOAL 클래스 검출 필터
+│  ├─ backboard
+│  │  ├─ detection    백보드 클래스 검출 필터
+│  │  ├─ depth        백보드 중심 거리 범위·좌우 표본 폭
+│  │  └─ candidate_tracking
+│  └─ control         접근·투척 위치/방향·복구
+└─ common
+   ├─ depth_roi_size_px  공·허들 BBox 중심 Depth 표본 크기
+   ├─ object_association 공통 단일 객체 연결 설정
+   ├─ command            명령 ID·ACK 제한 시간
+   └─ mission            시험 미션·공통 복구·카메라·관측 대기·시작 상태
+```
+
+예를 들어 공의 FORWARD Depth 상한은
+`vision_algorithm.ball.detection.forward_max_depth_m`, 공 진입 검출 횟수는
+`vision_algorithm.ball.control.entry_min_hits`, 공통 정지 관측 시간은
+`vision_algorithm.common.mission.post_motion_observation_sec`에서 변경한다.
+`line.detection.confidence`는 실전 노드의 YOLO 전체 1차 신뢰도 기본값으로도
+사용한다. 객체별 신뢰도를 더 낮게 주어도 1차 필터에서 제외된 검출은 복원되지 않는다.
+
+검출 필터, 후보 ID 추적, `control.lost_frames`는 서로 다른 단계의 설정이다.
+필터 통과가 미션 진입을 뜻하지는 않는다. 기존 C++ 설정 필드와 ROS 파라미터
+이름, 미션 FSM 및 ACK/READY/DONE 계약은 유지한다.
+
+이 객체별 형식을 처음 사용하기 전에는 새 로더를 포함한 코어를 한 번
+빌드·설치해야 한다. 이후 값만 변경할 때는 노드가 실제로 읽는 설치본에
+YAML을 반영하고 재시작하면 된다. 기존 `object_targets`, `line_features`,
+`*_candidate_tracking`, `mission` 등이 루트에 있는 이전 YAML도 계속 읽는다.
+고정 회귀 시나리오 `tests/fixtures/mission_scenarios.yaml`은 그 이전 형식을
+유지하며 운영 튜닝값으로 다시 생성하지 않는다.
+
 ## P2P-only command contract
 
 `MissionController::StepPerception()`에 detection, depth, camera feedback,
@@ -33,7 +87,7 @@ current DONE 뒤 queued action을 시작한다. [LINE OBS] 로그에 사용 프�
 ## LINE recovery
 
 하단 O/H guide는 최소 3개 line center가 있어야 valid다
-(`line_features.guide_min_points: 3`). 2점 이하는 기존 failure/recovery로 처리한다.
+(`line.features.guide_min_points: 3`). 2점 이하는 기존 failure/recovery로 처리한다.
 
 - 첫 실패: 2초 stationary observation
 - 유효 O/H 표본 5개 이상: 평균 guide로 정상 복귀
@@ -46,21 +100,32 @@ current DONE 뒤 queued action을 시작한다. [LINE OBS] 로그에 사용 프�
 
 ## Mission 요약
 
+BALL/HURDLE 후보의 탐색 방향에는 시간 만료를 적용하지 않는다. 최초 후보의
+좌우 위치를 기준으로 탐색 방향을 고정하고, 실제 DONE으로 완료한 탐색 회전과
+반대 방향 복원 횟수를 관리한다. 탐색 한도는
+`common.mission.candidate_search_max_turns`를 사용한다.
+
 - BALL: 원거리 direct cruise → 카메라 DOWN → lateral 우선 fine → 전후 보정
-  → PICK_BALL(내부 재그립) → 잔존 공 확인 → 기본 자세 → STEP_BACK 3회
+  → PICK_BALL(내부 재그립·일어나기 포함) → 잔존 공 확인 → 기본 자세
+  → 설정된 후진(`post_pickup_back_steps`, 기본 0회)
   → 카메라 FORWARD → LINE recovery
-  (PICK_BALL 후 10-frame verification에서 7회 이상 검출되면 남은 attempt에
-  한해 FineAdjust로 복귀한다. 이 관찰 상태에서만 association 없이 raw 최상위
+  (PICK_BALL(일어나기 포함) DONE 후 10-frame verification에서 3회 이상 검출되면 남은 attempt에
+  한해 FineAdjust로 복귀한다. 잔존 공 기준은 `ball.control.pickup_verify_min_hits`이며,
+  일반 안정 검출의 `stable_min_hits`와 별개다. 이 관찰 상태에서만 association 없이 raw 최상위
   ball 후보를 사용하며, 다음 일반 tracking은 새 identity를 acquire한다.)
 - HURDLE: F5 반복 → raw v 0.75, 10-window/7-hit latch → 현재 action DONE
   → camera DOWN → STEP_FORWARD_ONE(10) → HUDDLE(16)
 - GOAL: camera GOAL → backboard RGB-D geometry → 거리 우선 fine → shoot yaw
   ±30도 이내 signed SHOOT, 아니면 side step 후 settle → 현재 frame의 fresh
-  raw RGB-D pose로 geometry 재계산. GOAL 카메라에서 이전 백보드 관측이 없거나
-  마지막 관측이 중앙(설정 기본 ±0.12)이면 Search에서 정지 관측한다. 기존 안정 인식 조건을 충족했던 왼쪽/오른쪽
-  마지막 관측을 잃었으면 같은 방향으로 15도 TURN을 실행하고, 완료 후 0.6초
-  정착 관측 및 연속 3회 재인식으로 Search에 복귀한다. 방향 복구가 5초 내
-  성공하지 않으면 FAILED에서 정지한다.
+  raw RGB-D pose로 geometry 재계산. 첫 GOAL 정지 관측에서 백보드가 한 번도
+  보이지 않으면 FORWARD 도달 확인 → 기존 LINE 복구/판단 → 새 LINE 보행
+  1블록의 실제 DONE → GOAL 재관측을 수행한다. 추가 재탐색 한도는
+  `goal.control.entry_line_retry_max_attempts`(기본 3회)이며, 한도 뒤의 관측도
+  비어 있으면 FAILED에서 정지한다. 0이면 기존 방향/정지 복구를 사용한다.
+  LINE 블록 길이는 기존 `line.walk.*_repetitions`를 따른다. READY나 과거 DONE은
+  재관측을 허용하지 않으며, 재탐색은 공 보유 상태와 GOAL 미션 번호를 유지한다.
+  백보드가 잠깐이라도 보였거나 영상은 있으나 Depth가 실패한 경우, 접근 중
+  기존 백보드를 잃은 경우는 기존 방향 회전·정지 관측 복구를 유지한다.
 
 카메라 trigger는 진행 중 locomotion을 취소하지 않는다. DONE 뒤 camera request를
 내고, 카메라 모션이 끝날 때까지 새 locomotion을 HOLD한다.
@@ -90,7 +155,7 @@ cmake --install build
 
 ## DONE 이후 관측 창 (실기 기본값)
 
-- `mission.post_motion_observation_sec=1.0`: 짧은 움직임 및 카메라 DOWN/GOAL 완료 이후
+- `common.mission.post_motion_observation_sec=1.0`: 짧은 움직임 및 카메라 DOWN/GOAL 완료 이후
   이전 추적 이력을 초기화하고, 새로운 영상으로 최소 1초 관측한다.
 - BALL/HURDLE/GOAL: 이 관측 구간에서 촬영한 최근 **10프레임 중 최소 7회**
   유효 검출이 있어야 객체 기반 다음 동작을 선택한다. 프레임 7개만 도착했다고

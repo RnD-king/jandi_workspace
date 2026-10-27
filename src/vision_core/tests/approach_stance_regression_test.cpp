@@ -13,6 +13,7 @@ ObjectTarget Target(double u,double v) {
 void BallStages() {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.entry_min_hits=1; c.down_search_min_hits=1; c.stable_window=c.stable_min_hits=1;
+  c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.lost_frames=1;
   // Isolate legacy two-step / one-step / fine transitions from live tuning values.
   c.down_one_step_v_px=216.0; c.fine_mode_v_px=278.4;

@@ -139,7 +139,7 @@ if(BUILD_TESTING)
     tests/config_loader_test.cpp
   )
   target_link_libraries(shared_vision_core_config_loader_test
-    PRIVATE shared_vision_core
+    PRIVATE shared_vision_core yaml-cpp
   )
   add_test(
     NAME shared_vision_core_config_loader_test

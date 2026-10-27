@@ -34,7 +34,6 @@ struct HurdleConfig {
   double recovery_observation_sec{};
   int recovery_max_observations{};
   double target_u_px{};
-  double u_deadband_px{};
   double contact_v_px{};
   int contact_steps{};
   double contact_inter_action_hold_sec{};
@@ -43,14 +42,11 @@ struct HurdleConfig {
   int stable_min_hits{};
   int down_search_min_hits{}; // DOWN search only, within stable_window.
   int lost_frames{};
-  double smooth_alpha{}; // Legacy config key; position uses the bounded 1->3 window.
   double upper_acquire_v_px{};
   double approach_two_step_v_px{};
   double down_one_step_v_px{};
   double fine_mode_v_px{};
   double hurdle_ignore_duration_sec{};
-  int recovery_reacquire_min_hits{};
-  double recovery_timeout_sec{};
   double recovery_center_tolerance_px{};
 };
 

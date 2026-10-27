@@ -26,6 +26,51 @@ void Assign(const YAML::Node &node, const char *key, T &value) {
                              key + "': " + error.what());
   }
 }
+
+// Grouping is a file-layout concern. Keep the internal configuration and
+// controller contracts unchanged, and continue accepting existing flat YAMLs.
+YAML::Node AlgorithmSections(const YAML::Node &a) {
+  if (!a["common"]) return a;
+  const auto map = [](const YAML::Node &parent, const char *key) {
+    const auto node = parent[key];
+    if (!node || !node.IsMap())
+      throw std::runtime_error(std::string("missing required vision algorithm map: ") + key);
+    return node;
+  };
+  YAML::Node sections;
+  const auto line = map(a, "line");
+  sections["line_detection"] = map(line, "detection");
+  sections["line_features"] = map(line, "features");
+  sections["line"] = map(line, "stability");
+  sections["line_p2p"] = map(line, "walk");
+  const auto common = map(a, "common");
+  sections["command"] = map(common, "command");
+  sections["object_association"] = map(common, "object_association");
+  sections["mission"] = YAML::Clone(map(common, "mission"));
+  for (const auto *name : {"ball", "hurdle", "goal"}) {
+    const auto object = map(a, name);
+    sections[name] = YAML::Clone(map(object, "control"));
+    bool enabled=false;
+    Assign(object, "enabled", enabled);
+    sections["mission"][std::string("enable_") + name] = enabled;
+  }
+  for (const auto *name : {"ball", "hurdle", "goal", "backboard"}) {
+    const auto object = std::string(name) == "backboard"
+        ? map(map(a, "goal"), "backboard") : map(a, name);
+    const auto detection = map(object, "detection");
+    for (const auto &field : detection)
+      sections["object_targets"][std::string(name) + "_" + field.first.as<std::string>()] = field.second;
+    if (std::string(name) != "goal")
+      sections[std::string(name) + "_candidate_tracking"] = map(object, "candidate_tracking");
+  }
+  int depth_roi_size_px=0;
+  Assign(common, "depth_roi_size_px", depth_roi_size_px);
+  sections["object_targets"]["depth_roi_size_px"] = depth_roi_size_px;
+  const auto board_depth = map(map(map(a, "goal"), "backboard"), "depth");
+  for (const auto *key : {"depth_strip_width_px", "min_depth_m", "max_depth_m"})
+    sections["goal"][std::string("backboard_") + key] = board_depth[key];
+  return sections;
+}
 void Finite(double value, const char *key) {
   if (!std::isfinite(value))
     throw std::runtime_error(std::string("vision algorithm key '") + key + "' must be finite");
@@ -70,7 +115,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.line_p2p.straight_repetitions, "line_p2p.straight_repetitions");
   PositiveInt(c.line_p2p.right_repetitions, "line_p2p.right_repetitions");
   NonnegativeInt(c.candidate_search_max_turns, "mission.candidate_search_max_turns");
-  Positive(c.candidate_direction_max_age_sec, "mission.candidate_direction_max_age_sec");
   Nonnegative(c.ball.down_one_step_v_px, "ball.down_one_step_v_px");
   Nonnegative(c.ball.fine_mode_v_px, "ball.fine_mode_v_px");
   if (c.ball.down_one_step_v_px >= c.ball.fine_mode_v_px)
@@ -98,7 +142,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.hurdle.recovery_observation_sec, "hurdle.recovery_observation_sec");
   PositiveInt(c.hurdle.recovery_max_observations, "hurdle.recovery_max_observations");
   Nonnegative(c.hurdle.target_u_px, "hurdle.target_u_px");
-  Nonnegative(c.hurdle.u_deadband_px, "hurdle.u_deadband_px");
   Nonnegative(c.hurdle.contact_v_px, "hurdle.contact_v_px");
   PositiveInt(c.hurdle.contact_steps, "hurdle.contact_steps");
   Nonnegative(c.hurdle.contact_inter_action_hold_sec, "hurdle.contact_inter_action_hold_sec");
@@ -206,7 +249,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   HitsWithinWindow(c.ball.stable_min_hits, c.ball.stable_window,
                    "ball.stable_min_hits", "ball.stable_window");
   PositiveInt(c.ball.lost_frames, "ball.lost_frames");
-  Unit(c.ball.smooth_alpha, "ball.smooth_alpha");
   Nonnegative(c.ball.far_u_des_px, "ball.far_u_des_px");
   Nonnegative(c.ball.approach_u_deadband_px, "ball.approach_u_deadband_px");
   Nonnegative(c.ball.approach_left_top_u_px, "ball.approach_left_top_u_px");
@@ -230,8 +272,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.ball.approach_direct_down_v_px <= c.ball.approach_two_step_v_px)
     throw std::runtime_error("ball.approach_direct_down_v_px must exceed ball.approach_two_step_v_px");
   PositiveInt(c.ball.pickup_max_attempts, "ball.pickup_max_attempts");
-  Nonnegative(c.ball.ball_ignore_duration_sec,
-              "ball.ball_ignore_duration_sec");
+  HitsWithinWindow(c.ball.pickup_verify_min_hits, c.ball.stable_window,
+                   "ball.pickup_verify_min_hits", "ball.stable_window");
   Nonnegative(c.ball.pickup_u1_px, "ball.pickup_u1_px");
   Nonnegative(c.ball.pickup_u2_px, "ball.pickup_u2_px");
   Nonnegative(c.ball.pickup_v1_px, "ball.pickup_v1_px");
@@ -239,9 +281,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.ball.pickup_u1_px >= c.ball.pickup_u2_px ||
       c.ball.pickup_v1_px >= c.ball.pickup_v2_px)
     throw std::runtime_error("ball pickup edges require u1 < u2 and v1 < v2");
-  Nonnegative(c.ball.recovery_timeout_sec, "ball.recovery_timeout_sec");
-  PositiveInt(c.ball.recovery_reacquire_min_hits,
-              "ball.recovery_reacquire_min_hits");
   Nonnegative(c.ball.recovery_center_tolerance_px,
        "ball.recovery_center_tolerance_px");
 
@@ -250,15 +289,10 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   HitsWithinWindow(c.hurdle.stable_min_hits, c.hurdle.stable_window,
                    "hurdle.stable_min_hits", "hurdle.stable_window");
   PositiveInt(c.hurdle.lost_frames, "hurdle.lost_frames");
-  Unit(c.hurdle.smooth_alpha, "hurdle.smooth_alpha");
   Nonnegative(c.hurdle.upper_acquire_v_px, "hurdle.upper_acquire_v_px");
   Nonnegative(c.hurdle.approach_two_step_v_px, "hurdle.approach_two_step_v_px");
   Nonnegative(c.hurdle.hurdle_ignore_duration_sec,
               "hurdle.hurdle_ignore_duration_sec");
-  PositiveInt(c.hurdle.recovery_reacquire_min_hits,
-              "hurdle.recovery_reacquire_min_hits");
-  Nonnegative(c.hurdle.recovery_timeout_sec,
-              "hurdle.recovery_timeout_sec");
   Nonnegative(c.hurdle.recovery_center_tolerance_px,
        "hurdle.recovery_center_tolerance_px");
 
@@ -267,6 +301,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.goal.lost_frames, "goal.lost_frames");
   Unit(c.goal.smooth_alpha, "goal.smooth_alpha");
   NonnegativeInt(c.goal.post_pickup_walk_fallback_actions, "goal.post_pickup_walk_fallback_actions");
+  NonnegativeInt(c.goal.entry_line_retry_max_attempts, "goal.entry_line_retry_max_attempts");
   Nonnegative(c.goal.target_u_px, "goal.target_u_px");
   Nonnegative(c.goal.approach_u_deadband_px, "goal.approach_u_deadband_px");
   Nonnegative(c.goal.fine_adjust_start_z_m, "goal.fine_adjust_start_z_m");
@@ -275,9 +310,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.goal.throw_landing_z_m, "goal.throw_landing_z_m");
   Nonnegative(c.goal.position_tolerance_m, "goal.position_tolerance_m");
   Nonnegative(c.goal.shoot_yaw_limit_deg, "goal.shoot_yaw_limit_deg");
-  Nonnegative(c.goal.recovery_timeout_sec, "goal.recovery_timeout_sec");
-  PositiveInt(c.goal.recovery_reacquire_min_hits,
-              "goal.recovery_reacquire_min_hits");
   Nonnegative(c.goal.recovery_center_tolerance_px,
        "goal.recovery_center_tolerance_px");
 
@@ -399,9 +431,10 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     throw std::runtime_error("failed to load vision algorithm config '" +
                              path + "': " + error.what());
   }
-  const YAML::Node a = root["vision_algorithm"];
-  if (!a || !a.IsMap())
+  const YAML::Node raw = root["vision_algorithm"];
+  if (!raw || !raw.IsMap())
     throw std::runtime_error("vision algorithm config must contain a vision_algorithm map: " + path);
+  const YAML::Node a = AlgorithmSections(raw);
 
   const auto f = a["line_features"];
   Assign(f, "max_centers", c.line_features.max_centers);
@@ -455,7 +488,6 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b,"down_search_min_hits",c.ball.down_search_min_hits);
   Assign(b, "entry_min_hits", c.ball.entry_min_hits);
   Assign(b, "lost_frames", c.ball.lost_frames);
-  Assign(b, "smooth_alpha", c.ball.smooth_alpha);
   Assign(b, "far_u_des_px", c.ball.far_u_des_px);
   Assign(b, "approach_u_deadband_px", c.ball.approach_u_deadband_px);
   Assign(b, "approach_left_top_u_px", c.ball.approach_left_top_u_px);
@@ -475,13 +507,11 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "approach_two_step_v_px", c.ball.approach_two_step_v_px);
   Assign(b, "approach_direct_down_v_px", c.ball.approach_direct_down_v_px);
   Assign(b, "pickup_max_attempts", c.ball.pickup_max_attempts);
-  Assign(b, "ball_ignore_duration_sec", c.ball.ball_ignore_duration_sec);
+  Assign(b, "pickup_verify_min_hits", c.ball.pickup_verify_min_hits);
   Assign(b, "pickup_u1_px", c.ball.pickup_u1_px);
   Assign(b, "pickup_u2_px", c.ball.pickup_u2_px);
   Assign(b, "pickup_v1_px", c.ball.pickup_v1_px);
   Assign(b, "pickup_v2_px", c.ball.pickup_v2_px);
-  Assign(b, "recovery_timeout_sec", c.ball.recovery_timeout_sec);
-  Assign(b, "recovery_reacquire_min_hits", c.ball.recovery_reacquire_min_hits);
   Assign(b, "recovery_center_tolerance_px", c.ball.recovery_center_tolerance_px);
 
   const auto h = a["hurdle"];
@@ -493,7 +523,6 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
   Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);
   Assign(h, "target_u_px", c.hurdle.target_u_px);
-  Assign(h, "u_deadband_px", c.hurdle.u_deadband_px);
   Assign(h, "contact_v_px", c.hurdle.contact_v_px);
   Assign(h, "contact_steps", c.hurdle.contact_steps);
   Assign(h, "contact_inter_action_hold_sec", c.hurdle.contact_inter_action_hold_sec);
@@ -502,12 +531,9 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "stable_min_hits", c.hurdle.stable_min_hits);
   Assign(h,"down_search_min_hits",c.hurdle.down_search_min_hits);
   Assign(h, "lost_frames", c.hurdle.lost_frames);
-  Assign(h, "smooth_alpha", c.hurdle.smooth_alpha);
   Assign(h, "upper_acquire_v_px", c.hurdle.upper_acquire_v_px);
   Assign(h, "approach_two_step_v_px", c.hurdle.approach_two_step_v_px);
   Assign(h, "hurdle_ignore_duration_sec", c.hurdle.hurdle_ignore_duration_sec);
-  Assign(h, "recovery_reacquire_min_hits", c.hurdle.recovery_reacquire_min_hits);
-  Assign(h, "recovery_timeout_sec", c.hurdle.recovery_timeout_sec);
   Assign(h, "recovery_center_tolerance_px", c.hurdle.recovery_center_tolerance_px);
 
   const auto g = a["goal"];
@@ -531,6 +557,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "lost_frames", c.goal.lost_frames);
   Assign(g, "smooth_alpha", c.goal.smooth_alpha);
   Assign(g, "post_pickup_walk_fallback_actions", c.goal.post_pickup_walk_fallback_actions);
+  Assign(g, "entry_line_retry_max_attempts", c.goal.entry_line_retry_max_attempts);
   Assign(g, "target_u_px", c.goal.target_u_px);
   Assign(g, "approach_u_deadband_px", c.goal.approach_u_deadband_px);
   Assign(g, "fine_adjust_start_z_m", c.goal.fine_adjust_start_z_m);
@@ -539,8 +566,6 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "throw_landing_z_m", c.goal.throw_landing_z_m);
   Assign(g, "position_tolerance_m", c.goal.position_tolerance_m);
   Assign(g, "shoot_yaw_limit_deg", c.goal.shoot_yaw_limit_deg);
-  Assign(g, "recovery_timeout_sec", c.goal.recovery_timeout_sec);
-  Assign(g, "recovery_reacquire_min_hits", c.goal.recovery_reacquire_min_hits);
   Assign(g, "recovery_center_tolerance_px", c.goal.recovery_center_tolerance_px);
 
   const auto ld = a["line_detection"];
@@ -608,7 +633,6 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(cmd, "action_ack_timeout_sec", c.command.action_ack_timeout_sec);
   const auto m = a["mission"];
   Assign(m, "candidate_search_max_turns", c.candidate_search_max_turns);
-  Assign(m, "candidate_direction_max_age_sec", c.candidate_direction_max_age_sec);
   int test_mission=0;
   Assign(m,"test_mission",test_mission); c.test_mission=static_cast<MissionType>(test_mission);
   Assign(m,"test_stage",c.test_stage);

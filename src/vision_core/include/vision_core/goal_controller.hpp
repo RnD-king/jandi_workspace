@@ -27,6 +27,7 @@ enum class GoalMode {
   kCoarseRecovery,
   kRecoveryTurn,
   kEdgeTurn,
+  kEntryRetryCameraForward, // Keep all existing phase IDs unchanged.
 };
 
 struct GoalConfig {
@@ -44,6 +45,7 @@ struct GoalConfig {
   int lost_frames{};
   double smooth_alpha{};
   int post_pickup_walk_fallback_actions{}; // after three completed LINE walks if no 5-step DONE
+  int entry_line_retry_max_attempts{}; // Extra LINE blocks after an entirely empty first GOAL view; 0 disables.
   double target_u_px{};
   double approach_u_deadband_px{};
   double fine_adjust_start_z_m{};
@@ -52,8 +54,6 @@ struct GoalConfig {
   double throw_landing_z_m{};
   double position_tolerance_m{};
   double shoot_yaw_limit_deg{};
-  double recovery_timeout_sec{};
-  int recovery_reacquire_min_hits{};
   double recovery_center_tolerance_px{};
 };
 
@@ -95,6 +95,7 @@ struct TrackedGoal {
 };
 
 struct GoalResult {
+  int entry_line_retries{0};
   int detection_hits{0}, detection_frames{0}, lost_frames{0}, pose_lost_frames{0};
   int recovery_observations_completed{0};
   double recovery_observation_elapsed_sec{0.0};
@@ -113,6 +114,17 @@ struct GoalResult {
 class GoalController {
 public:
   bool CanEnterFromLine() const { return has_ball_ && goal_entry_armed_ && !ball_consumed_; }
+  bool EntryLineRetryPending() const { return entry_line_retry_pending_; }
+  int EntryLineRetries() const { return entry_line_retries_; }
+  int RequiredLineWalkActions() const {
+    return entry_line_retry_pending_ ? 1 : config_.post_pickup_walk_fallback_actions;
+  }
+  // Presence includes an image-only board with invalid Depth. It must never
+  // be mistaken for a completely empty initial GOAL view.
+  void ObserveEntryBackboard(bool visible) {
+    if (mode_ == GoalMode::kSearch && entry_recovery_pending_ && visible)
+      entry_view_board_seen_ = true;
+  }
   GoalController();
   GoalController(const GoalConfig &config, double camera_motion_timeout_sec);
   void StartAfterPickup(double now_sec);
@@ -231,6 +243,9 @@ private:
   // Direction only: never reused as GOAL-view stability or Depth evidence.
   std::optional<double> entry_recovery_u_;
   bool entry_recovery_pending_{false};
+  bool entry_view_board_seen_{false};
+  bool entry_line_retry_pending_{false};
+  int entry_line_retries_{0};
   GoalMode turn_resume_mode_{GoalMode::kApproach};
   bool turn_left_{false};
   bool turn_pending_{false};

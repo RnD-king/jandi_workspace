@@ -26,7 +26,7 @@ MissionControllerConfig Configuration() {
   c.ball.entry_min_hits = 6; c.ball.stable_window = 10; c.ball.stable_min_hits = 7;
   c.hurdle.stable_window = 10; c.hurdle.stable_min_hits = 7;
   c.post_motion_observation_sec = 1;
-  c.candidate_search_max_turns = 2; c.candidate_direction_max_age_sec = 5;
+  c.candidate_search_max_turns = 2;
   c.transition_settle_sec = 0;
   return c;
 }
@@ -140,7 +140,8 @@ void CandidateWinsReady(bool queued, bool early_transport) {
   assert(d.out.command.mission == MissionType::kBall);
 }
 
-void SearchAndRestore(bool left, int found_after, bool hurdle = false) {
+void SearchAndRestore(bool left, int found_after, bool hurdle = false,
+                      double drain_delay = 0) {
   auto c = Configuration(); c.enable_ball = !hurdle; c.enable_hurdle = hurdle;
   Driver d(c); d.Tick(); auto id = d.out.command.action_id;
   d.Tick(.01, {id,true,false,false});
@@ -149,6 +150,11 @@ void SearchAndRestore(bool left, int found_after, bool hurdle = false) {
   for (int i=0;i<(hurdle?7:6);++i) d.Tick();
   assert(d.out.candidate_mission == (hurdle ? MissionType::kHurdle : MissionType::kBall));
   d.frame.ball_target.reset(); d.frame.hurdle_target.reset();
+  if (drain_delay > 0) {
+    d.Tick(drain_delay);
+    assert(d.out.candidate_phase == 1); // Still draining the issued LINE action.
+    assert(d.out.command.action_id == id);
+  }
   d.Tick(.01, {id,true,true,false});
   const auto search = left ? MissionAction::kTurnLeftInPlace : MissionAction::kStepForwardRightOneHurdle;
   const auto restore = left ? MissionAction::kStepForwardRightOneHurdle : MissionAction::kTurnLeftInPlace;
@@ -211,6 +217,76 @@ void GoalBlocks(bool straight, int fallback) {
     } else assert(d.out.active_mission == MissionType::kLine);
     current = next;
   }
+}
+
+void GoalEmptyViewLineRetry(bool straight) {
+  auto c=Configuration();c.enable_goal=true;c.initial_has_ball=true;
+  c.goal.post_pickup_walk_fallback_actions=0;
+  c.goal.entry_line_retry_max_attempts=1;
+  Driver d(c);d.Tick();
+  assert(d.out.active_mission==MissionType::kGoal);
+  assert(d.out.command.camera_request==CameraRequest::kGoal);
+  const auto mission_index=d.out.goal_mission_index;
+  d.frame.camera_feedback={CameraMode::kTransition,false};d.Tick();
+  d.frame.camera_feedback={CameraMode::kGoal,true};d.Tick();
+  for(int i=0;i<40 && d.out.goal.mode!=GoalMode::kEntryRetryCameraForward;++i)
+    d.Tick(.05);
+  assert(d.out.goal.mode==GoalMode::kEntryRetryCameraForward && d.out.has_ball);
+  assert(d.out.command.camera_request==CameraRequest::kForward);
+  assert(d.out.goal.entry_line_retries==1 && d.out.command.action_id==0);
+  d.frame.camera_feedback={CameraMode::kTransition,false};
+  d.frame.allow_new_commands=d.frame.allow_new_mission_entry=d.frame.advance_line_fsm=false;
+  for(int i=0;i<5;++i) {
+    d.Tick();assert(d.out.command.action_id==0);
+    assert(d.out.command.camera_request==CameraRequest::kNone);
+    assert(d.out.goal.mode==GoalMode::kEntryRetryCameraForward);
+  }
+  d.frame.allow_new_commands=d.frame.allow_new_mission_entry=d.frame.advance_line_fsm=true;
+  d.frame.camera_feedback={CameraMode::kForward,true};d.Tick();
+  assert(d.out.active_mission==MissionType::kLine && d.out.has_ball);
+  assert(d.out.goal_walk_actions_completed==0 && d.out.goal_mission_index==mission_index);
+  // Camera feedback alone cannot re-enter GOAL, and an invalid LINE cannot
+  // originate a blind forward walk.
+  d.frame.line_centers.clear();
+  for(int i=0;i<5;++i) {
+    d.Tick();assert(d.out.command.action_id==0);
+    assert(d.out.active_mission==MissionType::kLine);
+  }
+  d.Line(straight?320:384);
+  for(int i=0;i<80 && !d.out.command.action_id;++i)d.Tick(.05);
+  const auto unit=straight?MissionAction::kLineStraightUnit:MissionAction::kLineRightUnit;
+  const int repeats=straight?c.line_p2p.straight_repetitions:c.line_p2p.right_repetitions;
+  auto current=d.out.command.action_id;
+  assert(current && d.out.command.action==unit);
+  d.Tick(.01,{current,true,false,false});
+  for(int step=0;step<repeats;++step) {
+    for(int i=0;i<12;++i)d.Tick(.04);
+    d.Tick(.01,{current,true,false,true});
+    const bool last=step+1==repeats;
+    const auto next=d.out.command.action_id;
+    assert(d.out.active_mission==MissionType::kLine);
+    if(last)assert(next==current);else {
+      assert(next && next!=current && d.out.command.action==unit);
+      d.Tick(.01,{next,true,false,false});
+    }
+    d.Tick(.01,{999999,true,true,false}); // A stale/unrelated DONE is not a completed block.
+    assert(d.out.active_mission==MissionType::kLine && d.out.goal_walk_actions_completed==0);
+    d.Tick(.01,{current,true,true,false});
+    if(!last)assert(d.out.active_mission==MissionType::kLine);
+    current=next;
+  }
+  assert(d.out.active_mission==MissionType::kGoal);
+  assert(d.out.goal.mode==GoalMode::kWaitCameraGoal);
+  assert(d.out.command.camera_request==CameraRequest::kGoal);
+  assert(d.out.goal_walk_actions_completed==1 && d.out.goal_mission_index==mission_index);
+  // A second empty look consumes no extra walk after the configured budget.
+  d.frame.camera_feedback={CameraMode::kTransition,false};d.Tick();
+  d.frame.camera_feedback={CameraMode::kGoal,true};d.Tick();
+  for(int i=0;i<40 && d.out.goal.mode!=GoalMode::kFailed;++i)d.Tick(.05);
+  assert(d.out.goal.mode==GoalMode::kFailed && d.out.has_ball);
+  assert(d.out.goal.entry_line_retries==1 && d.out.command.action_id==0);
+  d.core.Reset();d.Tick();
+  assert(d.out.goal.entry_line_retries==0);
 }
 
 void StartEstimatesAndReset() {
@@ -363,7 +439,11 @@ int main() {
   CandidateWinsReady(false,false); CandidateWinsReady(true,false); CandidateWinsReady(true,true);
   SearchAndRestore(true,1); SearchAndRestore(false,2); SearchAndRestore(true,0);
   SearchAndRestore(false,1,true); SearchAndRestore(false,0,true);
+  // An old direction is retained even after a long real-DONE wait. Both
+  // classes still obey the same search budget and opposite restoration.
+  SearchAndRestore(true,0,false,6.0); SearchAndRestore(false,0,true,6.0);
   GoalBlocks(true,3); GoalBlocks(false,1); GoalBlocks(false,3); GoalBlocks(true,0);
+  GoalEmptyViewLineRetry(true); GoalEmptyViewLineRetry(false);
   PauseDuringSearch();
   for(bool left:{false,true})FineRecoveryTurnSettle(left);
   for(bool hurdle:{false,true})for(int hits:{6,7})

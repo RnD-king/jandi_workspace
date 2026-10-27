@@ -14,13 +14,51 @@ void CheckField(const YAML::Node& node, const char* key, const T& actual,
     throw std::runtime_error("YAML value not applied: " + section + "." + key);
 }
 
+// Independently locate a raw YAML value in either supported file layout.
+// Compare every loaded field with that value, including object-specific IDs.
+YAML::Node AlgorithmField(const YAML::Node& a,const std::string& section,
+                         const std::string& key) {
+  if (!a["common"]) return a[section][key];
+  if (section=="line_features") return a["line"]["features"][key];
+  if (section=="line_detection") return a["line"]["detection"][key];
+  if (section=="line") return a["line"]["stability"][key];
+  if (section=="line_p2p") return a["line"]["walk"][key];
+  if (section=="object_targets") {
+    if (key=="depth_roi_size_px") return a["common"][key];
+    const auto split=key.find('_');
+    const auto object=key.substr(0,split), field=key.substr(split+1);
+    const auto node=object=="backboard" ? a["goal"]["backboard"] : a[object];
+    return node["detection"][field];
+  }
+  const std::string suffix="_candidate_tracking";
+  if (section.size()>suffix.size() &&
+      section.compare(section.size()-suffix.size(),suffix.size(),suffix)==0) {
+    const auto object=section.substr(0,section.size()-suffix.size());
+    const auto node=object=="backboard" ? a["goal"]["backboard"] : a[object];
+    return node["candidate_tracking"][key];
+  }
+  if (section=="ball" || section=="hurdle" || section=="goal") {
+    if (section=="goal" && key.find("backboard_")==0)
+      return a["goal"]["backboard"]["depth"][key.substr(10)];
+    return a[section]["control"][key];
+  }
+  if (section=="mission" && key.find("enable_")==0)
+    return a[key.substr(7)]["enabled"];
+  return a["common"][section][key];
+}
+template<class T>
+void CheckAlgorithmField(const YAML::Node& a,const char* section,const char* key,const T& actual) {
+  if (AlgorithmField(a,section,key).as<T>()!=actual)
+    throw std::runtime_error(std::string("YAML value not applied: ")+section+"."+key);
+}
+
 void CheckConfiguration(const std::string& path) {
   // Use production loading/validation, then compare against the file's values,
   // not today's tuning constants. Do not implement a second mission decision.
   const auto c = vision_core::LoadAlgorithmConfig(path);
   const auto a = YAML::LoadFile(path)["vision_algorithm"];
-#define FIELD(section, key) CheckField(a[#section], #key, c.section.key, #section)
-#define MISSION(key) CheckField(a["mission"], #key, c.key, "mission")
+#define FIELD(section, key) CheckAlgorithmField(a, #section, #key, c.section.key)
+#define MISSION(key) CheckAlgorithmField(a, "mission", #key, c.key)
   FIELD(line_features, max_centers);
   FIELD(line_features, guide_min_points);
   FIELD(line_features, image_center_u);
@@ -61,7 +99,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, down_search_min_hits);
   FIELD(ball, entry_min_hits);
   FIELD(ball, fine_side_two_step_margin_px);
-  const auto fine_motion=a["ball"]["fine_motion"];
+  const auto fine_motion=(a["common"] ? a["ball"]["control"] : a["ball"])["fine_motion"];
   CheckField(fine_motion,"max_repetitions",c.ball.fine_motion.max_repetitions,"ball.fine_motion");
   CheckField(fine_motion,"forward_delta_u_px",c.ball.fine_motion.forward_delta_px.u,"ball.fine_motion");
   CheckField(fine_motion,"forward_delta_v_px",c.ball.fine_motion.forward_delta_px.v,"ball.fine_motion");
@@ -72,7 +110,6 @@ void CheckConfiguration(const std::string& path) {
   CheckField(fine_motion,"right_delta_u_px",c.ball.fine_motion.right_delta_px.u,"ball.fine_motion");
   CheckField(fine_motion,"right_delta_v_px",c.ball.fine_motion.right_delta_px.v,"ball.fine_motion");
   FIELD(ball, lost_frames);
-  FIELD(ball, smooth_alpha);
   FIELD(ball, upper_acquire_v_px);
   FIELD(ball, far_u_des_px);
   FIELD(ball, approach_u_deadband_px);
@@ -88,9 +125,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, pickup_v1_px);
   FIELD(ball, pickup_v2_px);
   FIELD(ball, pickup_max_attempts);
-  FIELD(ball, ball_ignore_duration_sec);
-  FIELD(ball, recovery_timeout_sec);
-  FIELD(ball, recovery_reacquire_min_hits);
+  FIELD(ball, pickup_verify_min_hits);
   FIELD(ball, recovery_center_tolerance_px);
   FIELD(hurdle, down_search_max_steps);
   FIELD(hurdle, down_search_inter_action_hold_sec);
@@ -100,20 +135,16 @@ void CheckConfiguration(const std::string& path) {
   FIELD(hurdle, stable_min_hits);
   FIELD(hurdle, down_search_min_hits);
   FIELD(hurdle, lost_frames);
-  FIELD(hurdle, smooth_alpha);
   FIELD(hurdle, upper_acquire_v_px);
   FIELD(hurdle, approach_short_v_px);
   FIELD(hurdle, approach_two_step_v_px);
   FIELD(hurdle, target_u_px);
-  FIELD(hurdle, u_deadband_px);
   FIELD(hurdle, down_one_step_v_px);
   FIELD(hurdle, fine_mode_v_px);
   FIELD(hurdle, contact_v_px);
   FIELD(hurdle, contact_steps);
   FIELD(hurdle, contact_inter_action_hold_sec);
   FIELD(hurdle, hurdle_ignore_duration_sec);
-  FIELD(hurdle, recovery_reacquire_min_hits);
-  FIELD(hurdle, recovery_timeout_sec);
   FIELD(hurdle, recovery_center_tolerance_px);
   FIELD(goal, recovery_turn_max);
   FIELD(goal, edge_margin_px);
@@ -124,6 +155,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, lost_frames);
   FIELD(goal, smooth_alpha);
   FIELD(goal, post_pickup_walk_fallback_actions);
+  FIELD(goal, entry_line_retry_max_attempts);
   FIELD(goal, target_u_px);
   FIELD(goal, approach_u_deadband_px);
   FIELD(goal, approach_short_z_m);
@@ -137,8 +169,6 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, position_tolerance_m);
   FIELD(goal, shoot_yaw_limit_deg);
   FIELD(goal, post_shoot_back_steps);
-  FIELD(goal, recovery_timeout_sec);
-  FIELD(goal, recovery_reacquire_min_hits);
   FIELD(goal, recovery_center_tolerance_px);
   FIELD(line_detection, class_id);
   FIELD(line_detection, confidence);
@@ -197,14 +227,13 @@ void CheckConfiguration(const std::string& path) {
   FIELD(object_association, size_change_weight);
   FIELD(command, first_action_id);
   FIELD(command, action_ack_timeout_sec);
-  CheckField(a["mission"], "test_mission", static_cast<int>(c.test_mission), "mission");
+  CheckAlgorithmField(a, "mission", "test_mission", static_cast<int>(c.test_mission));
   MISSION(test_stage);
-  CheckField(a["goal"], "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px, "goal");
-  CheckField(a["goal"], "trial_start_goal", c.goal_trial_start_goal, "goal");
-  CheckField(a["ball"], "test_mission_index", c.test_ball_mission_index, "ball");
-  CheckField(a["goal"], "test_mission_index", c.test_goal_mission_index, "goal");
+  CheckAlgorithmField(a, "goal", "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px);
+  CheckAlgorithmField(a, "goal", "trial_start_goal", c.goal_trial_start_goal);
+  CheckAlgorithmField(a, "ball", "test_mission_index", c.test_ball_mission_index);
+  CheckAlgorithmField(a, "goal", "test_mission_index", c.test_goal_mission_index);
   MISSION(candidate_search_max_turns);
-  MISSION(candidate_direction_max_age_sec);
   MISSION(mission_recovery_max_turns);
   MISSION(mission_recovery_yaw_deg);
   MISSION(camera_motion_timeout_sec);
@@ -213,8 +242,8 @@ void CheckConfiguration(const std::string& path) {
   MISSION(fine_motion_settle_sec);
   MISSION(post_motion_observation_sec);
   MISSION(object_ready_mean_actions);
-  CheckField(a["goal"], "backboard_min_depth_m", c.backboard_min_depth_m, "goal");
-  CheckField(a["goal"], "backboard_max_depth_m", c.backboard_max_depth_m, "goal");
+  CheckAlgorithmField(a, "goal", "backboard_min_depth_m", c.backboard_min_depth_m);
+  CheckAlgorithmField(a, "goal", "backboard_max_depth_m", c.backboard_max_depth_m);
   MISSION(enable_ball);
   MISSION(enable_hurdle);
   MISSION(enable_goal);

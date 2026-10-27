@@ -1,292 +1,301 @@
+# 객체별 알고리즘 설정. 값 변경 후 실제 로드되는 설치본에 반영하고 노드를 재시작한다.
+# line / ball / hurdle / goal / common 순서. control은 기존 미션 동작 값이다.
 vision_algorithm:
-  line_features:
-    max_centers: 8
-    guide_min_points: 3 # 필요한 최소 개수
-    image_center_u: 380.0 # 라인 중앙 기준선
-    guide_fit_rmse_full_scale_px: 20.0 # 안내선 오차 표시의 기준 크기 (px)
-    ransac_enabled: true
-    ransac_min_input_points: 4
-    ransac_residual_threshold_px: 20.0
-    ransac_min_sample_v_gap_px: 20.0
-    ransac_max_outliers: 2
-
-    curve_min_points: 5 # 곡률 계산 최소 개수
-    curve_min_v_span_px: 80.0 # 곡률 계산에 세로 분포 폭
-    curve_local_fit_points: 4 # 곡률 표시용 부분 직선 계산의 점 개수
-
+  # LINE: 검출 → 중심점/피팅 → 안정성 → 보행·복구
   line:
-    line_stable_window: 10
-    line_stable_min_hits: 7
+    detection:
+      class_id: 0 # 검출 모델의 클래스 번호
+      confidence: 0.60 # LINE 기준값; 실전 노드 YOLO 전체 1차 신뢰도 기본값으로도 사용
+      min_box_width: 1.0 # 사용할 바운딩 박스 최소 가로 크기 (px)
+      min_box_height: 1.0 # 사용할 바운딩 박스 최소 세로 크기 (px)
 
-  # 라인 보행 방향 판단과 유실 복구
-  line_p2p:
-    left_repetitions: 3
-    straight_repetitions: 4
-    right_repetitions: 3
-    offset_gain: 0.3 # 게인 3개
-    heading_gain: 0.3
-    steering_deadband: 0.10 # |라인 점수|가 이 값보다 작으면 직진, 크면 회전
-    in_place_turn_score: 0.5 # |라인 점수|가 이 값보다 크면 WALK 제자리 회전 1회 후 재관측
+    features:
+      max_centers: 8
+      guide_min_points: 3 # 필요한 최소 개수
+      image_center_u: 380.0 # 라인 중앙 기준선
+      guide_fit_rmse_full_scale_px: 20.0 # 안내선 오차 표시의 기준 크기 (px)
+      ransac_enabled: true
+      ransac_min_input_points: 4
+      ransac_residual_threshold_px: 20.0
+      ransac_min_sample_v_gap_px: 20.0
+      ransac_max_outliers: 2
 
-    ready_lead_sec: 0.25  # ~초 전까지
+      curve_min_points: 5 # 곡률 계산 최소 개수
+      curve_min_v_span_px: 80.0 # 곡률 계산에 세로 분포 폭
+      curve_local_fit_points: 4 # 곡률 표시용 부분 직선 계산의 점 개수
 
-    failure_observation_sec: 2.0 # 라인 복구 대기
-    failure_min_valid_samples: 5
-    no_evidence_max_retries: 5 # 방향 정보가 없을 때 정지 관측 재시도 횟수
+    stability:
+      line_stable_window: 10
+      line_stable_min_hits: 7
 
-    recovery_observation_sec: 1.0
-    recovery_max_turns: 5 # 라인 회전 복구 최대 완료 횟수
-    recovery_turn_yaw_deg: 15 # 라인 회전 복구 요청 각도 (도)
+    # 라인 보행 방향 판단과 유실 복구
+    walk:
+      left_repetitions: 3
+      straight_repetitions: 4
+      right_repetitions: 3
+      offset_gain: 0.3 # 게인 3개
+      heading_gain: 0.3
+      steering_deadband: 0.10 # |라인 점수|가 이 값보다 작으면 직진, 크면 회전
+      in_place_turn_score: 0.5 # |라인 점수|가 이 값보다 크면 WALK 제자리 회전 1회 후 재관측
+
+      ready_lead_sec: 0.25 # ~초 전까지
+
+      failure_observation_sec: 2.0 # 라인 복구 대기
+      failure_min_valid_samples: 5
+      no_evidence_max_retries: 5 # 방향 정보가 없을 때 정지 관측 재시도 횟수
+
+      recovery_observation_sec: 1.0
+      recovery_max_turns: 5 # 라인 회전 복구 최대 완료 횟수
+      recovery_turn_yaw_deg: 15 # 라인 회전 복구 요청 각도 (도)
 
   # Pixel thresholds refer to the actual input image (defaults: 640x480).
+
+  # BALL: 검출·Depth 필터 → 후보 추적 → 미션 동작
   ball:
-    # 단독 시험 순서
-    test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
+    enabled: true # 공 미션 사용
+    detection:
+      class_id: 1 # 공 클래스 번호
+      confidence: 0.60 # 공 검출 최소 신뢰도 (0~1)
+      min_box_width: 20 # ball 최소 가로 (제일 멀 때 40,40 / 가까울 때  80,80)
+      min_box_height: 30 # ball 최소 세로
+      aspect_ratio_min: 0.5
+      aspect_ratio_max: 1.70
+      depth_enabled: true
+      allow_missing_depth: true # Depth 측정 실패 허용; 유효한 값이 범위 밖이면 제외
+      forward_min_depth_m: 0.35
+      forward_max_depth_m: 2.70
+      down_min_depth_m: 0.25
+      down_max_depth_m: 0.5
+    candidate_tracking:
+      enabled: true
+      max_center_distance_px: 180.0
+      max_size_log_ratio: 0.50
+      missing_frame_limit: 15
+      max_tracks: 16
 
-    down_search_max_steps: 10
-    down_search_inter_action_hold_sec: 0.5 # DOWN 탐색 1걸음 DONE 후 다음 걸음까지 최소 정지 시간 (초)
-    recovery_observation_sec: 1.0
-    recovery_max_observations: 5
-    recovery_walk_turn_max: 3 # 일반 접근 중 유실 복구 회전 한도
-    entry_recovery_walk_turn_max: 10 # BALL 최초 진입 후 첫 정지 관측 실패 시에만 적용
-    post_pickup_back_steps: 0   # 0: no backing away after pickup; return camera and reacquire line
+    control:
+      # 단독 시험
+      test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
 
-    stable_window: 10
-    stable_min_hits: 7 # 미세 조정
-    down_search_min_hits: 3 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
-    entry_min_hits: 4 # LINE → BALL 진입
-    lost_frames: 15
-    smooth_alpha: 0.45
+      # 검출 누적·진입·유실
+      stable_window: 10
+      stable_min_hits: 7 # 안정 검출 최소 횟수
+      entry_min_hits: 4 # LINE → BALL 진입
+      lost_frames: 15 # 유실 복구 진입 기준 프레임 수
+      upper_acquire_v_px: 470.0 # 공이 있을 조건 (중심 v가 이 값 이하인 프레임을 진입 횟수로 계산)
 
-    upper_acquire_v_px: 470.0 # 공이 있을 조건 (중심 v가 이 값 이하인 프레임을 진입 횟수로 계산)
+      # DOWN 1걸음 탐색
+      down_search_min_hits: 3 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
+      down_search_max_steps: 10
+      down_search_inter_action_hold_sec: 0.5 # DOWN 탐색 1걸음 DONE 후 다음 걸음까지 최소 정지 시간 (초)
 
-    # forward
-    far_u_des_px: 380.0 # 접근 경계의 화면 아래쪽 중심 (기존 위치 유지)
-    approach_u_deadband_px: 90 # 접근 경계의 화면 아래쪽 반폭
-    approach_left_top_u_px: 290.0 # 화면 위쪽(v=0) 왼쪽 경계 x; 아래쪽은 380-90=290
-    approach_right_top_u_px: 470.0 # 화면 위쪽(v=0) 오른쪽 경계 x; 아래쪽은 380+90=470
+      # FORWARD 접근
+      far_u_des_px: 380.0 # 접근 경계의 화면 아래쪽 중심 (기존 위치 유지)
+      approach_u_deadband_px: 90 # 접근 경계의 화면 아래쪽 반폭
+      approach_left_top_u_px: 290.0 # 화면 위쪽(v=0) 왼쪽 경계 x; 아래쪽은 380-90=290
+      approach_right_top_u_px: 470.0 # 화면 위쪽(v=0) 오른쪽 경계 x; 아래쪽은 380+90=470
+      approach_short_v_px: 100.0 # 위 가로선 (4걸음)
+      approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
+      approach_direct_down_v_px: 355.0 # 8번 중앙 가로선 (1걸음 후 down)
 
-    approach_short_v_px: 100.0 # 위 가로선 (4걸음)
-    approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
-    approach_direct_down_v_px: 355.0 # 8번 중앙 가로선 (1걸음 후 down)
+      # DOWN 접근·미세조정
+      down_one_step_v_px: 0.0 # 위 가로선 (2걸음)
+      fine_mode_v_px: 1 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
+      fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
+      fine_motion:
+        max_repetitions: 3 # 같은 방향만 최대 3회. 아래 값은 DOWN 화면의 공 중심 변화량.
+        forward_delta_u_px: 0.0 # Action 3 1회 후 공의 Δx (오른쪽 +)
+        forward_delta_v_px: 0.0 # Action 3 1회 후 공의 Δy (아래쪽 +)
+        backward_delta_u_px: 0.0 # Action 4
+        backward_delta_v_px: 0.0
+        left_delta_u_px: 0.0 # Action 5
+        left_delta_v_px: 0.0
+        right_delta_u_px: 0.0 # Action 6
+        right_delta_v_px: 0.0 # 방향별 (0,0)은 미측정. 모두 미측정이면 기존 단발/옆걸음 2회 유지.
 
-    # down
-    down_one_step_v_px: 0.0 # 위 가로선 (2걸음)
-    fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
-    fine_motion:
-      max_repetitions: 3 # 같은 방향만 최대 3회. 아래 값은 DOWN 화면의 공 중심 변화량.
-      forward_delta_u_px: 0.0 # Action 3 1회 후 공의 Δx (오른쪽 +)
-      forward_delta_v_px: 0.0 # Action 3 1회 후 공의 Δy (아래쪽 +)
-      backward_delta_u_px: 0.0 # Action 4
-      backward_delta_v_px: 0.0
-      left_delta_u_px: 0.0 # Action 5
-      left_delta_v_px: 0.0
-      right_delta_u_px: 0.0 # Action 6
-      right_delta_v_px: 0.0 # 방향별 (0,0)은 미측정. 모두 미측정이면 기존 단발/옆걸음 2회 유지.
-    fine_mode_v_px: 10 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
+      # 픽업
+      pickup_u1_px: 310 # 픽업 영역 왼쪽 경계 (px)
+      pickup_u2_px: 385 # 픽업 영역 오른쪽 경계 (px)
+      pickup_v1_px: 80 # 픽업 영역 위쪽 경계 (px)
+      pickup_v2_px: 130 # 픽업 영역 아래쪽 경계 (px)
+      pickup_max_attempts: 100
+      pickup_verify_min_hits: 3 # 픽업 DONE 후 stable_window 중 잔존 공 검출 기준; 이상이면 재픽업
 
-    pickup_u1_px: 310 # 사각형
-    pickup_u2_px: 385 # ㅇㅋ
-    pickup_v1_px: 80
-    pickup_v2_px: 130 # ㅇㅋ
+      # 픽업 후 복귀
+      post_pickup_back_steps: 0 # 0: no backing away after pickup; return camera and reacquire line
 
-    pickup_max_attempts: 100
-    ball_ignore_duration_sec: 5.0 # 호환 키: LINE → BALL 진입 지연에는 사용하지 않음
+      # 유실 복구
+      recovery_observation_sec: 1.0
+      recovery_max_observations: 5
+      recovery_walk_turn_max: 3 # 일반 접근 중 유실 복구 회전 한도
+      entry_recovery_walk_turn_max: 10 # BALL 최초 진입 후 첫 정지 관측 실패 시에만 적용
+      recovery_center_tolerance_px: 50 # 복구 방향 선택 기준 - 중앙에서 얼마나
 
-    recovery_timeout_sec: 5.0
-    recovery_reacquire_min_hits: 3
-    recovery_center_tolerance_px: 50 # 복구 방향 선택 기준 - 중앙에서 얼마나
-
+  # HURDLE: 검출·Depth 필터 → 후보 추적 → 미션 동작
   hurdle:
-    down_search_max_steps: 10 # 번까지 직진
-    down_search_inter_action_hold_sec: 0.5 # DOWN 탐색 1걸음 DONE 후 다음 걸음까지 최소 정지 시간 (초)
-    recovery_observation_sec: 1.0
-    recovery_max_observations: 5
-    stable_window: 10
-    stable_min_hits: 7
-    down_search_min_hits: 5 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
-    lost_frames: 15
-    smooth_alpha: 0.45
+    enabled: true # 허들 미션 사용
+    detection:
+      class_id: 4 # 허들 클래스 번호
 
-    upper_acquire_v_px: 470.0 # 허들이 있을 조건
+      confidence: 0.60 # 허들 검출 최소 신뢰도 (0~1)
 
-    # forward
-    approach_short_v_px: 100.0    # 위 가로선 (4걸음)
-    approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
 
-    # 가로 정렬 (라인 기준임. 이거 의미 없을 듯)
-    target_u_px: 380 # 세로선 중심
-    u_deadband_px: 160 # 세로선 반폭
+      # 객체별 최소 bbox 크기(px). 이보다 작은 가로 또는 세로는 검출 후보에서 제외.
+      min_box_width: 200 # hurdle 최소 가로
+      min_box_height: 10 # hurdle 최소 세로
 
-    # DOWN 카메라 세로 3구역
-    down_one_step_v_px: 80.0 # 위 가로선 (2걸음)
-    fine_mode_v_px: 180     # 아래 가로선 (1걸음)
+      aspect_ratio_min: 1.50
+      depth_enabled: true
+      allow_missing_depth: true # Depth 측정 실패 허용; 유효한 값이 범위 밖이면 제외
+      min_depth_m: 0.25
+      max_depth_m: 2.00
+    candidate_tracking:
+      enabled: true
+      max_center_distance_px: 200.0
+      max_size_log_ratio: 0.60
+      missing_frame_limit: 15
+      max_tracks: 16
 
-    # 허들 접촉 및 넘기
-    contact_v_px: 240 # 접촉 선 (반걸음)
-    contact_steps: 2     # 접촉 보행 반 걸음 횟수
-    contact_inter_action_hold_sec: 0.5 # 접촉 보행 DONE 후 다음 접촉 보행까지 정지 시간 (초, 0: 추가 대기 없음)
+    control:
+      # 검출 누적·진입·유실
+      stable_window: 10
+      stable_min_hits: 7 # 안정 검출 최소 횟수
+      lost_frames: 15 # 유실 복구 진입 기준 프레임 수
+      upper_acquire_v_px: 470.0 # 허들이 있을 조건
 
-    hurdle_ignore_duration_sec: 5.0
-    recovery_reacquire_min_hits: 3
-    recovery_timeout_sec: 5.0
-    recovery_center_tolerance_px: 76.8
+      # DOWN 1걸음 탐색
+      down_search_min_hits: 3 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
+      down_search_max_steps: 10 # 번까지 직진
+      down_search_inter_action_hold_sec: 0.5 # DOWN 탐색 1걸음 DONE 후 다음 걸음까지 최소 정지 시간 (초)
 
+      # FORWARD 접근·기존 수평 기준
+      approach_short_v_px: 100.0 # 위 가로선 (4걸음)
+      approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
+      target_u_px: 380 # 세로선 중심
+
+      # DOWN 접근·미세조정
+      down_one_step_v_px: 80.0 # 위 가로선 (2걸음)
+      fine_mode_v_px: 180 # 아래 가로선 (1걸음)
+
+      # 허들 접촉·넘기
+      contact_v_px: 240 # 접촉 선 (반걸음)
+      contact_steps: 2 # 접촉 보행 반 걸음 횟수
+      contact_inter_action_hold_sec: 0.5 # 접촉 보행 DONE 후 다음 접촉 보행까지 정지 시간 (초, 0: 추가 대기 없음)
+
+      # 유실 복구·미션 종료 후 무시 시간
+      recovery_observation_sec: 1.0
+      recovery_max_observations: 5
+      recovery_center_tolerance_px: 76.8
+      hurdle_ignore_duration_sec: 5.0
+
+  # GOAL: 검출·Depth 필터 → 후보 추적 → 미션 동작
   goal:
-    edge_margin_px: 50.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
+    enabled: true # 골대 미션 사용
+    detection:
+      class_id: 2 # 골대 클래스 번호
+      confidence: 0.60 # 골대 검출 최소 신뢰도 (0~1)
+      min_box_width: 20 # goal 최소 가로
+      min_box_height: 20 # goal 최소 세로
+    backboard:
+      detection:
+        class_id: 3 # 백보드 클래스 번호
+        confidence: 0.60 # 백보드 검출 최소 신뢰도 (0~1)
+        min_box_width: 20 # backboard 최소 가로
+        min_box_height: 20 # backboard 최소 세로
+      depth:
+        depth_strip_width_px: 5 # 백보드 좌우 표본 폭, 중앙은 3x3
+        min_depth_m: 0.10 # 백보드 최소 거리
+        max_depth_m: 2.50 # 백보드 최대 거리
 
-    backboard_depth_strip_width_px: 5 # 백보드 좌우 표본 폭, 중앙은 3x3
-    backboard_min_depth_m: 0.10 # 백보드 최소 거리
-    backboard_max_depth_m: 2.50 # 백보드 최대 거리
+      candidate_tracking:
+        enabled: true
+        max_center_distance_px: 200.0
+        max_size_log_ratio: 0.60
+        missing_frame_limit: 15
+        max_tracks: 16
 
-    trial_start_goal: false # true: 골대 단독 시험을 GOAL 카메라에서 시작, false: 기존 라인 출발
-    test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
+    control:
+      # 시작·공 픽업 후 진입
+      trial_start_goal: false # true: 골대 단독 시험을 GOAL 카메라에서 시작, false: 기존 라인 출발
+      test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
+      post_pickup_walk_fallback_actions: 2 # 라인 복귀 후 13번(5걸음) DONE 우선 / 없으면 보행 3회 DONE 후 GOAL 카메라
+      entry_line_retry_max_attempts: 2 # 첫 GOAL 관측에 백보드가 전혀 없으면 FORWARD → LINE 1블록 DONE → 재관측. 추가 시도 한도, 0: 기존 복구
 
-    recovery_turn_max: 3
-    recovery_observation_sec: 1.0
-    recovery_max_observations: 5
-    stable_window: 10
-    stable_min_hits: 7
-    lost_frames: 15
-    smooth_alpha: 0.45
+      # 검출 누적·유실
+      stable_window: 10
+      stable_min_hits: 7 # 안정 검출 최소 횟수
+      lost_frames: 15 # 유실 복구 진입 기준 프레임 수
+      smooth_alpha: 0.45
 
-    post_pickup_walk_fallback_actions: 1 # 라인 복귀 후 13번(5걸음) DONE 우선 / 없으면 보행 3회 DONE 후 GOAL 카메라
+      # 접근·카메라 전환
+      target_u_px: 360.0 # 중앙 세로 구역의 중심
+      approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
+      approach_short_z_m: 1.20 # 4걸음 → 3걸음 경계
+      fine_adjust_start_z_m: 0.80 # GOAL 카메라에서 근거리 접근 진입 기준
+      camera_goal_start_z_m: 0.80 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
 
-    # forward
-    target_u_px: 360.0          # 중앙 세로 구역의 중심
-    approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
+      # 근거리 접근
+      fine_two_step_range_error_m: 0.30 # 2걸음 → 1걸음 경계
+      fine_one_step_range_error_m: 0.15 # 1걸음 → 미세조정 경계
 
-    # 거리 기반 접근 (단위 m)
-    approach_short_z_m: 1.20     # 4걸음 → 3걸음 경계
-    fine_adjust_start_z_m: 0.80  # GOAL 카메라에서 근거리 접근 진입 기준
+      # 투척 위치·방향
+      hoop_radius_m: 0.10 # 림 위치 보정에 사용하는 반지름
+      throw_landing_x_m: -0.08 # 카메라 기준 허리 0도 공 낙하 X (m)
+      throw_landing_z_m: 0.40 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
+      position_tolerance_m: 0.06 # 목표 거리의 허용 오차
+      shoot_yaw_limit_deg: 20.0 # ±이 값: COARSE 회전 및 FINE 투척/좌우 이동 판단 기준
+      edge_margin_px: 50.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
 
-    camera_goal_start_z_m: 0.80  # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
+      # 투척 후 복귀
+      post_shoot_back_steps: 0 # 0: 투척 후 후진 없이 카메라 FORWARD 및 라인 복귀
 
-    # 근거리 접근 (GOAL 카메라)
-    fine_two_step_range_error_m: 0.30 # 2걸음 → 1걸음 경계
-    fine_one_step_range_error_m: 0.15 # 1걸음 → 미세조정 경계
+      # 유실 복구
+      recovery_turn_max: 3
+      recovery_observation_sec: 1.0
+      recovery_max_observations: 5
+      recovery_center_tolerance_px: 76.8
 
-    # 골대 위치 및 투척
-    hoop_radius_m: 0.10         # 림 위치 보정에 사용하는 반지름
-    throw_landing_x_m: -0.08   # 카메라 기준 허리 0도 공 낙하 X (m)
-    throw_landing_z_m: 0.40    # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
-    position_tolerance_m: 0.06  # 목표 거리의 허용 오차
-    shoot_yaw_limit_deg: 20.0   # ±이 값: COARSE 회전 및 FINE 투척/좌우 이동 판단 기준
+  # 공통: Depth 표본 크기·객체 연결·명령 통신·관측/카메라 대기
+  common:
+    depth_roi_size_px: 5 # 공·허들 BBox 중심 Depth 표본의 한 변 길이 (px)
+    object_association:
+      missing_frame_limit: 15 # 같은 물체의 추적을 유지할 미검출 프레임 수
+      max_center_distance_norm: 0.25 # 같은 물체로 연결할 정규화 중심 거리 한계
+      max_size_log_ratio: 0.80 # 같은 물체로 연결할 크기 변화 한계
 
-    # 투척 후
-    post_shoot_back_steps: 0    # 0: 투척 후 후진 없이 카메라 FORWARD 및 라인 복귀
+      center_distance_weight: 1.0 # 추적 후보 선택 시 중심 거리 가중치
+      size_change_weight: 0.25 # 추적 후보 선택 시 크기 변화 가중치
 
-    # 골대 인식 실패 시 복구
-    recovery_timeout_sec: 5.0
-    recovery_reacquire_min_hits: 3
-    recovery_center_tolerance_px: 76.8
+    command:
+      first_action_id: 1 # 시작 명령 ID (0은 사용하지 않음)
+      action_ack_timeout_sec: 10.0 # 실행기 ACK를 기다리는 제한 시간 (초)
 
-  line_detection:
-    class_id: 0 # 검출 모델의 클래스 번호
-    confidence: 0.60 # 이 값 이상인 검출을 사용 (0~1)
-    min_box_width: 1.0 # 사용할 바운딩 박스 최소 가로 크기 (px)
-    min_box_height: 1.0 # 사용할 바운딩 박스 최소 세로 크기 (px)
+    # 여러 미션에 공통으로 적용되는 설정
+    mission:
+      candidate_search_max_turns: 2
+      test_mission: 0 # 0 전체 미션, 2 공, 3 골대, 4 허들
+      test_stage: 0 # 0 전체 과정, 1 접근, 2 정렬, 3 실행
 
-  object_targets:
-    ball_class_id: 1 # 공 클래스 번호
-    goal_class_id: 2 # 골대 클래스 번호
-    backboard_class_id: 3 # 백보드 클래스 번호
-    hurdle_class_id: 4 # 허들 클래스 번호
+      # 미션 전후 라인 복구
+      mission_recovery_max_turns: 30 # 미션 전후 라인 복구 최대 회전 횟수
+      mission_recovery_yaw_deg: 15 # 미션 전후 라인 복구 요청 각도 (도)
 
-    ball_confidence: 0.60 # 공 검출 최소 신뢰도 (0~1)
-    goal_confidence: 0.60 # 골대 검출 최소 신뢰도 (0~1)
-    backboard_confidence: 0.60 # 백보드 검출 최소 신뢰도 (0~1)
-    hurdle_confidence: 0.60 # 허들 검출 최소 신뢰도 (0~1)
+      # 카메라 전환 완료 제한
+      camera_motion_timeout_sec: 30.0 # 카메라 전환 완료를 기다리는 제한 시간 (초)
 
+      # 모션 후 관측 대기
+      transition_settle_sec: 0.0 # DOWN/GOAL 카메라, 발 자세 변경, 허들 넘기 후 안정 대기 (초)
+      walk_inter_action_hold_sec: 0.0 # 일반 WALK 모션 사이 마지막 자세 유지 최소 시간 (초)
+      #                                 10, 11, 12, 13, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34
+      fine_motion_settle_sec: 0.0 # FINE 전진·후진·옆걸음·제자리 회전 후 관측 전 추가 대기 (초)
+      #                             3, 4, 5, 6, 7, 8
+      post_motion_observation_sec: 1.0 # DONE 후 공통 관측 최소 시간 (초, 10/7 검사와 동시 진행)
 
-    # 객체별 최소 bbox 크기(px). 이보다 작은 가로 또는 세로는 검출 후보에서 제외.
-    ball_min_box_width: 20 # ball 최소 가로 (제일 멀 때 40,40 / 가까울 때  80,80)
-    ball_min_box_height: 30 # ball 최소 세로
-    goal_min_box_width: 20 # goal 최소 가로
-    goal_min_box_height: 20 # goal 최소 세로
-    backboard_min_box_width: 20 # backboard 최소 가로
-    backboard_min_box_height: 20 # backboard 최소 세로
-    hurdle_min_box_width: 200 # hurdle 최소 가로
-    hurdle_min_box_height: 10 # hurdle 최소 세로
+      # 객체 접근 READY 관측 + 자동 선예약 예외 목록 (32, 33, 34는 생략).
+      # 예: [22, 23]이면 해당 동작은 40%-READY 평균으로 다음 동작 예약 가능.
+      # 기본 DONE 후 1초 관측; 즉시 DOWN/고정 시퀀스는 유지.
+      # LINE READY와 수동 PREVIEW/COMMIT은 별도 정책. 재시작 후 반영.
+      object_ready_mean_actions: [] # 11, 12 ,13 ,21 ,22 ,23 ,24 ,25 (11, 12, 13은 안 쓰임)
 
-    ball_aspect_ratio_min: 0.65
-    ball_aspect_ratio_max: 1.50
-    hurdle_aspect_ratio_min: 1.50
-    ball_depth_enabled: true
-    hurdle_depth_enabled: true
-    ball_allow_missing_depth: true
-    hurdle_allow_missing_depth: true
-    ball_forward_min_depth_m: 0.5
-    ball_forward_max_depth_m: 2.70
-    ball_down_min_depth_m: 0.25
-    ball_down_max_depth_m: 0.5
-    hurdle_min_depth_m: 0.25
-    hurdle_max_depth_m: 2.00
-    depth_roi_size_px: 5
-
-  ball_candidate_tracking:
-    enabled: true
-    max_center_distance_px: 180.0
-    max_size_log_ratio: 0.50
-    missing_frame_limit: 15
-    max_tracks: 16
-
-  hurdle_candidate_tracking:
-    enabled: true
-    max_center_distance_px: 200.0
-    max_size_log_ratio: 0.60
-    missing_frame_limit: 15
-    max_tracks: 16
-
-  backboard_candidate_tracking:
-    enabled: true
-    max_center_distance_px: 200.0
-    max_size_log_ratio: 0.80
-    missing_frame_limit: 15
-    max_tracks: 16
-
-  object_association:
-    missing_frame_limit: 15 # 같은 물체의 추적을 유지할 미검출 프레임 수
-    max_center_distance_norm: 0.25 # 같은 물체로 연결할 정규화 중심 거리 한계
-    max_size_log_ratio: 0.80 # 같은 물체로 연결할 크기 변화 한계
-
-    center_distance_weight: 1.0 # 추적 후보 선택 시 중심 거리 가중치
-    size_change_weight: 0.25 # 추적 후보 선택 시 크기 변화 가중치
-
-  command:
-    first_action_id: 1 # 시작 명령 ID (0은 사용하지 않음)
-    action_ack_timeout_sec: 10.0 # 실행기 ACK를 기다리는 제한 시간 (초)
-
-  # 여러 미션에 공통으로 적용되는 설정
-  mission:
-    candidate_search_max_turns: 2
-    candidate_direction_max_age_sec: 5.0 # Validated once after the initial stationary window.
-    test_mission: 0 # 0 전체 미션, 2 공, 3 골대, 4 허들
-    test_stage: 0 # 0 전체 과정, 1 접근, 2 정렬, 3 실행
-
-    # 미션 전후 라인 복구
-    mission_recovery_max_turns: 10 # 미션 전후 라인 복구 최대 회전 횟수
-    mission_recovery_yaw_deg: 15 # 미션 전후 라인 복구 요청 각도 (도)
-
-    # 카메라 전환 완료 제한
-    camera_motion_timeout_sec: 30.0 # 카메라 전환 완료를 기다리는 제한 시간 (초)
-
-    # 모션 후 관측 대기
-    transition_settle_sec: 0.0 # DOWN/GOAL 카메라, 발 자세 변경, 허들 넘기 후 안정 대기 (초)
-    walk_inter_action_hold_sec: 0.0 # 일반 WALK 모션 사이 마지막 자세 유지 최소 시간 (초)
-    #                                 10, 11, 12, 13, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34
-    fine_motion_settle_sec: 0.0 # FINE 전진·후진·옆걸음·제자리 회전 후 관측 전 추가 대기 (초)
-    #                             3, 4, 5, 6, 7, 8
-    post_motion_observation_sec: 1.0 # DONE 후 공통 관측 최소 시간 (초, 10/7 검사와 동시 진행)
-
-    # 객체 접근 READY 관측 + 자동 선예약 예외 목록 (32, 33, 34는 생략).
-    # 예: [22, 23]이면 해당 동작은 40%-READY 평균으로 다음 동작 예약 가능.
-    # 기본 DONE 후 1초 관측; 즉시 DOWN/고정 시퀀스는 유지.
-    # LINE READY와 수동 PREVIEW/COMMIT은 별도 정책. 재시작 후 반영.
-    object_ready_mean_actions: [] # 11, 12 ,13 ,21 ,22 ,23 ,24 ,25 (11, 12, 13은 안 쓰임)
-
-    # 사용할 미션과 시작 상태
-    enable_ball: true # 공 미션 사용
-    enable_hurdle: true # 허들 미션 사용
-    enable_goal: true # 골대 미션 사용
-    initial_has_ball: false # 시작할 때 공을 가지고 있는 것으로 설정
+      # 사용할 미션과 시작 상태
+      initial_has_ball: false # 시작할 때 공을 가지고 있는 것으로 설정

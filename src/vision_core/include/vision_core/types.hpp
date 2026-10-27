@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace vision_core {
 
@@ -55,6 +57,9 @@ struct LineGuide {
 struct Features {
   double n_visible{0.0};
   LineGuide guide;
+  // Indices in ComputeLineFeatures' original input, not the sorted/near fit.
+  // Only actual RANSAC removals are reported; max-centers truncation is not.
+  std::vector<std::size_t> ransac_outlier_indices;
 };
 
 struct LineTrackingConfig {

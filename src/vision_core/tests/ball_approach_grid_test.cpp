@@ -14,6 +14,7 @@ BallConfig Config() {
   c.far_u_des_px=380;c.approach_u_deadband_px=90;
   c.approach_left_top_u_px=390;c.approach_right_top_u_px=530;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=1;
+  c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.upper_acquire_v_px=1000;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
   c.approach_direct_down_v_px=355;

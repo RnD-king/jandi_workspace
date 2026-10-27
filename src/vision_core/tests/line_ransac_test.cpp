@@ -32,8 +32,10 @@ int main() {
   for (int count=0;count<=3;++count) assert(!compute(Straight(count)).guide.valid);
   auto one=Straight();one[0].u=560;
   Centered(compute(one),7);
+  assert(compute(one).ransac_outlier_indices==std::vector<std::size_t>({0}));
   auto two=one;two[2].u=80;
   Centered(compute(two),6);
+  assert(compute(two).ransac_outlier_indices==std::vector<std::size_t>({0,2}));
   auto four=Straight(4);four[0].u=560;
   Centered(compute(four),3); // Initial four, filtered three is valid.
 
@@ -58,6 +60,11 @@ int main() {
     assert(reverse.guide.valid==reference.guide.valid);
     assert(reverse.guide.offset==reference.guide.offset);
     assert(reverse.guide.heading_rad==reference.guide.heading_rad);
+    assert(reverse.ransac_outlier_indices.size()==reference.ransac_outlier_indices.size());
+    for(std::size_t i=0;i<reference.ransac_outlier_indices.size();++i) {
+      const auto original_index=reference.ransac_outlier_indices[i];
+      assert(reverse.ransac_outlier_indices[i]==points.size()-1-original_index);
+    }
   }
 
   // Keep three even when a four-point frame has two suspect points.
@@ -102,6 +109,7 @@ int main() {
   auto over_limit=Straight();over_limit.push_back({600,10});
   c.max_centers=16;
   Centered(compute(over_limit),8); // Never more than 28 pair hypotheses.
+  assert(compute(over_limit).ransac_outlier_indices.empty()); // Truncation is not a RANSAC removal.
   c.max_centers=8;
   c.ransac_max_outliers=1;
   assert(compute(two).n_visible==7);
@@ -113,6 +121,7 @@ int main() {
   c.ransac_min_input_points=4;
   c.ransac_enabled=false;
   assert(compute(two).n_visible==8);
+  assert(compute(two).ransac_outlier_indices.empty());
   assert(!compute(Straight(3)).guide.valid); // Initial-count gate is independent.
   assert(!compute({{320,450},{320,449},{320,448},{320,445}}).guide.valid);
 }

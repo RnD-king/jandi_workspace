@@ -91,7 +91,7 @@ static void ContactWalkHold() {
 int main() {
   ContactWalkHold();
   HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle;  c.contact_steps=1; c.down_search_min_hits=1; c.stable_window = c.stable_min_hits = 1;
-  c.lost_frames = 2; c.smooth_alpha = 1; c.upper_acquire_v_px=480;
+  c.lost_frames = 2;  c.upper_acquire_v_px=480;
   c.approach_two_step_v_px = 360.0;
   c.approach_short_v_px = 312.0;
   CruiseDecision straight; straight.applicable=true;
