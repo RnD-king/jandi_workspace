@@ -18,7 +18,17 @@ msg::TerminalFrame MakeTerminalFrame(const std_msgs::msg::Header& header,
   frame.control_state=context.control_state;
   frame.mission=DebugMissionName(result.mission.active_mission);
   frame.phase=StateMissionPhase(result.mission);
+  if (result.mission.approach_mission!=vision_core::MissionType::kNone)
+    frame.phase+=" "+std::to_string(result.mission.approach_completed_blocks)+"/"+
+        std::to_string(config.object_approach.lock_blocks)+(result.mission.approach_locked ? " LOCK" : " OPEN");
   frame.action_name=DebugActionName(result.mission.command.action);
+  if (result.mission.goal.depth_recovery_active)
+    frame.phase+=" "+std::to_string(result.mission.goal.depth_recovery_steps)+"/"+
+        std::to_string(config.goal.depth_recovery_max_steps);
+  if (result.mission.continuous_approach_enabled &&
+      result.mission.active_mission==vision_core::MissionType::kLine && result.mission.goal.entry_line_retries)
+    frame.phase+=" retry "+std::to_string(result.mission.goal.entry_line_retries)+"/"+
+        std::to_string(config.object_approach.goal_empty_max_retries);
   frame.action=static_cast<std::uint16_t>(result.mission.command.action);
   frame.waiting_action_id=context.waiting_action_id;
   frame.camera=StateCameraName(camera.actual_mode);

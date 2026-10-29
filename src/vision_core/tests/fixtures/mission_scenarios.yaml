@@ -51,6 +51,7 @@ vision_algorithm:
     recovery_walk_turn_max: 3
     recovery_max_steps: 3
     entry_recovery_max_steps: 3
+    down_recovery_max_actions: 3
     post_pickup_back_steps: 0
     stable_window: 10
     stable_min_hits: 7
@@ -69,7 +70,6 @@ vision_algorithm:
     approach_two_step_v_px: 240.0
     approach_direct_down_v_px: 480.0 # Preserve historical two-step scenarios; focused tests set the new boundary.
 
-    down_one_step_v_px: 0.0
     fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
     fine_motion:
       max_repetitions: 3
@@ -81,7 +81,6 @@ vision_algorithm:
       left_delta_v_px: 0.0
       right_delta_u_px: 0.0
       right_delta_v_px: 0.0
-    fine_mode_v_px: 10
 
     pickup_u1_px: 310
     pickup_u2_px: 385
@@ -137,6 +136,7 @@ vision_algorithm:
     test_mission_index: 1
 
     recovery_turn_max: 3
+    depth_recovery_max_steps: 3
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
     stable_window: 10
@@ -154,8 +154,6 @@ vision_algorithm:
 
     camera_goal_start_z_m: 0.80
 
-    fine_two_step_range_error_m: 0.30
-    fine_one_step_range_error_m: 0.15
 
     hoop_radius_m: 0.10
     throw_landing_x_m: -0.08
@@ -242,6 +240,15 @@ vision_algorithm:
 
   # 여러 미션에 공통으로 적용되는 설정
   mission:
+    object_approach_continous: false
+    object_approach:
+      missing_frames: 3
+      lock_blocks: 3
+      blend_frames: 5
+      goal_empty_max_retries: 3
+      reference_v_ratio: 0.80
+      forward_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 20.0, yaw_deg: 0.0}
+      goal_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 0.0, yaw_deg: 0.0}
     candidate_search_max_turns: 2
     test_mission: 0
     test_stage: 0

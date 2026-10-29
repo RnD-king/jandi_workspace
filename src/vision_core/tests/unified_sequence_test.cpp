@@ -100,7 +100,7 @@ void TestSearchConfirmationRetriesThroughObservationGate(bool manual) {
   t.in.ball_target=Target();
   for(int i=0;i<7;++i)t.Tick();
   t.Tick(true);
-  assert(t.out.ball.mode==BallMode::kCoarseAdjust && t.permit==0);
+  assert(t.out.ball.mode==BallMode::kWaitFinePose && t.permit==0);
   const int remaining=t.out.ball.down_search_steps_remaining;
   // The same post-search check is automatic in real execution and explicitly
   // requested by PREVIEW in manual tuning. Both use the core's real window.
@@ -170,7 +170,7 @@ Trial PickAndReturn() {
     t.Tick(i%2==1);
     assert(t.out.ball.mode==BallMode::kDownSearch); // Finish accepted motion first.
   }
-  t.Tick(true); assert(t.out.ball.mode==BallMode::kCoarseAdjust);
+  t.Tick(true); assert(t.out.ball.mode==BallMode::kWaitFinePose);
   assert(t.out.command.action_id==0 && t.permit==0);
   for(int i=0;i<7;++i)t.Tick();
   assert(t.Preview().command.action==MissionAction::kDefaultPoseMode);
@@ -234,6 +234,7 @@ void TestAlternatingBoundedRecovery() {
   assert(found_on_last.Preview().command.action==MissionAction::kWalkMode);
   found_on_last.Commit(); found_on_last.Tick(true);
   assert(found_on_last.out.active_mission==MissionType::kLine);
+  assert(!found_on_last.out.remembered_line_score); // New normal LINE episode discards mission-era memory.
   assert(found_on_last.out.foot_pose==FootPose::kWalk);
   assert(found_on_last.out.command.action_id==0 && found_on_last.permit==0);
 }

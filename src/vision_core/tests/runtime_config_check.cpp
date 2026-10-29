@@ -5,6 +5,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace {
 template <class T>
@@ -59,6 +60,20 @@ void CheckConfiguration(const std::string& path) {
   const auto a = YAML::LoadFile(path)["vision_algorithm"];
 #define FIELD(section, key) CheckAlgorithmField(a, #section, #key, c.section.key)
 #define MISSION(key) CheckAlgorithmField(a, "mission", #key, c.key)
+  MISSION(object_approach_continous);
+  const auto approach=AlgorithmField(a,"mission","object_approach");
+  CheckField(approach,"missing_frames",c.object_approach.missing_frames,"object_approach");
+  CheckField(approach,"lock_blocks",c.object_approach.lock_blocks,"object_approach");
+  CheckField(approach,"blend_frames",c.object_approach.blend_frames,"object_approach");
+  CheckField(approach,"goal_empty_max_retries",c.object_approach.goal_empty_max_retries,"object_approach");
+  CheckField(approach,"reference_v_ratio",c.object_approach.reference_v_ratio,"object_approach");
+  for (const auto& camera : {std::make_pair("forward_camera",c.object_approach.forward_camera),
+                            std::make_pair("goal_camera",c.object_approach.goal_camera)}) {
+    const auto node=approach[camera.first];const auto& pose=camera.second;
+    CheckField(node,"right_m",pose.right_m,camera.first);CheckField(node,"height_m",pose.height_m,camera.first);
+    CheckField(node,"forward_m",pose.forward_m,camera.first);CheckField(node,"pitch_deg",pose.pitch_deg,camera.first);
+    CheckField(node,"yaw_deg",pose.yaw_deg,camera.first);
+  }
   FIELD(line_features, max_centers);
   FIELD(line_features, guide_min_points);
   FIELD(line_features, image_center_u);
@@ -97,6 +112,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, recovery_walk_turn_max);
   FIELD(ball, recovery_max_steps);
   FIELD(ball, entry_recovery_max_steps);
+  FIELD(ball, down_recovery_max_actions);
   FIELD(ball, post_pickup_back_steps);
   FIELD(ball, stable_window);
   FIELD(ball, stable_min_hits);
@@ -122,8 +138,6 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, approach_short_v_px);
   FIELD(ball, approach_two_step_v_px);
   FIELD(ball, approach_direct_down_v_px);
-  FIELD(ball, down_one_step_v_px);
-  FIELD(ball, fine_mode_v_px);
   FIELD(ball, pickup_u1_px);
   FIELD(ball, pickup_u2_px);
   FIELD(ball, pickup_v1_px);
@@ -153,6 +167,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(hurdle, hurdle_ignore_duration_sec);
   FIELD(hurdle, recovery_center_tolerance_px);
   FIELD(goal, recovery_turn_max);
+  FIELD(goal, depth_recovery_max_steps);
   FIELD(goal, edge_margin_px);
   FIELD(goal, recovery_observation_sec);
   FIELD(goal, recovery_max_observations);
@@ -167,8 +182,6 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, approach_short_z_m);
   FIELD(goal, fine_adjust_start_z_m);
   FIELD(goal, camera_goal_start_z_m);
-  FIELD(goal, fine_two_step_range_error_m);
-  FIELD(goal, fine_one_step_range_error_m);
   FIELD(goal, hoop_radius_m);
   FIELD(goal, throw_landing_x_m);
   FIELD(goal, throw_landing_z_m);

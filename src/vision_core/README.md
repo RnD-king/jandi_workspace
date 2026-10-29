@@ -5,6 +5,9 @@ ROS와 하드웨어에 의존하지 않는 C++ perception·mission-control 라�
 `config/vision_algorithm.yaml`이 단일 원본이다. 필수 키가 없거나 범위를
 벗어나면 설정 로딩 단계에서 예외를 발생시킨다.
 
+LINE→객체 연속 접근의 T/F 선택, 3회 완료 후 락, 카메라 임시 보정값과 검증 명령은
+[CONTINUOUS_OBJECT_APPROACH.md](CONTINUOUS_OBJECT_APPROACH.md)를 참고한다.
+
 ## 객체별 YAML 구성
 
 운영 `config/vision_algorithm.yaml`은 다음 다섯 묶음을 사용한다.

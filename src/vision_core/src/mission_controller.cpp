@@ -63,7 +63,9 @@ ActionRequest MissionController::CruiseAction(const LineGuide &guide,
   const CruiseDecision decision = line_p2p_controller_.Compute(guide);
   // Remember the signed decision, including straight/deadband and exact zero.
   // Never replace it with an invalid frame or the sparse-center recovery hint.
-  if (decision.direction != CruiseDirection::kNone)
+  // Virtual object paths must not replace the last actual LINE direction:
+  // releasing a soft candidate must not turn LINE recovery into object search.
+  if (decision.direction != CruiseDirection::kNone && continuous_.mission==MissionType::kNone)
     last_line_score_ = decision.error;
   MissionAction action = MissionAction::kNone;
   if (decision.direction != CruiseDirection::kNone &&
@@ -302,6 +304,7 @@ void MissionController::FinishMission() {
     mission_finish_pending_ = true;
     return;
   }
+  last_line_score_.reset();recovering_approach_.reset();
   if (active_mission_ == MissionType::kBall && has_ball_ &&
       config_.enable_goal) {
     // Start counting only after the BALL mission's confirmed line recovery,
@@ -504,6 +507,12 @@ bool MissionController::ShouldDeferDone(
       feedback.action_id == 0 || feedback.action_id != last_command_.action_id)
     return false;
   if (RepeatScope() != 0)
+    return false;
+  // DOWN recovery owns its fresh post-DONE window and bounded FINE search.
+  // Deliver real DONE now; a second generic window would delay every attempt.
+  if (active_mission_==MissionType::kBall && ball_result_.mode==BallMode::kBallRecoveryDown)
+    return false;
+  if (active_mission_==MissionType::kGoal && goal_controller_.DepthRecoveryActive())
     return false;
   const MissionAction action = last_command_.action;
   const MissionType mission = last_command_.mission;
@@ -728,6 +737,12 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   }
   // Normal LINE planning and pre-entry candidates share the existing
   // coordinator; object/test mission FSMs below retain their execution path.
+  if (config_.object_approach_continous && config_.goal_trial_start_goal &&
+      config_.test_mission==MissionType::kNone && !input.manual_observation_control &&
+      active_mission_==MissionType::kGoal && goal_result_.mode==GoalMode::kWaitCameraGoal) {
+    active_mission_=MissionType::kLine;
+    approach_goal_probe_=true;
+  }
   if (active_mission_ == MissionType::kLine &&
       (config_.test_mission == MissionType::kNone || goal_controller_.EntryLineRetryPending()) &&
       !goal_trial_complete_ && !physical_reset_pending_)
@@ -1430,9 +1445,6 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     }
     if (ball_result_.mode != BallMode::kLineFollow)
       test_entry_pending_ = false;
-    if (before == BallMode::kDownSearch &&
-        ball_result_.mode == BallMode::kCoarseAdjust)
-      fresh_after_search_ = true;
     has_ball_ = ball_result_.has_ball;
     if (ball_result_.mode == BallMode::kPostPickupLineRecovery)
       ball_result_.action = line_action;
@@ -1534,6 +1546,26 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     break;
   }
 
+  if (ResumeContinuousApproach(input))
+    return StepWithLineImageCenter(input,line_image_center_u);
+  // A near mission changes body/head geometry. A pre-entry LINE score must
+  // never steer later recovery after that change, including legacy/manual paths.
+  if ((active_mission_==MissionType::kBall &&
+       ((ball_result_.mode==BallMode::kApproachBall && ball_result_.tracked.visible &&
+         ball_result_.tracked.center_px.v>=config_.ball.approach_two_step_v_px) ||
+        ball_result_.mode==BallMode::kWaitCameraDown || ball_result_.mode==BallMode::kDownSearch ||
+        ball_result_.mode==BallMode::kCoarseAdjust || ball_result_.mode==BallMode::kWaitFinePose ||
+        ball_result_.mode==BallMode::kFineAdjustForPickup)) ||
+      (active_mission_==MissionType::kHurdle &&
+       ((hurdle_result_.mode==HurdleMode::kApproach && hurdle_result_.tracked.visible &&
+         hurdle_result_.tracked.center_px.v>=config_.hurdle.approach_two_step_v_px) ||
+        hurdle_result_.mode==HurdleMode::kWaitCameraDown || hurdle_result_.mode==HurdleMode::kDownSearch ||
+        hurdle_result_.mode==HurdleMode::kCoarseAdjust || hurdle_result_.mode==HurdleMode::kWaitFinePose ||
+        hurdle_result_.mode==HurdleMode::kFineAdjust)) ||
+      (active_mission_==MissionType::kGoal &&
+       (goal_result_.mode==GoalMode::kCoarseAdjust || goal_result_.mode==GoalMode::kWaitFinePose ||
+        goal_result_.mode==GoalMode::kFineAdjust)))
+    last_line_score_.reset();
   ActionRequest request;
   CameraRequest camera_request = CameraRequest::kNone;
   int phase = 0;
@@ -1736,6 +1768,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 
 void MissionController::PopulateDiagnostics(MissionFrameResult &output,
                                             double now) const {
+  PopulateApproachDiagnostics(output);
+  output.remembered_line_score=last_line_score_;
   output.line_score_recovery =
       line_state_ == LineState::kScoreRecovery ||
       (line_state_ == LineState::kFinalHold &&
@@ -1759,12 +1793,14 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
   output.repeat_sequence = output.repeat_scope != 0;
   output.ball_mission_index = std::max(
       1, (active_mission_ == MissionType::kBall ||
+          (continuous_.mission==MissionType::kBall && continuous_.mission_started) ||
           (goal_trial_complete_ && config_.test_mission == MissionType::kBall))
              ? ball_mission_index_
              : ball_mission_index_ + 1);
   output.goal_mission_index = std::max(
       1,
       (active_mission_ == MissionType::kGoal || goal_controller_.EntryLineRetryPending() ||
+       (continuous_.mission==MissionType::kGoal && continuous_.mission_started) ||
        (goal_trial_complete_ && (config_.test_mission == MissionType::kGoal ||
                                  (config_.test_mission == MissionType::kNone &&
                                   config_.goal_trial_start_goal))))
@@ -1786,6 +1822,10 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
   output.goal.recovery_observations_completed =
       goal_controller_.RecoveryObservationsCompleted();
   output.goal.entry_line_retries = goal_controller_.EntryLineRetries();
+  output.goal.depth_recovery_active=goal_controller_.DepthRecoveryActive();
+  output.goal.depth_recovery_steps=goal_controller_.DepthRecoverySteps();
+  if (config_.object_approach_continous && active_mission_==MissionType::kLine)
+    output.goal.entry_line_retries=approach_goal_empty_retries_;
   output.goal.recovery_observation_elapsed_sec =
       goal_controller_.RecoveryObservationElapsed(now);
   output.ball.recovery_observations_completed =
@@ -1987,11 +2027,13 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
       ball={best->target,best->detection_index};
     }
   } else if(config_.ball_candidate_tracking.enabled &&
-      ((active_mission_==MissionType::kLine && candidate_.phase==CandidatePhase::kNone && !has_ball_) || ball_reacquiring_)) {
+      ((active_mission_==MissionType::kLine && candidate_.phase==CandidatePhase::kNone && !has_ball_ && !ball_target_locked_) || ball_reacquiring_)) {
     const bool entry=active_mission_==MissionType::kLine && candidate_.phase==CandidatePhase::kNone;
     ball_candidate_tracker_.Update(ball_candidates,config_.ball_candidate_tracking,config_.object_association,
         config_.ball.stable_window,entry ? config_.ball.upper_acquire_v_px : std::numeric_limits<double>::infinity());
     const auto* chosen=ball_reacquiring_ ? ball_candidate_tracker_.Find(ball_target_id_) : nullptr;
+    if (!chosen && continuous_.mission==MissionType::kBall && continuous_.id)
+      chosen=ball_candidate_tracker_.Find(continuous_.id);
     if(!chosen) chosen=ball_candidate_tracker_.Best();
     if(chosen) {
       entry_track=*chosen;
@@ -2040,7 +2082,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
     }
   }
   const bool hurdle_active = active_mission_ == MissionType::kHurdle ||
-                             candidate_.mission == MissionType::kHurdle;
+                             candidate_.mission == MissionType::kHurdle || continuous_.mission==MissionType::kHurdle;
   const bool hurdle_recovery =
       (active_mission_ == MissionType::kHurdle &&
        (hurdle_result_.mode == HurdleMode::kDownSearch ||
@@ -2072,7 +2114,8 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
               config_.object_targets.backboard_confidence, config_.object_targets),
           config_.backboard_candidate_tracking, config_.object_association,
           input.image_width, input.image_height, config_.goal.stable_window,
-          std::numeric_limits<double>::infinity(), active_mission_ == MissionType::kGoal, board_recovery,
+          std::numeric_limits<double>::infinity(), active_mission_ == MissionType::kGoal ||
+              continuous_.mission==MissionType::kGoal, board_recovery,
           input.manual_ready_mean && active_mission_ == MissionType::kGoal, input.backboard_target_id);
   const auto hurdle = camera_moving || !manual_hurdle_identity_valid ? ObjectAssociationSelection{} :
       hurdle_target_tracker_.Observe(
@@ -2176,6 +2219,14 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   }
   MissionFrameInput prepared;
   prepared.line_centers = output.perception.line_centers;
+  prepared.intrinsics=input.intrinsics;
+  prepared.rectify_approach=input.enable_imu_rectification && input.imu_valid;
+  prepared.approach_roll_rad=input.roll_rad;prepared.approach_pitch_rad=input.pitch_rad;
+  prepared.ball_track_id=entry_track ? entry_track->id : ball_target_id_;
+  prepared.hurdle_track_id=hurdle_target_tracker_.TargetId();
+  prepared.backboard_track_id=backboard_target_tracker_.TargetId();
+  if (backboard_target_tracker_.Selected())
+    prepared.backboard_entry_track_hits=backboard_target_tracker_.Selected()->HitCount();
   prepared.ball_target = output.perception.targets.ball;
   if(config_.ball_candidate_tracking.enabled && active_mission_==MissionType::kLine && candidate_.phase==CandidatePhase::kNone) {
     prepared.ball_entry_track_hits=entry_track ? entry_track->HitCount() : 0;
@@ -2259,7 +2310,12 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   std::optional<double> center = config_.line_features.image_center_u;
   output.mission = StepWithLineImageCenter(prepared, center);
   if(config_.ball_candidate_tracking.enabled) {
-    const bool selected_ball=candidate_.mission==MissionType::kBall || active_mission_==MissionType::kBall;
+    const bool continuous_ball=continuous_.mission==MissionType::kBall && continuous_.locked;
+    if (continuous_ball && !ball_target_locked_ && continuous_.id && continuous_.last) {
+      ball_target_id_=continuous_.id;ball_target_locked_=true;ball_reacquiring_=false;
+      ball_association_tracker_.Seed(*continuous_.last);ball_candidate_tracker_.Reset();
+    }
+    const bool selected_ball=candidate_.mission==MissionType::kBall || active_mission_==MissionType::kBall || continuous_ball;
     if(selected_ball && entry_track && !ball_target_locked_ &&
         ((!ball_reacquiring_ && candidate_.mission==MissionType::kBall) ||
          (active_mission_==MissionType::kBall && ball_result_.mode!=BallMode::kWaitCameraDown &&
@@ -2286,7 +2342,10 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   output.perception.ball_missing_frames=ball_target_locked_ ? ball_association_tracker_.MissingFrames() :
       (entry_track ? entry_track->missing_frames : 0);
   if (config_.hurdle_candidate_tracking.enabled) {
-    const bool selected = candidate_.mission == MissionType::kHurdle || active_mission_ == MissionType::kHurdle;
+    const bool continuous_hurdle=continuous_.mission==MissionType::kHurdle && continuous_.locked;
+    const bool selected = candidate_.mission == MissionType::kHurdle || active_mission_ == MissionType::kHurdle ||
+        continuous_.mission==MissionType::kHurdle;
+    if (continuous_hurdle && hurdle_target_tracker_.TargetId()==continuous_.id) hurdle_target_tracker_.Lock();
     if (selected && ((candidate_.mission == MissionType::kHurdle && !hurdle_target_tracker_.Reacquiring()) ||
         (active_mission_ == MissionType::kHurdle && hurdle_result_.mode != HurdleMode::kWaitCameraDown &&
          hurdle_result_.mode != HurdleMode::kDownSearch && hurdle_result_.mode != HurdleMode::kRecoveryDown &&
@@ -2298,13 +2357,15 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
       hurdle_target_tracker_.Reset();
   }
   if (config_.backboard_candidate_tracking.enabled) {
+    if (continuous_.mission==MissionType::kGoal && continuous_.locked &&
+        backboard_target_tracker_.TargetId()==continuous_.id) backboard_target_tracker_.Lock();
     if (active_mission_ == MissionType::kGoal && goal_result_.tracked.stable &&
         goal_result_.mode != GoalMode::kWaitCameraGoal && goal_result_.mode != GoalMode::kRecoveryTurn &&
         goal_result_.mode != GoalMode::kRecoveryForwardStep && goal_result_.mode != GoalMode::kRecoveryExtraTurn &&
         goal_result_.mode != GoalMode::kRecoverySearch && goal_result_.mode != GoalMode::kFineRecovery &&
         goal_result_.mode != GoalMode::kCoarseRecovery)
       backboard_target_tracker_.Lock();
-    if (active_mission_ != MissionType::kGoal &&
+    if (active_mission_ != MissionType::kGoal && continuous_.mission!=MissionType::kGoal &&
         (backboard_target_tracker_.Locked() || backboard_target_tracker_.Reacquiring()))
       backboard_target_tracker_.Reset();
   }
@@ -2662,6 +2723,9 @@ bool MissionController::UpdateLineP2pTuning(const LineP2pConfig &line_p2p) {
 }
 
 void MissionController::ClearObservationEvidence() {
+  approach_evidence_={};
+  continuous_.hits.clear();continuous_.pose_hits.clear();continuous_.near_hits.clear();
+  continuous_.missing=continuous_.blend=0;
   line_plan_.ClearEvidence();
   line_invalid_frames_ = 0;
   if (candidate_.phase == CandidatePhase::kObserve)
@@ -2685,6 +2749,15 @@ void MissionController::ClearObservationEvidence() {
 void MissionController::Reset() { Reset(false); }
 
 void MissionController::Reset(bool preserve_action_ids) {
+  recovering_approach_.reset();
+  continuous_={};approach_evidence_={};
+  approach_goal_probe_=approach_return_forward_=false;
+  approach_goal_empty_frames_=approach_goal_retry_after_=0;
+  approach_goal_empty_retries_=0;
+  approach_goal_search_failed_=false;
+  approach_goal_depth_failed_=false;approach_goal_bad_depth_frames_=0;
+  approach_goal_depth_action_id_=0;
+  approach_camera_started_=-1;
   line_plan_.Reset();
   candidate_ = {};
   line_ready_handled_id_ = line_auxiliary_id_ = 0;

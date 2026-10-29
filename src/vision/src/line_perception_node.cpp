@@ -932,7 +932,7 @@ private:
       vision_core::MissionAction action) const {
     switch (action) {
     case vision_core::MissionAction::kLineStraightUnit:
-      return simulate_step_forward_one_duration_sec_;
+      return 2.0 * simulate_step_forward_one_duration_sec_;
     case vision_core::MissionAction::kLineLeftUnit:
     case vision_core::MissionAction::kLineRightUnit:
       return simulate_curve_step_duration_sec_ / 3.0;

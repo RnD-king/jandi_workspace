@@ -4,6 +4,10 @@
 not need ROS or image transport. Jetson does the inference and ASCII rendering;
 only terminal text crosses SSH. The viewer never publishes motion commands.
 
+With the core's `object_approach_continous` option enabled, the phase also shows
+the approach target and physically completed blocks, e.g. `APP_BALL 2/3 OPEN`
+or `APP_GOAL 3/3 LOCK`. `LINE` remains the mission until near/recovery handoff.
+
 ## Build on the target machine
 
 The package adds two ROS messages, so rebuild `vision` on Jetson as well as PC:

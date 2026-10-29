@@ -39,7 +39,7 @@ checks = {
 for action, filename in {
     'STEP_FORWARD_ONE': 'motions/보행_1걸음_초기X_수정.json',
     'LINE_LEFT_UNIT': 'motions/보행_좌회전전진_20도_최종_초기X_수정.json',
-    'LINE_STRAIGHT_UNIT': 'motions/보행_1걸음_초기X_수정.json',
+    'LINE_STRAIGHT_UNIT': 'missions/2걸음.json',
     'LINE_RIGHT_UNIT': 'motions/보행_우회전전진_20도_최종_초기X_찐.json',
     'STEP_FORWARD_LEFT_THREE': 'missions/좌회전전진_3회.json',
     'STEP_FORWARD_RIGHT_THREE': 'missions/우회전전진_3회.json',
@@ -51,7 +51,7 @@ for action, filename in {
     'STEP_FORWARD_RIGHT_ONE': 'missions/우회전전진_1회.json',
     'STEP_FORWARD_LEFT_ONE': 'missions/좌회전전진_1회.json',
     'STEP_FORWARD_RIGHT_ONE_HUDDLE': 'motions/우회전_최종.json',
-    'TURN_LEFT_IN_PLACE': 'motions/좌회전_최종.json',
+    'TURN_LEFT_IN_PLACE': 'motions/좌회전_최종__.json',
     'PICK_BALL': 'motions/공_줍고일어나기_최종.json',
     'PICK_BALL_RE': 'motions/공_줍고일어나기_최종_재그립제외.json',
     'PICK_BALL_RE_STAND': 'motions/공_줍고일어나기_최종_재그립제외_일어나기.json',

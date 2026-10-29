@@ -9,7 +9,7 @@
 
 namespace vision_core {
 
-// Plans are logical 3/4/3-motion blocks, not another executor queue. The
+// Plans are logical blocks of the configured unit repetitions, not another executor queue. The
 // coordinator remains the sole owner of the current and one queued command.
 class LinePlan {
 public:
@@ -25,7 +25,7 @@ public:
            action == MissionAction::kStepForwardRight;
   }
   void UpdateConfig(const LineP2pConfig& config) { config_ = config; }
-  ActionRequest Begin(MissionAction cruise);
+  ActionRequest Begin(MissionAction cruise, std::uint64_t owner = 0);
   ActionRequest Continue(std::uint64_t ready_id = 0) const;
   void Issued(const ControlCommand& command, std::uint64_t parent_id);
   void Feedback(const CommandDeliveryFeedback& feedback, double now, double hold);
@@ -40,6 +40,8 @@ public:
   std::optional<LineGuide> Finish(std::uint64_t id, double now, double remaining);
   std::optional<LineWindowStats> Stats(std::uint64_t id) const;
   std::vector<MissionAction> TakeCompleted();
+  struct CompletedBlock { MissionAction cruise; std::uint64_t owner; };
+  std::vector<CompletedBlock> TakeCompletedBlocks();
   void Abort();
   void ClearEvidence();
   void Reset();
@@ -51,6 +53,7 @@ private:
   struct Block {
     std::uint64_t id;
     MissionAction cruise, unit;
+    std::uint64_t owner{0};
     int count, issued{0}, completed{0};
     bool aborted{false}, reported{false}, window_finished{false};
     std::optional<double> start;

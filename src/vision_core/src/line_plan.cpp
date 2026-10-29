@@ -16,7 +16,7 @@ const LinePlan::Block* LinePlan::Find(std::uint64_t id) const {
   for (const auto& block : blocks_) if (block.id == id) return &block;
   return nullptr;
 }
-ActionRequest LinePlan::Begin(MissionAction cruise) {
+ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner) {
   if (!IsCruise(cruise)) return {};
   // Retain recent IDs for idempotent late feedback, without unbounded growth.
   while (blocks_.size() >= 32 && blocks_.front().reported) {
@@ -33,6 +33,7 @@ ActionRequest LinePlan::Begin(MissionAction cruise) {
   const int count = left ? config_.left_repetitions :
       right ? config_.right_repetitions : config_.straight_repetitions;
   blocks_.emplace_back(next_block_++, cruise, unit, count, config_);
+  blocks_.back().owner=owner;
   return UnitRequest(unit);
 }
 ActionRequest LinePlan::Continue(std::uint64_t ready_id) const {
@@ -139,10 +140,15 @@ std::optional<LineWindowStats> LinePlan::Stats(std::uint64_t id) const {
 }
 std::vector<MissionAction> LinePlan::TakeCompleted() {
   std::vector<MissionAction> result;
+  for (const auto& block:TakeCompletedBlocks()) result.push_back(block.cruise);
+  return result;
+}
+std::vector<LinePlan::CompletedBlock> LinePlan::TakeCompletedBlocks() {
+  std::vector<CompletedBlock> result;
   for (auto& block : blocks_) {
     if (!block.reported && block.completed == block.issued &&
         (block.aborted || block.completed == block.count)) {
-      if (!block.aborted) result.push_back(block.cruise);
+      if (!block.aborted) result.push_back({block.cruise,block.owner});
       block.reported = true;
     }
   }

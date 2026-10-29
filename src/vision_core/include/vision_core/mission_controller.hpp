@@ -17,6 +17,8 @@
 #include "vision_core/line_feature_extractor.hpp"
 #include "vision_core/line_p2p_controller.hpp"
 #include "vision_core/line_plan.hpp"
+#include "vision_core/object_approach.hpp"
+#include <array>
 #include "vision_core/object_target_extractor.hpp"
 #include "vision_core/object_association_tracker.hpp"
 #include "vision_core/object_target_tracker.hpp"
@@ -49,6 +51,8 @@ struct MissionControllerConfig {
   // MANUAL reuses the mean for Preview/Commit without reserving B.
   // Empty means all object walks use post-DONE stationary observation.
   std::vector<int> object_ready_mean_actions;
+  bool object_approach_continous{false};
+  ObjectApproachConfig object_approach;
   bool UsesObjectReadyMean(MissionAction action) const {
     return std::find(object_ready_mean_actions.begin(),
                      object_ready_mean_actions.end(), static_cast<int>(action)) !=
@@ -77,6 +81,11 @@ enum class FootPose { kWalk, kFine };
 
 struct MissionFrameInput {
   std::vector<Point2> line_centers;
+  Intrinsics intrinsics;
+  bool rectify_approach{false};
+  double approach_roll_rad{}, approach_pitch_rad{};
+  std::uint64_t ball_track_id{}, hurdle_track_id{}, backboard_track_id{};
+  std::optional<int> backboard_entry_track_hits;
   std::optional<ObjectTarget> ball_target;
   // StepPerception supplies per-ID entry evidence within upper_acquire_v_px.
   // Candidates already passed confidence, bbox, aspect and optional depth gates.
@@ -136,6 +145,9 @@ struct MissionFrameResult {
   MissionType active_mission{MissionType::kLine};
   Features line_features;
   bool line_computed{false};
+  std::optional<double> remembered_line_score;
+  bool approach_goal_search_failed{false};
+  bool approach_goal_depth_failed{false};
   // The guide supplied to LINE selector (raw, READY-cache, or post-DONE mean).
   std::optional<LineGuide> line_decision_guide;
   std::optional<LineWindowStats> line_window_stats;
@@ -150,6 +162,10 @@ struct MissionFrameResult {
   int candidate_phase{0}, candidate_search_turns{0}, candidate_restore_turns{0};
   bool line_plan_active{false};
   bool object_ready_mean_used{false}; // True only on the real object-action DONE.
+  bool continuous_approach_enabled{false}, approach_locked{false}, approach_near{false};
+  MissionType approach_mission{MissionType::kNone};
+  std::uint64_t approach_track_id{};
+  int approach_completed_blocks{}, approach_missing_frames{};
   std::size_t post_motion_frames{0};
   std::size_t post_motion_window_frames{0};
   int post_motion_valid{0};
@@ -347,6 +363,45 @@ public:
   void Reset(bool preserve_action_ids);
 
 private:
+  struct ApproachEvidence {
+    std::uint64_t id{};
+    std::optional<ObjectTarget> last;
+    std::deque<bool> hits;
+  };
+  struct ContinuousApproach {
+    MissionType mission{MissionType::kNone};
+    std::uint64_t id{}, epoch{};
+    int blocks{}, missing{}, blend{};
+    bool locked{false}, near{false}, mission_started{false};
+    std::optional<ObjectTarget> last;
+    GoalPoseObservation pose;
+    std::optional<double> depth;
+    std::deque<bool> hits, good_hits, pose_hits, near_hits;
+  } continuous_;
+  std::optional<ContinuousApproach> recovering_approach_;
+  struct RouteDecision {
+    ActionRequest action;
+    bool depth_recovery_step{false};
+    std::optional<LineGuide> guide;
+    CameraRequest camera{CameraRequest::kNone};
+    bool hold{false}, entered{false};
+  };
+  std::array<ApproachEvidence,3> approach_evidence_;
+  std::uint64_t next_approach_epoch_{1};
+  bool approach_goal_probe_{false}, approach_return_forward_{false};
+  int approach_goal_empty_frames_{0}, approach_goal_retry_after_{0};
+  int approach_goal_empty_retries_{0};
+  bool approach_goal_search_failed_{false};
+  bool approach_goal_depth_failed_{false};
+  int approach_goal_bad_depth_frames_{0};
+  std::uint64_t approach_goal_depth_action_id_{0};
+  double approach_camera_started_{-1.0};
+  RouteDecision PrepareContinuousApproach(const MissionFrameInput&,const Features&,bool idle);
+  void ReleaseContinuousApproach();
+  void EnterContinuousMission(const MissionFrameInput&,bool lost);
+  bool ResumeContinuousApproach(const MissionFrameInput&);
+  void PopulateApproachDiagnostics(MissionFrameResult&) const;
+  bool PrepareGoalDepthRecovery(const MissionFrameInput&,bool visible,bool usable,bool idle,RouteDecision&);
   enum class LineState {
     kNormal,
     kFailureObserve,

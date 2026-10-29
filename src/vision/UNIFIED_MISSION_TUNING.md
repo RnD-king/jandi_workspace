@@ -63,17 +63,11 @@ DONE 이후 1초 정지 관측을 사용한다. 나중에 JSON 모션을 검증�
 실제 DONE 횟수로 제한하며 시간 제한은 없다. 최근 최대 10프레임에서
 down_search_min_hits(기본 5회) 검출과 현재 프레임 검출로 탐색 종료를 결정한다.
 발견 조건을 채워도 현재 수락된 걸음의 실제 DONE까지 기다린다.
-이후 큰 보행으로 거리만 조정한다:
-
-- v < down_one_step_v_px: 21번, 2걸음.
-- down_one_step_v_px ≤ v < fine_mode_v_px: 10번, 1걸음.
-- v ≥ fine_mode_v_px: 2번 자세 전환 → 새 관측 → 미세보행.
-
-공이 줍기 영역의 v 구간까지 도달한 경우에도 더 전진하지 않고 미세보행으로 전환한다.
-전환선은 fine_mode_v_px와 pickup_v1_px 중 먼저 도달하는 실제 기준을 표시한다.
-공 DOWN 화면은 줍기 사각형 하나와 가로선 2개다. 허들 DOWN도 가로선 2개만 표시하며
-접촉 기준은 글자 패널과 contact_v_px에서 확인한다.
-미세보행 진입 후 공은 3/4/5/6, 허들은 3번만 사용한다. 10/21로 자동 복귀하지 않는다.
+공은 DOWN에서 발견 조건을 채우면 즉시 FINE 발 전환을 요청하고 실제 DONE 뒤 새 관측으로
+pickup 사각형에 맞춘다. 공의 DOWN 일반 보행 구간과 전환 임계값은 없다.
+공 DOWN 화면은 pickup 사각형을 표시하며 상하좌우 3/4/5/6만 사용한다.
+허들은 기존 DOWN 일반 보행/미세 전환 경계를 유지한다.
+골대도 근거리 기준에 진입하면 즉시 FINE 발 전환을 요청한다. 이 두 정책은 연속 접근 T/F와 무관하다.
 
 | rqt 파라미터 | 기본값(px) | 의미 |
 |---|---:|---|
@@ -83,8 +77,6 @@ down_search_min_hits(기본 5회) 검출과 현재 프레임 검출로 탐색 �
 | ball_approach_u_deadband_px | 16 | 공 좌우 허용 반폭 |
 | ball_approach_short_v_px | 288 | 중앙 4→3걸음 경계 |
 | ball_approach_two_step_v_px | 360 | 공 아래 행 2걸음→DOWN 경계 |
-| ball_down_one_step_v_px | 216 | DOWN 2→1걸음 경계 |
-| ball_fine_mode_v_px | 278.4 | 미세보행 진입선 |
 | ball_pickup_u1_px / ball_pickup_u2_px | 281.6 / 358.4 | 줍기 영역 왼쪽 / 오른쪽 |
 | ball_pickup_v1_px / ball_pickup_v2_px | 307.2 / 364.8 | 줍기 영역 위쪽 / 아래쪽 |
 | hurdle_approach_short_v_px | 312 | 허들 4→3걸음 경계 |

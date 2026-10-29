@@ -94,7 +94,12 @@ public:
   static const char *ModeName(HurdleMode mode);
   bool EntryReady() const;
   void EnterVerified(const std::optional<ObjectTarget>& mean,
-                     const std::deque<bool>& hits, int width, int height, double now);
+                     const std::deque<bool>& hits, int width, int height, double now,
+                     bool allow_entry_recovery = true);
+  void EnterContinuousRecovery(const ObjectTarget&,const std::deque<bool>&,
+                               int width,int height,double now);
+  void EnterContinuousNear(double now);
+  const std::deque<bool>& ObservationHits() const { return hit_history_; }
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
@@ -161,6 +166,7 @@ private:
   std::deque<bool> acquire_history_;
   bool awaiting_approach_observation_{false};
   bool entry_observation_pending_{false};
+  bool entry_recovery_allowed_{true};
   bool entry_step_recovery_{false}, recovery_step_pending_{false};
   int recovery_steps_completed_{0}, recovery_step_limit_{0};
   HurdleMode recovery_resume_mode_{HurdleMode::kApproach};

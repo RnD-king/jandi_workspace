@@ -60,6 +60,7 @@ struct Features {
   // Indices in ComputeLineFeatures' original input, not the sorted/near fit.
   // Only actual RANSAC removals are reported; max-centers truncation is not.
   std::vector<std::size_t> ransac_outlier_indices;
+  double guide_reference_v_px{0.0};
 };
 
 struct LineTrackingConfig {

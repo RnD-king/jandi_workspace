@@ -50,6 +50,7 @@ struct BallConfig {
   int recovery_walk_turn_max{3}; // Zone-4/6 rotation-only recovery.
   int recovery_max_steps{}; // General FORWARD loss: turn/step or central step search.
   int entry_recovery_max_steps{}; // First post-entry loss; exhausted -> LINE.
+  int down_recovery_max_actions{}; // FINE rectangle-directed search, then fail.
   int post_pickup_back_steps{};
 
   int stable_window{};
@@ -74,8 +75,6 @@ struct BallConfig {
   double upper_acquire_v_px{};
   double approach_two_step_v_px{};
   double approach_direct_down_v_px{}; // Zone 8 only: one step instead of two before DOWN.
-  double down_one_step_v_px{};
-  double fine_mode_v_px{};
   double fine_side_two_step_margin_px{};
   BallFineMotionConfig fine_motion;
   int pickup_max_attempts{};
@@ -141,7 +140,12 @@ public:
   static const char *ModeName(BallMode mode);
   std::optional<double> EntryDirection() const;
   void EnterVerified(const std::optional<ObjectTarget>& mean,
-                     const std::deque<bool>& hits, int width, int height, double now);
+                     const std::deque<bool>& hits, int width, int height, double now,
+                     bool allow_entry_recovery = true);
+  void EnterContinuousRecovery(const ObjectTarget&,const std::deque<bool>&,
+                               int width,int height,double now);
+  void EnterContinuousNear(double now);
+  const std::deque<bool>& ObservationHits() const { return hit_history_; }
   bool HasBall() const { return has_ball_; }
   void SetHasBall(bool has_ball) { has_ball_ = has_ball; }
   void CompleteLineRecovery();
@@ -193,9 +197,9 @@ public:
   MissionAction FineMotionAction() const { return fine_side_action_; }
   Point2 FineMotionPredictedCenter() const { return fine_repeat_predicted_center_; }
   int RecoveryWalkTurnsCompleted() const { return recovery_walk_turns_completed_; }
-  int RecoveryStepsCompleted() const { return forward_recovery_steps_completed_; }
-  int RecoveryStepLimit() const { return forward_recovery_step_limit_; }
-  bool EntryRecovery() const { return forward_recovery_entry_; }
+  int RecoveryStepsCompleted() const { return down_recovery_active_ ? down_recovery_completed_ : forward_recovery_steps_completed_; }
+  int RecoveryStepLimit() const { return down_recovery_active_ ? config_.down_recovery_max_actions : forward_recovery_step_limit_; }
+  bool EntryRecovery() const { return !down_recovery_active_ && forward_recovery_entry_; }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   int DownSearchStepsRemaining() const {
     return down_search_.Remaining(config_.down_search_max_steps);
@@ -207,11 +211,13 @@ private:
                      int image_width, int image_height);
   ActionRequest FarAction(int image_height) const;
   ActionRequest FineAction() const;
+  ActionRequest FineActionAt(Point2 center) const;
   ActionRequest RecoveryAction() const;
   void ClearTracking();
   void BeginForwardRecovery(double now, std::optional<double> u, bool entry_loss,
                             bool rotation_only = false);
   void ExhaustForwardRecovery(double now, BallResult &result);
+  void BeginDownRecovery(double now);
   void ResetToLine();
 
   BallConfig config_;
@@ -222,6 +228,7 @@ private:
   std::deque<std::optional<double>> entry_u_history_;
   std::optional<double> entry_recovery_u_;
   bool entry_recovery_pending_{false};
+  bool entry_recovery_allowed_{true};
   MissionAction fine_side_action_{MissionAction::kNone};
   int fine_side_remaining_{0};
   bool fine_side_pending_{false};
@@ -253,6 +260,11 @@ private:
   TrackedBall tracked_;
   double last_seen_u_px_{0.0};
   std::optional<double> last_stable_ball_u_;
+  std::optional<Point2> last_down_center_;
+  MissionAction down_recovery_action_{MissionAction::kNone};
+  int down_recovery_completed_{0};
+  bool down_recovery_active_{false}, down_recovery_pending_{false};
+  bool down_recovery_observing_{false}, down_recovery_pose_pending_{false};
   std::optional<bool> recovery_turn_left_;
   int recovery_walk_turns_completed_{0};
   int recovery_walk_turn_limit_{3}; // Fixed per loss episode.

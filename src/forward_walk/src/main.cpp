@@ -294,7 +294,7 @@ private:
             return "motions/미세보행_미세전진_수정.json";
 
         case vision::msg::ActionCommand::STEP_BACK:
-            return "motions/미세보행_후진.json";
+            return "motions/미세보행_후진__찐.json";
 
         case vision::msg::ActionCommand::LEFT_SIDE_STEP:
             return "motions/미세보행_좌로이동_초기X.json";
@@ -324,7 +324,7 @@ private:
             return "motions/보행_좌회전전진_20도_최종_초기X_수정.json";
 
         case vision::msg::ActionCommand::LINE_STRAIGHT_UNIT:
-            return "motions/보행_1걸음_초기X_수정.json";
+            return "missions/2걸음.json";
 
         case vision::msg::ActionCommand::LINE_RIGHT_UNIT:
             return "motions/보행_우회전전진_20도_최종_초기X_찐.json";
@@ -353,7 +353,7 @@ private:
         // A dedicated WALK-stance motion, played once without yaw repetition.
         // Missing/invalid assets are rejected by PrepareProgram before ACK.
         case vision::msg::ActionCommand::TURN_LEFT_IN_PLACE:
-            return "motions/좌회전_최종.json";
+            return "motions/좌회전_최종__.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_FIVE:
             return "missions/연속걷기.json";

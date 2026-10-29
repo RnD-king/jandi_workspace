@@ -115,10 +115,20 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.line_p2p.straight_repetitions, "line_p2p.straight_repetitions");
   PositiveInt(c.line_p2p.right_repetitions, "line_p2p.right_repetitions");
   NonnegativeInt(c.candidate_search_max_turns, "mission.candidate_search_max_turns");
-  Nonnegative(c.ball.down_one_step_v_px, "ball.down_one_step_v_px");
-  Nonnegative(c.ball.fine_mode_v_px, "ball.fine_mode_v_px");
-  if (c.ball.down_one_step_v_px >= c.ball.fine_mode_v_px)
-    throw std::runtime_error("ball DOWN thresholds must be ordered");
+  PositiveInt(c.object_approach.missing_frames,"object_approach.missing_frames");
+  PositiveInt(c.object_approach.lock_blocks,"object_approach.lock_blocks");
+  PositiveInt(c.object_approach.blend_frames,"object_approach.blend_frames");
+  NonnegativeInt(c.object_approach.goal_empty_max_retries,"object_approach.goal_empty_max_retries");
+  Positive(c.object_approach.reference_v_ratio,"object_approach.reference_v_ratio");
+  if (c.object_approach.reference_v_ratio>=1)
+    throw std::runtime_error("object_approach.reference_v_ratio must be below 1");
+  for (const auto& camera:{c.object_approach.forward_camera,c.object_approach.goal_camera}) {
+    if (!std::isfinite(camera.right_m) || !std::isfinite(camera.forward_m) ||
+        !std::isfinite(camera.pitch_deg) || !std::isfinite(camera.yaw_deg) ||
+        std::abs(camera.pitch_deg)>=89 || std::abs(camera.yaw_deg)>=89)
+      throw std::runtime_error("invalid object approach camera pose");
+    Positive(camera.height_m,"object_approach.camera.height_m");
+  }
   Nonnegative(c.ball.approach_short_v_px, "ball.approach_short_v_px");
   PositiveInt(c.ball.down_search_max_steps, "ball.down_search_max_steps");
   Nonnegative(c.ball.down_search_inter_action_hold_sec, "ball.down_search_inter_action_hold_sec");
@@ -127,7 +137,9 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
   NonnegativeInt(c.ball.recovery_max_steps, "ball.recovery_max_steps");
   NonnegativeInt(c.ball.entry_recovery_max_steps, "ball.entry_recovery_max_steps");
+  PositiveInt(c.ball.down_recovery_max_actions, "ball.down_recovery_max_actions");
   NonnegativeInt(c.goal.recovery_turn_max, "goal.recovery_turn_max");
+  PositiveInt(c.goal.depth_recovery_max_steps, "goal.depth_recovery_max_steps");
   Nonnegative(c.goal.edge_margin_px, "goal.edge_margin_px");
   Nonnegative(c.transition_settle_sec, "mission.transition_settle_sec");
   Nonnegative(c.walk_inter_action_hold_sec, "mission.walk_inter_action_hold_sec");
@@ -148,8 +160,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.hurdle.contact_v_px, "hurdle.contact_v_px");
   PositiveInt(c.hurdle.contact_steps, "hurdle.contact_steps");
   Nonnegative(c.hurdle.contact_inter_action_hold_sec, "hurdle.contact_inter_action_hold_sec");
-  Nonnegative(c.goal.fine_one_step_range_error_m,"goal.fine_one_step_range_error_m");
-  Nonnegative(c.goal.fine_two_step_range_error_m,"goal.fine_two_step_range_error_m");
   Positive(c.goal.recovery_observation_sec, "goal.recovery_observation_sec");
   PositiveInt(c.goal.recovery_max_observations, "goal.recovery_max_observations");
   Positive(c.goal.approach_short_z_m, "goal.approach_short_z_m");
@@ -157,8 +167,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   NonnegativeInt(c.goal.post_shoot_back_steps, "goal.post_shoot_back_steps");
   if (c.ball.approach_short_v_px >= c.ball.approach_two_step_v_px ||
       c.hurdle.approach_short_v_px >= c.hurdle.approach_two_step_v_px ||
-      c.goal.camera_goal_start_z_m > c.goal.approach_short_z_m ||
-      c.goal.fine_one_step_range_error_m > c.goal.fine_two_step_range_error_m)
+      c.goal.camera_goal_start_z_m > c.goal.approach_short_z_m)
     throw std::runtime_error("approach/fine transition thresholds must be ordered");
   const int tm=static_cast<int>(c.test_mission);
   if ((tm!=0 && tm!=2 && tm!=3 && tm!=4) || c.test_stage<0 || c.test_stage>3 ||
@@ -485,8 +494,6 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   const auto b = a["ball"];
   Assign(b, "test_mission_index", c.test_ball_mission_index);
-  Assign(b, "down_one_step_v_px", c.ball.down_one_step_v_px);
-  Assign(b, "fine_mode_v_px", c.ball.fine_mode_v_px);
   Assign(b, "approach_short_v_px", c.ball.approach_short_v_px);
   Assign(b, "down_search_max_steps", c.ball.down_search_max_steps);
   Assign(b, "down_search_inter_action_hold_sec", c.ball.down_search_inter_action_hold_sec);
@@ -495,6 +502,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "recovery_walk_turn_max", c.ball.recovery_walk_turn_max);
   Assign(b, "recovery_max_steps", c.ball.recovery_max_steps);
   Assign(b, "entry_recovery_max_steps", c.ball.entry_recovery_max_steps);
+  Assign(b, "down_recovery_max_actions", c.ball.down_recovery_max_actions);
   Assign(b, "post_pickup_back_steps", c.ball.post_pickup_back_steps);
 
   Assign(b, "stable_window", c.ball.stable_window);
@@ -559,11 +567,10 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px);
   Assign(g, "backboard_min_depth_m", c.backboard_min_depth_m);
   Assign(g, "backboard_max_depth_m", c.backboard_max_depth_m);
-  Assign(g,"fine_one_step_range_error_m",c.goal.fine_one_step_range_error_m);
-  Assign(g,"fine_two_step_range_error_m",c.goal.fine_two_step_range_error_m);
   Assign(g, "recovery_turn_max", c.goal.recovery_turn_max);
   Assign(g, "recovery_observation_sec", c.goal.recovery_observation_sec);
   Assign(g, "recovery_max_observations", c.goal.recovery_max_observations);
+  Assign(g, "depth_recovery_max_steps", c.goal.depth_recovery_max_steps);
   Assign(g, "approach_short_z_m", c.goal.approach_short_z_m);
   Assign(g, "camera_goal_start_z_m", c.goal.camera_goal_start_z_m);
   Assign(g, "post_shoot_back_steps", c.goal.post_shoot_back_steps);
@@ -661,6 +668,20 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(m, "fine_motion_settle_sec", c.fine_motion_settle_sec);
   Assign(m, "post_motion_observation_sec", c.post_motion_observation_sec);
   Assign(m, "object_ready_mean_actions", c.object_ready_mean_actions);
+  Assign(m,"object_approach_continous",c.object_approach_continous);
+  const auto approach=m["object_approach"];
+  Assign(approach,"missing_frames",c.object_approach.missing_frames);
+  Assign(approach,"lock_blocks",c.object_approach.lock_blocks);
+  Assign(approach,"blend_frames",c.object_approach.blend_frames);
+  Assign(approach,"goal_empty_max_retries",c.object_approach.goal_empty_max_retries);
+  Assign(approach,"reference_v_ratio",c.object_approach.reference_v_ratio);
+  const auto read_camera=[](const YAML::Node& node,ApproachCameraPose& camera) {
+    Assign(node,"right_m",camera.right_m); Assign(node,"height_m",camera.height_m);
+    Assign(node,"forward_m",camera.forward_m); Assign(node,"pitch_deg",camera.pitch_deg);
+    Assign(node,"yaw_deg",camera.yaw_deg);
+  };
+  read_camera(approach["forward_camera"],c.object_approach.forward_camera);
+  read_camera(approach["goal_camera"],c.object_approach.goal_camera);
   Assign(m, "enable_ball", c.enable_ball);
   Assign(m, "enable_hurdle", c.enable_hurdle);
   Assign(m, "enable_goal", c.enable_goal);

@@ -16,10 +16,19 @@ inline const char* StateCameraName(vision_core::CameraMode mode) {
 }
 inline const char* StateMissionPhase(const vision_core::MissionFrameResult& m) {
   using vision_core::MissionType;
+  if(m.approach_goal_search_failed) return "GOAL_SEARCH_FAILED";
+  if(m.approach_goal_depth_failed) return "GOAL_DEPTH_FAILED";
+  if(m.goal.depth_recovery_active) return "GOAL_DEPTH_RECOVERY";
   if(m.active_mission==MissionType::kBall) return vision_core::BallController::ModeName(m.ball.mode);
   if(m.active_mission==MissionType::kHurdle) return vision_core::HurdleController::ModeName(m.hurdle.mode);
   if(m.active_mission==MissionType::kGoal) return vision_core::GoalController::ModeName(m.goal.mode);
   if(m.terminal_hold) return "LINE_FINAL_HOLD";
+  if(m.approach_mission!=MissionType::kNone) {
+    if(m.approach_near) return "APPROACH_NEAR";
+    if(m.approach_mission==MissionType::kBall) return "APP_BALL";
+    if(m.approach_mission==MissionType::kGoal) return "APP_GOAL";
+    return "APP_HURDLE";
+  }
   if(m.candidate_phase) return "LINE_OBJECT_CANDIDATE";
   return m.line_in_recovery ? "LINE_RECOVERY" : "LINE_FOLLOW";
 }
@@ -60,7 +69,8 @@ public:
        <<waiting_action<<' '<<waiting_camera<<' '<<m.command.action_id<<' '
        <<p.ball_target_id<<' '<<p.hurdle_target_id<<' '<<p.backboard_target_id<<' '
        <<p.ball_target_locked<<p.hurdle_target_locked<<p.backboard_target_locked<<' '
-       <<m.ball.down_search_found<<m.hurdle.down_search_found;
+       <<m.ball.down_search_found<<m.hurdle.down_search_found<<' '
+       <<int(m.approach_mission)<<':'<<m.approach_track_id<<':'<<m.approach_completed_blocks<<':'<<m.approach_locked;
     const bool changed=key.str()!=last_key_;
     if(!changed && now>=last_sec_ && now-last_sec_<1.0) return std::nullopt;
     last_key_=key.str(); last_sec_=now;
@@ -93,6 +103,12 @@ public:
         <<" object="<<DebugMissionName(object)<<" hits="<<hits<<'/'<<window<<" frames="<<frames
         <<" lost="<<lost<<" found="<<found<<" filtered="<<p.accepted_object_detections.size()
         <<" observe="<<m.post_motion_valid<<'/'<<m.post_motion_window_frames;
+    if(m.continuous_approach_enabled)
+      text<<" goal_empty_retries="<<m.goal.entry_line_retries<<'/'<<config.object_approach.goal_empty_max_retries;
+    if(m.continuous_approach_enabled)
+      text<<" approach="<<DebugMissionName(m.approach_mission)<<" id="<<m.approach_track_id
+          <<" blocks="<<m.approach_completed_blocks<<'/'<<config.object_approach.lock_blocks
+          <<" locked="<<m.approach_locked<<" missing="<<m.approach_missing_frames<<" near="<<m.approach_near;
     if(object==MissionType::kGoal) text<<" pose_lost="<<m.goal.pose_lost_frames;
     const auto candidates=[&](const char* label,const std::vector<BallCandidateTrack>& tracks) {
       for(const auto& track:tracks)

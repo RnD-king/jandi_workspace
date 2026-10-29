@@ -31,7 +31,7 @@ vision_algorithm:
     # 라인 보행 방향 판단과 유실 복구
     walk:
       left_repetitions: 2
-      straight_repetitions: 3
+      straight_repetitions: 2
       right_repetitions: 2
       offset_gain: 0.3 # 게인 3개
       heading_gain: 0.3
@@ -101,8 +101,6 @@ vision_algorithm:
       approach_direct_down_v_px: 355.0 # 8번 중앙 가로선 (1걸음 후 down)
 
       # DOWN 접근·미세조정
-      down_one_step_v_px: 0.0 # 위 가로선 (2걸음)
-      fine_mode_v_px: 1 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
       fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
       fine_motion:
         max_repetitions: 3 # 같은 방향만 최대 3회. 아래 값은 DOWN 화면의 공 중심 변화량.
@@ -132,6 +130,7 @@ vision_algorithm:
       recovery_walk_turn_max: 3 # 중간 좌/우(4·6) 구역의 회전 후 제자리 관측 한도
       recovery_max_steps: 3 # 일반 FORWARD 유실: 좌우 회전 후/중앙 정지 관측 후 1걸음, 전진 한도
       entry_recovery_max_steps: 1 # 진입 직후 첫 관측 실패의 전진 한도; 소진 후 공 없이 LINE 복귀
+      down_recovery_max_actions: 3 # DOWN 유실: 마지막 pickup 사각형 기준 방향으로 FINE 1회→관측, 한도 후 실패
       recovery_center_tolerance_px: 50 # 복구 방향 선택 기준 - 중앙에서 얼마나
 
   # HURDLE: 검출·Depth 필터 → 후보 추적 → 미션 동작
@@ -240,8 +239,6 @@ vision_algorithm:
       camera_goal_start_z_m: 0.80 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
 
       # 근거리 접근
-      fine_two_step_range_error_m: 0.30 # 2걸음 → 1걸음 경계
-      fine_one_step_range_error_m: 0.15 # 1걸음 → 미세조정 경계
 
       # 투척 위치·방향
       hoop_radius_m: 0.10 # 림 위치 보정에 사용하는 반지름
@@ -256,6 +253,7 @@ vision_algorithm:
 
       # 유실 복구
       recovery_turn_max: 5 # 좌우 탐색 회전 한도. 재발견 뒤 같은 방향 추가 1회전은 별도
+      depth_recovery_max_steps: 3 # 백보드는 보이나 Depth/좌표 실패: WALK 1걸음 또는 FINE 전진→정지 관측, 소진 시 실패
       recovery_observation_sec: 1.0
       recovery_max_observations: 5
       recovery_center_tolerance_px: 1 # 마지막 안정 위치가 target_u_px ±이 값이면 WALK 1걸음/FINE 미세 1회 전진 후 관측
@@ -277,6 +275,18 @@ vision_algorithm:
 
     # 여러 미션에 공통으로 적용되는 설정
     mission:
+      # false: 기존 정지 확정/접근. true: LINE→원거리 객체를 공통 O/H·32/33/34로 추종.
+      object_approach_continous: false
+      object_approach:
+        missing_frames: 3 # 확정 전 연속 유실이면 LINE 복귀. 3회 락 이후는 기존 미션 복구.
+        lock_blocks: 3 # 같은 ID의 보행 묶음 전체가 실제 DONE된 횟수 (전송/ACK/READY 아님)
+        blend_frames: 5 # LINE→가상 경로의 전환 프레임 수
+        goal_empty_max_retries: 3 # 최초 GOAL 확인 후 FORWARD→LINE 1묶음→GOAL 재확인 한도; 소진 시 FINAL HOLD
+        reference_v_ratio: 0.80 # 실제 LINE 기준 높이를 못 구하는 GOAL 뷰의 기준
+        # 임시값: 사용자 요청으로 우선 사용. 광학 중심의 몸통 기준 위치/자세를 실측 후 교체!
+        # 위치: 오른쪽/위/전방 +m. 각도: 아래로 pitch+, 오른쪽으로 yaw+ (모터 tick 아님).
+        forward_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 20.0, yaw_deg: 0.0}
+        goal_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 0.0, yaw_deg: 0.0}
       candidate_search_max_turns: 2
       test_mission: 0 # 0 전체 미션, 2 공, 3 골대, 4 허들
       test_stage: 0 # 0 전체 과정, 1 접근, 2 정렬, 3 실행

@@ -206,7 +206,7 @@ void SearchOnlyFiveHits() {
   ActionExecutionFeedback done;done.action_done=true;
   b=ball.Compute({},640,480,1.3,down,done);
   h=hurdle.Compute({},640,480,1.3,down,done,{});
-  assert(b.mode==BallMode::kCoarseAdjust && h.mode==HurdleMode::kCoarseAdjust);
+  assert(b.mode==BallMode::kWaitFinePose && h.mode==HurdleMode::kCoarseAdjust);
   assert(b.action.action==MissionAction::kNone && h.action.action==MissionAction::kNone);
   // The relaxed search threshold must never authorize FINE with five hits.
   ball.StartTestExecute();hurdle.StartTestExecute();
@@ -245,7 +245,7 @@ void CountedDownSearch(bool found_on_last) {
     if(i<3) {
       assert(b.action.action==MissionAction::kStepForwardOne && h.action.action==b.action.action);
     } else {
-      assert(b.mode==(found_on_last?BallMode::kCoarseAdjust:BallMode::kFailed));
+      assert(b.mode==(found_on_last?BallMode::kWaitFinePose:BallMode::kFailed));
       assert(h.mode==(found_on_last?HurdleMode::kCoarseAdjust:HurdleMode::kFailed));
       assert(b.action.action==MissionAction::kNone && h.action.action==MissionAction::kNone);
     }

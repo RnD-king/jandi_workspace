@@ -153,8 +153,8 @@ fine_adjust_start_z_m 근접 조건이 성립하여 GOAL_CLOSE_WALK에 진입하
 확보한다. RESET은 실제 완료된 이벤트의 관측 대기를 폐기할 수 있지만, 진행 중인
 몸/카메라 동작을 완료로 꾸미지 않는다.
 
-post_motion_observation_sec는 0을 거절한다. 공의 미세 진입선은
-min(ball_fine_mode_v_px, ball_pickup_v1_px)를 실제 로직과 동일하게 표시한다.
+post_motion_observation_sec는 0을 거절한다. 공은 DOWN에서 발견하면 즉시 FINE으로 전환하며
+DOWN 일반 보행 전환선은 없다. 화면에는 pickup 사각형을 표시한다.
 IMU 좌표 기준 통일과 AUTO의 골대 단독 시작 방식 변경은 이번 범위에서 보류했다.
 
 소스 변경 적용에는 코어 빌드/설치와 vision 재빌드가 필요하다. GitHub·젯슨 반영은 별도다.
@@ -163,7 +163,7 @@ IMU 좌표 기준 통일과 AUTO의 골대 단독 시작 방식 변경은 이번
 ## 2026-10-14 공통 접근 및 RESET 규칙
 
 - BALL: 현재 PC의 원거리/중거리 중앙은 3걸음(22), 근거리 중앙은 2걸음(21) 후 DOWN이다. 근거리 양쪽 및 FORWARD 유실 복구는 WALK 제자리 회전 좌 31/우 28을 사용한다. 구역 경계·회복 횟수는 운영 YAML을 따른다.
-- GOAL: 일반 접근은 기존 거리/화면 구역 로직을 사용한다. GOAL 근거리(COARSE)에서는 거리 오차가 `fine_one_step_range_error_m` 이상일 때 `shoot_yaw_limit_deg` 밖이면 WALK 제자리 회전 좌 31/우 28을 우선한다. 경계 미만이면 FINE으로 전환한다. FINE의 림 위치 보정·낙하점·투척 허용값은 운영 YAML의 `hoop_radius_m`, `throw_landing_x_m`, `throw_landing_z_m`, `position_tolerance_m`, `shoot_yaw_limit_deg`를 사용한다.
+- GOAL: 근거리 판단 직후 FINE 발 전환을 요청하고 실제 DONE 뒤 미세 정렬한다. 이전 COARSE 일반 보행 단계와 거리 오차 전환 파라미터는 제거했다. 낙하점·허리 회전·투척 허용값은 기존 운영 YAML을 사용한다.
 - HURDLE: FORWARD에서 LINE O/H score의 좌중우와 허들 중심의 세로 위치를 결합한다. DOWN 진입 후는 기존 알고리즘 그대로 유지한다.
 - RESET: 기본 흐름과 전용 Stage 시험은 기존 카메라 상태가 FORWARD로 보고되어도 새로운 FORWARD 명령을 전송한다. 일반 GOAL 단독 실행에서 `goal_trial_start_goal=true`이면 GOAL 명령을 전송한다. WALK_MODE와 카메라 명령의 실제 DONE 이후 WAIT_START로 진입한다.
 - 백보드 디버그는 좌/중/우 샘플영역의 유효 깊이 픽셀 수, 비율, 중앙값을 표시하지만 새 유효성 거부 임계값을 추가하지 않는다.

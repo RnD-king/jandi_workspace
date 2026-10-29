@@ -197,8 +197,8 @@ int main() {
   assert(r.mode==BallMode::kVerifyPickupObservation);
   assert(r.action.action == MissionAction::kNone);
 
-  // Losing an already acquired DOWN target starts stationary recovery,
-  // never the initial blind-forward search or a new camera movement.
+  // Losing an acquired DOWN target uses the last pickup-rectangle direction
+  // with FINE motions, never blind WALK search or a new camera movement.
   BallController recovery(c, 3.0);
   r = recovery.Compute(Ball(0.3, 0.3), 640,480, 0, {}, {});
   r = recovery.Compute(Ball(0.5, 0.8), 640,480, .1, {}, done);
@@ -215,7 +215,7 @@ int main() {
   r = recovery.Compute(std::nullopt, 640,480, .4, down, {});
   assert(r.mode == BallMode::kBallRecoveryDown);
   r = recovery.Compute(std::nullopt, 640,480, .5, down, {});
-  assert(r.action.action == MissionAction::kNone);
+  assert(r.action.action == MissionAction::kLeftSideStep);
   assert(r.camera_request == CameraRequest::kNone);
 
   // Default post-pickup recovery skips all backward steps and requests FORWARD

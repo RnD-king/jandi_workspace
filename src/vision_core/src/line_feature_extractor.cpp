@@ -2,6 +2,7 @@
 // 역할: 보정된 점선 중심점들로부터 P2P용 LineGuide를 만든다.
 
 #include "vision_core/line_feature_extractor.hpp"
+#include "vision_core/object_approach.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -155,7 +156,7 @@ double WrapAngle(double angle) {
 }
 
 LineGuide ComputeLineGuide(const std::vector<Point2> &points, double cx,
-                           double denom, const FeatureConfig &cfg) {
+                           double denom, const FeatureConfig &cfg, double* reference_v) {
   LineGuide guide;
   if (cfg.guide_min_points < 3 ||
       points.size() < static_cast<std::size_t>(cfg.guide_min_points))
@@ -172,7 +173,9 @@ LineGuide ComputeLineGuide(const std::vector<Point2> &points, double cx,
 
   const double near_reference_v = MeanV(points, 0, local_count);
   const double near_reference_u = near_fit.a * near_reference_v + near_fit.b;
-  guide.offset = (near_reference_u - cx) / denom;
+  *reference_v=near_reference_v;
+  guide=ImageLineGuide(near_fit.a,near_reference_u,cx,
+                       static_cast<int>(2*denom),0.0);
   // FitLine의 a=du/dv이고 영상에서 진행 방향은 v 감소 방향이다.
   // 따라서 -atan(a)가 진행 방향 기준 image-right(+) 각도다.
   guide.heading_rad = -std::atan(near_fit.a);
@@ -257,7 +260,7 @@ Features ComputeLineFeatures(const std::vector<Point2> &input, int image_width,
   // 중심점이 principal point로 이동해도 좌/우 정규화 크기가 달라지지 않도록
   // 영상 반폭을 분모로 사용한다.
   const double denom = std::max(0.5 * static_cast<double>(image_width), 1.0);
-  f.guide = ComputeLineGuide(points, cx, denom, cfg);
+  f.guide = ComputeLineGuide(points, cx, denom, cfg, &f.guide_reference_v_px);
   return f;
 }
 

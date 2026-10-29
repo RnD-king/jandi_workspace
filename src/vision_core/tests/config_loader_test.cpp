@@ -87,6 +87,12 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.object_association.max_center_distance_norm==baseline.object_association.max_center_distance_norm);
   assert(c.command.first_action_id==baseline.command.first_action_id);
   assert(c.object_ready_mean_actions==baseline.object_ready_mean_actions);
+  assert(!c.object_approach_continous && c.object_approach.lock_blocks==3);
+  assert(c.object_approach.goal_empty_max_retries==3);
+  root["vision_algorithm"]["common"]["mission"]["object_approach_continous"]=true;
+  root["vision_algorithm"]["common"]["mission"]["object_approach"]["forward_camera"]["right_m"]=-.07;
+  const auto continuous=LoadText(YAML::Dump(root));
+  assert(continuous.object_approach_continous && continuous.object_approach.forward_camera.right_m==-.07);
   auto a=root["vision_algorithm"];
   // Distinct values detect accidental cross-object filter/tracker wiring.
   a["ball"]["detection"]["class_id"]=11;
@@ -179,8 +185,6 @@ int main(int argc, char **argv) {
   assert(c.ball.pickup_u2_px == 385);
   assert(c.ball.pickup_v1_px == 80);
   assert(c.ball.pickup_v2_px == 130);
-  assert(c.ball.down_one_step_v_px == 0);
-  assert(c.ball.fine_mode_v_px == 10);
   assert(c.ball.pickup_max_attempts == 100);
   assert(c.ball.pickup_verify_min_hits == 3);
   assert(c.goal.entry_line_retry_max_attempts == 3);
@@ -190,8 +194,6 @@ int main(int argc, char **argv) {
   assert(c.hurdle.down_search_inter_action_hold_sec == 0.0);
   assert(c.hurdle.down_one_step_v_px == 100);
   assert(c.hurdle.fine_mode_v_px == 180);
-  assert(c.goal.fine_one_step_range_error_m == 0.15);
-  assert(c.goal.fine_two_step_range_error_m == 0.30);
   assert(c.backboard_max_depth_m == 2.50);
   assert(c.line_features.image_center_u == 410.0);
   assert(c.camera_motion_timeout_sec == 3.0);
@@ -203,6 +205,13 @@ int main(int argc, char **argv) {
   assert(c.line_features.ransac_max_outliers==2);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
   CheckGroupedConfiguration(text.str());
+  Reject(text.str(),"lock_blocks: 3","lock_blocks: 0");
+  Reject(text.str(),"missing_frames: 3","missing_frames: -1");
+  Reject(text.str(),"goal_empty_max_retries: 3","goal_empty_max_retries: -1");
+  Reject(text.str(),"down_recovery_max_actions: 3","down_recovery_max_actions: 0");
+  Reject(text.str(),"depth_recovery_max_steps: 3","depth_recovery_max_steps: 0");
+  Reject(text.str(),"reference_v_ratio: 0.80","reference_v_ratio: .nan");
+  Reject(text.str(),"object_approach_continous: false","object_approach_continous: nonsense");
   for (const auto* value : {"-0.1", "1.0", "1.1", ".nan", ".inf"})
     Reject(text.str(), "observation_start_ratio: 0.40",
            std::string("observation_start_ratio: ") + value);

@@ -51,7 +51,7 @@ void InvalidAndNearWindows() {
   goal.Compute({},{},{},640,480,0,true,camera,{});
   goal.UseVerifiedObservation(Target(320),{true,0,.7,0,1},hits,hits,640,480,hits);
   auto g=goal.Compute({},{},{},640,480,1,true,camera,{});
-  assert(g.mode==GoalMode::kCoarseAdjust); // no second near-detection window
+  assert(g.mode==GoalMode::kWaitFinePose); // no second near-detection window
 }
 void GoalRecovery(bool fine, bool left) {
   auto c=LoadDefaultAlgorithmConfig().goal;
@@ -892,9 +892,9 @@ void GoalEntryFallbackAndDepth() {
   pose.UseVerifiedObservation(Target(c.target_u_px),{},hits,misses,640,480);
   g=pose.Compute({},Target(c.target_u_px),{},640,480,1.5,true,camera,
       {false,false,true},true,.5);
-  assert(g.mode==GoalMode::kCoarseAdjust);
+  assert(g.mode==GoalMode::kWaitFinePose);
   g=pose.Compute({},Target(c.target_u_px),{},640,480,1.6,true,camera,{});
-  assert(g.mode==GoalMode::kCoarseRecovery && g.action.action==MissionAction::kNone);
+  assert(g.mode==GoalMode::kWaitFinePose && g.action.action==MissionAction::kDefaultPoseMode);
 }
 
 void GoalEntryCameraTransport(bool left, bool manual) {
@@ -960,7 +960,7 @@ void Defaults() {
   auto c=LoadDefaultAlgorithmConfig();
   assert(CruiseAction(CruiseDirection::kStraight)==MissionAction::kStepForwardFour);
   assert(c.transition_settle_sec==.6 && c.fine_motion_settle_sec==0 && c.walk_inter_action_hold_sec==0);
-  assert(c.ball.down_one_step_v_px==0 && c.ball.fine_mode_v_px==10);
+
   assert(c.ball.recovery_walk_turn_max==3 && c.ball.entry_recovery_max_steps==3 && c.goal.recovery_turn_max==3);
   for(int field=0;field<4;++field) {
     auto bad=c;

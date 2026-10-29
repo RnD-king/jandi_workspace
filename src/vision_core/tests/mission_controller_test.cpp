@@ -679,7 +679,7 @@ int main() {
   mi.camera_feedback={CameraMode::kDown,true};
   mi.ball_target=Ball(.5,.7);
   mr=manual.Step(mi);
-  assert(mr.ball.mode==BallMode::kCoarseAdjust);
+  assert(mr.ball.mode==BallMode::kWaitFinePose);
   mi.now_sec=(.31) + 3.0; mi.manual_observation_control=true; mi.allow_new_body_actions=true;
   mr=manual.Step(mi);
   assert(mr.command.action==MissionAction::kDefaultPoseMode);

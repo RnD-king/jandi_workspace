@@ -188,16 +188,12 @@ public:
     declare_parameter<double>("line_p2p_offset_gain", algorithm_defaults.line_p2p.offset_gain);
     declare_parameter<double>("line_p2p_heading_gain", algorithm_defaults.line_p2p.heading_gain);
     declare_parameter<double>("line_p2p_steering_deadband", algorithm_defaults.line_p2p.steering_deadband);
-    declare_parameter<double>("ball_down_one_step_v_px", algorithm_defaults.ball.down_one_step_v_px);
-    declare_parameter<double>("ball_fine_mode_v_px", algorithm_defaults.ball.fine_mode_v_px);
     declare_parameter<double>("ball_approach_short_v_px", algorithm_defaults.ball.approach_short_v_px);
     declare_parameter<double>("hurdle_down_one_step_v_px", algorithm_defaults.hurdle.down_one_step_v_px);
     declare_parameter<double>("hurdle_fine_mode_v_px", algorithm_defaults.hurdle.fine_mode_v_px);
     declare_parameter<double>("hurdle_approach_short_v_px", algorithm_defaults.hurdle.approach_short_v_px);
     declare_parameter<double>("hurdle_target_u_px", algorithm_defaults.hurdle.target_u_px);
     declare_parameter<double>("hurdle_contact_v_px", algorithm_defaults.hurdle.contact_v_px);
-    declare_parameter<double>("goal_fine_one_step_range_error_m",algorithm_defaults.goal.fine_one_step_range_error_m);
-    declare_parameter<double>("goal_fine_two_step_range_error_m",algorithm_defaults.goal.fine_two_step_range_error_m);
     declare_parameter<double>("goal_approach_short_z_m", algorithm_defaults.goal.approach_short_z_m);
     declare_parameter<double>("goal_camera_goal_start_z_m", algorithm_defaults.goal.camera_goal_start_z_m);
     declare_parameter<int>("mission_recovery_max_turns",algorithm_defaults.mission_recovery_max_turns);
@@ -413,16 +409,12 @@ public:
     mission_config.mission_recovery_max_turns=static_cast<int>(get_parameter("mission_recovery_max_turns").as_int());
     mission_config.test_ball_mission_index=static_cast<int>(get_parameter("test_ball_mission_index").as_int());
     mission_config.test_goal_mission_index=static_cast<int>(get_parameter("test_goal_mission_index").as_int());
-    mission_config.ball.down_one_step_v_px=get_parameter("ball_down_one_step_v_px").as_double();
-    mission_config.ball.fine_mode_v_px=get_parameter("ball_fine_mode_v_px").as_double();
     mission_config.ball.approach_short_v_px=get_parameter("ball_approach_short_v_px").as_double();
     mission_config.hurdle.down_one_step_v_px=get_parameter("hurdle_down_one_step_v_px").as_double();
     mission_config.hurdle.fine_mode_v_px=get_parameter("hurdle_fine_mode_v_px").as_double();
     mission_config.hurdle.approach_short_v_px=get_parameter("hurdle_approach_short_v_px").as_double();
     mission_config.hurdle.target_u_px=get_parameter("hurdle_target_u_px").as_double();
     mission_config.hurdle.contact_v_px=get_parameter("hurdle_contact_v_px").as_double();
-    mission_config.goal.fine_one_step_range_error_m=get_parameter("goal_fine_one_step_range_error_m").as_double();
-    mission_config.goal.fine_two_step_range_error_m=get_parameter("goal_fine_two_step_range_error_m").as_double();
     mission_config.goal.approach_short_z_m=get_parameter("goal_approach_short_z_m").as_double();
     mission_config.goal.camera_goal_start_z_m=get_parameter("goal_camera_goal_start_z_m").as_double();
 
@@ -906,10 +898,6 @@ private:
       else if (name == "fine_motion_settle_sec") target=&candidate.fine_motion_settle_sec;
       else if (name == "goal_edge_margin_px") target=&candidate.goal.edge_margin_px;
       else if (name == "ball_fine_side_two_step_margin_px") target=&candidate.ball.fine_side_two_step_margin_px;
-      else if (name == "goal_fine_one_step_range_error_m") target=&candidate.goal.fine_one_step_range_error_m;
-      else if (name == "goal_fine_two_step_range_error_m") target=&candidate.goal.fine_two_step_range_error_m;
-      else if (name == "ball_down_one_step_v_px") target=&candidate.ball.down_one_step_v_px;
-      else if (name == "ball_fine_mode_v_px") target=&candidate.ball.fine_mode_v_px;
       else if (name == "ball_approach_short_v_px") target = &candidate.ball.approach_short_v_px;
       else if (name == "hurdle_down_one_step_v_px") target=&candidate.hurdle.down_one_step_v_px;
       else if (name == "hurdle_fine_mode_v_px") target=&candidate.hurdle.fine_mode_v_px;
@@ -1476,7 +1464,7 @@ private:
       vision_core::MissionAction action) const {
     switch (action) {
     case vision_core::MissionAction::kLineStraightUnit:
-      return simulate_step_forward_one_duration_sec_;
+      return 2.0 * simulate_step_forward_one_duration_sec_;
     case vision_core::MissionAction::kLineLeftUnit:
     case vision_core::MissionAction::kLineRightUnit:
       return simulate_curve_step_duration_sec_ / 3.0;

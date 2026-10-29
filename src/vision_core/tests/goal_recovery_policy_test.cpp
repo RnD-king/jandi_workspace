@@ -38,10 +38,10 @@ struct Driver {
     Tick(board,pose,feedback);
   }
   static GoalMode Resume(int phase) {
-    return phase==0?GoalMode::kApproach:phase==1?GoalMode::kCoarseAdjust:GoalMode::kFineAdjust;
+    return phase==0?GoalMode::kApproach:GoalMode::kFineAdjust;
   }
   static GoalMode Stationary(int phase) {
-    return phase==0?GoalMode::kRecoverySearch:phase==1?GoalMode::kCoarseRecovery:GoalMode::kFineRecovery;
+    return phase==0?GoalMode::kRecoverySearch:GoalMode::kFineRecovery;
   }
   void BeginLoss(int phase,double u) {
     if(phase==2)core.StartTestExecute();
@@ -50,6 +50,13 @@ struct Driver {
     core.UseVerifiedObservation(Board(u),pose,std::deque<bool>(10,true),
         std::deque<bool>(10,true),640,480);
     Tick(Board(u),pose,{false,false,true},false);
+    if(phase==1) {
+      assert(out.mode==GoalMode::kWaitFinePose);
+      Tick(Board(u),pose); // issue the requested feet transition
+      Tick(Board(u),pose,{true,false,false});
+      core.UseVerifiedObservation(Board(u),pose,std::deque<bool>(10,true),std::deque<bool>(10,true),640,480);
+      Tick(Board(u),pose,{},false);
+    }
     assert(out.mode==Resume(phase));
     for(int i=1;i<=config.lost_frames;++i) {
       Tick({}, {},{},false);
@@ -60,7 +67,7 @@ struct Driver {
 void Center(int phase,bool found,double offset) {
   Driver d;d.BeginLoss(phase,320+offset);
   assert(d.out.mode==GoalMode::kRecoveryForwardStep);
-  const auto action=phase==2?MissionAction::kStepForwardHalf:MissionAction::kStepForwardOne;
+  const auto action=phase!=0?MissionAction::kStepForwardHalf:MissionAction::kStepForwardOne;
   d.Tick({}, {},{},false);assert(d.out.action.action==action);
   // An uncommitted preview cannot consume a stray DONE.
   d.Tick({}, {},{true,false,true},false);
@@ -87,10 +94,10 @@ void Center(int phase,bool found,double offset) {
 void ExtraTurn(int phase,bool left,bool found_after_extra) {
   Driver d;d.BeginLoss(phase,left?180:460);
   assert(d.out.mode==GoalMode::kRecoveryTurn);
-  const auto action=phase==2 ? (left?MissionAction::kTurnLeft:MissionAction::kTurnRight)
+  const auto action=phase!=0 ? (left?MissionAction::kTurnLeft:MissionAction::kTurnRight)
       : (left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle);
   d.Tick();assert(d.out.action.action==action);
-  assert(d.out.action.target_yaw_deg==(phase==2?15:0));
+  assert(d.out.action.target_yaw_deg==(phase!=0?15:0));
   const double opposite_u=left?460:180;
   for(int i=0;i<12;++i)d.Tick(Board(opposite_u),{true,0,1.5,0,1},{false,true,false});
   assert(d.out.mode==GoalMode::kRecoveryTurn && d.core.RecoveryTurnsCompleted()==0);
@@ -133,9 +140,14 @@ void UnknownAndImageOnly() {
     visible.core.UseVerifiedObservation(Board(320),pose,std::deque<bool>(10,true),
         std::deque<bool>(10,true),640,480);
     visible.Tick(Board(320),pose,{false,false,true},false);
+    if(phase==1) {
+      visible.Tick(Board(320),pose);
+      visible.Tick(Board(320),pose,{true,false,false});
+    }
     for(int i=0;i<c.lost_frames;++i)visible.Tick({}, {},{},false,true);
     assert(visible.out.mode==Driver::Stationary(phase));
-    assert(visible.out.action.action==MissionAction::kNone);
+    assert(visible.out.depth_recovery_active);
+    assert(visible.out.action.action==(phase!=0 ? MissionAction::kStepForwardHalf : MissionAction::kStepForwardOne));
   }
   // Reset removes direction and any pending motion/extra-turn state.
   Driver reset(c);reset.BeginLoss(0,180);reset.Tick();
@@ -144,6 +156,21 @@ void UnknownAndImageOnly() {
   reset.core.StartGoalTrial();reset.Tick();reset.Window(false,{false,false,true});
   assert(reset.out.mode==GoalMode::kRecoverySearch && reset.core.RecoveryTurnsCompleted()==0);
 }
+void StationaryReacquisitionResetsExhaustedTurns() {
+  Driver d;d.BeginLoss(0,180);d.Tick();
+  d.Tick({}, {},{true,false,false});d.Window(false,{false,false,true});
+  assert(d.out.mode==GoalMode::kRecoverySearch && d.core.RecoveryTurnsCompleted()==1);
+  d.Tick(Board(180),{true,0,1.5,0,1});
+  assert(d.core.RecoveryTurnsCompleted()==1); // A single sighting is not recovery.
+  for(int i=0;i<12 && d.out.mode==GoalMode::kRecoverySearch;++i)
+    d.Tick(Board(180),{true,0,1.5,0,1},{},false);
+  assert(d.out.mode==GoalMode::kSearch && d.core.RecoveryTurnsCompleted()==0);
+  d.Tick(Board(180),{true,0,1.5,0,1},{},false);
+  assert(d.out.mode==GoalMode::kApproach);
+  for(int i=0;i<d.config.lost_frames;++i)d.Tick({}, {},{},false);
+  // A fresh loss has the full turn allowance, not exhausted stationary-only search.
+  assert(d.out.mode==GoalMode::kRecoveryTurn && d.core.RecoveryTurnsCompleted()==0);
+}
 }
 int main() {
   for(int phase:{0,1,2}) {
@@ -151,4 +178,5 @@ int main() {
     for(bool left:{false,true})for(bool found:{false,true})ExtraTurn(phase,left,found);
   }
   UnknownAndImageOnly();
+  StationaryReacquisitionResetsExhaustedTurns();
 }

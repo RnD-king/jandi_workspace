@@ -149,6 +149,27 @@ void EntryExhaustionResumesLine() {
   }
   assert(walking && !out.has_ball);
 }
+
+void LockedHandoffUsesGeneralBudget(bool lost_at_handoff) {
+  const auto c=Configuration();Driver d(c);
+  if(lost_at_handoff)
+    d.core.EnterContinuousRecovery(Target(200),std::deque<bool>(10,true),640,480,d.now);
+  else {
+    d.core.EnterVerified(Target(200),std::deque<bool>(10,true),640,480,d.now,false);
+    d.core.UseVerifiedObservation({},std::deque<bool>(10,false),640,480);
+    d.Tick({}, {false,false,true},false);
+  }
+  assert(!d.core.EntryRecovery() && d.core.RecoveryStepLimit()==c.recovery_max_steps);
+  for(int n=1;n<=c.recovery_max_steps;++n) {
+    d.Tick();assert(d.out.action.action==MissionAction::kTurnLeftInPlace);
+    d.Tick({}, {true,false,false});d.Tick();
+    assert(d.out.action.action==MissionAction::kStepForwardOne);
+    d.Tick({}, {true,false,false});d.Observe();
+  }
+  assert(d.out.mode==BallMode::kBallRecoveryForward);
+  for(int i=0;i<30 && d.out.mode!=BallMode::kFailed;++i)d.Tick();
+  assert(d.out.mode==BallMode::kFailed && !d.core.EntryRecovery());
+}
 }
 int main() {
   for(bool entry:{false,true}) {
@@ -157,4 +178,5 @@ int main() {
     DisabledSearch(entry);
   }
   EntryExhaustionResumesLine();
+  LockedHandoffUsesGeneralBudget(false);LockedHandoffUsesGeneralBudget(true);
 }
