@@ -77,7 +77,7 @@ int main() {
   Check(id_view.image.at<cv::Vec3b>(320,140)==cv::Vec3b(0,165,255),
         "a displayed ID must have a center in its box color");
   for(const auto& entry:std::vector<std::pair<int,cv::Vec3b>>{
-      {0,{0,255,0}},{1,{0,165,255}},{2,{0,0,255}},{3,{0,0,255}},{4,{0,255,255}}}) {
+      {0,{0,255,0}},{1,{0,165,255}},{2,{255,0,128}},{3,{0,0,255}},{4,{0,255,255}}}) {
     auto colors=image.clone();vision_core::Detection detection{{20,300,40,40},1,entry.first};
     vision::DrawFilteredDebugDetection(colors,detection,c);
     Check(colors.at<cv::Vec3b>(300,20)==entry.second &&

@@ -187,10 +187,11 @@ inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
       static_cast<int>(std::lround(det.box.width)),static_cast<int>(std::lround(det.box.height)));
   const auto clipped=box & cv::Rect(0,0,vis.cols,vis.rows);
   if (clipped.empty()) return;
-  cv::Scalar color(0,0,255); // GOAL and BACKBOARD
+  cv::Scalar color(0,0,255); // BACKBOARD
   const bool is_line=det.class_id==config.line_detection.class_id;
   if (is_line) color=line_outlier ? cv::Scalar(255,0,255) : cv::Scalar(0,255,0);
   else if (det.class_id==config.object_targets.ball_class_id) color=cv::Scalar(0,165,255);
+  else if (det.class_id==config.object_targets.goal_class_id) color=cv::Scalar(255,0,128);
   else if (det.class_id==config.object_targets.hurdle_class_id) color=cv::Scalar(0,255,255);
   cv::rectangle(vis,clipped,color,2);
   // A center belongs to a displayed tracking ID, not filter acceptance alone.
