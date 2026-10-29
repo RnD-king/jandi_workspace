@@ -246,7 +246,11 @@ public:
     // 시작 자세 완료 후 기본 FORWARD 목표를 유지한다. 외부 카메라 명령/상태 ID는 만들지 않는다.
     // 실제 전송은 MainNode의 단일 writer가 수행하고, 이후 DOWN/GOAL 명령은 이 자세를 변경할 수 있다.
     void HoldForward() {
-        start_ = target_ = current_ = config_.forward;
+        HoldPose(config_.forward);
+    }
+    // Adopt an already transmitted head pose, without a new camera command.
+    void HoldPose(CameraPose pose) {
+        start_ = target_ = current_ = pose;
         step_ = steps_ = 0;
         active_ = settling_ = false;
         override_enabled_ = true;

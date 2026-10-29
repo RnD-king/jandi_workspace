@@ -4,6 +4,7 @@
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "p2p_motion_player.hpp"
 #include "motion_executor_state.hpp"
+#include "shoot_tuning_pose.hpp"
 #include "vision/msg/action_command.hpp"
 #include "vision/msg/camera_command.hpp"
 #include "vision/msg/command_status.hpp"
@@ -200,20 +201,49 @@ int main() {
             "/jandi_vision/shoot_tuning_pose",10);
         pump([&]{return pose_pub->get_subscription_count()>0;});
         vision::msg::ShootTuningPose timed_pose;
-        timed_pose.action_id=8800;timed_pose.duration_sec=1.0;
+        timed_pose.action_id=8800;timed_pose.duration_sec=2.0;
         const auto timed_packets=Dxl::packets.size();
+        const auto pose_start=Dxl::current;
+        const auto pose_target=motion_executor::ShootTuningPoseTargets();
         pose_pub->publish(timed_pose);
         pump([&]{return Count(actions,8800,Status::ACK)>0;});
+        Check(node->shoot_pose_in_progress_ && !node->arm_transition_in_progress_,
+              "fixed shooting pose entered the ordinary arm transition");
         pose_pub->publish(timed_pose);
-        pump([&]{return Count(actions,8800,Status::DONE)>0;});flush();
-        Check(Dxl::packets.size()-timed_packets>=50 && Dxl::packets.size()-timed_packets<65,
-              "timed pose did not execute its 50 steps once with the requested duration");
-        const auto ordinary_packets=Dxl::packets.size();
+        camera(8802,2);action(8803,11);
+        pump([&]{return Count(actions,8800,Status::DONE)>0;},5.0);flush();
+        Check(Dxl::packets.size()-timed_packets==100,
+              "fixed pose did not execute exactly one 2-second interpolation");
+        Check(Dxl::packets[timed_packets].at(22)!=pose_target.at(22),
+              "fixed pose snapped the head directly to GOAL without interpolation");
+        Check(Dxl::current==pose_target,"fixed pose lost literal leg/arm/gripper/GOAL head targets");
+        Check(Count(actions,8800,Status::ACK)==2 && Count(actions,8800,Status::READY)==0 && Count(actions,8800,Status::DONE)==1 &&
+              Count(cameras,8802,Status::ACK)==0 && Count(actions,8803,Status::ACK)==0,
+              "fixed pose queued another action or accepted a conflicting camera command");
+        for(std::size_t i=timed_packets;i<Dxl::packets.size();++i)
+            for(int motor:Dxl::MotorIds()) {
+                const auto previous=i==timed_packets?pose_start.at(motor):Dxl::packets[i-1].at(motor);
+                const auto current=Dxl::packets[i].at(motor);
+                Check(current>=std::min(previous,pose_target.at(motor)) &&
+                      current<=std::max(previous,pose_target.at(motor)),
+                      "fixed pose replayed an intermediate walking pose or jumped back to the held camera pose");
+            }
+        const auto finished_packets=Dxl::packets.size();
+        pose_pub->publish(timed_pose);
+        pump([&]{return Count(actions,8800,Status::DONE)==2;});flush();
+        Check(Dxl::packets.size()==finished_packets,"completed fixed pose replayed on a duplicate ID");
         action(8801,vision::msg::ActionCommand::DEFAULT_POSE_MODE,3);
+        Check(node->arm_transition_in_progress_,"ordinary action did not re-evaluate arms after fixed pose");
+        pump([&]{return !node->arm_transition_in_progress_;});
+        const auto ordinary_packets=Dxl::packets.size();
         pump([&]{return node->action_transactions_.completed.Contains(8801);});flush();
         Check(Dxl::packets.size()-ordinary_packets==20,
               "ordinary DEFAULT_POSE_MODE inherited the bench timing override");
-        std::cout<<"PASS scoped shoot tuning timing, idempotent feedback and unchanged normal pose timing\n";
+        Check(Dxl::current.at(0)==2248 && Dxl::current.at(15)==1379 &&
+              Dxl::current.at(16)==2765 && Dxl::current.at(19)==1968 &&
+              Dxl::current.at(21)==2054 && Dxl::current.at(22)==966,
+              "ordinary action lost JSON/arm/gripper behavior or overwrote the fixed GOAL camera hold");
+        std::cout<<"PASS fixed full-body shoot pose, one interpolation, duplicate/busy handling and persistent GOAL hold\n";
 
         for(uint16_t code=1;code<=34;++code) {
             const bool excluded=code==14||code==15||code==16||code==17||code==29||code==30;

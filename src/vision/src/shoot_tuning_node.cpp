@@ -7,7 +7,6 @@
 #include <cv_bridge/cv_bridge.h>
 #include "vision/msg/action_command.hpp"
 #include "vision/msg/command_status.hpp"
-#include "vision/msg/camera_command.hpp"
 #include "vision/msg/shoot_tuning_pose.hpp"
 #include "vision/yolo_trt_engine.hpp"
 #include "vision/object_depth.hpp"
@@ -173,8 +172,6 @@ public:
     const auto cmd_topic=ReadOnly<std::string>("action_cmd_topic","/jandi_vision/action_cmd");
     const auto status_topic=ReadOnly<std::string>("action_status_topic","/jandi_vision/action_status");
     const auto pose_topic=ReadOnly<std::string>("shoot_pose_cmd_topic","/jandi_vision/shoot_tuning_pose");
-    const auto camera_topic=ReadOnly<std::string>("camera_cmd_topic","/jandi_vision/camera_cmd");
-    const auto camera_status_topic=ReadOnly<std::string>("camera_status_topic","/jandi_vision/camera_status");
     max_depth_age_=ReadOnly<double>("max_depth_age_sec",.20);
     max_frame_age_=ReadOnly<double>("max_frame_age_sec",.50);
     const double hz=ReadOnly<double>("inference_hz",15.0);
@@ -195,10 +192,8 @@ public:
         std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::system_clock::now().time_since_epoch()).count());
     transport_=std::make_unique<vision_core::ControlCommandCoordinator>(command_config);
-    next_camera_id_=command_config.first_action_id;
     action_pub_=create_publisher<msg::ActionCommand>(cmd_topic,10);
     pose_pub_=create_publisher<msg::ShootTuningPose>(pose_topic,10);
-    camera_pub_=create_publisher<msg::CameraCommand>(camera_topic,10);
     image_sub_=create_subscription<sensor_msgs::msg::Image>(image_topic,
         rclcpp::SensorDataQoS().keep_last(1),[this](sensor_msgs::msg::Image::SharedPtr image) {
           latest_image_=image; latest_received_=Clock::now();
@@ -226,8 +221,6 @@ public:
         });
     status_sub_=create_subscription<msg::CommandStatus>(status_topic,10,
         [this](msg::CommandStatus::SharedPtr status) { OnStatus(*status); });
-    camera_status_sub_=create_subscription<msg::CommandStatus>(camera_status_topic,10,
-        [this](msg::CommandStatus::SharedPtr status) { OnCameraStatus(*status); });
     parameter_callback_=add_on_set_parameters_callback([this](const auto& parameters) {
       rcl_interfaces::msg::SetParametersResult result;
       result.successful=false;
@@ -270,12 +263,14 @@ public:
     frame_timer_=create_wall_timer(std::chrono::duration<double>(1.0/hz),
         [this]() { ProcessLatestImage(); });
     transport_timer_=create_wall_timer(std::chrono::milliseconds(100),[this]() {
+      PollStartupPose();
       if (transport_->HasPendingAction() && !ReleaseUnavailableRequest()) AdvanceTransport({});
-      PollCamera();
       UpdateUi();
     });
+    startup_pose_wait_started_=Clock::now();
+    status_text_->setText("시작 기본자세 준비 — 모션 수신 노드 연결 대기");
     window_->show();
-    RCLCPP_INFO(get_logger(),"Shoot bench ready; no action is sent until a button is pressed");
+    RCLCPP_INFO(get_logger(),"Shoot bench ready; requesting the fixed shooting pose once after executor discovery");
   }
 
 private:
@@ -546,7 +541,6 @@ private:
   }
 
   QString MeasurementError() {
-    if (pending_camera_id_!=0) return "카메라 정면 복귀 완료를 기다려 주세요.";
     if (!live_.valid) return "계산 가능한 카메라 프레임이 없습니다.";
     const double capture=StampSeconds(live_.header);
     const double age=get_clock()->now().seconds()-capture;
@@ -661,6 +655,8 @@ private:
     UpdateUi();
   }
   void SendAction(const vision_core::ActionRequest& request) {
+    // An explicit motion button supersedes any still-pending startup request.
+    startup_pose_pending_=false;
     if (MotionBusy()) return;
     const bool preparing=request.action==MissionAction::kDefaultPoseMode;
     if ((preparing ? pose_pub_->get_subscription_count() : action_pub_->get_subscription_count())==0) {
@@ -670,7 +666,6 @@ private:
     // READY never queues another command. Unavailable requests are discarded
     // locally without reporting a physical completion or sending STOP.
     current_action_=request.action;
-    prepare_camera_after_done_=preparing;
     active_prepare_duration_sec_=prepare_duration_sec_;
     AdvanceTransport({},request);
     UpdateUi();
@@ -688,13 +683,10 @@ private:
       last_done_sec_=get_clock()->now().seconds();
       // Never reuse an in-motion frame for the next automatic calculation.
       live_.valid=false;
-      if (prepare_camera_after_done_) {
-        prepare_camera_after_done_=false;
-        BeginForwardCamera();
-      } else {
-        status_text_->setText(QString("%1 완료 (DONE %2) — 다음 버튼 대기")
-            .arg(DebugActionName(current_action_)).arg(static_cast<qulonglong>(last_done_id_)));
-      }
+      status_text_->setText(QString("%1 완료 (DONE %2) — 다음 버튼 대기")
+          .arg(current_action_==MissionAction::kDefaultPoseMode
+              ? "슈팅 기본자세 (카메라 GOAL 포함)" : DebugActionName(current_action_))
+          .arg(static_cast<qulonglong>(last_done_id_)));
     }
     UpdateUi();
   }
@@ -734,49 +726,25 @@ private:
         : "모션 ACK 응답이 없어 동작 요청 대기를 해제했습니다.";
     status_text_->setText(QString("알림: %1 계산·좌표 표시는 계속 사용할 수 있습니다.").arg(notice));
     current_action_=MissionAction::kNone;
-    prepare_camera_after_done_=false;
     UpdateUi();
     return true;
   }
 
-  bool MotionBusy() const { return transport_->HasPendingAction() || pending_camera_id_!=0; }
-  void BeginForwardCamera() {
-    if (camera_pub_->get_subscription_count()==0) {
-      status_text_->setText("알림: 몸 기본자세 완료. 카메라 수신 노드가 없어 정면 복귀 요청을 건너뛰었습니다.");
+  bool MotionBusy() const { return transport_->HasPendingAction(); }
+  void PollStartupPose() {
+    if (!startup_pose_pending_) return;
+    // Allow DDS discovery and forward_walk's startup pose to finish first.
+    // Once attempted or skipped, a later connection never triggers this again.
+    if (pose_pub_->get_subscription_count()>0) {
+      SendAction({MissionAction::kDefaultPoseMode,ActionCategory::kMission,0,false});
       return;
     }
-    pending_camera_id_=next_camera_id_++;
-    if (next_camera_id_==0) next_camera_id_=1;
-    camera_acknowledged_=false;
-    camera_requested_at_=Clock::now();
-    PollCamera();
-  }
-  void PollCamera() {
-    if (pending_camera_id_==0) return;
-    const double elapsed=std::chrono::duration<double>(Clock::now()-camera_requested_at_).count();
-    if (camera_pub_->get_subscription_count()==0 || (!camera_acknowledged_ &&
-        config_.command.action_ack_timeout_sec>0 && elapsed>=config_.command.action_ack_timeout_sec)) {
-      pending_camera_id_=0;
-      status_text_->setText("알림: 카메라 연결/ACK 응답이 없어 정면 복귀 대기를 해제했습니다. 계산·좌표 표시는 계속 사용할 수 있습니다.");
-      return;
+    const double wait=config_.command.action_ack_timeout_sec>0
+        ? config_.command.action_ack_timeout_sec : 10.0;
+    if (std::chrono::duration<double>(Clock::now()-startup_pose_wait_started_).count()>=wait) {
+      startup_pose_pending_=false;
+      status_text_->setText("알림: 모션 수신 노드가 없어 시작 기본자세를 건너뛰었습니다. 계산·좌표 표시는 계속 사용할 수 있습니다.");
     }
-    if (!camera_acknowledged_) {
-      msg::CameraCommand command;
-      command.command_id=pending_camera_id_; command.request=msg::CameraCommand::FORWARD;
-      camera_pub_->publish(command);
-    }
-    status_text_->setText(camera_acknowledged_ ? "몸 기본자세 완료 — 카메라 정면 복귀 DONE 대기"
-                                              : "몸 기본자세 완료 — 카메라 정면 복귀 ACK 대기");
-  }
-  void OnCameraStatus(const msg::CommandStatus& status) {
-    if (pending_camera_id_==0 || status.command_id!=pending_camera_id_) return;
-    if (status.status==msg::CommandStatus::ACK) camera_acknowledged_=true;
-    if (status.status==msg::CommandStatus::DONE) {
-      pending_camera_id_=0;
-      last_done_sec_=get_clock()->now().seconds(); live_.valid=false;
-      status_text_->setText("기본자세 및 카메라 정면 복귀 완료 — 다음 버튼 대기");
-    }
-    UpdateUi();
   }
 
   vision_core::MissionControllerConfig config_;
@@ -804,12 +772,9 @@ private:
   sensor_msgs::msg::Image::SharedPtr latest_image_,latest_depth_,processed_image_;
   rclcpp::Publisher<msg::ActionCommand>::SharedPtr action_pub_;
   rclcpp::Publisher<msg::ShootTuningPose>::SharedPtr pose_pub_;
-  rclcpp::Publisher<msg::CameraCommand>::SharedPtr camera_pub_;
-  rclcpp::Subscription<msg::CommandStatus>::SharedPtr camera_status_sub_;
   double prepare_duration_sec_{},active_prepare_duration_sec_{};
-  bool prepare_camera_after_done_{false},camera_acknowledged_{false};
-  std::uint64_t next_camera_id_{1},pending_camera_id_{0};
-  Clock::time_point camera_requested_at_;
+  bool startup_pose_pending_{true};
+  Clock::time_point startup_pose_wait_started_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_,depth_sub_;
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr info_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr imu_sub_;

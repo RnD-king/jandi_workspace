@@ -322,21 +322,21 @@ P2PMotionPlayer::PreparedProgram P2PMotionPlayer::PreparePoseTransition(
     const RawPositions& held_pose, const RawPositions& targets, double duration_sec)
 {
     if (!std::isfinite(duration_sec) || duration_sec<=0 || duration_sec>60)
-        throw std::invalid_argument("invalid arm transition duration");
-    Keyframe frame; frame.name="mission_arm_transition";
+        throw std::invalid_argument("invalid pose transition duration");
+    Keyframe frame; frame.name="pose_transition";
     frame.positions=held_pose; frame.duration_sec=duration_sec;
     frame.max_speed_deg_s=60.0; frame.interpolation=Interpolation::kSmoothStep;
     for (int id:Dxl::MotorIds()) {
         const auto it=held_pose.find(id);
         if (it==held_pose.end() || it->second<0 || it->second>4095)
-            throw std::invalid_argument("invalid held pose for arm transition");
+            throw std::invalid_argument("invalid held pose for pose transition");
     }
     for (const auto& target:targets) {
         if (!held_pose.count(target.first) || target.second<0 || target.second>4095)
-            throw std::invalid_argument("invalid arm transition target");
+            throw std::invalid_argument("invalid pose transition target");
         frame.positions.at(target.first)=target.second;
     }
-    Motion motion; motion.name="mission_arm_transition"; motion.keyframes.push_back(std::move(frame));
+    Motion motion; motion.name="pose_transition"; motion.keyframes.push_back(std::move(frame));
     PreparedProgram program; program.motions.push_back(std::move(motion)); return program;
 }
 

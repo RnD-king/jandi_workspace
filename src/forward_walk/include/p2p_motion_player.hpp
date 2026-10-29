@@ -34,7 +34,7 @@ public:
         bool final_keyframe_only{false};
         std::optional<double> duration_override_sec;
         // Scale movement segments proportionally; preserve intermediate poses,
-        // holds and speed limits. Used by the shooting bench's pose request.
+        // holds and speed limits.
         std::optional<double> total_duration_override_sec;
         // 선택된 명령에만 적용할 절대 목표 tick. 원본 JSON 대신 준비 데이터의 키프레임을 수정한다.
         // 첫 목표까지 기존 P2P 보간으로 이동하므로 전송 직전 갑자기 값을 덮어쓰지 않는다.
@@ -54,7 +54,7 @@ public:
     PreparedProgram PrepareProgram(const std::string& json_path,
                                    const std::string& motion_directory,
                                    const StartOptions& options) const;
-    // 현재 전체 목표를 유지하며 지정 관절만 전환하는 메모리 내 P2P 모션을 준비한다.
+    // 현재 전체 목표를 유지하며 지정 관절(또는 모든 관절)을 전환하는 메모리 내 P2P 모션을 준비한다.
     static int32_t FinalMotorTick(const std::string& json_path, int motor_id);
     static PreparedProgram PreparePoseTransition(const RawPositions& held_pose,
                                                 const RawPositions& targets, double duration_sec);

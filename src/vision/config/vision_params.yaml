@@ -89,7 +89,7 @@ goal_tuning_node:
     rosbag: false
     rosbag_fps: 10.0
 
-# 슛 단발 시험: 명령은 UI 버튼을 누를 때만 전송한다.
+# 슛 단발 시험: 실행 시 고정 기본자세를 한 번 요청하고 이후 UI 버튼으로 동작한다.
 # 알고리즘 기본값은 vision_core/config/vision_algorithm.yaml에서 읽는다.
 shoot_tuning_node:
   ros__parameters:
@@ -100,8 +100,6 @@ shoot_tuning_node:
     action_cmd_topic: "/jandi_vision/action_cmd"
     action_status_topic: "/jandi_vision/action_status"
     shoot_pose_cmd_topic: "/jandi_vision/shoot_tuning_pose"
-    camera_cmd_topic: "/jandi_vision/camera_cmd"
-    camera_status_topic: "/jandi_vision/camera_status"
     shoot_prepare_duration_sec: 2.0
     inference_hz: 15.0
     max_depth_age_sec: 0.20

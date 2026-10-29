@@ -4,6 +4,7 @@
 #include "dynamixel.hpp"
 #include "p2p_motion_player.hpp"
 #include "motion_executor_state.hpp"
+#include "shoot_tuning_pose.hpp"
 #include "vision_core/config_loader.hpp"
 #include "vision/msg/action_command.hpp"
 #include "vision/msg/camera_command.hpp"
@@ -235,17 +236,7 @@ private:
                       std::placeholders::_1));
         shoot_pose_sub_=create_subscription<vision::msg::ShootTuningPose>(
             "/jandi_vision/shoot_tuning_pose",10,
-            [this](vision::msg::ShootTuningPose::SharedPtr request) {
-                if (!std::isfinite(request->duration_sec) || request->duration_sec<0.2 || request->duration_sec>60) {
-                    RCLCPP_WARN(get_logger(),"Shoot tuning pose rejected: duration must be in [0.2,60] seconds");
-                    return;
-                }
-                auto command=std::make_shared<vision::msg::ActionCommand>();
-                command->action_id=request->action_id;
-                command->mission=vision::msg::ActionCommand::MISSION_GOAL;
-                command->action=vision::msg::ActionCommand::DEFAULT_POSE_MODE;
-                HandleActionCommand(command,request->duration_sec);
-            });
+            std::bind(&MainNode::ShootTuningPoseCallback,this,std::placeholders::_1));
         RCLCPP_INFO(
             get_logger(),
             "Startup WALK_MODE pose reached and held; ready for command topics");
@@ -510,12 +501,6 @@ private:
     void ActionCommandCallback(
         const vision::msg::ActionCommand::SharedPtr message)
     {
-        HandleActionCommand(message,std::nullopt);
-    }
-
-    void HandleActionCommand(const vision::msg::ActionCommand::SharedPtr message,
-                             std::optional<double> shoot_pose_duration)
-    {
         RCLCPP_INFO(get_logger(),
                     "Action received: id=%llu mission=%u action=%u target_yaw_deg=%d",
                     static_cast<unsigned long long>(message->action_id),
@@ -556,7 +541,6 @@ private:
         int effective_target_yaw_deg = 0;
         bool zero_turn=false;
         P2PMotionPlayer::StartOptions start_options;  // 반복, 관절 offset, 뒤에 붙일 모션 등의 옵션
-        if (shoot_pose_duration) start_options.total_duration_override_sec=*shoot_pose_duration;
         if (IsTurnAction(message->action)) {
             // 회전 방향은 TURN_LEFT/TURN_RIGHT action으로만 정한다.
             // Vision이 전달한 양수 회전량은 별도 부호 변환 없이 그대로 사용한다.
@@ -686,6 +670,56 @@ private:
         EnsureMotionLoop();
     }
 
+    // Fixed full-body shooting pose: one interpolation, no JSON or action-level
+    // arm/gripper overrides. It shares the normal action ID/ACK/DONE history.
+    void ShootTuningPoseCallback(const vision::msg::ShootTuningPose::SharedPtr request)
+    {
+        if (!std::isfinite(request->duration_sec) || request->duration_sec<0.2 || request->duration_sec>60) {
+            RCLCPP_WARN(get_logger(),"Shoot tuning pose rejected: duration must be in [0.2,60] seconds");
+            return;
+        }
+        using Command=vision::msg::ActionCommand;
+        using motion_executor::Admission;
+        const auto admission=action_transactions_.Evaluate(
+            request->action_id,Command::MISSION_GOAL,Command::DEFAULT_POSE_MODE);
+        if (admission==Admission::ActiveDuplicate || admission==Admission::QueuedDuplicate) {
+            if (admission==Admission::QueuedDuplicate && !queued_action_acknowledged_) return;
+            PublishActionStatus(request->action_id,vision::msg::CommandStatus::ACK);
+            return;
+        }
+        if (admission==Admission::CompletedDuplicate) {
+            PublishActionStatus(request->action_id,vision::msg::CommandStatus::DONE);
+            return;
+        }
+        // The bench never queues this full-body/head pose behind locomotion.
+        if (admission!=Admission::Start || startup_pose_in_progress_ || camera_motion_->Active()) {
+            RCLCPP_WARN(get_logger(),"Shoot tuning pose rejected: executor busy (id=%llu)",
+                        static_cast<unsigned long long>(request->action_id));
+            return;
+        }
+        try {
+            const auto initial=dxl_->GetRawPositions();
+            const auto program=P2PMotionPlayer::PreparePoseTransition(
+                initial,motion_executor::ShootTuningPoseTargets(),request->duration_sec);
+            if (!p2p_player_->StartPrepared(program,initial,std::chrono::steady_clock::now())) {
+                RCLCPP_ERROR(get_logger(),"Shoot tuning pose start failed, no ACK: %s",p2p_player_->Error().c_str());
+                return;
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(get_logger(),"Shoot tuning pose preparation failed, no ACK: %s",e.what());
+            return;
+        }
+        action_transactions_.Activate(request->action_id,Command::MISSION_GOAL,Command::DEFAULT_POSE_MODE);
+        current_action_=Command::DEFAULT_POSE_MODE;
+        active_target_yaw_deg_=0;
+        shoot_pose_in_progress_=true;
+        motion_in_progress_=true;
+        RCLCPP_INFO(get_logger(),"[SHOOT POSE] ACK id=%llu duration=%.2fs head=(2054,966)",
+                    static_cast<unsigned long long>(request->action_id),request->duration_sec);
+        PublishActionStatus(request->action_id,vision::msg::CommandStatus::ACK);
+        EnsureMotionLoop();
+    }
+
     // 몸 동작과 별도인 카메라 command_id에 ACK/DONE을 대응시켜 전송한다.
     void PublishCameraStatus(std::uint64_t id, std::uint8_t status)
     {
@@ -714,7 +748,7 @@ private:
             PublishCameraStatus(message->command_id, vision::msg::CommandStatus::DONE);
             return;
         }
-        if (admission != Admission::Start) {
+        if (admission != Admission::Start || shoot_pose_in_progress_) {
             RCLCPP_WARN(get_logger(), "Camera command rejected (zero ID or busy): id=%llu",
                         static_cast<unsigned long long>(message->command_id));
             return;
@@ -770,6 +804,7 @@ private:
         arm_pose_uncertain_=true; // 팔 전환 중단 후 다음 명령에서 출발점을 다시 읽고 재전환한다.
         camera_transactions_.active_id = 0;
         startup_pose_in_progress_ = false;
+        shoot_pose_in_progress_ = false;
         motion_in_progress_ = false;
         current_action_ = 0;
         active_target_yaw_deg_ = 0;
@@ -853,7 +888,7 @@ private:
             try {
                 // 시작 시 FORWARD 또는 이후 카메라 명령의 yaw/pitch 목표를 덮어쓴다.
                 // 카메라 DONE 뒤에도 그 자세를 유지한다.
-                camera_motion_->Merge(command);
+                if (!shoot_pose_in_progress_) camera_motion_->Merge(command);
                 // write_started/written_at: SDK 전송 호출의 시작/반환 시각. 실제 관절 도착 시각은 아니다.
                 const auto write_started = std::chrono::steady_clock::now();
                 // 몸과 카메라 Goal Position을 쓰는 단일 전송 지점.
@@ -926,6 +961,14 @@ private:
                         return; // 팔 전환 완료는 Action DONE이 아니다. 원래 action이 끝나야 DONE을 보낸다.
                     }
                     // 0도 회전 요청은 팔 전환만 마친 뒤 정상 DONE 처리한다.
+                }
+                if (shoot_pose_in_progress_) {
+                    shoot_pose_in_progress_=false;
+                    // Keep the head ticks reached by the combined interpolation;
+                    // later body JSON must not restore the previous FORWARD hold.
+                    camera_motion_->HoldPose({last_sent_positions_.at(camera_config_.yaw_id),
+                                              last_sent_positions_.at(camera_config_.pitch_id)});
+                    arm_pose_uncertain_=true;
                 }
                 const auto completed_id = action_transactions_.active_id;  // 방금 끝난 몸 명령의 ID
                 // A의 DONE을 먼저 보낸 뒤, 이미 ACK한 대기 동작 B를 활성 동작으로 올린다.
@@ -1065,6 +1108,7 @@ private:
     double startup_pose_duration_sec_{3.0};           // 시작 자세 이동 시간(초)
     bool startup_pose_in_progress_{false};            // 명령 구독을 열기 전 시작 자세를 재생 중인지
     bool motion_in_progress_{false};                  // Vision에서 받은 몸 모션을 실행 중인지(시작 자세와 구분)
+    bool shoot_pose_in_progress_{false};              // 고정 슈팅 자세가 머리까지 함께 보간하는 동안 카메라 덮어쓰기 금지
     // READY 뒤 미리 ACK한 다음 몸 동작 한 개. 모터를 아직 움직이지 않고 준비 데이터를 보관한다.
     struct QueuedAction {
         std::uint64_t id;                             // 원래 ActionCommand.action_id: ACK/DONE 대응용
