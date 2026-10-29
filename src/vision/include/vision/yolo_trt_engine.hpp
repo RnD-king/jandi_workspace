@@ -35,6 +35,7 @@ public:
   // detections: 출력 벡터 (함수 내부에서 clear 후 채움)
   // 반환: 성공 여부
   bool Infer(const cv::Mat &img, std::vector<Detection> &detections);
+  void SetConfidenceThreshold(float threshold);
 
 private:
   bool LoadEngine(const std::string &engine_path);

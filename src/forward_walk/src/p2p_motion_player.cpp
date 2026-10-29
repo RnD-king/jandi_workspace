@@ -261,6 +261,18 @@ void P2PMotionPlayer::ApplyStartOptions(
             }
         }
     }
+    if (options.total_duration_override_sec) {
+        const double duration=*options.total_duration_override_sec;
+        if (!std::isfinite(duration) || duration<=0 || duration>60)
+            throw std::runtime_error("total_duration_override_sec must be in (0,60]");
+        double original=0;
+        for (const auto& motion:motions_)
+            for (const auto& frame:motion.keyframes) original+=frame.duration_sec;
+        if (!std::isfinite(original) || original<=0)
+            throw std::runtime_error("cannot scale an empty/invalid motion duration");
+        for (auto& motion:motions_)
+            for (auto& frame:motion.keyframes) frame.duration_sec*=duration/original;
+    }
     if (motions_.empty()) {
         throw std::runtime_error("program contains no motions after options");
     }

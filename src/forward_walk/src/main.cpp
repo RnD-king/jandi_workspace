@@ -8,6 +8,7 @@
 #include "vision/msg/action_command.hpp"
 #include "vision/msg/camera_command.hpp"
 #include "vision/msg/command_status.hpp"
+#include "vision/msg/shoot_tuning_pose.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -232,6 +233,19 @@ private:
             "/jandi_vision/camera_cmd", 10,
             std::bind(&MainNode::CameraCommandCallback, this,
                       std::placeholders::_1));
+        shoot_pose_sub_=create_subscription<vision::msg::ShootTuningPose>(
+            "/jandi_vision/shoot_tuning_pose",10,
+            [this](vision::msg::ShootTuningPose::SharedPtr request) {
+                if (!std::isfinite(request->duration_sec) || request->duration_sec<0.2 || request->duration_sec>60) {
+                    RCLCPP_WARN(get_logger(),"Shoot tuning pose rejected: duration must be in [0.2,60] seconds");
+                    return;
+                }
+                auto command=std::make_shared<vision::msg::ActionCommand>();
+                command->action_id=request->action_id;
+                command->mission=vision::msg::ActionCommand::MISSION_GOAL;
+                command->action=vision::msg::ActionCommand::DEFAULT_POSE_MODE;
+                HandleActionCommand(command,request->duration_sec);
+            });
         RCLCPP_INFO(
             get_logger(),
             "Startup WALK_MODE pose reached and held; ready for command topics");
@@ -496,6 +510,12 @@ private:
     void ActionCommandCallback(
         const vision::msg::ActionCommand::SharedPtr message)
     {
+        HandleActionCommand(message,std::nullopt);
+    }
+
+    void HandleActionCommand(const vision::msg::ActionCommand::SharedPtr message,
+                             std::optional<double> shoot_pose_duration)
+    {
         RCLCPP_INFO(get_logger(),
                     "Action received: id=%llu mission=%u action=%u target_yaw_deg=%d",
                     static_cast<unsigned long long>(message->action_id),
@@ -536,6 +556,7 @@ private:
         int effective_target_yaw_deg = 0;
         bool zero_turn=false;
         P2PMotionPlayer::StartOptions start_options;  // 반복, 관절 offset, 뒤에 붙일 모션 등의 옵션
+        if (shoot_pose_duration) start_options.total_duration_override_sec=*shoot_pose_duration;
         if (IsTurnAction(message->action)) {
             // 회전 방향은 TURN_LEFT/TURN_RIGHT action으로만 정한다.
             // Vision이 전달한 양수 회전량은 별도 부호 변환 없이 그대로 사용한다.
@@ -1021,6 +1042,7 @@ private:
     rclcpp::Publisher<vision::msg::CommandStatus>::SharedPtr action_status_pub_;  // 몸 ACK/READY/DONE 송신
     rclcpp::Publisher<vision::msg::CommandStatus>::SharedPtr camera_status_pub_;  // 카메라 ACK/DONE 송신
     rclcpp::Subscription<vision::msg::ActionCommand>::SharedPtr action_cmd_sub_; // 몸 명령 수신 연결
+    rclcpp::Subscription<vision::msg::ShootTuningPose>::SharedPtr shoot_pose_sub_;
     rclcpp::Subscription<vision::msg::CameraCommand>::SharedPtr camera_cmd_sub_; // 카메라 명령 수신 연결
     rclcpp::TimerBase::SharedPtr motion_loop_timer_;   // 1 ms마다 MotionLoop를 호출하는 ROS 타이머
     std::chrono::steady_clock::time_point last_motion_tick_at_{}; // 직전 유효 콜백 시각: 지연 경고 계산용

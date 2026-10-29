@@ -4,7 +4,7 @@
 실행 시 Qt 창 하나에 기존 `line_perception_node`와 같은
 `RenderMissionDebug` 영상, 버튼, 파라미터 조절 영역이 열린다.
 영상 탭에는 실시간 디버그, 마지막 계산 프레임, 기존 상태 디버그가 있다.
-자동 미션을 시작하거나 카메라 자세를 명령하지 않는다.
+자동 미션은 시작하지 않는다. 기본자세 버튼은 몸 복귀가 끝난 뒤 카메라 정면 복귀를 요청한다.
 
 ## 빌드
 
@@ -21,7 +21,7 @@ cmake --install /home/noh/vision_core/build_shoot
 source /opt/ros/humble/setup.bash
 cd /home/noh/my_cv
 CMAKE_PREFIX_PATH=/home/noh/vision_core/install${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH} \
-  colcon build --packages-select vision --symlink-install --cmake-clean-cache
+  colcon build --packages-select vision forward_walk --symlink-install --cmake-clean-cache
 ```
 
 ## 실행
@@ -57,7 +57,7 @@ ros2 run vision shoot_tuning_node --ros-args \
 | --- | --- |
 | 계산하기 | 누른 순간 화면에 표시 중인 최신 처리 프레임의 골대 중심을 계산 결과로 저장한다. 명령은 전송하지 않는다. |
 | 슛 | 인식 결과와 무관하게 `SHOOT(17)`, 허리 각도 `0°`를 전송한다. |
-| 기본자세 | `DEFAULT_POSE_MODE(2)`를 전송한다. 현재 executor 매핑은 `motions/미세보행_초기자세가기_수정1.json`이다. |
+| 기본자세 | 전용 요청으로 `DEFAULT_POSE_MODE(2)`를 지정 시간에 실행하고, 실제 몸 DONE 뒤 카메라 `FORWARD`를 요청한다. |
 | 계산된 값에서 슛 | 저장된 골대 중심 좌표와 현재 슛 파라미터로 다음 한 동작을 판단하여 전송한다. 새 영상을 계산하지 않는다. |
 | 클릭 결과를 계산 결과로 사용 | 마지막으로 클릭해서 표시한 골대 중심을 계산 결과로 저장한다. 영상이 바뀌어도 클릭한 프레임의 좌표를 사용한다. |
 | 입력 좌표를 계산 결과로 사용 | 직접 입력한 골대 중심의 탑뷰 `(X,Y)`를 계산 결과로 저장한다. 카메라 인식 결과는 필요하지 않다. |
@@ -72,6 +72,20 @@ X는 유한한 수, Y는 양수여야 한다. 림 반지름을 중복해서 빼�
 
 처음에는 **기본자세**로 미세보행 준비 자세를 잡는다. 슛 뒤 다시 준비할 때도
 이 버튼을 사용한다. 임의 관절 위치를 저장했다 복원하는 기능은 아니다.
+
+기본자세의 **이동 구간 합계**는 이 노드의 `shoot_prepare_duration_sec`로 조절하며
+기본값은 2초, 범위는 0.2~60초이다. 오른쪽 UI와 rqt에서 수정할 수 있다.
+기존 미세보행 초기자세 JSON의 중간 자세와 구간별 시간 비율을 유지하면서
+이 요청에만 시간을 적용한다. 공용 JSON과 다른 노드의 일반 기본자세 명령은 바꾸지 않는다.
+관절 속도 제한, 기존 팔 전환, 홀드 및 이후 카메라 이동 시간은 추가될 수 있다.
+카메라는 기존 `camera_forward_yaw_tick`/`camera_forward_pitch_tick` 목표를 사용하고,
+정면 복귀 실제 DONE을 받을 때까지 추가 동작을 막는다. 계산용 영상도 카메라 DONE
+이후 촬영된 새 프레임을 사용한다.
+
+기본자세 전용 `/jandi_vision/shoot_tuning_pose` 토픽은 `ShootTuningPose`에
+action ID와 시간을 함께 담는다. `forward_walk`도 함께 재빌드해야 하며, 이전
+실행기가 이 토픽을 구독하지 않으면 알림만 표시하고 기본자세 요청을 건너뛴다.
+기존 `ActionCommand`/`CameraCommand`/`CommandStatus` 정의와 동작 번호는 유지한다.
 
 `계산된 값에서 슛`은 현재 생산 코드의 `GoalController::FineAction`을 재사용한다.
 가능한 경우에는 허리 각도를 포함한 `SHOOT` 한 명령을 전송하고, 그렇지 않으면
@@ -135,6 +149,8 @@ ros2 run rqt_reconfigure rqt_reconfigure
 
 | 파라미터 | 용도 |
 | --- | --- |
+| `conf_thres` | YOLO 1차 confidence 하한. 기존 인식 노드와 같은 공통 기본값(현재 0.60)을 사용하며 UI/rqt 편집을 즉시 반영한다. |
+| `shoot_prepare_duration_sec` | 이 슛 튜닝 노드의 기본자세 이동 시간 합계. 기본 2초. |
 | `goal_hoop_radius_m` | 백보드에서 림 중심으로 옮길 거리 |
 | `goal_throw_landing_x_m`, `goal_throw_landing_z_m` | 허리 0°에서 측정한 슛 도달점 `(오른쪽, 전방)` |
 | `goal_position_tolerance_m` | 회전된 슛 도달점과 림 중심 사이 허용오차 |
@@ -149,6 +165,8 @@ ros2 run rqt_reconfigure rqt_reconfigure
 executor에서 잘리지 않는다. 현재 executor 기본값은 30°이다.
 도달점 파라미터는 관측한 도달 위치를 입력하는 보정값이며 슛 JSON의
 팔 동작, 속도, 발사 세기를 직접 변경하지 않는다.
+`conf_thres`보다 낮은 confidence 후보는 YOLO 출력에서 먼저 제외되므로,
+개별 골대/백보드 threshold를 더 낮춰 시험하려면 1차 기준도 함께 낮춘다.
 
 기본 알고리즘 값은 `vision_core/config/vision_algorithm.yaml`에서 읽는다.
 편집값은 실행 중에만 적용되며 YAML을 자동 변경하지 않는다.
@@ -168,6 +186,7 @@ ctest --test-dir /home/noh/vision_core/build_shoot \
   -R shared_vision_core_goal_controller_test --output-on-failure
 cd /home/noh/my_cv
 colcon test --packages-select vision --ctest-args -R vision_shoot_tuning_test --output-on-failure
+colcon test --packages-select forward_walk --ctest-args -R 'executor_(logic|integration)_test' --output-on-failure
 colcon test-result --verbose
 ```
 

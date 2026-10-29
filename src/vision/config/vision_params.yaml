@@ -99,6 +99,10 @@ shoot_tuning_node:
     imu_topic: "/camera/imu_tilt"
     action_cmd_topic: "/jandi_vision/action_cmd"
     action_status_topic: "/jandi_vision/action_status"
+    shoot_pose_cmd_topic: "/jandi_vision/shoot_tuning_pose"
+    camera_cmd_topic: "/jandi_vision/camera_cmd"
+    camera_status_topic: "/jandi_vision/camera_status"
+    shoot_prepare_duration_sec: 2.0
     inference_hz: 15.0
     max_depth_age_sec: 0.20
     max_frame_age_sec: 0.50

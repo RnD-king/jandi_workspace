@@ -44,6 +44,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CommandStatus.msg"
   "msg/TerminalDetection.msg"
   "msg/TerminalFrame.msg"
+  "msg/ShootTuningPose.msg"
   DEPENDENCIES std_msgs
 )
 

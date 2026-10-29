@@ -7,6 +7,8 @@
 #include <cv_bridge/cv_bridge.h>
 #include "vision/msg/action_command.hpp"
 #include "vision/msg/command_status.hpp"
+#include "vision/msg/camera_command.hpp"
+#include "vision/msg/shoot_tuning_pose.hpp"
 #include "vision/yolo_trt_engine.hpp"
 #include "vision/object_depth.hpp"
 #include "vision/shoot_tuning.hpp"
@@ -89,6 +91,7 @@ struct Setting {
 };
 std::vector<Setting> Settings(vision_core::MissionControllerConfig& c) {
   return {
+    {"conf_thres","YOLO 1차 confidence 하한",&c.line_detection.confidence,0,1,.01},
     {"goal_hoop_radius_m","림 반지름 (m)",&c.goal.hoop_radius_m,0,2,.005},
     {"goal_throw_landing_x_m","슛 도달점 X / 오른쪽 (m)",&c.goal.throw_landing_x_m,-10,10,.01},
     {"goal_throw_landing_z_m","슛 도달점 Y / 전방 (m)",&c.goal.throw_landing_z_m,.001,10,.01},
@@ -158,6 +161,9 @@ public:
     config_.backboard_depth_strip_width_px=ReadOnly<int>(
         "backboard_depth_strip_width_px",config_.backboard_depth_strip_width_px);
     click_yaw_deg_=declare_parameter<double>("click_backboard_yaw_deg",0.0);
+    prepare_duration_sec_=declare_parameter<double>("shoot_prepare_duration_sec",2.0);
+    if (!std::isfinite(prepare_duration_sec_) || prepare_duration_sec_<0.2 || prepare_duration_sec_>60)
+      throw std::invalid_argument("shoot_prepare_duration_sec must be in [0.2,60]");
     ValidateSettings(config_,click_yaw_deg_);
 
     const auto image_topic=ReadOnly<std::string>("image_topic","/camera/camera/color/image_raw");
@@ -166,6 +172,9 @@ public:
     const auto imu_topic=ReadOnly<std::string>("imu_topic","/camera/imu_tilt");
     const auto cmd_topic=ReadOnly<std::string>("action_cmd_topic","/jandi_vision/action_cmd");
     const auto status_topic=ReadOnly<std::string>("action_status_topic","/jandi_vision/action_status");
+    const auto pose_topic=ReadOnly<std::string>("shoot_pose_cmd_topic","/jandi_vision/shoot_tuning_pose");
+    const auto camera_topic=ReadOnly<std::string>("camera_cmd_topic","/jandi_vision/camera_cmd");
+    const auto camera_status_topic=ReadOnly<std::string>("camera_status_topic","/jandi_vision/camera_status");
     max_depth_age_=ReadOnly<double>("max_depth_age_sec",.20);
     max_frame_age_=ReadOnly<double>("max_frame_age_sec",.50);
     const double hz=ReadOnly<double>("inference_hz",15.0);
@@ -178,15 +187,18 @@ public:
         !std::isfinite(imu_limit_) || imu_limit_<0)
       throw std::invalid_argument("Invalid inference rate, frame/depth age, or IMU limit");
     const auto engine=ReadOnly<std::string>("engine_path",DefaultEnginePath());
-    // Shared-core thresholds remain adjustable down to zero via rqt.
-    yolo_=std::make_unique<YoloTrtEngine>(engine,640,640,0.0f);
+    yolo_=std::make_unique<YoloTrtEngine>(engine,640,640,
+        static_cast<float>(config_.line_detection.confidence));
     observer_=std::make_unique<vision_core::MissionController>(config_);
     auto command_config=config_.command;
     command_config.first_action_id=static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::system_clock::now().time_since_epoch()).count());
     transport_=std::make_unique<vision_core::ControlCommandCoordinator>(command_config);
+    next_camera_id_=command_config.first_action_id;
     action_pub_=create_publisher<msg::ActionCommand>(cmd_topic,10);
+    pose_pub_=create_publisher<msg::ShootTuningPose>(pose_topic,10);
+    camera_pub_=create_publisher<msg::CameraCommand>(camera_topic,10);
     image_sub_=create_subscription<sensor_msgs::msg::Image>(image_topic,
         rclcpp::SensorDataQoS().keep_last(1),[this](sensor_msgs::msg::Image::SharedPtr image) {
           latest_image_=image; latest_received_=Clock::now();
@@ -214,16 +226,19 @@ public:
         });
     status_sub_=create_subscription<msg::CommandStatus>(status_topic,10,
         [this](msg::CommandStatus::SharedPtr status) { OnStatus(*status); });
+    camera_status_sub_=create_subscription<msg::CommandStatus>(camera_status_topic,10,
+        [this](msg::CommandStatus::SharedPtr status) { OnCameraStatus(*status); });
     parameter_callback_=add_on_set_parameters_callback([this](const auto& parameters) {
       rcl_interfaces::msg::SetParametersResult result;
       result.successful=false;
-      if (transport_->HasPendingAction()) {
+      if (MotionBusy()) {
         result.reason="Wait for executor DONE before changing parameters";
         return result;
       }
       try {
         auto candidate=config_;
         double click_yaw=click_yaw_deg_;
+        double prepare_duration=prepare_duration_sec_;
         for (const auto& parameter:parameters) {
           bool found=false;
           for (const auto& setting:Settings(candidate))
@@ -233,11 +248,18 @@ public:
           if (parameter.get_name()=="click_backboard_yaw_deg") {
             click_yaw=parameter.as_double(); found=true;
           }
+          if (parameter.get_name()=="shoot_prepare_duration_sec") {
+            prepare_duration=parameter.as_double(); found=true;
+          }
           if (!found) throw std::invalid_argument("Parameter is not live-tunable: "+parameter.get_name());
         }
         ValidateSettings(candidate,click_yaw);
+        if (!std::isfinite(prepare_duration) || prepare_duration<0.2 || prepare_duration>60)
+          throw std::invalid_argument("shoot_prepare_duration_sec must be in [0.2,60]");
         auto observer=std::make_unique<vision_core::MissionController>(candidate);
         config_=candidate; click_yaw_deg_=click_yaw;
+        prepare_duration_sec_=prepare_duration;
+        yolo_->SetConfidenceThreshold(static_cast<float>(config_.line_detection.confidence));
         observer_=std::move(observer);
         ++parameter_revision_;
         result.successful=true;
@@ -249,6 +271,7 @@ public:
         [this]() { ProcessLatestImage(); });
     transport_timer_=create_wall_timer(std::chrono::milliseconds(100),[this]() {
       if (transport_->HasPendingAction() && !ReleaseUnavailableRequest()) AdvanceTransport({});
+      PollCamera();
       UpdateUi();
     });
     window_->show();
@@ -379,6 +402,8 @@ private:
       add_setting(setting.name,setting.label,*setting.value,setting.low,setting.high,setting.step);
     add_setting("click_backboard_yaw_deg","클릭 시 가정할 백보드 yaw (deg)",
                 click_yaw_deg_,-180,180,1);
+    add_setting("shoot_prepare_duration_sec","기본자세 복귀 이동 시간 (s)",
+                prepare_duration_sec_,.2,60,.1);
     Text("슛 도달점은 측정한 착탄 위치를 입력합니다.\n계산된 값에서 슛은 저장한 골대 좌표와 현재 슛 파라미터를 사용합니다.\n픽셀 클릭의 yaw는 클릭 시점의 가정값입니다.",parameter_layout);
     parameter_layout->addStretch();
     auto* scroll=new QScrollArea;
@@ -398,7 +423,7 @@ private:
     }
   }
   void UpdateUi() {
-    const bool busy=transport_->HasPendingAction();
+    const bool busy=MotionBusy();
     for (auto* button:motion_buttons_) button->setEnabled(!busy);
     calculate_button_->setEnabled(true);
     stored_shoot_button_->setEnabled(!busy && calculated_target_.has_value());
@@ -507,7 +532,7 @@ private:
 
   MissionDebugImages Render(const Frame& frame) const {
     MissionDebugContext context;
-    context.control_state=transport_->HasPendingAction() ? "EXECUTING / WAIT DONE" : "SHOOT BENCH / HOLD";
+    context.control_state=MotionBusy() ? "EXECUTING / WAIT DONE" : "SHOOT BENCH / HOLD";
     context.control_hint="CALCULATE / SHOOT / PREPARE / SHOOT STORED RESULT";
     context.waiting_action_id=transport_->PendingActionId();
     context.last_received_done_id=last_done_id_;
@@ -521,6 +546,7 @@ private:
   }
 
   QString MeasurementError() {
+    if (pending_camera_id_!=0) return "카메라 정면 복귀 완료를 기다려 주세요.";
     if (!live_.valid) return "계산 가능한 카메라 프레임이 없습니다.";
     const double capture=StampSeconds(live_.header);
     const double age=get_clock()->now().seconds()-capture;
@@ -584,7 +610,7 @@ private:
         .arg(DebugActionName(request.action)).arg(request.target_yaw_deg));
   }
   void ShootStoredResult() {
-    if (transport_->HasPendingAction()) return;
+    if (MotionBusy()) return;
     if (!calculated_target_) {
       status_text_->setText("먼저 계산하거나 클릭 결과·입력 좌표를 계산 결과로 사용해 주세요.");
       return;
@@ -635,14 +661,17 @@ private:
     UpdateUi();
   }
   void SendAction(const vision_core::ActionRequest& request) {
-    if (transport_->HasPendingAction()) return;
-    if (action_pub_->get_subscription_count()==0) {
+    if (MotionBusy()) return;
+    const bool preparing=request.action==MissionAction::kDefaultPoseMode;
+    if ((preparing ? pose_pub_->get_subscription_count() : action_pub_->get_subscription_count())==0) {
       status_text_->setText("알림: 모션 수신 노드가 없어 동작 요청을 건너뛰었습니다. 계산·좌표 표시는 계속 사용할 수 있습니다.");
       UpdateUi(); return;
     }
     // READY never queues another command. Unavailable requests are discarded
     // locally without reporting a physical completion or sending STOP.
     current_action_=request.action;
+    prepare_camera_after_done_=preparing;
+    active_prepare_duration_sec_=prepare_duration_sec_;
     AdvanceTransport({},request);
     UpdateUi();
   }
@@ -659,8 +688,13 @@ private:
       last_done_sec_=get_clock()->now().seconds();
       // Never reuse an in-motion frame for the next automatic calculation.
       live_.valid=false;
-      status_text_->setText(QString("%1 완료 (DONE %2) — 정지 / 다음 버튼 대기")
-          .arg(DebugActionName(current_action_)).arg(static_cast<qulonglong>(last_done_id_)));
+      if (prepare_camera_after_done_) {
+        prepare_camera_after_done_=false;
+        BeginForwardCamera();
+      } else {
+        status_text_->setText(QString("%1 완료 (DONE %2) — 다음 버튼 대기")
+            .arg(DebugActionName(current_action_)).arg(static_cast<qulonglong>(last_done_id_)));
+      }
     }
     UpdateUi();
   }
@@ -674,7 +708,12 @@ private:
       output.action_id=command.action_id; output.mission=msg::ActionCommand::MISSION_GOAL;
       output.action=static_cast<std::uint16_t>(command.action);
       output.target_yaw_deg=command.target_yaw_deg;
-      action_pub_->publish(output);
+      if (command.action==MissionAction::kDefaultPoseMode) {
+        msg::ShootTuningPose pose;
+        pose.action_id=command.action_id;
+        pose.duration_sec=active_prepare_duration_sec_;
+        pose_pub_->publish(pose);
+      } else { action_pub_->publish(output); }
       status_text_->setText(QString("%1 / id=%2 — ACK 대기")
           .arg(DebugActionName(command.action)).arg(static_cast<qulonglong>(command.action_id)));
     } else if (transport_->ActionAckTimedOut()) {
@@ -686,15 +725,58 @@ private:
   }
 
   bool ReleaseUnavailableRequest() {
-    const auto reason=ReleaseUnavailableShootRequest(*transport_,action_pub_->get_subscription_count()>0);
+    const bool connected=current_action_==MissionAction::kDefaultPoseMode
+        ? pose_pub_->get_subscription_count()>0 : action_pub_->get_subscription_count()>0;
+    const auto reason=ReleaseUnavailableShootRequest(*transport_,connected);
     if (reason==ShootRequestUnavailable::kNone) return false;
     const auto notice=reason==ShootRequestUnavailable::kDisconnected
         ? "모션 수신 노드 연결이 없어 동작 요청 대기를 해제했습니다."
         : "모션 ACK 응답이 없어 동작 요청 대기를 해제했습니다.";
     status_text_->setText(QString("알림: %1 계산·좌표 표시는 계속 사용할 수 있습니다.").arg(notice));
     current_action_=MissionAction::kNone;
+    prepare_camera_after_done_=false;
     UpdateUi();
     return true;
+  }
+
+  bool MotionBusy() const { return transport_->HasPendingAction() || pending_camera_id_!=0; }
+  void BeginForwardCamera() {
+    if (camera_pub_->get_subscription_count()==0) {
+      status_text_->setText("알림: 몸 기본자세 완료. 카메라 수신 노드가 없어 정면 복귀 요청을 건너뛰었습니다.");
+      return;
+    }
+    pending_camera_id_=next_camera_id_++;
+    if (next_camera_id_==0) next_camera_id_=1;
+    camera_acknowledged_=false;
+    camera_requested_at_=Clock::now();
+    PollCamera();
+  }
+  void PollCamera() {
+    if (pending_camera_id_==0) return;
+    const double elapsed=std::chrono::duration<double>(Clock::now()-camera_requested_at_).count();
+    if (camera_pub_->get_subscription_count()==0 || (!camera_acknowledged_ &&
+        config_.command.action_ack_timeout_sec>0 && elapsed>=config_.command.action_ack_timeout_sec)) {
+      pending_camera_id_=0;
+      status_text_->setText("알림: 카메라 연결/ACK 응답이 없어 정면 복귀 대기를 해제했습니다. 계산·좌표 표시는 계속 사용할 수 있습니다.");
+      return;
+    }
+    if (!camera_acknowledged_) {
+      msg::CameraCommand command;
+      command.command_id=pending_camera_id_; command.request=msg::CameraCommand::FORWARD;
+      camera_pub_->publish(command);
+    }
+    status_text_->setText(camera_acknowledged_ ? "몸 기본자세 완료 — 카메라 정면 복귀 DONE 대기"
+                                              : "몸 기본자세 완료 — 카메라 정면 복귀 ACK 대기");
+  }
+  void OnCameraStatus(const msg::CommandStatus& status) {
+    if (pending_camera_id_==0 || status.command_id!=pending_camera_id_) return;
+    if (status.status==msg::CommandStatus::ACK) camera_acknowledged_=true;
+    if (status.status==msg::CommandStatus::DONE) {
+      pending_camera_id_=0;
+      last_done_sec_=get_clock()->now().seconds(); live_.valid=false;
+      status_text_->setText("기본자세 및 카메라 정면 복귀 완료 — 다음 버튼 대기");
+    }
+    UpdateUi();
   }
 
   vision_core::MissionControllerConfig config_;
@@ -721,6 +803,13 @@ private:
   Clock::time_point latest_received_;
   sensor_msgs::msg::Image::SharedPtr latest_image_,latest_depth_,processed_image_;
   rclcpp::Publisher<msg::ActionCommand>::SharedPtr action_pub_;
+  rclcpp::Publisher<msg::ShootTuningPose>::SharedPtr pose_pub_;
+  rclcpp::Publisher<msg::CameraCommand>::SharedPtr camera_pub_;
+  rclcpp::Subscription<msg::CommandStatus>::SharedPtr camera_status_sub_;
+  double prepare_duration_sec_{},active_prepare_duration_sec_{};
+  bool prepare_camera_after_done_{false},camera_acknowledged_{false};
+  std::uint64_t next_camera_id_{1},pending_camera_id_{0};
+  Clock::time_point camera_requested_at_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_,depth_sub_;
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr info_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr imu_sub_;

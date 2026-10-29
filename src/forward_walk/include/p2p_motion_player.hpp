@@ -33,6 +33,9 @@ public:
         // 노드 시작 시 전체 WALK_MODE 모션을 재생하지 않고 마지막 자세로만 이동한다.
         bool final_keyframe_only{false};
         std::optional<double> duration_override_sec;
+        // Scale movement segments proportionally; preserve intermediate poses,
+        // holds and speed limits. Used by the shooting bench's pose request.
+        std::optional<double> total_duration_override_sec;
         // 선택된 명령에만 적용할 절대 목표 tick. 원본 JSON 대신 준비 데이터의 키프레임을 수정한다.
         // 첫 목표까지 기존 P2P 보간으로 이동하므로 전송 직전 갑자기 값을 덮어쓰지 않는다.
         std::unordered_map<int, int32_t> position_overrides;

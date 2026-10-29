@@ -7,6 +7,7 @@
 #include "vision/msg/action_command.hpp"
 #include "vision/msg/camera_command.hpp"
 #include "vision/msg/command_status.hpp"
+#include "vision/msg/shoot_tuning_pose.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -90,6 +91,7 @@ int main() {
     WriteMotion(startup,true);WriteMotion(left);WriteMotion(right);
     WriteMotion(directory/"motions/우회전_최종.json");
     WriteMotion(directory/"motions/공_재그립.json",false,1968);
+    WriteMotion(directory/"motions/미세보행_초기자세가기_수정1.json");
     for(int count=1;count<=3;++count) {
         WriteTripleMission(directory/("missions/좌회전전진_"+std::to_string(count)+"회.json"),
             left.filename().string(),count);
@@ -193,6 +195,25 @@ int main() {
         Check(Dxl::current.at(19)==1968,"walking did not override ID19");
         Check(cameras.empty(),"automatic FORWARD hold emitted a camera command status");
         std::cout<<"PASS real MainNode startup FORWARD transmission/hold and ordinary P2P override\n";
+
+        auto pose_pub=observer->create_publisher<vision::msg::ShootTuningPose>(
+            "/jandi_vision/shoot_tuning_pose",10);
+        pump([&]{return pose_pub->get_subscription_count()>0;});
+        vision::msg::ShootTuningPose timed_pose;
+        timed_pose.action_id=8800;timed_pose.duration_sec=1.0;
+        const auto timed_packets=Dxl::packets.size();
+        pose_pub->publish(timed_pose);
+        pump([&]{return Count(actions,8800,Status::ACK)>0;});
+        pose_pub->publish(timed_pose);
+        pump([&]{return Count(actions,8800,Status::DONE)>0;});flush();
+        Check(Dxl::packets.size()-timed_packets>=50 && Dxl::packets.size()-timed_packets<65,
+              "timed pose did not execute its 50 steps once with the requested duration");
+        const auto ordinary_packets=Dxl::packets.size();
+        action(8801,vision::msg::ActionCommand::DEFAULT_POSE_MODE,3);
+        pump([&]{return node->action_transactions_.completed.Contains(8801);});flush();
+        Check(Dxl::packets.size()-ordinary_packets==20,
+              "ordinary DEFAULT_POSE_MODE inherited the bench timing override");
+        std::cout<<"PASS scoped shoot tuning timing, idempotent feedback and unchanged normal pose timing\n";
 
         for(uint16_t code=1;code<=34;++code) {
             const bool excluded=code==14||code==15||code==16||code==17||code==29||code==30;

@@ -327,6 +327,12 @@ bool YoloTrtEngine::Infer(const cv::Mat &img,
   return true;
 }
 
+void YoloTrtEngine::SetConfidenceThreshold(float threshold) {
+  if (!std::isfinite(threshold) || threshold<0 || threshold>1)
+    throw std::invalid_argument("YOLO confidence threshold must be in [0,1]");
+  conf_thres_=threshold;
+}
+
 void YoloTrtEngine::Postprocess(std::vector<Detection> &detections, int img_w,
                                 int img_h) {
   detections.clear();

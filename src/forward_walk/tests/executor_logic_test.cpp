@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <stdexcept>
 #include <unistd.h>
 
@@ -113,6 +114,30 @@ int main() {
         Require(sequence.Update(&actual,t0+1500ms)==P2PMotionPlayer::UpdateResult::kFinished,
                 "mission length did not reflect its references");
         pass("fixed mission reference order, repeated references and completion");
+
+        P2PMotionPlayer::StartOptions scaled_options;
+        scaled_options.total_duration_override_sec=3.0;
+        const auto replay_duration=[&](const P2PMotionPlayer::PreparedProgram& program) {
+            P2PMotionPlayer replay(nullptr);
+            Require(replay.StartPrepared(program,InitialPose(),t0),replay.Error());
+            for(int step=0;step<=200;++step) {
+                RawPositions output;
+                if(replay.Update(&output,t0+step*20ms)==P2PMotionPlayer::UpdateResult::kFinished)
+                    return step*.02;
+            }
+            throw std::runtime_error("scaled test motion did not finish");
+        };
+        const auto slower=sequence.PrepareProgram(sequence_path.string(),temporary.string(),scaled_options);
+        Require(std::abs(replay_duration(slower)-3.0)<1e-8,
+                "per-request total duration did not scale the complete program");
+        const auto unchanged=sequence.PrepareProgram(sequence_path.string(),temporary.string(),{});
+        Require(std::abs(replay_duration(unchanged)-1.5)<1e-8,
+                "timed bench request leaked into subsequent ordinary motion timing");
+        for(double invalid:{0.,-1.,61.,std::numeric_limits<double>::quiet_NaN()}) {
+            scaled_options.total_duration_override_sec=invalid;
+            Rejects([&]{sequence.PrepareProgram(sequence_path.string(),temporary.string(),scaled_options);});
+        }
+        pass("request-only proportional duration override and ordinary motion timing isolation");
 
         using boost::property_tree::ptree;
         ptree root;
