@@ -45,7 +45,7 @@ void InvalidAndNearWindows() {
   HurdleController hurdle(c.hurdle,3);hurdle.StartTestExecute();
   hurdle.UseVerifiedObservation({},missing,640,480);
   auto h=hurdle.Compute({},640,480,1,{CameraMode::kDown,true},done,{});
-  assert(h.mode==HurdleMode::kRecoveryDown);
+  assert(h.mode==HurdleMode::kRecoveryStep);
   GoalController goal(c.goal,3);goal.StartTestNear();
   const CameraFeedback camera{CameraMode::kGoal,true};
   goal.Compute({},{},{},640,480,0,true,camera,{});
@@ -70,11 +70,17 @@ void GoalRecovery(bool fine, bool left) {
   assert(g.action.action==turn && goal.RecoveryTurnsCompleted()==0);
   g=goal.Compute({},{},{},640,480,.4,true,camera,{false,true,false});
   assert(g.action.action==MissionAction::kNone && goal.RecoveryTurnsCompleted()==0);
-  // In-motion reacquisition resets the budget. The late DONE cannot count it.
+  // Moving evidence cannot interrupt recovery or schedule the extra turn.
   g=goal.Compute({},target,{true,0,1.5,0,1},640,480,.5,true,camera,{false,true,false});
+  assert(g.mode==GoalMode::kRecoveryTurn && goal.RecoveryTurnsCompleted()==0);
+  g=goal.Compute({},target,{true,0,1.5,0,1},640,480,.6,true,camera,{true,false,false});
+  assert(g.mode==GoalMode::kRecoveryTurn);
+  g=goal.Compute({},target,{true,0,1.5,0,1},640,480,.7,true,camera,{false,false,true});
+  assert(g.mode==GoalMode::kRecoveryExtraTurn && goal.RecoveryTurnsCompleted()==1);
+  g=goal.Compute({},target,{true,0,1.5,0,1},640,480,.8,true,camera,{});
+  assert(g.action.action==turn);
+  g=goal.Compute({},target,{true,0,1.5,0,1},640,480,.9,true,camera,{true,false,true});
   assert(g.mode==(fine?GoalMode::kFineAdjust:GoalMode::kApproach));
-  assert(goal.RecoveryTurnsCompleted()==0);
-  goal.Compute({},{},{},640,480,.6,true,camera,{true,false,false});
   assert(goal.RecoveryTurnsCompleted()==0);
   // A fresh loss has exactly three completed turns before stationary fallback.
   goal.Reset();
@@ -697,47 +703,43 @@ void FineSidePairTransport(bool left, bool manual) {
 void EntryDirectionRecovery(bool left, bool reacquire) {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.entry_min_hits=6;c.stable_min_hits=7;c.stable_window=10;
-  c.recovery_walk_turn_max=3;c.entry_recovery_walk_turn_max=10;
+  c.recovery_max_steps=1;c.entry_recovery_max_steps=3;
   c.recovery_center_tolerance_px=50;
   c.recovery_observation_sec=1;c.recovery_max_observations=5;
   BallController ball(c,3);
   const auto target=Target(c.far_u_des_px+(left?-120:120),100);
-  BallResult b;
   const CameraFeedback forward{CameraMode::kForward,true};
+  BallResult b;
   for(int i=0;i<6;++i)
     b=ball.Compute(target,640,480,.1*i,forward,{false,true,false});
   assert(b.mode==BallMode::kApproachBall && b.entry_hits==6 && !b.tracked.stable);
-  // The common observer discards moving evidence, but not entry direction.
-  ball.ClearObservationHistory();
   ball.UseVerifiedObservation({},std::deque<bool>(10,false),640,480);
   b=ball.Compute({},640,480,2,forward,{true,false,true});
-  assert(b.mode==BallMode::kBallRecoveryWalkTurn);
-  b=ball.Compute({},640,480,2.01,forward,{});
+  assert(b.mode==BallMode::kForwardRecoveryTurn && ball.RecoveryStepLimit()==3);
   const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
-  assert(b.action.action==turn && ball.RecoveryWalkTurnsCompleted()==0);
-  if(reacquire) {
-    for(int i=1;i<=10;++i)
-      b=ball.Compute(target,640,480,2.01+.05*i,forward,{false,true,false});
-    assert(b.mode==BallMode::kApproachBall && ball.RecoveryWalkTurnsCompleted()==0);
-    ball.Compute(target,640,480,2.7,forward,{true,false,true});
-    assert(ball.RecoveryWalkTurnsCompleted()==0);
-    return;
+  double now=2;
+  for(int n=1;n<=3;++n) {
+    b=ball.Compute({},640,480,now+=.1,forward,{});
+    assert(b.action.action==turn);
+    b=ball.Compute(target,640,480,now+=.1,forward,{false,true,false});
+    assert(b.mode==BallMode::kForwardRecoveryTurn && ball.RecoveryStepsCompleted()==n-1);
+    b=ball.Compute({},640,480,now+=.1,forward,{true,false,false});
+    assert(b.mode==BallMode::kForwardRecoveryStep && ball.RecoveryWalkTurnsCompleted()==n);
+    b=ball.Compute({},640,480,now+=.1,forward,{});
+    assert(b.action.action==MissionAction::kStepForwardOne);
+    b=ball.Compute({},640,480,now+=.1,forward,{true,false,false});
+    assert(b.mode==BallMode::kForwardRecoveryObserve && ball.RecoveryStepsCompleted()==n);
+    for(int i=0;i<10;++i)
+      b=ball.Compute(reacquire?std::optional<ObjectTarget>(target):std::nullopt,
+                     640,480,now+=.1,forward,{});
+    if(reacquire) {
+      assert(b.mode==BallMode::kApproachBall && ball.RecoveryWalkTurnsCompleted()==0);
+      return;
+    }
+    assert(b.mode==(n<3?BallMode::kForwardRecoveryTurn:BallMode::kLineFollow));
   }
-  double now=2.1;
-  for(int n=1;n<=10;++n) {
-    b=ball.Compute({},640,480,now,forward,{false,true,false});
-    assert(ball.RecoveryWalkTurnsCompleted()==n-1);
-    now+=.1;b=ball.Compute({},640,480,now,forward,{true,false,true});
-    assert(ball.RecoveryWalkTurnsCompleted()==n);
-    if(n<10) {now+=.1;b=ball.Compute({},640,480,now,forward,{});assert(b.action.action==turn);}
-  }
-  assert(b.mode==BallMode::kBallRecoveryForward);
-  for(int i=0;i<100 && b.mode!=BallMode::kFailed;++i) {
-    now+=.1;b=ball.Compute({},640,480,now,forward,{});
-    assert(b.action.action==MissionAction::kNone);
-  }
-  assert(b.mode==BallMode::kFailed && ball.RecoveryObservationsCompleted()==5);
-  ball.Reset();assert(ball.RecoveryWalkTurnsCompleted()==0);
+  assert(!b.active && !b.has_ball && !b.pickup_failed);
+  ball.Reset();assert(ball.RecoveryStepsCompleted()==0);
 }
 
 void EntryDirectionTransport(bool left) {
@@ -775,7 +777,7 @@ void EntryDirectionCentralFallback() {
     b=ball.Compute(Target(c.far_u_des_px,100),640,480,.1*i,forward,{false,true,false});
   ball.UseVerifiedObservation({},std::deque<bool>(10,false),640,480);
   b=ball.Compute({},640,480,2,forward,{true,false,true});
-  assert(b.mode==BallMode::kBallRecoveryForward);
+  assert(b.mode==BallMode::kForwardRecoveryObserve);
   b=ball.Compute({},640,480,2.1,forward,{});
   assert(b.action.action==MissionAction::kNone);
   ball.Reset();
@@ -817,14 +819,20 @@ void GoalEntryFirstObservation(bool left, bool reacquire, int prior_hits) {
   const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
   assert(g.action.action==turn && goal.RecoveryTurnsCompleted()==0);
   if(reacquire) {
-    // Check the recovery exit itself. Further stable frames may advance
-    // SEARCH to APPROACH once the seven-hit criterion has been met.
-    for(int i=1;i<=10 && g.mode==GoalMode::kRecoveryTurn;++i)
+    for(int i=1;i<=10;++i)
       g=goal.Compute({},board,{true,0,1.5,0,1},640,480,2.85+.05*i,true,camera,{false,true,false});
+    assert(g.mode==GoalMode::kRecoveryTurn && goal.RecoveryTurnsCompleted()==0);
+    goal.UseVerifiedObservation(board,{true,0,1.5,0,1},
+        std::deque<bool>(10,true),std::deque<bool>(10,true),640,480);
+    g=goal.Compute({},board,{true,0,1.5,0,1},640,480,4.5,true,camera,{true,false,true});
+    assert(g.mode==GoalMode::kRecoveryExtraTurn && goal.RecoveryTurnsCompleted()==1);
+    g=goal.Compute({},{},{},640,480,4.6,true,camera,{});
+    assert(g.action.action==turn);
+    goal.UseVerifiedObservation(board,{true,0,1.5,0,1},
+        std::deque<bool>(10,true),std::deque<bool>(10,true),640,480);
+    g=goal.Compute({},board,{true,0,1.5,0,1},640,480,5.8,true,camera,{true,false,true});
     assert(g.mode==GoalMode::kSearch && goal.RecoveryTurnsCompleted()==0);
     assert(g.tracked.visible && g.tracked.stable);
-    goal.Compute({},board,{true,0,1.5,0,1},640,480,3.5,true,camera,{true,false,true});
-    assert(goal.RecoveryTurnsCompleted()==0);
     return;
   }
   for(int i=1;i<=3;++i) {
@@ -846,8 +854,8 @@ void GoalEntryFallbackAndDepth() {
   c.recovery_turn_max=3;c.lost_frames=1;
   const CameraFeedback forward{CameraMode::kForward,true}, camera{CameraMode::kGoal,true};
   const std::deque<bool> misses(10,false), hits(10,true);
-  // Empty direction, centered direction, zero budget and image-only Depth
-  // failure must all choose stationary recovery, without a search rotation.
+  // Known center advances once; missing direction, disabled turns and
+  // image-only Depth failure remain stationary.
   for(int scenario=0;scenario<4;++scenario) {
     auto cfg=c;if(scenario==2)cfg.recovery_turn_max=0;
     GoalController goal(cfg,3);goal.StartGoalTrial();
@@ -858,7 +866,8 @@ void GoalEntryFallbackAndDepth() {
     assert(g.mode==GoalMode::kSearch);
     goal.UseVerifiedObservation({}, {},misses,misses,640,480);
     g=goal.Compute({},{},{},640,480,2,true,camera,{false,false,true},true,{},false,scenario==3);
-    assert(g.mode==GoalMode::kRecoverySearch && g.action.action==MissionAction::kNone);
+    assert(g.mode==(scenario==1?GoalMode::kRecoveryForwardStep:GoalMode::kRecoverySearch));
+    assert(g.action.action==MissionAction::kNone);
     // RESET must also discard an earlier directional sighting.
     goal.StartGoalTrial();goal.Compute({},{},{},640,480,3,true,camera,{});
     goal.UseVerifiedObservation({}, {},misses,misses,640,480);
@@ -952,7 +961,7 @@ void Defaults() {
   assert(CruiseAction(CruiseDirection::kStraight)==MissionAction::kStepForwardFour);
   assert(c.transition_settle_sec==.6 && c.fine_motion_settle_sec==0 && c.walk_inter_action_hold_sec==0);
   assert(c.ball.down_one_step_v_px==0 && c.ball.fine_mode_v_px==10);
-  assert(c.ball.recovery_walk_turn_max==3 && c.ball.entry_recovery_walk_turn_max==10 && c.goal.recovery_turn_max==3);
+  assert(c.ball.recovery_walk_turn_max==3 && c.ball.entry_recovery_max_steps==3 && c.goal.recovery_turn_max==3);
   for(int field=0;field<4;++field) {
     auto bad=c;
     if(field==0)bad.transition_settle_sec=-1;

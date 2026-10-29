@@ -148,6 +148,7 @@ void TestManualPerceptionStationaryRecovery() {
 }
 void TestStationaryRecoveryAndNoHurdleCentering() {
   auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;
+  c.hurdle.recovery_max_steps=0; // Isolate the stationary fallback and its fresh identity window.
   // This fixture tests mode recovery, not the production 0.60s post-search
   // settling time. With a 10/7 observation window, the remaining frames
   // otherwise end before the settle deadline and never reach kWaitFinePose.

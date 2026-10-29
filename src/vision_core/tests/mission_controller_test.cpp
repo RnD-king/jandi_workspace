@@ -190,7 +190,7 @@ int main() {
   assert(r.command.command_type==CommandType::kHold);
   assert(r.line_in_recovery);
 
-  // 안정된 마지막 조향 방향만 기억하고, 첫 실패 관측 2초 뒤 같은 방향으로
+  // 마지막 유효 점수의 부호를 기억하고, 첫 실패 관측 2초 뒤 같은 방향으로
   // 양수 15도 TURN을 발행한다.
   controller.Reset();
   in=Frame(0); in.line_decision_guide_override=Guide(-.2);
@@ -223,21 +223,29 @@ int main() {
   assert(r.command.action==MissionAction::kTurnLeft);
   assert(r.command.target_yaw_deg==15);
 
-  // 방향 evidence가 없으면 최초 관측 + 5회 추가 관측 뒤 FINAL HOLD이며,
-  // 다음 유효 frame 하나로 자동 재시작하지 않는다.
+  // No history defaults to RIGHT after the first failed stationary window.
+  // Only five real turns are allowed, then fresh valid frames cannot resume it.
   controller.Reset();
   in=Frame(0); in.line_centers.clear(); r=controller.Step(in);
-  for (int i=1;i<=6;++i) {
-    in=Frame(2.1*i); in.line_centers.clear(); r=controller.Step(in);
-    assert(r.command.action==MissionAction::kNone);
+  std::uint64_t completed_recovery_id=0;
+  int default_right_turns=0;
+  for (int i=1;i<=200 && r.command.mission_phase!=4;++i) {
+    in=Frame(.1*i); in.line_centers.clear();
+    if (r.command.action_id && r.command.action_id!=completed_recovery_id) {
+      completed_recovery_id=r.command.action_id;
+      if (r.command.action==MissionAction::kTurnRight) ++default_right_turns;
+      else assert(r.command.action==MissionAction::kDefaultPoseMode);
+      in.delivery_feedback={completed_recovery_id,true,true,false};
+    }
+    r=controller.Step(in);
   }
-  in=Frame(13.0); in.line_decision_guide_override=Guide(0);
+  assert(default_right_turns==5 && r.command.mission_phase==4);
+  in=Frame(21.0); in.line_decision_guide_override=Guide(0);
   r=controller.Step(in);
   assert(r.command.action==MissionAction::kNone);
   assert(r.command.mission_phase==4);
 
-  // 정상 RIGHT 뒤 READY의 reliable STRAIGHT 판단은 과거 방향 evidence를
-  // 지운다. 이후 line loss는 TURN_RIGHT가 아니라 stationary retry다.
+  // A reliable STRAIGHT score of zero is retained and recovers to RIGHT.
   controller.Reset();
   in=Frame(0); in.line_decision_guide_override=Guide(.3);
   r=controller.Step(in);
@@ -260,13 +268,18 @@ int main() {
   r=controller.Step(in);
   in=Frame(3.4); in.line_centers.clear();
   r=controller.Step(in);
-  assert(r.command.action==MissionAction::kNone);
-  assert(r.command.mission_phase==1);
+  assert(r.command.action==MissionAction::kDefaultPoseMode);
+  const auto straight_recovery_pose=r.command.action_id;
+  in=Frame(3.5); in.line_centers.clear();
+  in.delivery_feedback={straight_recovery_pose,true,true,false}; r=controller.Step(in);
+  in=Frame(3.6); in.line_centers.clear(); r=controller.Step(in);
+  in=Frame(4.7); in.line_centers.clear(); r=controller.Step(in);
+  assert(r.command.action==MissionAction::kTurnRight);
 
   // FINAL HOLD에서는 유효한 object detection도 새 mission을 시작하지 않는다.
   auto terminal_config=c;
   terminal_config.line_p2p.failure_observation_sec=0.0;
-  terminal_config.line_p2p.no_evidence_max_retries=0;
+  terminal_config.line_p2p.last_score_recovery_max_turns=0;
   terminal_config.enable_ball=true;
   terminal_config.enable_hurdle=false;
   terminal_config.ball.entry_min_hits=1; terminal_config.ball.down_search_min_hits=1; terminal_config.ball.stable_window=1;
@@ -286,7 +299,7 @@ int main() {
   auto turn_config=c;
   turn_config.line_p2p.failure_observation_sec=0.0;
   turn_config.line_p2p.recovery_observation_sec=0.0; // Legacy instant-turn fixture.
-  turn_config.line_p2p.recovery_max_turns=5;
+  turn_config.line_p2p.last_score_recovery_max_turns=5;
   MissionController turning(turn_config);
   in=Frame(0); in.line_decision_guide_override=Guide(-.3);
   r=turning.Step(in);

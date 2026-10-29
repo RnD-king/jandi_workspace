@@ -97,11 +97,16 @@ window and one-slot queue. BALL FINE may commit a fixed pair of 5/6 actions
 when excess beyond its pickup edge reaches fine_side_two_step_margin_px.
 Entry recovery remembers actual admission detections without inventing seven-hit stability.
 
-GOAL entry now retains pre-camera direction independently of tracking history.
-After the first completed common window, a missing board searches with existing
-31/28 turns and goal.recovery_turn_max; missing/central direction falls back to
-bounded stationary recovery. A visible board with failed Depth never requests
-an entry search turn. Normal COARSE/FINE criteria and the 10/7 observer remain.
+GOAL entry retains pre-camera direction independently of tracking history.
+An entirely empty first view uses the configured LINE retry; with retries
+disabled, saved direction selects recovery. Known center advances once (WALK
+10 / FINE 3), while missing direction or visible image with bad Depth stays
+stationary. Directional recovery waits for actual DONE plus a fresh window;
+reacquisition adds exactly one same-direction turn, then observes again before
+resuming. `goal_recovery_policy_test` covers approach/COARSE/FINE loss, center
+boundaries, absent history, actual-DONE latching, preview, both rotation
+directions, last-attempt reacquisition, loss after the extra turn, reset, and
+the bounded stationary fallback. Fixed two-turn edge correction is independent.
 
 
 2026-10-16 regression coverage (`shared_vision_core_mission_oct16_regression_test`):
@@ -130,3 +135,13 @@ counter in the shared debug result. The phase still uses the existing post-DONE
 observation and READY one-slot queue. Object-wide bbox fallback fields were
 removed; LINE uses its existing line_detection dimensions, including live updates.
 LineBoxFilters checks the real perception pipeline after both live update APIs.
+# BALL FORWARD 복구
+
+`shared_vision_core_ball_forward_recovery_test`는 진입 직후/일반 유실의 독립된
+전진 한도, 좌/중앙/우 흐름, 실제 DONE 카운트, 전진 후 새 관측, 재검출 복귀,
+진입 복구 소진 후 정상 LINE 보행 재개를 검사한다. 기존 중간 좌우 구역의
+회전 전용 복구는 `mission_oct16_regression_test`의 별도 시나리오로 유지한다.
+
+`shared_vision_core_hurdle_recovery_steps_test`는 진입 직후 일반 전진과 DOWN
+접근/미세 전진의 독립 한도, 실제 DONE 카운트, 이동 중 검출 표본 폐기,
+전진 후 정지 재확인, 한도 소진 후 LINE 보행/정지 복구 분기를 검사한다.

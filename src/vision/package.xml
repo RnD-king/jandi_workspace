@@ -13,6 +13,7 @@
   <depend>rclcpp</depend>
   <depend>ament_index_cpp</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>std_srvs</depend>
   <exec_depend>rclpy</exec_depend>
@@ -22,6 +23,7 @@
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <depend>libopencv-dev</depend>
+  <depend>qtbase5-dev</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

@@ -169,6 +169,7 @@ public:
         get_parameter("line_p2p_steering_deadband").as_double();
     vision_core::ValidateAlgorithmConfig(config);
     line_p2p_config_ = config.line_p2p;
+    accumulator_ = vision_core::LineGuideAccumulator(line_p2p_config_);
 
     controller_ = std::make_unique<vision_core::MissionController>(config);
     yolo_ = std::make_unique<YoloTrtEngine>(engine_path, 640, 640,
@@ -762,8 +763,9 @@ private:
                   window ? window->window_frames : 0,
                   window ? window->used_frames : 0);
     label(30, 543, text, 0.63, accent);
-    std::snprintf(text, sizeof(text), "Active action ID: %llu   |   Observation: 40%% -> READY",
-                  static_cast<unsigned long long>(active_id));
+    std::snprintf(text, sizeof(text), "Active action ID: %llu   |   Observation: %.0f%% -> READY",
+                  static_cast<unsigned long long>(active_id),
+                  100.0 * gains.observation_start_ratio);
     label(30, 581, text, 0.58, muted);
     label(24, 630, "IDLE gain updates re-evaluate NEXT from the stored O/H.", 0.55, muted);
     debug_bag_->Submit(request, header, camera, panel);

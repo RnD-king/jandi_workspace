@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -69,6 +70,20 @@ int main() {
     const auto directory=fs::temp_directory_path()/("jandi_main_test_"+std::to_string(getpid()));
     fs::create_directories(directory/"motions");
     fs::create_directories(directory/"missions");
+    // A non-default YAML lead must control READY without any ROS override.
+    // Use a private copy so the operator's YAML is never changed by this test.
+    std::ifstream original_algorithm(vision_core::DefaultAlgorithmConfigPath());
+    Check(original_algorithm.good(), "cannot read shared algorithm test input");
+    std::ostringstream algorithm_stream;algorithm_stream<<original_algorithm.rdbuf();
+    auto algorithm_text=algorithm_stream.str();
+    const auto lead_key=algorithm_text.find("ready_lead_sec:");
+    Check(lead_key!=std::string::npos,"algorithm YAML has no READY lead");
+    const auto value_at=lead_key+std::string("ready_lead_sec:").size();
+    algorithm_text.replace(value_at,algorithm_text.find('\n',value_at)-value_at," 0.20");
+    const auto test_algorithm=directory/"vision_algorithm.yaml";
+    {std::ofstream output(test_algorithm);output<<algorithm_text;}
+    Check(setenv("VISION_CORE_ALGORITHM_CONFIG",test_algorithm.c_str(),1)==0,
+          "cannot select private algorithm YAML");
     const auto startup=directory/"motions/보행_왼발만앞에.json";
     const auto left=directory/"motions/보행_좌회전전진_20도_최종_초기X_수정.json";
     const auto right=directory/"motions/보행_우회전전진_20도_최종_초기X_찐.json";
@@ -101,6 +116,8 @@ int main() {
         auto camera_sub=observer->create_subscription<Status>("/jandi_vision/camera_status",100,
             [&](Status::SharedPtr m){cameras.emplace_back(m->command_id,m->status);});
         auto node=std::make_shared<MainNode>();
+        Check(node->ready_lead_sec_==0.20,
+              "executor ignored the non-default READY lead in the shared YAML");
         rclcpp::executors::SingleThreadedExecutor executor;
         executor.add_node(observer);executor.add_node(node);
         auto pump=[&](const std::function<bool()>& done, double seconds=3.0) {

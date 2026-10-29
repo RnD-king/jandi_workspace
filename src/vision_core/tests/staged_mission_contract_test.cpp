@@ -281,9 +281,14 @@ void ExecuteStageCompletesRecovery(MissionType mission) {
 }
 void RecoveryUsesCompleteWindow() {
   auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;c.ball.lost_frames=c.hurdle.lost_frames=1;
+  c.ball.recovery_max_steps=0; // Isolate stationary-window validation from motion search.
   BallController ball(c.ball,3);HurdleController hurdle(c.hurdle,3);
   BallResult b;HurdleResult h;double now=0;
   for(int i=0;i<7;++i){now+=.12;b=ball.Compute(Target(320,144),640,480,now,{}, {},false);h=hurdle.Compute(Target(320,200),640,480,now,{}, {},StraightLine(),false);}
+  // Establish a successful first observation; this case isolates later stationary recovery.
+  now+=.12;
+  b=ball.Compute(Target(320,144),640,480,now,{}, {false,false,true},false);
+  h=hurdle.Compute(Target(320,200),640,480,now,{}, {false,false,true},StraightLine(),false);
   now+=.12;b=ball.Compute({},640,480,now,{}, {},false);h=hurdle.Compute({},640,480,now,{}, {},StraightLine(),false);
   assert(b.mode==BallMode::kBallRecoveryForward && h.mode==HurdleMode::kRecoveryForward);
   for(int i=0;i<10;++i) {

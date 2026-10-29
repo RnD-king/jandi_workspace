@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 namespace {
 constexpr double kEps = 1e-12;
@@ -119,5 +120,39 @@ int main() {
   malformed.offset = std::numeric_limits<double>::infinity();
   accumulator.Add(9, 0.5, malformed);
   assert(!accumulator.FinishAll(9).has_value());
+
+  // A custom 20% start keeps the same 1->3 time weights through READY.
+  LineGuideAccumulator earlier(3, .20);
+  earlier.Begin(90, 10.0);
+  earlier.Add(90, 10.79, Guide(-100.0, 0.0, 0.0));
+  earlier.Add(90, 10.8, Guide(1.0, 0.0, 0.0));
+  earlier.Add(90, 12.275, Guide(2.0, 0.0, 0.0));
+  earlier.Add(90, 13.75, Guide(3.0, 0.0, 0.0));
+  const auto earlier_mean = earlier.Finish(90, 13.75, .25);
+  assert(earlier_mean && std::abs(earlier_mean->offset - 14.0/6.0) < kEps);
+  const auto earlier_stats = earlier.LastStats();
+  assert(earlier_stats && earlier_stats->used_frames == 3);
+  assert(std::abs(earlier_stats->window_start_sec - 10.8) < kEps);
+  assert(std::abs(earlier_stats->remaining_sec - .25) < kEps);
+
+  LineGuideAccumulator from_start(1, 0.0);
+  from_start.Begin(91, 0.0);
+  from_start.Add(91, 0.0, Guide(1.0, 0.0, 0.0));
+  from_start.Add(91, 1.0, Guide(3.0, 0.0, 0.0));
+  const auto full_mean = from_start.Finish(91, 1.0);
+  assert(full_mean && std::abs(full_mean->offset - 2.5) < kEps);
+
+  // A configured start after READY gives no evidence; never widen it silently.
+  LineGuideAccumulator too_late(1, .99);
+  too_late.Begin(92, 0.0);
+  too_late.Add(92, 3.75, Guide(1.0, 0.0, 0.0));
+  assert(!too_late.Finish(92, 3.75, .25));
+  for (double ratio : {-0.1, 1.0, std::numeric_limits<double>::infinity(),
+                       std::numeric_limits<double>::quiet_NaN()}) {
+    bool rejected = false;
+    try { LineGuideAccumulator invalid_ratio(1, ratio); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    assert(rejected);
+  }
   return 0;
 }

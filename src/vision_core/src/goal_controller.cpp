@@ -133,6 +133,10 @@ const char *GoalController::ModeName(GoalMode mode) {
     return "GOAL_BACK_AWAY";
   case GoalMode::kEntryRetryCameraForward:
     return "GOAL_RETRY_CAMERA_FORWARD";
+  case GoalMode::kRecoveryForwardStep:
+    return "GOAL_RECOVERY_FORWARD_STEP";
+  case GoalMode::kRecoveryExtraTurn:
+    return "GOAL_RECOVERY_EXTRA_TURN";
   }
   return "UNKNOWN";
 }
@@ -586,7 +590,7 @@ GoalResult GoalController::Compute(
     }
     return result;
   case GoalMode::kSearch: {
-    // No past GOAL-view sighting, or a centered last sighting: wait in place.
+    // Wait for an initial observation before choosing a loss recovery action.
     if (!tracked_.visible && seen_after_camera_goal_ &&
         lost_count_ >= std::max(1, config_.lost_frames)) {
       if (!board_visible) BeginLostRecovery(now_sec, false);
@@ -756,67 +760,82 @@ GoalResult GoalController::Compute(
     }
     return result;
   }
-  case GoalMode::kRecoveryTurn:
   case GoalMode::kEdgeTurn: {
-    const bool recovery = mode_ == GoalMode::kRecoveryTurn;
-    const bool fine = turn_resume_mode_ == GoalMode::kFineAdjust;
-    if (recovery && board_visible && !backboard) {
-      mode_ = fine ? GoalMode::kFineRecovery :
-          (turn_resume_mode_==GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
-      turn_pending_=turn_done_=false;
-      stationary_recovery_.Begin(now_sec);
-      result.mode=mode_;
-      return result;
-    }
-    if (recovery && tracked_.visible && tracked_.stable &&
-        hit_history_.size() >= static_cast<std::size_t>(config_.stable_window)) {
-      mode_ = turn_resume_mode_;
-      recovery_turns_completed_ = 0;
+    if (turn_pending_ && feedback.action_done) turn_done_ = true;
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (turn_pending_) {
+      // Edge correction is a fixed pair of existing single-turn actions.
+      // Each actual DONE advances it without an intermediate observation.
+      if (!turn_done_) return result;
       turn_pending_ = turn_done_ = false;
-      recovery_exhausted_ = false;
+      ++edge_turns_completed_;
+      if (edge_turns_completed_ >= 2) {
+        mode_ = turn_resume_mode_;
+        result.mode = mode_;
+        return result;
+      }
+    }
+    result.action = Locomotion(turn_left_ ? MissionAction::kTurnLeftInPlace
+                                        : MissionAction::kStepForwardRightOneHurdle);
+    if (allow_new_body_actions) turn_pending_ = true;
+    return result;
+  }
+  case GoalMode::kRecoveryTurn:
+  case GoalMode::kRecoveryForwardStep:
+  case GoalMode::kRecoveryExtraTurn: {
+    const bool search_turn = mode_ == GoalMode::kRecoveryTurn;
+    const bool forward_step = mode_ == GoalMode::kRecoveryForwardStep;
+    const bool fine = turn_resume_mode_ == GoalMode::kFineAdjust;
+    if (!turn_pending_ && (search_turn || forward_step) && board_visible && !backboard) {
+      BeginStationaryRecovery(now_sec);
       result.mode = mode_;
       return result;
     }
     if (turn_pending_ && feedback.action_done) turn_done_ = true;
     if (feedback.action_active && !feedback.action_done) return result;
     if (turn_pending_) {
-      // Edge correction is a fixed pair of existing single-turn actions.
-      // Each actual DONE advances it without an intermediate observation.
-      if (!turn_done_ || (recovery && !feedback.observation_complete)) return result;
+      // A moving sighting cannot finish recovery. Manual callers may deliver
+      // DONE before the fresh stationary window, so retain it until both arrive.
+      if (!turn_done_ || !feedback.observation_complete) return result;
       turn_pending_ = turn_done_ = false;
-      if (recovery) {
-        ++recovery_turns_completed_;
-        if (recovery_turns_completed_ >= config_.recovery_turn_max) {
-          recovery_exhausted_ = true;
-          mode_ = fine ? GoalMode::kFineRecovery :
-              (turn_resume_mode_ == GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
-          stationary_recovery_.Begin(now_sec);
+      if (search_turn) ++recovery_turns_completed_;
+      const bool found = tracked_.visible && tracked_.stable &&
+          hit_history_.size() >= static_cast<std::size_t>(config_.stable_window);
+      if (found) {
+        if (search_turn) {
+          // Exactly one additional turn, including on the last search attempt.
+          // The saved direction is not replaced by the reacquired image side.
+          mode_ = GoalMode::kRecoveryExtraTurn;
           ClearTracking();
-          result.mode = mode_;
-          return result;
-        }
-      } else {
-        ++edge_turns_completed_;
-        if (edge_turns_completed_ >= 2) {
+        } else {
           mode_ = turn_resume_mode_;
-          result.mode = mode_;
-          return result;
+          recovery_turns_completed_ = 0;
+          recovery_exhausted_ = false;
         }
+        result.mode = mode_;
+        return result;
+      }
+      if (!search_turn || board_visible ||
+          recovery_turns_completed_ >= config_.recovery_turn_max) {
+        if (search_turn && recovery_turns_completed_ >= config_.recovery_turn_max)
+          recovery_exhausted_ = true;
+        BeginStationaryRecovery(now_sec);
+        result.mode = mode_;
+        return result;
       }
     }
-    if (recovery && recovery_turns_completed_ >= config_.recovery_turn_max) {
+    if (search_turn && recovery_turns_completed_ >= config_.recovery_turn_max) {
       recovery_exhausted_ = true;
-      mode_ = fine ? GoalMode::kFineRecovery :
-          (turn_resume_mode_ == GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
-      stationary_recovery_.Begin(now_sec);
-      ClearTracking();
+      BeginStationaryRecovery(now_sec);
       result.mode = mode_;
       return result;
     }
-    result.action = Locomotion(fine
+    result.action = Locomotion(forward_step
+        ? (fine ? MissionAction::kStepForwardHalf : MissionAction::kStepForwardOne)
+        : fine
         ? (turn_left_ ? MissionAction::kTurnLeft : MissionAction::kTurnRight)
         : (turn_left_ ? MissionAction::kTurnLeftInPlace : MissionAction::kStepForwardRightOneHurdle));
-    if (fine) result.action.target_yaw_deg = 15;
+    if (fine && !forward_step) result.action.target_yaw_deg = 15;
     if (allow_new_body_actions) turn_pending_ = true;
     return result;
   }
@@ -961,9 +980,12 @@ void GoalController::BeginLostRecovery(double now_sec, bool fine,
       ? std::optional<double>(*u - config_.target_u_px) : std::nullopt;
   const bool directional = offset && std::isfinite(*offset) &&
       std::abs(*offset) > config_.recovery_center_tolerance_px;
-  if (!recovery_exhausted_ && config_.recovery_turn_max > 0 && directional) {
+  const bool centered = offset && std::isfinite(*offset) && !directional;
+  turn_pending_ = turn_done_ = false;
+  if (centered) {
+    mode_ = GoalMode::kRecoveryForwardStep;
+  } else if (!recovery_exhausted_ && config_.recovery_turn_max > 0 && directional) {
     turn_left_ = *offset < 0.0;
-    turn_pending_ = turn_done_ = false;
     recovery_turns_completed_ = 0;
     mode_ = GoalMode::kRecoveryTurn;
   } else {
@@ -971,6 +993,14 @@ void GoalController::BeginLostRecovery(double now_sec, bool fine,
         (turn_resume_mode_ == GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
     stationary_recovery_.Begin(now_sec);
   }
+  ClearTracking();
+}
+
+void GoalController::BeginStationaryRecovery(double now_sec) {
+  mode_ = turn_resume_mode_ == GoalMode::kFineAdjust ? GoalMode::kFineRecovery :
+      (turn_resume_mode_ == GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
+  turn_pending_ = turn_done_ = false;
+  stationary_recovery_.Begin(now_sec);
   ClearTracking();
 }
 

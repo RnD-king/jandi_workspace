@@ -76,6 +76,8 @@ MissionFrameResult MissionController::StepPlannedLine(
   LineGuide decision = input.line_decision_guide_override.value_or(raw);
   output.line_decision_guide = decision;
   last_line_image_width_ = input.image_width;
+  last_line_image_center_u_ = features.image_center_u >= 0
+      ? features.image_center_u : 0.5 * input.image_width;
   if (input.advance_line_fsm) {
     line_stability_history_.push_back(line_state_ == LineState::kNormal && raw.valid);
     while (line_stability_history_.size() > static_cast<std::size_t>(config_.line.line_stable_window))
@@ -89,7 +91,8 @@ MissionFrameResult MissionController::StepPlannedLine(
   const bool may_advance = input.allow_new_mission_entry;
   const bool commands_allowed = input.allow_new_commands && input.allow_new_body_actions &&
       !command_coordinator_.ActionAckTimedOut();
-  const int recovery_turns_before = line_recovery_turns_;
+  const int visible_turns_before = line_visible_recovery_turns_;
+  const int last_score_turns_before = line_last_score_recovery_turns_;
   const bool completing_current = input.delivery_feedback.done &&
       command_coordinator_.PendingActionId() == input.delivery_feedback.action_id &&
       !command_coordinator_.HasQueuedAction();
@@ -355,7 +358,11 @@ MissionFrameResult MissionController::StepPlannedLine(
       request.action == MissionAction::kTurnLeftInPlace || request.action == MissionAction::kStepForwardRightOneHurdle;
   bool pose_transition = false;
   if ((wants_fine && foot_pose_ != FootPose::kFine) || (wants_walk && foot_pose_ != FootPose::kWalk)) {
-    if (wants_fine) { recovery_turn_issued_ = false; line_recovery_turns_ = recovery_turns_before; }
+    if (wants_fine) {
+      recovery_turn_issued_ = false;
+      line_visible_recovery_turns_ = visible_turns_before;
+      line_last_score_recovery_turns_ = last_score_turns_before;
+    }
     request = {wants_walk ? MissionAction::kWalkMode : MissionAction::kDefaultPoseMode,
                ActionCategory::kLocomotion, 0, false};
     pose_transition = true;

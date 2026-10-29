@@ -18,17 +18,21 @@ struct LineP2pConfig {
   double steering_deadband{};
   double in_place_turn_score{}; // Above this absolute O/H score, turn once in WALK.
   double ready_lead_sec{}; // Matches the motion executor's READY remaining time.
+  double observation_start_ratio{}; // Fraction of estimated LINE block duration, in [0,1).
   // 판단 실패 또는 recovery 회전 뒤 stationary re-observation 시간이다.
   double failure_observation_sec{};
   // Observation after a LINE loss-recovery turn, separate from 2s loss wait.
   double recovery_observation_sec{};
   // 이 개수 이상의 유효 O/H 표본만 정상 LINE 판단에 사용한다.
   int failure_min_valid_samples{};
-  // 방향 기억 없이 정지 재관측하는 추가 횟수와 방향 기억을 따라 회전하는
-  // 최대 횟수다. 한도를 넘으면 명시적 Reset 전까지 FINAL HOLD다.
-  int no_evidence_max_retries{};
+  // Loss recovery: current visible centers take priority over the last score.
+  // Counts remain cumulative across source switches until a valid guide returns.
+  int visible_recovery_max_turns{};
+  int visible_recovery_turn_yaw_deg{};
+  int last_score_recovery_max_turns{};
+  int last_score_recovery_turn_yaw_deg{};
+  // Separate limit for WALK corrections when a valid score is too large.
   int recovery_max_turns{};
-  int recovery_turn_yaw_deg{};
 };
 
 class LineP2pController {
@@ -41,7 +45,7 @@ private:
   LineP2pConfig config_;
 };
 
-// Keep the 40%-to-READY window of long LINE motion; later valid guides get 1->3 weight.
+// Keep the configured start-to-READY window; later valid guides get 1->3 weight.
 struct LineWindowStats {
   std::uint64_t action_id{0};
   std::size_t total_frames{0}, valid_frames{0}, window_frames{0}, used_frames{0};
@@ -52,6 +56,8 @@ class LineGuideAccumulator {
 public:
   LineGuideAccumulator();
   explicit LineGuideAccumulator(int minimum_valid_samples);
+  explicit LineGuideAccumulator(const LineP2pConfig &config);
+  LineGuideAccumulator(int minimum_valid_samples, double observation_start_ratio);
   void Begin(std::uint64_t action_id, double now_sec);
   void Add(std::uint64_t action_id, double now_sec, const LineGuide &guide);
   std::optional<LineGuide> Finish(std::uint64_t action_id, double now_sec,
@@ -74,6 +80,7 @@ private:
   std::vector<double> frame_times_;
   std::optional<LineWindowStats> last_stats_;
   int minimum_valid_samples_;
+  double observation_start_ratio_;
 };
 
 } // namespace vision_core

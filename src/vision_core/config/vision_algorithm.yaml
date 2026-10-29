@@ -30,23 +30,25 @@ vision_algorithm:
 
     # 라인 보행 방향 판단과 유실 복구
     walk:
-      left_repetitions: 3
-      straight_repetitions: 4
-      right_repetitions: 3
+      left_repetitions: 2
+      straight_repetitions: 3
+      right_repetitions: 2
       offset_gain: 0.3 # 게인 3개
       heading_gain: 0.3
-      steering_deadband: 0.10 # |라인 점수|가 이 값보다 작으면 직진, 크면 회전
+      steering_deadband: 0.14 # |라인 점수|가 이 값보다 작으면 직진, 크면 회전
       in_place_turn_score: 0.5 # |라인 점수|가 이 값보다 크면 WALK 제자리 회전 1회 후 재관측
 
-      ready_lead_sec: 0.25 # ~초 전까지
+      ready_lead_sec: 0.20 # 비전 관측 계산과 실행기 READY 발행이 함께 읽는 종료 전 여유 시간
+      observation_start_ratio: 0.20 # LINE 수집 시작 비율 (0 이상 1 미만). 0.20=20%, 시작~READY에서 기존 1→3 가중평균
 
       failure_observation_sec: 2.0 # 라인 복구 대기
-      failure_min_valid_samples: 5
-      no_evidence_max_retries: 5 # 방향 정보가 없을 때 정지 관측 재시도 횟수
-
-      recovery_observation_sec: 1.0
-      recovery_max_turns: 5 # 라인 회전 복구 최대 완료 횟수
-      recovery_turn_yaw_deg: 15 # 라인 회전 복구 요청 각도 (도)
+      failure_min_valid_samples: 5 # 한 시퀀스에서 적어도 이 정도 프레임 동안은 관측되어야 한다~
+      recovery_observation_sec: 1.0 # 두 유실 복구 경로의 회전 후 정지 관측 시간
+      visible_recovery_max_turns: 5 # 1순위: 현재 점선 2개 이상, 평균 X 쪽으로 회전
+      visible_recovery_turn_yaw_deg: 15
+      last_score_recovery_max_turns: 5 # 2순위: 마지막 유효 점수 부호, 0/기록 없음은 우회전
+      last_score_recovery_turn_yaw_deg: 15
+      recovery_max_turns: 5 # 유효한 |점수| > in_place_turn_score일 때 WALK 회전 보정 한도
 
   # Pixel thresholds refer to the actual input image (defaults: 640x480).
 
@@ -116,7 +118,7 @@ vision_algorithm:
       # 픽업
       pickup_u1_px: 310 # 픽업 영역 왼쪽 경계 (px)
       pickup_u2_px: 385 # 픽업 영역 오른쪽 경계 (px)
-      pickup_v1_px: 80 # 픽업 영역 위쪽 경계 (px)
+      pickup_v1_px: 90 # 픽업 영역 위쪽 경계 (px)
       pickup_v2_px: 130 # 픽업 영역 아래쪽 경계 (px)
       pickup_max_attempts: 100
       pickup_verify_min_hits: 3 # 픽업 DONE 후 stable_window 중 잔존 공 검출 기준; 이상이면 재픽업
@@ -127,8 +129,9 @@ vision_algorithm:
       # 유실 복구
       recovery_observation_sec: 1.0
       recovery_max_observations: 5
-      recovery_walk_turn_max: 3 # 일반 접근 중 유실 복구 회전 한도
-      entry_recovery_walk_turn_max: 10 # BALL 최초 진입 후 첫 정지 관측 실패 시에만 적용
+      recovery_walk_turn_max: 3 # 중간 좌/우(4·6) 구역의 회전 후 제자리 관측 한도
+      recovery_max_steps: 3 # 일반 FORWARD 유실: 좌우 회전 후/중앙 정지 관측 후 1걸음, 전진 한도
+      entry_recovery_max_steps: 1 # 진입 직후 첫 관측 실패의 전진 한도; 소진 후 공 없이 LINE 복귀
       recovery_center_tolerance_px: 50 # 복구 방향 선택 기준 - 중앙에서 얼마나
 
   # HURDLE: 검출·Depth 필터 → 후보 추적 → 미션 동작
@@ -183,6 +186,8 @@ vision_algorithm:
       contact_inter_action_hold_sec: 0.5 # 접촉 보행 DONE 후 다음 접촉 보행까지 정지 시간 (초, 0: 추가 대기 없음)
 
       # 유실 복구·미션 종료 후 무시 시간
+      entry_recovery_max_steps: 3 # 진입 직후 첫 관측 실패: 직진 1걸음씩, 소진 후 LINE 복귀
+      recovery_max_steps: 3 # DOWN 유실: 접근은 1걸음, FINE은 미세 전진 후 재관측
       recovery_observation_sec: 1.0
       recovery_max_observations: 5
       recovery_center_tolerance_px: 76.8
@@ -230,7 +235,7 @@ vision_algorithm:
       # 접근·카메라 전환
       target_u_px: 360.0 # 중앙 세로 구역의 중심
       approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
-      approach_short_z_m: 1.20 # 4걸음 → 3걸음 경계
+      approach_short_z_m: 0.80 # 4걸음 → 3걸음 경계
       fine_adjust_start_z_m: 0.80 # GOAL 카메라에서 근거리 접근 진입 기준
       camera_goal_start_z_m: 0.80 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
 
@@ -240,8 +245,8 @@ vision_algorithm:
 
       # 투척 위치·방향
       hoop_radius_m: 0.10 # 림 위치 보정에 사용하는 반지름
-      throw_landing_x_m: -0.08 # 카메라 기준 허리 0도 공 낙하 X (m)
-      throw_landing_z_m: 0.40 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
+      throw_landing_x_m: -0.12 # 카메라 기준 허리 0도 공 낙하 X (m)
+      throw_landing_z_m: 0.45 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
       position_tolerance_m: 0.06 # 목표 거리의 허용 오차
       shoot_yaw_limit_deg: 20.0 # ±이 값: COARSE 회전 및 FINE 투척/좌우 이동 판단 기준
       edge_margin_px: 50.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
@@ -250,10 +255,10 @@ vision_algorithm:
       post_shoot_back_steps: 0 # 0: 투척 후 후진 없이 카메라 FORWARD 및 라인 복귀
 
       # 유실 복구
-      recovery_turn_max: 3
+      recovery_turn_max: 5 # 좌우 탐색 회전 한도. 재발견 뒤 같은 방향 추가 1회전은 별도
       recovery_observation_sec: 1.0
       recovery_max_observations: 5
-      recovery_center_tolerance_px: 76.8
+      recovery_center_tolerance_px: 1 # 마지막 안정 위치가 target_u_px ±이 값이면 WALK 1걸음/FINE 미세 1회 전진 후 관측
 
   # 공통: Depth 표본 크기·객체 연결·명령 통신·관측/카메라 대기
   common:

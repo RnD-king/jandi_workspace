@@ -32,7 +32,7 @@ ActionRequest LinePlan::Begin(MissionAction cruise) {
       right ? MissionAction::kLineRightUnit : MissionAction::kLineStraightUnit;
   const int count = left ? config_.left_repetitions :
       right ? config_.right_repetitions : config_.straight_repetitions;
-  blocks_.emplace_back(next_block_++, cruise, unit, count, config_.failure_min_valid_samples);
+  blocks_.emplace_back(next_block_++, cruise, unit, count, config_);
   return UnitRequest(unit);
 }
 ActionRequest LinePlan::Continue(std::uint64_t ready_id) const {

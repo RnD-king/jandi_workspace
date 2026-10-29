@@ -329,7 +329,10 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         (ball_cmd.mode==vision_core::BallMode::kApproachBall ||
          ball_cmd.mode==vision_core::BallMode::kApproachTwoBeforeDown ||
          ball_cmd.mode==vision_core::BallMode::kWaitCameraDown ||
-         ball_cmd.mode==vision_core::BallMode::kBallRecoveryForward)) {
+         ball_cmd.mode==vision_core::BallMode::kBallRecoveryForward ||
+         ball_cmd.mode==vision_core::BallMode::kForwardRecoveryTurn ||
+         ball_cmd.mode==vision_core::BallMode::kForwardRecoveryStep ||
+         ball_cmd.mode==vision_core::BallMode::kForwardRecoveryObserve)) {
       const auto top=c.ApproachBounds(0,vis.rows);
       const auto bottom=c.ApproachBounds(vis.rows-1,vis.rows);
       const auto draw_edge=[&](double top_u,double bottom_u) {
@@ -664,6 +667,21 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
       std::snprintf(buf, sizeof(buf), "HURDLE DOWN SEARCH | remaining %d steps",
           hurdle_cmd.down_search_steps_remaining);
     add_row(selected_ball ? ball_approach_rows : hurdle_approach_rows,buf,selected_ball ? ball_color : hurdle_color);
+  }
+  if (selected_ball && (ball_cmd.mode==vision_core::BallMode::kForwardRecoveryTurn ||
+      ball_cmd.mode==vision_core::BallMode::kForwardRecoveryStep ||
+      ball_cmd.mode==vision_core::BallMode::kForwardRecoveryObserve)) {
+    std::snprintf(buf,sizeof(buf),"%s recovery | forward steps %d / %d | %s",
+        ball_cmd.entry_recovery ? "ENTRY" : "FORWARD", ball_cmd.recovery_steps_completed,
+        ball_cmd.recovery_step_limit, vision_core::BallController::ModeName(ball_cmd.mode));
+    add_row(ball_recovery_rows,buf,ball_color);
+  }
+  if (selected_hurdle && (hurdle_cmd.mode==vision_core::HurdleMode::kRecoveryStep ||
+      hurdle_cmd.mode==vision_core::HurdleMode::kRecoveryStepObserve)) {
+    std::snprintf(buf,sizeof(buf),"HURDLE %s recovery | steps %d / %d | %s",
+        hurdle_cmd.entry_recovery ? "ENTRY" : "DOWN", hurdle_cmd.recovery_steps_completed,
+        hurdle_cmd.recovery_step_limit, vision_core::HurdleController::ModeName(hurdle_cmd.mode));
+    add_row(hurdle_approach_rows,buf,hurdle_color);
   }
   if (ball_cmd.mode == vision_core::BallMode::kBallRecoveryForward ||
       hurdle_cmd.mode == vision_core::HurdleMode::kRecoveryForward ||

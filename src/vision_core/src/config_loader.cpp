@@ -125,7 +125,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
   NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
-  NonnegativeInt(c.ball.entry_recovery_walk_turn_max, "ball.entry_recovery_walk_turn_max");
+  NonnegativeInt(c.ball.recovery_max_steps, "ball.recovery_max_steps");
+  NonnegativeInt(c.ball.entry_recovery_max_steps, "ball.entry_recovery_max_steps");
   NonnegativeInt(c.goal.recovery_turn_max, "goal.recovery_turn_max");
   Nonnegative(c.goal.edge_margin_px, "goal.edge_margin_px");
   Nonnegative(c.transition_settle_sec, "mission.transition_settle_sec");
@@ -141,6 +142,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.hurdle.down_search_inter_action_hold_sec, "hurdle.down_search_inter_action_hold_sec");
   Positive(c.hurdle.recovery_observation_sec, "hurdle.recovery_observation_sec");
   PositiveInt(c.hurdle.recovery_max_observations, "hurdle.recovery_max_observations");
+  NonnegativeInt(c.hurdle.entry_recovery_max_steps, "hurdle.entry_recovery_max_steps");
+  NonnegativeInt(c.hurdle.recovery_max_steps, "hurdle.recovery_max_steps");
   Nonnegative(c.hurdle.target_u_px, "hurdle.target_u_px");
   Nonnegative(c.hurdle.contact_v_px, "hurdle.contact_v_px");
   PositiveInt(c.hurdle.contact_steps, "hurdle.contact_steps");
@@ -226,21 +229,28 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.line_p2p.in_place_turn_score <= c.line_p2p.steering_deadband)
     throw std::runtime_error("line_p2p.in_place_turn_score must exceed steering_deadband");
   Nonnegative(c.line_p2p.ready_lead_sec, "line_p2p.ready_lead_sec");
+  Nonnegative(c.line_p2p.observation_start_ratio, "line_p2p.observation_start_ratio");
+  if (c.line_p2p.observation_start_ratio >= 1.0)
+    throw std::runtime_error("line_p2p.observation_start_ratio must be in [0,1)");
   Nonnegative(c.line_p2p.failure_observation_sec,
               "line_p2p.failure_observation_sec");
   Nonnegative(c.line_p2p.recovery_observation_sec,
               "line_p2p.recovery_observation_sec");
   PositiveInt(c.line_p2p.failure_min_valid_samples,
               "line_p2p.failure_min_valid_samples");
-  NonnegativeInt(c.line_p2p.no_evidence_max_retries,
-                 "line_p2p.no_evidence_max_retries");
+  NonnegativeInt(c.line_p2p.visible_recovery_max_turns,
+                 "line_p2p.visible_recovery_max_turns");
+  NonnegativeInt(c.line_p2p.last_score_recovery_max_turns,
+                 "line_p2p.last_score_recovery_max_turns");
   NonnegativeInt(c.line_p2p.recovery_max_turns,
                  "line_p2p.recovery_max_turns");
-  if (c.line_p2p.recovery_turn_yaw_deg < 1 ||
-      c.line_p2p.recovery_turn_yaw_deg > 180)
-    throw std::runtime_error(
-        "vision algorithm key 'line_p2p.recovery_turn_yaw_deg' must be in "
-        "[1, 180]");
+  const std::pair<int, const char *> recovery_angles[] = {
+      {c.line_p2p.visible_recovery_turn_yaw_deg, "visible_recovery_turn_yaw_deg"},
+      {c.line_p2p.last_score_recovery_turn_yaw_deg, "last_score_recovery_turn_yaw_deg"}};
+  for (const auto &angle : recovery_angles)
+    if (angle.first < 1 || angle.first > 180)
+      throw std::runtime_error(std::string("line_p2p.") + angle.second +
+                               " must be in [1, 180]");
 
   HitsWithinWindow(c.ball.entry_min_hits, c.ball.stable_window,
                    "ball.entry_min_hits", "ball.stable_window");
@@ -463,12 +473,15 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(lp, "steering_deadband", c.line_p2p.steering_deadband);
   Assign(lp,"in_place_turn_score",c.line_p2p.in_place_turn_score);
   Assign(lp, "ready_lead_sec", c.line_p2p.ready_lead_sec);
+  Assign(lp, "observation_start_ratio", c.line_p2p.observation_start_ratio);
   Assign(lp, "failure_observation_sec", c.line_p2p.failure_observation_sec);
   Assign(lp, "recovery_observation_sec", c.line_p2p.recovery_observation_sec);
   Assign(lp, "failure_min_valid_samples", c.line_p2p.failure_min_valid_samples);
-  Assign(lp, "no_evidence_max_retries", c.line_p2p.no_evidence_max_retries);
+  Assign(lp, "visible_recovery_max_turns", c.line_p2p.visible_recovery_max_turns);
+  Assign(lp, "visible_recovery_turn_yaw_deg", c.line_p2p.visible_recovery_turn_yaw_deg);
+  Assign(lp, "last_score_recovery_max_turns", c.line_p2p.last_score_recovery_max_turns);
+  Assign(lp, "last_score_recovery_turn_yaw_deg", c.line_p2p.last_score_recovery_turn_yaw_deg);
   Assign(lp, "recovery_max_turns", c.line_p2p.recovery_max_turns);
-  Assign(lp, "recovery_turn_yaw_deg", c.line_p2p.recovery_turn_yaw_deg);
 
   const auto b = a["ball"];
   Assign(b, "test_mission_index", c.test_ball_mission_index);
@@ -480,7 +493,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
   Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
   Assign(b, "recovery_walk_turn_max", c.ball.recovery_walk_turn_max);
-  Assign(b, "entry_recovery_walk_turn_max", c.ball.entry_recovery_walk_turn_max);
+  Assign(b, "recovery_max_steps", c.ball.recovery_max_steps);
+  Assign(b, "entry_recovery_max_steps", c.ball.entry_recovery_max_steps);
   Assign(b, "post_pickup_back_steps", c.ball.post_pickup_back_steps);
 
   Assign(b, "stable_window", c.ball.stable_window);
@@ -522,6 +536,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "down_search_inter_action_hold_sec", c.hurdle.down_search_inter_action_hold_sec);
   Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
   Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);
+  Assign(h, "entry_recovery_max_steps", c.hurdle.entry_recovery_max_steps);
+  Assign(h, "recovery_max_steps", c.hurdle.recovery_max_steps);
   Assign(h, "target_u_px", c.hurdle.target_u_px);
   Assign(h, "contact_v_px", c.hurdle.contact_v_px);
   Assign(h, "contact_steps", c.hurdle.contact_steps);

@@ -30,16 +30,21 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(Qt5 REQUIRED COMPONENTS Widgets)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ActionCommand.msg"
   "msg/CameraCommand.msg"
   "msg/CommandStatus.msg"
+  "msg/TerminalDetection.msg"
+  "msg/TerminalFrame.msg"
+  DEPENDENCIES std_msgs
 )
 
 message(STATUS "OpenCV_DIR=${OpenCV_DIR}")
@@ -141,6 +146,8 @@ add_executable(hurdle_tuning_node src/perception_tuning_node.cpp)
 target_compile_definitions(hurdle_tuning_node PRIVATE VISION_HURDLE_TUNING_NODE=1)
 add_executable(goal_tuning_node src/perception_tuning_node.cpp)
 target_compile_definitions(goal_tuning_node PRIVATE VISION_GOAL_TUNING_NODE=1)
+add_executable(shoot_tuning_node src/shoot_tuning_node.cpp)
+target_compile_definitions(shoot_tuning_node PRIVATE QT_NO_KEYWORDS)
 
 target_link_libraries(line_perception_node
   vision_core
@@ -196,6 +203,12 @@ set_target_properties(goal_tuning_node PROPERTIES
   INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
 ament_target_dependencies(goal_tuning_node
   rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge)
+target_link_libraries(shoot_tuning_node vision_core "${vision_typesupport_target}" Qt5::Widgets)
+set_target_properties(shoot_tuning_node PROPERTIES
+  BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
+ament_target_dependencies(shoot_tuning_node
+  rclcpp ament_index_cpp sensor_msgs geometry_msgs cv_bridge)
 
 install(TARGETS
   vision_core
@@ -203,6 +216,7 @@ install(TARGETS
   line_p2p_tuning_node
   perception_tuning_node
   goal_tuning_node
+  shoot_tuning_node
   ball_tuning_node
   hurdle_tuning_node
   DESTINATION lib/${PROJECT_NAME}
@@ -216,7 +230,11 @@ install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
 
-install(FILES ROSBAG_RECORDING.md DESTINATION share/${PROJECT_NAME})
+install(FILES ROSBAG_RECORDING.md SHOOT_TUNING.md TERMINAL_VIEW.md DESTINATION share/${PROJECT_NAME})
+
+install(PROGRAMS scripts/vision_terminal_node.py
+  DESTINATION lib/${PROJECT_NAME} RENAME vision_terminal_node)
+install(FILES scripts/terminal_view.py DESTINATION lib/${PROJECT_NAME})
 
 # Motor-free manual executor UI (rclpy + tkinter) and its pure protocol model.
 install(PROGRAMS scripts/jandi_mock_executor_ui.py
@@ -228,6 +246,18 @@ install(FILES scripts/mock_executor_protocol.py
 )
 
 if(BUILD_TESTING)
+  add_executable(vision_terminal_publisher_test tests/terminal_publisher_test.cpp)
+  target_include_directories(vision_terminal_publisher_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(vision_terminal_publisher_test shared_vision_core::shared_vision_core
+    ${OpenCV_LIBS} "${vision_typesupport_target}")
+  ament_target_dependencies(vision_terminal_publisher_test rclcpp sensor_msgs std_msgs)
+  add_test(NAME vision_terminal_publisher_test COMMAND vision_terminal_publisher_test)
+  set_tests_properties(vision_terminal_publisher_test PROPERTIES LABELS "logic")
+  add_executable(vision_shoot_tuning_test tests/shoot_tuning_test.cpp)
+  target_include_directories(vision_shoot_tuning_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(vision_shoot_tuning_test shared_vision_core::shared_vision_core ${OpenCV_LIBS})
+  add_test(NAME vision_shoot_tuning_test COMMAND vision_shoot_tuning_test)
+  set_tests_properties(vision_shoot_tuning_test PROPERTIES LABELS "logic")
   add_executable(vision_object_depth_test tests/object_depth_test.cpp)
   target_include_directories(vision_object_depth_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(vision_object_depth_test ${OpenCV_LIBS})
@@ -262,6 +292,9 @@ if(BUILD_TESTING)
   target_link_libraries(vision_backboard_depth_regions_test ${OpenCV_LIBS})
   add_test(NAME vision_backboard_depth_regions_test COMMAND vision_backboard_depth_regions_test)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME vision_terminal_view_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/terminal_view_test.py)
+  set_tests_properties(vision_terminal_view_test PROPERTIES LABELS "logic")
   add_test(NAME vision_mock_executor_protocol_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/mock_executor_protocol_test.py)
   set_tests_properties(vision_hurdle_debug_guides_test vision_backboard_depth_regions_test

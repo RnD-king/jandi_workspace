@@ -56,8 +56,9 @@ private:
     std::optional<double> start;
     LineGuideAccumulator observations;
     std::optional<LineGuide> mean;
-    Block(std::uint64_t key, MissionAction old, MissionAction basic, int repeat, int samples)
-        : id(key), cruise(old), unit(basic), count(repeat), observations(samples) {}
+    Block(std::uint64_t key, MissionAction old, MissionAction basic, int repeat,
+          const LineP2pConfig &config)
+        : id(key), cruise(old), unit(basic), count(repeat), observations(config) {}
   };
   struct Unit {
     std::uint64_t block, parent;

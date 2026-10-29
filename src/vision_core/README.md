@@ -73,11 +73,21 @@ action으로 직접 결정한다.
 
 LINE READY는 current action 취소가 아니다. 긴 LINE action에서 최초 ACK
 이후 관측을 모으고, READY가 남은 시간 약 0.25초 전에 도착한다고 가정해
-전체 추정 실행시간의 40% 지점부터 READY까지의 유효 LineGuide를
+전체 추정 실행시간의 `line.walk.observation_start_ratio` 지점
+(현재 운영값 `0.20`, 20%)부터 READY까지의 유효 LineGuide를
 1→3 시간 가중평균해 direct selector로 다음 action 하나를 예약한다.
+시작 비율은 `0 이상 1 미만`이며 `0.20`이면 20%부터 수집한다.
+YAML 변경 뒤 설치본에 반영하고 노드를 재시작한다. 객체 접근의 READY
+관측 정책은 별도이며 이 LINE 설정으로 바뀌지 않는다.
 실제 READY 없이 DONE에 도착한 경우에는 남은 시간을 0으로 취급한다.
 current DONE 뒤 queued action을 시작한다. [LINE OBS] 로그에 사용 프레임 수와
-집계 구간이 출력되며 유효 표본 최소 개수는 아직 강제하지 않는다.
+집계 구간이 출력되며 유효 표본은 `line.walk.failure_min_valid_samples`
+개 이상이어야 한다.
+
+`forward_walk` 실행기도 같은 설치본 YAML의 `line.walk.ready_lead_sec`를
+읽는다(현재 `0.25`초). 별도의 다른 ROS override는 거부한다. 같은 파일을
+사용하려면 양쪽 프로세스에 동일한 `VISION_CORE_ALGORITHM_CONFIG` 경로를
+지정할 수 있다. YAML 수정 후 두 노드를 재시작한다.
 
 현재 action의 ACK는 실행기가 action을 수락하고 시작했다는 뜻이다. READY 뒤
 발행된 queued action의 ACK는 실행기가 그 ID와 payload를 내부 queue에 실제로
@@ -86,19 +96,57 @@ current DONE 뒤 queued action을 시작한다. [LINE OBS] 로그에 사용 프�
 
 ## LINE recovery
 
-하단 O/H guide는 최소 3개 line center가 있어야 valid다
-(`line.features.guide_min_points: 3`). 2점 이하는 기존 failure/recovery로 처리한다.
+입력 중심점이 3개 이하이면 그 프레임의 guide는 invalid다. 처음 4개 이상에서
+RANSAC으로 걸러져 3개가 남은 경우에는 fitting할 수 있다. 보행 중 10프레임
+연속 invalid면 미발행 반복을 취소하고 이미 발행된 동작의 DONE을 기다린다.
+마지막 READY 평균의 유효 표본이 `failure_min_valid_samples`(현재 5)개 미만인
+경우에도 DONE 뒤 복구를 시작한다.
 
-- 첫 실패: 2초 stationary observation
-- 유효 O/H 표본 5개 이상: 평균 guide로 정상 복귀
-- 5개 미만 + 방향 기억: 같은 방향 TURN 15도 후 2초 재관측, 최대 5회
-- 5개 미만 + 방향 기억 없음: 회전 없이 2초 재관측을 최대 5회 추가
-- 한도 초과: Reset 전까지 FINAL HOLD
+- 첫 실패: `failure_observation_sec`(현재 2초) 정지 관측.
+- 유효 guide 표본 5개 이상: 평균 guide로 정상 복귀하고 두 복구 횟수를 초기화.
+- 관측 실패: 현재 프레임의 유한한 점선 중심점 2개 이상이면 평균 X를 실제
+  LINE 기준 중심과 비교해 좌/우 회전. 각도·한도는
+  `visible_recovery_turn_yaw_deg` / `visible_recovery_max_turns`(현재 15도/5회).
+- 1개 이하 또는 평균 X가 정확히 기준 중심이면 마지막 유효 판단 점수의 부호로
+  회전. 음수는 좌, 0 이상과 기록 없음은 우. 직진 deadband 안의 점수도 보관한다.
+  각도·한도는 `last_score_recovery_turn_yaw_deg` /
+  `last_score_recovery_max_turns`(현재 15도/5회).
+- 회전의 실제 DONE과 settle 뒤 `recovery_observation_sec`(현재 1초) 정지 관측.
+  실패하면 위 우선순위를 다시 평가한다. 경로를 바꿔도 각 경로의 횟수는 누적된다.
+- 선택한 경로의 한도가 소진되면 Reset 전까지 FINAL HOLD.
 
-불안정 표본은 방향 기억을 갱신하지 않는다. curvature는 별도 validity와 분모로
-누적하는 진단값이며 steering, mission 전환, recovery 결정에 사용하지 않는다.
+옛 `no_evidence_max_retries`와 단일 `recovery_turn_yaw_deg`는 위 두 경로로
+대체했다. `recovery_max_turns`는 유효한 `|score| > in_place_turn_score`일 때의
+기존 WALK 회전 보정 한도로만 사용한다. 유실 복구의 TURN_LEFT/RIGHT는
+기존 FINE 자세 전환과 실제 ACK/DONE을 유지한다.
+
+마지막 점수는 유효한 보행 판단에서만 갱신하며 유실 프레임이나 희소 점선의
+위치로 덮어쓰지 않는다. Reset/미션 후 라인 재획득 시작 시 초기화한다.
+curvature는 진단값이며 steering, mission 전환, recovery 결정에 사용하지 않는다.
 
 ## Mission 요약
+
+BALL의 진입 직후 첫 관측 실패와 일반 FORWARD 연속 유실은 같은 탐색 순서를
+사용한다. 저장된 공 위치가 중심 허용 범위 밖이면 해당 방향 WALK 제자리 회전
+1회 → 전진 1걸음 → 정지 관측이다. 중앙/방향 미확인은 정지 관측부터 시작하고,
+실패하면 회전 없이 전진한다. 각 전진 뒤 새 10프레임/7회 검출과
+`ball.control.recovery_observation_sec`(1초)를 확인한다.
+전진 실제 DONE 한도는 `entry_recovery_max_steps`(진입 직후)와
+`recovery_max_steps`(일반 접근), 각각 현재 3회다. 진입 직후 한도 소진 시에는
+픽업 성공 처리 없이 공 모드를 해제하고 정상 LINE 재획득·보행으로 복귀한다.
+일반 접근은 한도 소진 후 정지 관측 최대 5회, 이후 FAILED다.
+중간 좌우 구역(4·6)은 기존 `recovery_walk_turn_max`(3회)의 회전 후 제자리
+관측만 사용한다. 기존 `entry_recovery_walk_turn_max` 키는 제거했다.
+
+HURDLE 진입 직후 첫 정지 관측이 실패하면 직진 1걸음 → 정지 관측을
+`hurdle.control.entry_recovery_max_steps`(현재 3회)까지 시도한다. 끝까지
+못 찾으면 허들 넘기를 실행하지 않고 정상 LINE 재획득·보행으로 복귀한다.
+DOWN 접근/미세 조정 중 `lost_frames`(15) 연속 유실이면 접근은 일반 1걸음,
+FINE은 미세 전진 1회 → 정지 관측을 `hurdle.control.recovery_max_steps`
+(현재 3회)까지 반복한다. 그 뒤에도 못 찾으면 기존 1초 정지 관측 최대 5회,
+이후 FAILED다. 복구 전진의 실제 DONE만 횟수에 포함하고 매번 새 10/7 표본과
+`recovery_observation_sec`를 확인한다. 초기 DOWN 탐색과 접촉/넘기 시퀀스의
+별도 한도는 이 복구 전진 횟수와 독립적이다.
 
 BALL/HURDLE 후보의 탐색 방향에는 시간 만료를 적용하지 않는다. 최초 후보의
 좌우 위치를 기준으로 탐색 방향을 고정하고, 실제 DONE으로 완료한 탐색 회전과
@@ -124,8 +172,14 @@ BALL/HURDLE 후보의 탐색 방향에는 시간 만료를 적용하지 않는�
   비어 있으면 FAILED에서 정지한다. 0이면 기존 방향/정지 복구를 사용한다.
   LINE 블록 길이는 기존 `line.walk.*_repetitions`를 따른다. READY나 과거 DONE은
   재관측을 허용하지 않으며, 재탐색은 공 보유 상태와 GOAL 미션 번호를 유지한다.
-  백보드가 잠깐이라도 보였거나 영상은 있으나 Depth가 실패한 경우, 접근 중
-  기존 백보드를 잃은 경우는 기존 방향 회전·정지 관측 복구를 유지한다.
+  접근·근거리에서 백보드를 연속 `goal.control.lost_frames`만큼 잃으면 마지막
+  안정 위치로 복구한다. 중앙(`recovery_center_tolerance_px` 이내)이면 WALK는
+  일반 전진 1걸음(10), FINE은 미세 전진 1회(3) 후 새 정지 관측을 한다.
+  좌우면 기존 방향으로 회전하고, 실제 DONE 뒤 관측에서 다시 찾으면 같은
+  방향으로 추가 1회 회전한 뒤 다시 관측하고 이전 단계로 복귀한다. 추가 회전은
+  탐색 회전 한도와 별도이며 반복해서 추가하지 않는다. 전진·추가 회전 뒤에도
+  못 찾으면 기존 정지 복구로 넘어간다. 방향 기록이 없거나 백보드 영상은 있지만
+  Depth·자세만 실패하면 정지 관측한다. 화면 끝 보정의 고정 2회전은 별도다.
 
 카메라 trigger는 진행 중 locomotion을 취소하지 않는다. DONE 뒤 camera request를
 내고, 카메라 모션이 끝날 때까지 새 locomotion을 HOLD한다.

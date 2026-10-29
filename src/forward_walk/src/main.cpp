@@ -123,7 +123,14 @@ public:
             });
 
         // READY를 보낼 종료 전 여유 시간(초). 실제 통신 지연을 예측하는 값은 아니다.
-        ready_lead_sec_ = declare_parameter<double>("ready_lead_sec", 0.25);
+        // Share the installed algorithm YAML with vision. A ROS override must
+        // agree with it so READY emission and the observation estimate match.
+        rcl_interfaces::msg::ParameterDescriptor ready_descriptor;
+        ready_descriptor.read_only = true;
+        ready_lead_sec_ = declare_parameter<double>(
+            "ready_lead_sec", algorithm.line_p2p.ready_lead_sec, ready_descriptor);
+        if (ready_lead_sec_ != algorithm.line_p2p.ready_lead_sec)
+            throw std::invalid_argument("ready_lead_sec must match line.walk.ready_lead_sec in vision_algorithm.yaml");
         // 카메라 yaw=좌우 회전, pitch=상하 회전. 자세 값은 각도가 아니라 encoder tick이다.
         camera_config_.yaw_id = declare_parameter<int>("camera_yaw_motor_id", 21);
         camera_config_.pitch_id = declare_parameter<int>("camera_pitch_motor_id", 22);
@@ -1058,7 +1065,7 @@ private:
     // 마지막으로 전송 호출에 성공한 전체 목표 tick. 실제 encoder 측정값과 구분해야 한다.
     P2PMotionPlayer::RawPositions last_sent_positions_;
     std::chrono::steady_clock::time_point next_write_at_{}; // 몸/카메라 공통으로 다음 전송이 허용되는 시각
-    double ready_lead_sec_{0.25};                      // 종료 몇 초 전부터 READY를 허용할지
+    double ready_lead_sec_{};                          // Shared YAML: line.walk.ready_lead_sec
     std::uint16_t current_action_{0};                  // 현재 동작 종류(명령 고유 ID 아님), 0은 유휴 상태
     int active_target_yaw_deg_{0};                     // 현재 계획한 각도 저장용; 이 값 자체가 모터를 제어하진 않음
 };

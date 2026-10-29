@@ -1,6 +1,7 @@
 #include "vision/debug_bag_publisher.hpp"
 #include "vision/mission_debug_view.hpp"
 #include "vision/mission_state_log.hpp"
+#include "vision/terminal_publisher.hpp"
 #include "vision/debug_guides.hpp"
 #include "vision/mission_parameters.hpp"
 #include "vision/backboard_depth.hpp"
@@ -169,6 +170,7 @@ public:
     // YOLO의 필터 전 raw detection bbox를 별도 창에서 확인할 때만 켠다.
     declare_parameter<bool>("show_yolo_debug_view", false);
     debug_bag_ = std::make_unique<vision::DebugBagPublisher>(*this);
+    terminal_publisher_=std::make_unique<vision::TerminalPublisher>(*this);
     declare_parameter<double>("inference_hz", 15.0);
     declare_parameter<int>("max_centers", algorithm_defaults.line_features.max_centers);
     // 각 object mission controller의 사용 여부다.
@@ -387,7 +389,10 @@ public:
               continue;
             }
             if (parameter.get_name()=="transition_settle_sec" || parameter.get_name()=="fine_motion_settle_sec" ||
-                parameter.get_name()=="ball_recovery_walk_turn_max" || parameter.get_name()=="goal_recovery_turn_max") {
+                parameter.get_name()=="ball_recovery_walk_turn_max" ||
+                parameter.get_name()=="ball_recovery_max_steps" || parameter.get_name()=="ball_entry_recovery_max_steps" ||
+                parameter.get_name()=="hurdle_entry_recovery_max_steps" || parameter.get_name()=="hurdle_recovery_max_steps" ||
+                parameter.get_name()=="goal_recovery_turn_max") {
               response.successful=false;
               response.reason="Mission settings are applied at node startup; restart with the new value";
               return response;
@@ -761,6 +766,8 @@ private:
                          const vision_core::PerceptionMissionFrameResult &result,
                          bool imu_ready, double roll, double pitch) {
     LogMissionState(result);
+    terminal_publisher_->Publish(header,bgr.cols,bgr.rows,dets,debug_config_,result,
+        camera_feedback_,DebugContext(imu_ready,roll,pitch));
     const auto request = debug_bag_->RequestFrame();
     if (!show_debug_view_ && !show_yolo_debug_view_ && !request) return;
     vision::MissionDebugImages views;
@@ -1680,6 +1687,7 @@ private:
   float backboard_conf_thres_{0.60f};
   float hurdle_conf_thres_{0.60f};
   std::unique_ptr<vision::DebugBagPublisher> debug_bag_;
+  std::unique_ptr<vision::TerminalPublisher> terminal_publisher_;
   bool show_debug_view_{false};
   bool show_yolo_debug_view_{false};
   double inference_hz_{5.0};

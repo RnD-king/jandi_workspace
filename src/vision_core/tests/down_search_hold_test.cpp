@@ -151,7 +151,7 @@ void FailedSearchConfirmationResumes(bool partial_hits) {
   assert(s.ball.DownSearchStepsRemaining()==1 && s.hurdle.DownSearchStepsRemaining()==1);
   // A later ordinary approach loss still uses the existing recovery FSM.
   s.Verify(5.4,{},std::deque<bool>(10,false));s.NoStep();
-  assert(s.b.mode==BallMode::kBallRecoveryDown && s.h.mode==HurdleMode::kRecoveryDown);
+  assert(s.b.mode==BallMode::kBallRecoveryDown && s.h.mode==HurdleMode::kRecoveryStep);
 }
 void FailedSearchConfirmationRetainsLimitAndHold() {
   auto c=Config(.5,.5);

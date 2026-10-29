@@ -35,7 +35,7 @@ MissionController::MissionController()
 
 MissionController::MissionController(const MissionControllerConfig &config)
     : config_(ValidatedConfig(config)), line_plan_(config_.line_p2p), line_p2p_controller_(config_.line_p2p),
-      line_guide_accumulator_(config_.line_p2p.failure_min_valid_samples),
+      line_guide_accumulator_(config_.line_p2p),
       ball_controller_(config_.ball, config_.camera_motion_timeout_sec),
       hurdle_controller_(config_.hurdle, config_.camera_motion_timeout_sec),
       goal_controller_(config_.goal, config_.camera_motion_timeout_sec),
@@ -61,6 +61,10 @@ MissionController::MissionController(const MissionControllerConfig &config)
 ActionRequest MissionController::CruiseAction(const LineGuide &guide,
                                               bool queue_eligible) {
   const CruiseDecision decision = line_p2p_controller_.Compute(guide);
+  // Remember the signed decision, including straight/deadband and exact zero.
+  // Never replace it with an invalid frame or the sparse-center recovery hint.
+  if (decision.direction != CruiseDirection::kNone)
+    last_line_score_ = decision.error;
   MissionAction action = MissionAction::kNone;
   if (decision.direction != CruiseDirection::kNone &&
       std::abs(decision.error) > config_.line_p2p.in_place_turn_score) {
@@ -163,12 +167,16 @@ ActionRequest MissionController::ComputeLineAction(
     }
     if (action_active || recovery_turn_issued_)
       return {};
-    if (!input.allow_new_body_actions)
+    if (!input.allow_new_body_actions || !input.allow_new_commands ||
+        !input.allow_new_line_action || !input.advance_line_fsm ||
+        command_coordinator_.ActionAckTimedOut())
       return {};
     recovery_turn_issued_ = true;
-    ++line_recovery_turns_;
-    return RecoveryTurn(line_direction_evidence_ == DirectionEvidence::kLeft,
-                        config_.line_p2p.recovery_turn_yaw_deg);
+    const auto &c = config_.line_p2p;
+    if (line_recovery_uses_visible_centers_) ++line_visible_recovery_turns_;
+    else ++line_last_score_recovery_turns_;
+    return RecoveryTurn(line_recovery_left_, line_recovery_uses_visible_centers_
+        ? c.visible_recovery_turn_yaw_deg : c.last_score_recovery_turn_yaw_deg);
   }
 
   if (line_state_ == LineState::kFailureObserve ||
@@ -188,28 +196,37 @@ ActionRequest MissionController::ComputeLineAction(
     line_observation_active_ = false;
     if (observed) {
       line_state_ = LineState::kNormal;
-      line_no_evidence_retries_ = line_recovery_turns_ = 0;
-      const CruiseDecision d = line_p2p_controller_.Compute(*observed);
-      if (d.direction == CruiseDirection::kLeft)
-        line_direction_evidence_ = DirectionEvidence::kLeft;
-      else if (d.direction == CruiseDirection::kRight)
-        line_direction_evidence_ = DirectionEvidence::kRight;
-      else if (d.direction == CruiseDirection::kStraight)
-        line_direction_evidence_ = DirectionEvidence::kNone;
+      line_visible_recovery_turns_ = line_last_score_recovery_turns_ = 0;
       return CruiseAction(*observed, true);
     }
-    if (line_direction_evidence_ == DirectionEvidence::kNone) {
-      if (line_no_evidence_retries_ <
-          std::max(0, config_.line_p2p.no_evidence_max_retries)) {
-        ++line_no_evidence_retries_;
-        BeginObservation(LineState::kFailureObserve, input.now_sec);
-      } else {
-        line_state_ = LineState::kFinalHold;
-      }
-      return {};
+    // Use this frame only, even if it has too few centers for a valid guide.
+    // Finite centers in the image follow the same clamping/near-first cap as
+    // the feature extractor, without requiring its four-point fitting gate.
+    std::vector<Point2> centers;
+    if (input.image_width > 1 && input.image_height > 1) {
+      for (const auto &p : input.line_centers)
+        if (std::isfinite(p.u) && std::isfinite(p.v))
+          centers.push_back({std::clamp(p.u, 0.0, double(input.image_width - 1)),
+                             std::clamp(p.v, 0.0, double(input.image_height - 1))});
     }
-    if (line_recovery_turns_ <
-        std::max(0, config_.line_p2p.recovery_max_turns)) {
+    std::sort(centers.begin(), centers.end(), [](const Point2 &a, const Point2 &b) {
+      return a.v == b.v ? a.u < b.u : a.v > b.v;
+    });
+    centers.resize(std::min(centers.size(), static_cast<std::size_t>(
+        std::min(8, std::max(1, config_.line_features.max_centers)))));
+    double mean_u = 0.0;
+    for (const auto &p : centers) mean_u += p.u;
+    if (!centers.empty()) mean_u /= centers.size();
+    line_recovery_uses_visible_centers_ = centers.size() >= 2 &&
+        mean_u != last_line_image_center_u_;
+    line_recovery_left_ = line_recovery_uses_visible_centers_
+        ? mean_u < last_line_image_center_u_ : last_line_score_.value_or(0.0) < 0.0;
+    const int turns = line_recovery_uses_visible_centers_
+        ? line_visible_recovery_turns_ : line_last_score_recovery_turns_;
+    const int limit = line_recovery_uses_visible_centers_
+        ? config_.line_p2p.visible_recovery_max_turns
+        : config_.line_p2p.last_score_recovery_max_turns;
+    if (turns < limit) {
       line_state_ = LineState::kRecoveryTurn;
       recovery_turn_issued_ = false;
       return ComputeLineAction(guide, input, false, false, reference_valid);
@@ -226,13 +243,6 @@ ActionRequest MissionController::ComputeLineAction(
     AddObservation(guide);
     return {};
   }
-  const CruiseDecision d = line_p2p_controller_.Compute(guide);
-  if (d.direction == CruiseDirection::kLeft)
-    line_direction_evidence_ = DirectionEvidence::kLeft;
-  else if (d.direction == CruiseDirection::kRight)
-    line_direction_evidence_ = DirectionEvidence::kRight;
-  else if (d.direction == CruiseDirection::kStraight)
-    line_direction_evidence_ = DirectionEvidence::kNone;
   return CruiseAction(guide, true);
 }
 
@@ -244,8 +254,9 @@ void MissionController::BeginLineReacquisition() {
   mission_recovery_found_ = false;
   mission_recovery_verifying_ = false;
   mission_recovery_hits_.clear();
-  line_direction_evidence_ = DirectionEvidence::kNone;
-  line_no_evidence_retries_ = line_recovery_turns_ = 0;
+  last_line_score_.reset();
+  line_recovery_uses_visible_centers_ = line_recovery_left_ = false;
+  line_visible_recovery_turns_ = line_last_score_recovery_turns_ = 0;
   recovery_turn_issued_ = false;
   line_observation_active_ = false;
   line_failure_pending_done_ = false;
@@ -1220,7 +1231,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   // although it advances WAIT_CAMERA without collecting a sample yet.
   output.post_motion_observing = observation_hold;
   decision_observation_first_frame_ = false;
-  const int line_turns_before = line_recovery_turns_;
+  const int visible_turns_before = line_visible_recovery_turns_;
+  const int last_score_turns_before = line_last_score_recovery_turns_;
   ActionExecutionFeedback action_feedback = input.action_feedback;
   const bool matching_feedback =
       last_command_.action_id != 0 &&
@@ -1241,6 +1253,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         *line_image_center_u >= 0.0 &&
         *line_image_center_u < static_cast<double>(input.image_width))
       cfg.image_center_u = *line_image_center_u;
+    last_line_image_center_u_ = cfg.image_center_u >= 0
+        ? cfg.image_center_u : 0.5 * input.image_width;
     output.line_features = ComputeLineFeatures(
         input.line_centers, input.image_width, input.image_height, cfg);
     output.line_computed = true;
@@ -1581,7 +1595,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   if (implicit_pose) {
     if (active_mission_ == MissionType::kLine && wants_fine) {
       recovery_turn_issued_ = false;
-      line_recovery_turns_ = line_turns_before;
+      line_visible_recovery_turns_ = visible_turns_before;
+      line_last_score_recovery_turns_ = last_score_turns_before;
     }
     request = {wants_walk ? MissionAction::kWalkMode
                           : MissionAction::kDefaultPoseMode,
@@ -1777,6 +1792,9 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
       ball_controller_.RecoveryObservationsCompleted();
   output.ball.recovery_observation_elapsed_sec =
       ball_controller_.RecoveryObservationElapsed(now);
+  output.ball.recovery_steps_completed = ball_controller_.RecoveryStepsCompleted();
+  output.ball.recovery_step_limit = ball_controller_.RecoveryStepLimit();
+  output.ball.entry_recovery = ball_controller_.EntryRecovery();
   output.ball.down_search_steps_remaining =
       ball_controller_.DownSearchStepsRemaining();
   output.ball.down_search_found = ball_controller_.DownSearchFound();
@@ -1800,6 +1818,9 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
       hurdle_controller_.RecoveryObservationsCompleted();
   output.hurdle.recovery_observation_elapsed_sec =
       hurdle_controller_.RecoveryObservationElapsed(now);
+  output.hurdle.recovery_steps_completed = hurdle_controller_.RecoveryStepsCompleted();
+  output.hurdle.recovery_step_limit = hurdle_controller_.RecoveryStepLimit();
+  output.hurdle.entry_recovery = hurdle_controller_.EntryRecovery();
   output.hurdle.down_search_steps_remaining =
       hurdle_controller_.DownSearchStepsRemaining();
 }
@@ -1940,7 +1961,9 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   const auto mode_before=ball_result_.mode;
   const bool recovery_mode=active_mission_==MissionType::kBall &&
       (mode_before==BallMode::kBallRecoveryDown || mode_before==BallMode::kBallRecoveryForward ||
-       mode_before==BallMode::kBallRecoveryWalkTurn || mode_before==BallMode::kDownSearch);
+       mode_before==BallMode::kBallRecoveryWalkTurn || mode_before==BallMode::kDownSearch ||
+       mode_before==BallMode::kForwardRecoveryTurn || mode_before==BallMode::kForwardRecoveryStep ||
+       mode_before==BallMode::kForwardRecoveryObserve);
   const bool candidate_search=candidate_.mission==MissionType::kBall &&
       (candidate_.phase==CandidatePhase::kSearch || candidate_.phase==CandidatePhase::kRestore);
   const bool acquisition_episode=recovery_mode || candidate_search;
@@ -2022,11 +2045,14 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
       (active_mission_ == MissionType::kHurdle &&
        (hurdle_result_.mode == HurdleMode::kDownSearch ||
         hurdle_result_.mode == HurdleMode::kRecoveryDown ||
-        hurdle_result_.mode == HurdleMode::kRecoveryForward)) ||
+        hurdle_result_.mode == HurdleMode::kRecoveryForward ||
+        hurdle_result_.mode == HurdleMode::kRecoveryStep ||
+        hurdle_result_.mode == HurdleMode::kRecoveryStepObserve)) ||
       (candidate_.mission == MissionType::kHurdle &&
        (candidate_.phase == CandidatePhase::kSearch || candidate_.phase == CandidatePhase::kRestore));
   const bool board_recovery = active_mission_ == MissionType::kGoal &&
       (goal_result_.mode == GoalMode::kRecoveryTurn || goal_result_.mode == GoalMode::kRecoverySearch ||
+       goal_result_.mode == GoalMode::kRecoveryForwardStep || goal_result_.mode == GoalMode::kRecoveryExtraTurn ||
        goal_result_.mode == GoalMode::kFineRecovery || goal_result_.mode == GoalMode::kCoarseRecovery);
   const bool manual_hurdle_identity_valid = !input.manual_ready_mean ||
       !config_.hurdle_candidate_tracking.enabled || active_mission_ != MissionType::kHurdle ||
@@ -2128,7 +2154,9 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
                        goal_result_.mode == GoalMode::kFineRecovery ||
                        goal_result_.mode == GoalMode::kCoarseRecovery ||
                        goal_result_.mode == GoalMode::kShoot ||
-                       (goal_result_.mode == GoalMode::kRecoveryTurn &&
+                       ((goal_result_.mode == GoalMode::kRecoveryTurn ||
+                         goal_result_.mode == GoalMode::kRecoveryForwardStep ||
+                         goal_result_.mode == GoalMode::kRecoveryExtraTurn) &&
                         foot_pose_ == FootPose::kFine));
     const bool near =
         depth.center_depth_m &&
@@ -2237,6 +2265,8 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
          (active_mission_==MissionType::kBall && ball_result_.mode!=BallMode::kWaitCameraDown &&
           ball_result_.mode!=BallMode::kDownSearch && ball_result_.mode!=BallMode::kBallRecoveryDown &&
           ball_result_.mode!=BallMode::kBallRecoveryForward && ball_result_.mode!=BallMode::kBallRecoveryWalkTurn &&
+          ball_result_.mode!=BallMode::kForwardRecoveryTurn && ball_result_.mode!=BallMode::kForwardRecoveryStep &&
+          ball_result_.mode!=BallMode::kForwardRecoveryObserve &&
           ball_result_.mode!=BallMode::kVerifyPickupObservation))) {
       ball_target_id_=entry_track->id; ball_target_locked_=true; ball_reacquiring_=false;
       ball_association_tracker_.Seed(entry_track->target);
@@ -2260,7 +2290,9 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
     if (selected && ((candidate_.mission == MissionType::kHurdle && !hurdle_target_tracker_.Reacquiring()) ||
         (active_mission_ == MissionType::kHurdle && hurdle_result_.mode != HurdleMode::kWaitCameraDown &&
          hurdle_result_.mode != HurdleMode::kDownSearch && hurdle_result_.mode != HurdleMode::kRecoveryDown &&
-         hurdle_result_.mode != HurdleMode::kRecoveryForward && hurdle_result_.tracked.stable)))
+         hurdle_result_.mode != HurdleMode::kRecoveryForward &&
+         hurdle_result_.mode != HurdleMode::kRecoveryStep && hurdle_result_.mode != HurdleMode::kRecoveryStepObserve &&
+         hurdle_result_.tracked.stable)))
       hurdle_target_tracker_.Lock();
     if (!selected && (hurdle_target_tracker_.Locked() || hurdle_target_tracker_.Reacquiring()))
       hurdle_target_tracker_.Reset();
@@ -2268,6 +2300,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   if (config_.backboard_candidate_tracking.enabled) {
     if (active_mission_ == MissionType::kGoal && goal_result_.tracked.stable &&
         goal_result_.mode != GoalMode::kWaitCameraGoal && goal_result_.mode != GoalMode::kRecoveryTurn &&
+        goal_result_.mode != GoalMode::kRecoveryForwardStep && goal_result_.mode != GoalMode::kRecoveryExtraTurn &&
         goal_result_.mode != GoalMode::kRecoverySearch && goal_result_.mode != GoalMode::kFineRecovery &&
         goal_result_.mode != GoalMode::kCoarseRecovery)
       backboard_target_tracker_.Lock();
@@ -2316,6 +2349,11 @@ int MissionController::RepeatScope() const {
       pose_change_pending_)
     return 0;
   if (active_mission_ == MissionType::kBall) {
+    // One committed side-recovery cycle is TURN -> STEP -> fresh observation.
+    // Share a scope across the two motions; the controller owns post-step data.
+    if (ball_result_.mode == BallMode::kForwardRecoveryTurn ||
+        ball_result_.mode == BallMode::kForwardRecoveryStep)
+      return 200 + static_cast<int>(BallMode::kForwardRecoveryTurn);
     if (ball_result_.mode == BallMode::kMidTurnBeforeRecovery ||
         ball_result_.mode == BallMode::kFineSidePair ||
         ball_result_.mode == BallMode::kFineMotionRepeat ||
@@ -2325,6 +2363,7 @@ int MissionController::RepeatScope() const {
       return 200 + static_cast<int>(ball_result_.mode);
   } else if (active_mission_ == MissionType::kHurdle) {
     if (hurdle_result_.mode == HurdleMode::kDownSearch ||
+        hurdle_result_.mode == HurdleMode::kRecoveryStep ||
         hurdle_result_.mode == HurdleMode::kContactWalk)
       return 400 + static_cast<int>(hurdle_result_.mode);
   } else if (active_mission_ == MissionType::kGoal) {
@@ -2341,10 +2380,12 @@ bool MissionController::NeedsStationaryObservation() const {
   if (candidate_.phase == CandidatePhase::kObserve) return true;
   return (active_mission_ == MissionType::kBall &&
           (ball_result_.mode == BallMode::kBallRecoveryDown ||
-           ball_result_.mode == BallMode::kBallRecoveryForward)) ||
+           ball_result_.mode == BallMode::kBallRecoveryForward ||
+           ball_result_.mode == BallMode::kForwardRecoveryObserve)) ||
          (active_mission_ == MissionType::kHurdle &&
           (hurdle_result_.mode == HurdleMode::kRecoveryDown ||
-           hurdle_result_.mode == HurdleMode::kRecoveryForward)) ||
+           hurdle_result_.mode == HurdleMode::kRecoveryForward ||
+           hurdle_result_.mode == HurdleMode::kRecoveryStepObserve)) ||
          (active_mission_ == MissionType::kGoal &&
           (goal_result_.mode == GoalMode::kFineRecovery ||
            goal_result_.mode == GoalMode::kCoarseRecovery ||
@@ -2580,7 +2621,7 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   }
   config_ = updated;
   line_guide_accumulator_ =
-      LineGuideAccumulator(config_.line_p2p.failure_min_valid_samples);
+      LineGuideAccumulator(config_.line_p2p);
   line_p2p_controller_ = LineP2pController(config_.line_p2p);
   line_plan_.UpdateConfig(config_.line_p2p);
   ball_controller_.UpdateTuning(config_.ball);
@@ -2616,7 +2657,7 @@ bool MissionController::UpdateLineP2pTuning(const LineP2pConfig &line_p2p) {
   line_p2p_controller_ = LineP2pController(line_p2p);
   line_plan_.UpdateConfig(line_p2p);
   line_guide_accumulator_ =
-      LineGuideAccumulator(line_p2p.failure_min_valid_samples);
+      LineGuideAccumulator(line_p2p);
   return true;
 }
 
@@ -2675,9 +2716,10 @@ void MissionController::Reset(bool preserve_action_ids) {
   active_mission_ = MissionType::kLine;
   has_ball_ = config_.initial_has_ball;
   line_state_ = LineState::kNormal;
-  line_direction_evidence_ = DirectionEvidence::kNone;
+  last_line_score_.reset();
+  line_recovery_uses_visible_centers_ = line_recovery_left_ = false;
   line_observation_active_ = false;
-  line_no_evidence_retries_ = line_recovery_turns_ = 0;
+  line_visible_recovery_turns_ = line_last_score_recovery_turns_ = 0;
   recovery_turn_issued_ = false;
   line_stability_history_.clear();
   line_guide_accumulator_.Reset();

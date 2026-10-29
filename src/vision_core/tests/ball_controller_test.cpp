@@ -377,7 +377,7 @@ int main() {
   walk_c.lost_frames=5;
   walk_c.recovery_observation_sec=1.0;
   walk_c.recovery_max_observations=2;
-  walk_c.recovery_walk_turn_max=5;
+  walk_c.recovery_max_steps=5;
   walk_c.recovery_center_tolerance_px=40;
   BallController walk_recovery(walk_c,3.0);
   double walk_time=50.0;
@@ -391,60 +391,49 @@ int main() {
     r=walk_recovery.Compute({},640,480,walk_time,{}, {});
     walk_time+=.1;
   }
-  assert(r.mode==BallMode::kBallRecoveryForward);
-  for(int i=0;i<18 && r.mode!=BallMode::kBallRecoveryWalkTurn;++i) {
-    r=walk_recovery.Compute({},640,480,walk_time,{}, {});
-    walk_time+=.1;
-  }
-  assert(r.mode==BallMode::kBallRecoveryWalkTurn);
-  for(int turn=0;turn<5;++turn) {
-    r=walk_recovery.Compute({},640,480,walk_time,{}, {});
-    assert(r.action.action==MissionAction::kTurnLeftInPlace); // in-place action 31
-    walk_time+=.1;
-    ActionExecutionFeedback moving; moving.action_active=true;
-    r=walk_recovery.Compute({},640,480,walk_time,{},moving);
+  assert(r.mode==BallMode::kForwardRecoveryTurn);
+  for(int cycle=0;cycle<5;++cycle) {
+    r=walk_recovery.Compute({},640,480,walk_time+=.1,{},{});
+    assert(r.action.action==MissionAction::kTurnLeftInPlace);
+    r=walk_recovery.Compute({},640,480,walk_time+=.1,{}, {false,true,false});
     assert(r.action.action==MissionAction::kNone);
-    walk_time+=.1;
-    ActionExecutionFeedback completed; completed.action_done=true;
-    completed.observation_complete=false;
-    r=walk_recovery.Compute({},640,480,walk_time,{},completed);
-    assert(walk_recovery.RecoveryWalkTurnsCompleted()==turn);
-    ActionExecutionFeedback observed_only; observed_only.observation_complete=true;
-    r=walk_recovery.Compute({},640,480,walk_time+.01,{},observed_only);
-    assert(r.action.action==MissionAction::kNone);
-    assert(walk_recovery.RecoveryWalkTurnsCompleted()==turn+1);
-    walk_time+=.1;
+    r=walk_recovery.Compute({},640,480,walk_time+=.1,{}, {true,false,false});
+    assert(r.mode==BallMode::kForwardRecoveryStep);
+    assert(walk_recovery.RecoveryWalkTurnsCompleted()==cycle+1);
+    r=walk_recovery.Compute({},640,480,walk_time+=.1,{},{});
+    assert(r.action.action==MissionAction::kStepForwardOne);
+    r=walk_recovery.Compute({},640,480,walk_time+=.1,{}, {false,true,false});
+    assert(walk_recovery.RecoveryStepsCompleted()==cycle);
+    r=walk_recovery.Compute({},640,480,walk_time+=.1,{}, {true,false,false});
+    assert(walk_recovery.RecoveryStepsCompleted()==cycle+1);
+    for(int i=0;i<10;++i)r=walk_recovery.Compute({},640,480,walk_time+=.1,{},{});
+    assert(r.mode==(cycle<4?BallMode::kForwardRecoveryTurn:BallMode::kBallRecoveryForward));
   }
-  assert(r.mode==BallMode::kBallRecoveryForward);
-  for(int i=0;i<24 && r.mode!=BallMode::kFailed;++i) {
-    r=walk_recovery.Compute({},640,480,walk_time,{}, {});
-    walk_time+=.1;
-  }
-  assert(r.mode==BallMode::kFailed); // original 2 stationary attempts preserved
+  for(int i=0;i<24 && r.mode!=BallMode::kFailed;++i)
+    r=walk_recovery.Compute({},640,480,walk_time+=.1,{},{});
+  assert(r.mode==BallMode::kFailed); // Original two stationary fallback attempts.
 
   for(double recovery_u:{.2,.8}) {
-    BallController found_after_turn(walk_c,3.0);
-    double find_time=80.0;
+    BallController found_after_step(walk_c,3.0);
+    double now=80;
     for(int i=0;i<7;++i)
-      found_after_turn.Compute(Ball(recovery_u,.3),640,480,find_time+=.1,{},{});
-    for(int i=0;i<5;++i)
-      r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
-    for(int i=0;i<18 && r.mode!=BallMode::kBallRecoveryWalkTurn;++i)
-      r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
-    assert(r.mode==BallMode::kBallRecoveryWalkTurn);
-    r=found_after_turn.Compute({},640,480,find_time+=.1,{},{});
-    assert(r.action.action==(recovery_u<.5 ? MissionAction::kTurnLeftInPlace
-                                         : MissionAction::kStepForwardRightOneHurdle));
-    ActionExecutionFeedback moving2; moving2.action_active=true;
+      found_after_step.Compute(Ball(recovery_u,.3),640,480,now+=.1,{},{});
+    for(int i=0;i<5;++i)r=found_after_step.Compute({},640,480,now+=.1,{},{});
+    assert(r.mode==BallMode::kForwardRecoveryTurn);
+    r=found_after_step.Compute({},640,480,now+=.1,{},{});
+    assert(r.action.action==(recovery_u<.5?MissionAction::kTurnLeftInPlace:
+                                           MissionAction::kStepForwardRightOneHurdle));
     for(int i=0;i<10;++i)
-      r=found_after_turn.Compute(Ball(recovery_u,.3),640,480,find_time+=.1,{},moving2);
-    assert(r.mode==BallMode::kApproachBall);
-    assert(found_after_turn.RecoveryWalkTurnsCompleted()==0);
-    ActionExecutionFeedback completed2; completed2.action_done=true;
-    completed2.observation_complete=true;
-    r=found_after_turn.Compute(Ball(recovery_u,.3),640,480,find_time+=.1,{},completed2);
-    assert(r.mode==BallMode::kApproachBall);
-    assert(found_after_turn.RecoveryWalkTurnsCompleted()==0);
+      r=found_after_step.Compute(Ball(recovery_u,.3),640,480,now+=.1,{}, {false,true,false});
+    assert(r.mode==BallMode::kForwardRecoveryTurn); // Moving evidence never ends the cycle.
+    r=found_after_step.Compute({},640,480,now+=.1,{}, {true,false,false});
+    r=found_after_step.Compute({},640,480,now+=.1,{},{});
+    assert(r.action.action==MissionAction::kStepForwardOne);
+    r=found_after_step.Compute({},640,480,now+=.1,{}, {true,false,false});
+    assert(r.mode==BallMode::kForwardRecoveryObserve);
+    for(int i=0;i<10;++i)
+      r=found_after_step.Compute(Ball(recovery_u,.3),640,480,now+=.1,{},{});
+    assert(r.mode==BallMode::kApproachBall && found_after_step.RecoveryStepsCompleted()==0);
   }
 
   return 0;

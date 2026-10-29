@@ -26,6 +26,9 @@ line_perception_node:
     rosbag_fps: 10.0
     show_debug_view: false
     show_yolo_debug_view: false
+    terminal_node: false
+    terminal_fps: 5.0
+    terminal_topic: "/jandi_vision/terminal"
     enable_ball_controller: true
     enable_hurdle_controller: true
     enable_goal_controller: true
@@ -85,3 +88,21 @@ goal_tuning_node:
   ros__parameters:
     rosbag: false
     rosbag_fps: 10.0
+
+# 슛 단발 시험: 명령은 UI 버튼을 누를 때만 전송한다.
+# 알고리즘 기본값은 vision_core/config/vision_algorithm.yaml에서 읽는다.
+shoot_tuning_node:
+  ros__parameters:
+    image_topic: "/camera/camera/color/image_raw"
+    depth_topic: "/camera/camera/aligned_depth_to_color/image_raw"
+    camera_info_topic: "/camera/camera/color/camera_info"
+    imu_topic: "/camera/imu_tilt"
+    action_cmd_topic: "/jandi_vision/action_cmd"
+    action_status_topic: "/jandi_vision/action_status"
+    inference_hz: 15.0
+    max_depth_age_sec: 0.20
+    max_frame_age_sec: 0.50
+    use_imu_rectification: false
+    assume_zero_imu: false
+    imu_abs_limit_deg: 45.0
+    click_backboard_yaw_deg: 0.0

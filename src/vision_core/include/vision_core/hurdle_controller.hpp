@@ -25,6 +25,8 @@ enum class HurdleMode {
   kApproachTwoBeforeDown,
   kCoarseAdjust,
   kWaitFinePose,
+  kRecoveryStep,
+  kRecoveryStepObserve,
 };
 
 struct HurdleConfig {
@@ -33,6 +35,8 @@ struct HurdleConfig {
   double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
   double recovery_observation_sec{};
   int recovery_max_observations{};
+  int entry_recovery_max_steps{}; // First FORWARD observation loss; exhausted -> LINE.
+  int recovery_max_steps{}; // DOWN loss: WALK step or FINE step, then stationary fallback.
   double target_u_px{};
   double contact_v_px{};
   int contact_steps{};
@@ -64,6 +68,8 @@ struct TrackedHurdle {
 struct HurdleResult {
   int recovery_observations_completed{0};
   double recovery_observation_elapsed_sec{0.0};
+  int recovery_steps_completed{0}, recovery_step_limit{0};
+  bool entry_recovery{false};
   int down_search_steps_remaining{0};
   bool down_search_found{false};
   int detection_hits{0}, detection_frames{0}, lost_frames{0};
@@ -126,6 +132,9 @@ public:
         hit_history_.size()>=static_cast<std::size_t>(config_.stable_window);
   }
   int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
+  int RecoveryStepsCompleted() const { return recovery_steps_completed_; }
+  int RecoveryStepLimit() const { return recovery_step_limit_; }
+  bool EntryRecovery() const { return entry_step_recovery_; }
   bool DownSearchFound() const { return down_search_.Found(); }
   int LostFrames() const { return lost_count_; }
   int DetectionFrames() const { return static_cast<int>(hit_history_.size()); }
@@ -140,6 +149,8 @@ private:
   void UpdateTracker(const std::optional<ObjectTarget> &target,
                      int image_width, int image_height);
   ActionRequest RecoveryAction() const;
+  void BeginStepRecovery(double now_sec, bool entry_loss);
+  void ExhaustStepRecovery(double now_sec, HurdleResult &result);
   void ResetToLine(bool clear_ignore);
   void ClearTracking();
 
@@ -149,6 +160,11 @@ private:
   std::deque<bool> hit_history_;
   std::deque<bool> acquire_history_;
   bool awaiting_approach_observation_{false};
+  bool entry_observation_pending_{false};
+  bool entry_step_recovery_{false}, recovery_step_pending_{false};
+  int recovery_steps_completed_{0}, recovery_step_limit_{0};
+  HurdleMode recovery_resume_mode_{HurdleMode::kApproach};
+  MissionAction recovery_step_action_{MissionAction::kStepForwardOne};
   bool last_approach_pending_{false};
   int last_approach_zone_{0};
   int last_approach_steps_{0};

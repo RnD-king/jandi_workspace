@@ -28,6 +28,8 @@ enum class GoalMode {
   kRecoveryTurn,
   kEdgeTurn,
   kEntryRetryCameraForward, // Keep all existing phase IDs unchanged.
+  kRecoveryForwardStep,
+  kRecoveryExtraTurn,
 };
 
 struct GoalConfig {
@@ -193,6 +195,11 @@ public:
       mode_ = turn_resume_mode_;
     config_ = config;
   }
+  // Single-frame shooting bench: reuse the production fine decision without
+  // entering a mission, consuming a ball, or advancing any controller state.
+  ActionRequest PlanFineAction(const GoalPoseObservation &pose) const {
+    return FineAction(pose);
+  }
   void ShiftTimers(double duration) { state_enter_sec_+=duration; }
   void Reset();
 
@@ -256,6 +263,7 @@ private:
   void CaptureEntryDirection();
   void BeginLostRecovery(double now_sec, bool fine,
                          std::optional<double> direction_u = std::nullopt);
+  void BeginStationaryRecovery(double now_sec);
 
   bool seen_after_camera_goal_{false};
   int recovery_visible_count_{0};

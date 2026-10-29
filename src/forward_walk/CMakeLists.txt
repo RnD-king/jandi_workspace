@@ -24,7 +24,7 @@ find_package(rosidl_default_generators REQUIRED)
 
 
 find_package(vision REQUIRED)
-# The same installed canonical YAML supplies the executor's default walk gap.
+# The same installed canonical YAML supplies the executor's walk gap and READY lead.
 find_package(shared_vision_core REQUIRED CONFIG
   HINTS "$ENV{VISION_CORE_ROOT}/lib/cmake/shared_vision_core"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../../vision_core/install/lib/cmake/shared_vision_core")

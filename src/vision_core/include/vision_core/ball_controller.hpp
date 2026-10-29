@@ -36,6 +36,9 @@ enum class BallMode {
   kFineSidePair, // Fixed pair of existing 5/6 actions; append to preserve phase IDs.
   kMidTurnBeforeRecovery, // One WALK turn after zone-4/6 loss, then stationary recovery.
   kFineMotionRepeat, // Calibrated same-direction FINE chain, at most three actions.
+  kForwardRecoveryTurn, // Side hint: one WALK turn, then one forward step.
+  kForwardRecoveryStep,
+  kForwardRecoveryObserve, // Initial central wait or fresh post-step evidence.
 };
 
 struct BallConfig {
@@ -44,8 +47,9 @@ struct BallConfig {
   double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
   double recovery_observation_sec{};
   int recovery_max_observations{};
-  int recovery_walk_turn_max{3}; // General approach loss only.
-  int entry_recovery_walk_turn_max{10}; // First post-entry observation loss only.
+  int recovery_walk_turn_max{3}; // Zone-4/6 rotation-only recovery.
+  int recovery_max_steps{}; // General FORWARD loss: turn/step or central step search.
+  int entry_recovery_max_steps{}; // First post-entry loss; exhausted -> LINE.
   int post_pickup_back_steps{};
 
   int stable_window{};
@@ -105,6 +109,8 @@ struct BallResult {
   int entry_hits{0};
   int recovery_observations_completed{0};
   double recovery_observation_elapsed_sec{0.0};
+  int recovery_steps_completed{0}, recovery_step_limit{0};
+  bool entry_recovery{false};
   int down_search_steps_remaining{0};
   bool down_search_found{false};
   int detection_hits{0}, detection_frames{0}, lost_frames{0};
@@ -187,6 +193,9 @@ public:
   MissionAction FineMotionAction() const { return fine_side_action_; }
   Point2 FineMotionPredictedCenter() const { return fine_repeat_predicted_center_; }
   int RecoveryWalkTurnsCompleted() const { return recovery_walk_turns_completed_; }
+  int RecoveryStepsCompleted() const { return forward_recovery_steps_completed_; }
+  int RecoveryStepLimit() const { return forward_recovery_step_limit_; }
+  bool EntryRecovery() const { return forward_recovery_entry_; }
   double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
   int DownSearchStepsRemaining() const {
     return down_search_.Remaining(config_.down_search_max_steps);
@@ -200,7 +209,9 @@ private:
   ActionRequest FineAction() const;
   ActionRequest RecoveryAction() const;
   void ClearTracking();
-  void BeginForwardRecovery(double now, std::optional<double> u, bool immediate_turn);
+  void BeginForwardRecovery(double now, std::optional<double> u, bool entry_loss,
+                            bool rotation_only = false);
+  void ExhaustForwardRecovery(double now, BallResult &result);
   void ResetToLine();
 
   BallConfig config_;
@@ -248,6 +259,10 @@ private:
   bool recovery_walk_turn_pending_{false};
   bool recovery_walk_turn_done_{false};
   bool recovery_turn_search_exhausted_{false};
+  bool forward_recovery_entry_{false};
+  int forward_recovery_steps_completed_{0};
+  int forward_recovery_step_limit_{0};
+  bool forward_recovery_action_pending_{false};
   double state_enter_sec_{0.0};
   bool back_away_issued_{false};
   bool has_ball_{false};

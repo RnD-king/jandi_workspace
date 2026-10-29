@@ -18,6 +18,10 @@ int main(int argc,char** argv) {
     rclcpp::NodeOptions options;
     options.parameter_overrides({
         rclcpp::Parameter("ball_recovery_walk_turn_max",5),
+        rclcpp::Parameter("ball_recovery_max_steps",2),
+        rclcpp::Parameter("ball_entry_recovery_max_steps",4),
+        rclcpp::Parameter("hurdle_entry_recovery_max_steps",2),
+        rclcpp::Parameter("hurdle_recovery_max_steps",5),
         rclcpp::Parameter("goal_recovery_turn_max",2),
         rclcpp::Parameter("goal_edge_margin_px",75.0),
         rclcpp::Parameter("ball_approach_direct_down_v_px",370.0),
@@ -134,6 +138,10 @@ int main(int argc,char** argv) {
     }
 
     Check(applied.ball.recovery_walk_turn_max==5,"BALL startup override was lost");
+    Check(applied.ball.recovery_max_steps==2 && applied.ball.entry_recovery_max_steps==4,
+          "BALL entry/general recovery step overrides were not independent");
+    Check(applied.hurdle.entry_recovery_max_steps==2 && applied.hurdle.recovery_max_steps==5,
+          "HURDLE entry/DOWN recovery step overrides were not independent");
     Check(applied.goal.recovery_turn_max==2,"GOAL startup override was lost");
     Check(applied.goal.edge_margin_px==75,"edge margin startup override was lost");
     Check(applied.ball.approach_direct_down_v_px==370,"BALL direct DOWN startup override was lost");

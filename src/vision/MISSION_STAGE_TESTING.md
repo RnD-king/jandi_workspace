@@ -26,14 +26,42 @@ ROS/rqt 이름은 `ball_fine_side_two_step_margin_px`이다.
 튜닝 노드는 기존 WAIT_PREVIEW/WAIT_COMMIT 편집 규칙을 따른다.
 
 BALL 진입 검출의 실제 좌우 평균을 별도로 기억한다. 진입 후 첫 정지 관측에서
-공을 못 찾으면 이 방향으로 WALK 제자리 회전을 최대 `ball.recovery_walk_turn_max`
-회 실행한다. 중앙 근처/방향 미확인은 기존 정지 복구를 사용한다.
-방향 기억이 6회여도 복구 재검출·FINE 관측의 10/7은 완화하지 않는다.
+공을 못 찾거나 일반 FORWARD 접근 중 `ball.lost_frames` 연속 미검출이면
+같은 전진 탐색 흐름을 사용한다. 좌우 방향이 있으면 WALK 제자리 회전(좌31/우28)
+1회 → 전진 1걸음(10번) → 정지 재관측이다. 중앙 근처/방향 미확인은 먼저
+정지 관측하고, 실패하면 회전 없이 전진 1걸음 → 정지 재관측을 반복한다.
+각 관측은 `ball.recovery_observation_sec`(현재 1초)와 새 10프레임/7회 검출을
+모두 충족해야 성공이다. 회전 중 표본은 전진 후 관측에 재사용하지 않는다.
 
-GOAL도 카메라 전환 전 백보드 방향을 별도로 기억한다. 첫 GOAL 공통 관측에서
-못 찾으면 그 방향으로 최대 `goal.recovery_turn_max`회 WALK 회전(좌31/우28)을 한다.
-방향 미확인·중앙 근처이면 기존 정지 복구로 들어간다. 백보드가 보이지만
-Depth만 실패한 경우에는 회전하지 않는다. GOAL 진입·Depth·투척 조건은 유지한다.
+일반 전진 한도는 `ball.recovery_max_steps`(현재 3회), 진입 직후 한도는
+`ball.entry_recovery_max_steps`(현재 3회)로 독립 설정한다. 전진의 실제 DONE만
+횟수에 포함한다. 진입 직후 한도가 소진되면 공 없이 LINE을 재획득하고 정상
+라인 보행으로 복귀한다. 일반 접근 한도 소진 후에는 기존 정지 관측을
+`ball.recovery_max_observations`회 수행하고, 계속 실패하면 FAILED다.
+옛 `entry_recovery_walk_turn_max`는 `entry_recovery_max_steps`로 대체했다.
+ROS/rqt 이름은 `ball_recovery_max_steps`, `ball_entry_recovery_max_steps`이며,
+실전에서는 재시작 후 적용하고 튜닝에서는 기존 편집 규칙을 따른다.
+
+중간 좌우 구역(4·6) 접근 뒤 관측 실패는 전진 탐색과 별도다. 기존대로 해당
+방향으로 회전 후 제자리 관측하며 최초 회전을 포함해 `ball.recovery_walk_turn_max`
+(현재 3회)까지만 회전한다. 근거리 좌우(7·9)의 추가 회전 후 DOWN 전환도 유지한다.
+
+HURDLE 진입 직후 첫 관측 실패는 `hurdle.entry_recovery_max_steps`(현재 3회)
+범위에서 직진 1걸음과 정지 관측을 반복한다. 소진하면 정상 LINE을 재획득하고
+보행으로 복귀한다. DOWN 접근·FINE에서 15프레임 연속 유실되면 각각 일반
+1걸음·미세 전진 1회를 `hurdle.recovery_max_steps`(현재 3회)까지 반복하고,
+소진 후에는 기존 정지 관측 최대 5회, 이후 FAILED다. 매 실제 DONE 뒤 새
+10프레임/7회 검출과 `recovery_observation_sec`(1초)를 확인한다.
+ROS/rqt 이름은 `hurdle_entry_recovery_max_steps`, `hurdle_recovery_max_steps`다.
+
+GOAL의 완전히 빈 첫 관측은 카메라 FORWARD → 새 LINE 1블록 → GOAL 재관측을
+`goal.entry_line_retry_max_attempts`까지 수행한다. 이 설정이 0이거나 이미
+백보드를 본 뒤 유실되면 저장된 방향을 사용한다. 중앙 유실은 WALK 일반 1걸음(10),
+FINE 미세 전진 1회(3) 후 관측한다. 좌우 유실은 최대 `goal.recovery_turn_max`회
+회전(WALK 좌31/우28, FINE 좌7/우8 15도)하며, 실제 DONE 뒤 관측에서 다시 찾으면
+저장된 복구 방향으로 추가 1회 회전 → 새 관측 → 기존 단계 복귀다. 전진·추가 회전
+뒤에도 못 찾으면 기존 정지 복구로 넘어간다. 방향 기록 없음과 영상은 보이지만
+Depth·자세가 실패한 경우는 정지 관측한다. 화면 끝 고정 2회전은 별도다.
 
 | 노드 | 미션 |
 |---|---|
@@ -106,7 +134,8 @@ perception_tuning_node의 기존 서비스 이름은 유지한다.
 공·허들·골대의 물체 재발견은 정지 관측마다 10회 중 7회다. 최소 1초 및 10프레임을
 확보하고 판정하며 기본 최대 5회다. PREVIEW 대기로 같은 복구 이력을 초기화하지 않는다.
 실패한 관측 구간 다음에는 새 증거를 모으고, 시도 횟수는 유지한다.
-GOAL 시야에서 처음부터 백보드를 못 본 상태는 의도대로 HOLD한다.
+GOAL의 완전히 빈 첫 관측은 위 LINE 재탐색 경로를 사용하며, 재탐색 한도를
+소진해도 관측에 실패하면 FAILED에서 정지한다.
 
 백보드 중심 깊이는 중심 3×3, 좌우 깊이는 박스 안쪽의 폭 5px × 전체 높이 영역의
 유효 깊이 중앙값이다. backboard_depth_strip_width_px는 폭이며 기본값은 공통 YAML이다.

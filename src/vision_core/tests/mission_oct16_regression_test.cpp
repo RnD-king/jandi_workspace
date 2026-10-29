@@ -171,7 +171,7 @@ void BallTurnDisabled() {
   c.far_u_des_px=380;c.approach_u_deadband_px=90;
   c.approach_left_top_u_px=290;c.approach_right_top_u_px=470;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
-  c.recovery_walk_turn_max=0;c.entry_recovery_walk_turn_max=0;
+  c.recovery_walk_turn_max=0;c.entry_recovery_max_steps=0;
   BallController ball(c,3);
   ball.Compute(Target(200,150),640,480,0,{},{});
   ActionExecutionFeedback done;done.action_done=done.observation_complete=true;
@@ -364,7 +364,7 @@ void InvalidNewSettings() {
     if(i==3)c.line_p2p.in_place_turn_score=std::numeric_limits<double>::infinity();
     if(i==4)c.ball.down_search_max_steps=0;
     if(i==5)c.hurdle.down_search_max_steps=-1;
-    if(i==6)c.ball.entry_recovery_walk_turn_max=-1;
+    if(i==6)c.ball.entry_recovery_max_steps=-1;
     bool rejected=false;
     try {ValidateAlgorithmConfig(c);}catch(...){rejected=true;}
     assert(rejected);

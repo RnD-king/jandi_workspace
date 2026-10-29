@@ -334,7 +334,7 @@ public:
   void BeginPhysicalReset();
   MissionFrameResult StepPhysicalReset(const CommandDeliveryFeedback &feedback,
                                       const CameraFeedback &camera, double now_sec);
-  // Observed 40%-to-READY LINE guide, for manual one-slot preview only.
+  // Observed configured-start-to-READY LINE guide, for manual one-slot preview only.
   std::optional<LineGuide> LastReadyLineGuide() const { return last_ready_line_guide_; }
   // 진행 중 action/짧은 동작 후 관측이 없을 때만 LINE direct selector
   // gain/deadband를 상태 손실 없이 교체한다.
@@ -355,7 +355,6 @@ private:
     kFinalHold,
     kScoreRecovery, // WALK 31/28 recovery for an excessive valid O/H score.
   };
-  enum class DirectionEvidence { kNone, kLeft, kRight };
 
   MissionFrameResult StepWithLineImageCenter(
       const MissionFrameInput &input,
@@ -447,6 +446,7 @@ private:
   double decision_object_weight_{0.0};
   // Width for renormalizing cached LINE offsets after optical reference edits.
   int last_line_image_width_{0};
+  double last_line_image_center_u_{0.0};
   LineP2pController line_p2p_controller_;
   LineGuideAccumulator line_guide_accumulator_;
   struct MovingObjectSample {
@@ -476,7 +476,9 @@ private:
   std::uint64_t ready_line_action_id_{0};
   bool line_failure_pending_done_{false};
   LineState line_state_{LineState::kNormal};
-  DirectionEvidence line_direction_evidence_{DirectionEvidence::kNone};
+  std::optional<double> last_line_score_;
+  bool line_recovery_uses_visible_centers_{false};
+  bool line_recovery_left_{false};
   double line_observation_start_sec_{0.0};
   bool line_observation_active_{false};
   double observation_offset_sum_{0.0};
@@ -485,8 +487,8 @@ private:
   double observation_curvature_sum_{0.0};
   int observation_valid_count_{0};
   int observation_curvature_count_{0};
-  int line_no_evidence_retries_{0};
-  int line_recovery_turns_{0};
+  int line_visible_recovery_turns_{0};
+  int line_last_score_recovery_turns_{0};
   bool recovery_turn_issued_{false};
   std::deque<bool> line_stability_history_;
   bool decision_observation_active_{false};

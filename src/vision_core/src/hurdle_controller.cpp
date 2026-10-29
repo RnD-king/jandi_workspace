@@ -44,6 +44,8 @@ const char *HurdleController::ModeName(HurdleMode mode) {
   case HurdleMode::kApproachTwoBeforeDown: return "HURDLE_TWO_THEN_DOWN";
   case HurdleMode::kCoarseAdjust: return "HURDLE_DOWN_WALK";
   case HurdleMode::kWaitFinePose: return "HURDLE_TO_FINE_FEET";
+  case HurdleMode::kRecoveryStep: return "HURDLE_RECOVERY_STEP";
+  case HurdleMode::kRecoveryStepObserve: return "HURDLE_RECOVERY_STEP_OBSERVE";
   }
   return "UNKNOWN";
 }
@@ -93,6 +95,38 @@ ActionRequest HurdleController::RecoveryAction() const {
   return {}; // HURDLE horizontal alignment is deferred to LINE observations.
 }
 
+void HurdleController::BeginStepRecovery(double now_sec, bool entry_loss) {
+  entry_step_recovery_ = entry_loss;
+  recovery_resume_mode_ = entry_loss ? HurdleMode::kApproach
+      : (fine_pose_entered_ ? HurdleMode::kFineAdjust : HurdleMode::kCoarseAdjust);
+  recovery_step_action_ = !entry_loss && fine_pose_entered_
+      ? MissionAction::kStepForwardHalf : MissionAction::kStepForwardOne;
+  recovery_step_limit_ = entry_loss ? config_.entry_recovery_max_steps : config_.recovery_max_steps;
+  recovery_steps_completed_ = 0;
+  recovery_step_pending_ = false;
+  entry_observation_pending_ = false;
+  last_approach_pending_ = awaiting_approach_observation_ = false;
+  if (!entry_loss) down_search_.InvalidateDetection();
+  ClearTracking();
+  stationary_recovery_.Begin(now_sec);
+  mode_ = recovery_step_limit_ > 0 || entry_loss
+      ? HurdleMode::kRecoveryStep : HurdleMode::kRecoveryDown;
+}
+
+void HurdleController::ExhaustStepRecovery(double now_sec, HurdleResult &result) {
+  if (entry_step_recovery_) {
+    ResetToLine(true);
+    result = {};
+    result.mode = HurdleMode::kLineFollow;
+  } else {
+    ClearTracking();
+    stationary_recovery_.Begin(now_sec);
+    mode_ = HurdleMode::kRecoveryDown;
+    result.mode = mode_;
+    result.tracked = {};
+  }
+}
+
 HurdleResult HurdleController::Compute(
     const std::optional<ObjectTarget> &target, int image_width,
     int image_height, double now_sec, const CameraFeedback &camera,
@@ -117,6 +151,7 @@ HurdleResult HurdleController::Compute(
     if (allow_mission_entry && tracked_.stable && tracked_.visible &&
         acquire_hits >= std::max(1, config_.stable_min_hits)) {
       mode_ = HurdleMode::kApproach;
+      entry_observation_pending_ = true;
       state_enter_sec_ = now_sec;
     }
   }
@@ -125,11 +160,23 @@ HurdleResult HurdleController::Compute(
   result.active = mode_ != HurdleMode::kLineFollow;
   result.mode = mode_;
   result.tracked = tracked_;
+  result.recovery_steps_completed = recovery_steps_completed_;
+  result.recovery_step_limit = recovery_step_limit_;
+  result.entry_recovery = entry_step_recovery_;
   switch (mode_) {
   case HurdleMode::kLineFollow:
     return result;
   case HurdleMode::kApproach: {
     if (feedback.action_active && !feedback.action_done) return result;
+    if (entry_observation_pending_ && feedback.observation_complete) {
+      entry_observation_pending_ = false;
+      if (!tracked_.visible || !tracked_.stable) {
+        BeginStepRecovery(now_sec, true);
+        result.mode = mode_;
+        result.tracked = {};
+        return result;
+      }
+    }
     if (feedback.action_done && last_approach_pending_) {
       last_approach_pending_=false;
       awaiting_approach_observation_=true;
@@ -142,8 +189,7 @@ HurdleResult HurdleController::Compute(
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
-          mode_=HurdleMode::kRecoveryForward; stationary_recovery_.Begin(now_sec); state_enter_sec_=now_sec;
-          recovery_visible_count_=0; result.mode=mode_;
+          BeginStepRecovery(now_sec,true);result.mode=mode_;result.tracked={};
         }
         return result;
       }
@@ -154,8 +200,9 @@ HurdleResult HurdleController::Compute(
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
-          mode_=HurdleMode::kRecoveryForward; stationary_recovery_.Begin(now_sec); state_enter_sec_=now_sec;
-          recovery_visible_count_=0; result.mode=mode_;
+          if (entry_observation_pending_) BeginStepRecovery(now_sec,true);
+          else {mode_=HurdleMode::kRecoveryForward;stationary_recovery_.Begin(now_sec);state_enter_sec_=now_sec;}
+          recovery_visible_count_=0;result.mode=mode_;result.tracked=tracked_;
         }
       }
       return result;
@@ -179,6 +226,7 @@ HurdleResult HurdleController::Compute(
               : (left ? MissionAction::kTurnLeftInPlace
                       : MissionAction::kStepForwardRightOneHurdle));
       if (allow_new_body_actions) {
+        entry_observation_pending_=false;
         last_approach_steps_=steps;
         last_approach_pending_=true;
         last_approach_zone_=left ? (steps==4 ? 1 : steps==3 ? 4 : 7)
@@ -190,6 +238,7 @@ HurdleResult HurdleController::Compute(
     result.action=Locomotion(steps==2 ? MissionAction::kStepForwardTwo :
         MissionAction::kStepForwardThree);
     if (allow_new_body_actions) {
+      entry_observation_pending_=false;
       last_approach_steps_=steps==4 ? 3 : steps;
       last_approach_pending_=true;
       last_approach_zone_=steps==4 ? 2 : steps==3 ? 5 : 8;
@@ -267,7 +316,7 @@ HurdleResult HurdleController::Compute(
     }
     if (!tracked_.visible) {
       if (lost_count_>=config_.lost_frames) {
-        mode_=HurdleMode::kRecoveryDown; ClearTracking(); stationary_recovery_.Begin(now_sec); result.mode=mode_;
+        BeginStepRecovery(now_sec,false);result.mode=mode_;result.tracked={};
       }
       return result;
     }
@@ -288,8 +337,7 @@ HurdleResult HurdleController::Compute(
     if (feedback.action_active && !feedback.action_done) return result;
     if (!tracked_.visible) {
       if (lost_count_>=config_.lost_frames) {
-        mode_=HurdleMode::kRecoveryDown;
-        ClearTracking(); stationary_recovery_.Begin(now_sec); result.mode=mode_;
+        BeginStepRecovery(now_sec,false);result.mode=mode_;result.tracked={};
       }
       return result;
     }
@@ -344,6 +392,45 @@ HurdleResult HurdleController::Compute(
       result.mode = HurdleMode::kLineFollow;
     }
     return result;
+  case HurdleMode::kRecoveryStep:
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (recovery_step_pending_) {
+      if (!feedback.action_done) return result;
+      recovery_step_pending_ = false;
+      ++recovery_steps_completed_;
+      result.recovery_steps_completed = recovery_steps_completed_;
+      ClearTracking();
+      stationary_recovery_.Begin(now_sec);
+      mode_ = HurdleMode::kRecoveryStepObserve;
+      result.mode = mode_;
+      result.tracked = {};
+      return result;
+    }
+    if (recovery_steps_completed_ >= recovery_step_limit_) {
+      ExhaustStepRecovery(now_sec,result);
+      return result;
+    }
+    result.action = Locomotion(recovery_step_action_);
+    if (allow_new_body_actions) recovery_step_pending_ = true;
+    return result;
+  case HurdleMode::kRecoveryStepObserve: {
+    if (feedback.action_active && !feedback.action_done) return result;
+    const auto status = stationary_recovery_.Observe(target.has_value(),now_sec,
+        config_.stable_window,config_.stable_min_hits,config_.recovery_observation_sec,1);
+    if (status == StationaryObjectRecovery::Result::kFound) {
+      mode_ = recovery_resume_mode_;
+      entry_step_recovery_ = false;
+      recovery_steps_completed_ = 0;
+      result.recovery_steps_completed = 0;
+      result.entry_recovery = false;
+      result.mode = mode_;
+    } else if (status == StationaryObjectRecovery::Result::kFailed) {
+      if (recovery_steps_completed_ >= recovery_step_limit_)
+        ExhaustStepRecovery(now_sec,result);
+      else {ClearTracking();mode_=HurdleMode::kRecoveryStep;result.mode=mode_;result.tracked={};}
+    }
+    return result;
+  }
   case HurdleMode::kRecoveryForward: {
     if (feedback.action_active && !feedback.action_done) return result;
     const auto status=stationary_recovery_.Observe(target.has_value(),now_sec,
@@ -381,6 +468,7 @@ void HurdleController::EnterVerified(const std::optional<ObjectTarget>& mean,
     const std::deque<bool>& hits, int width, int height, double now) {
   UseVerifiedObservation(mean, hits, width, height);
   mode_ = HurdleMode::kApproach;
+  entry_observation_pending_ = true;
   state_enter_sec_ = now;
 }
 
@@ -423,6 +511,10 @@ void HurdleController::ClearTracking() {
 
 void HurdleController::ResetToLine(bool clear_ignore) {
   mode_ = HurdleMode::kLineFollow;
+  entry_observation_pending_=entry_step_recovery_=recovery_step_pending_=false;
+  recovery_steps_completed_=recovery_step_limit_=0;
+  recovery_resume_mode_=HurdleMode::kApproach;
+  recovery_step_action_=MissionAction::kStepForwardOne;
   down_search_.Reset();
   stationary_recovery_.Begin(0.0);
   completed_contact_steps_=0;

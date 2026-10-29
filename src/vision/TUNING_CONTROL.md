@@ -17,8 +17,9 @@ This document describes the local implementation in `src/vision`. The independen
 - First press (or no valid saved guide): perform **1.0 second stationary observation**;
   issue a single action using the averaged valid LineGuide.
 - Once ACK arrives, accumulate frames during motion. At READY (fallback DONE),
-  finalize using **the production `LineGuideAccumulator::Finish()` 40%-to-READY
-  time window and 1-to-3 weighting**, using configured `ready_lead_sec`.
+  finalize using **the production `LineGuideAccumulator::Finish()` configured-start-to-READY
+  time window and 1-to-3 weighting**, using `line.walk.observation_start_ratio`
+  (current operational value `0.20`) and configured `ready_lead_sec`.
 - Save the resulting mean O/H *only inside the tuning node*. Never send a
   READY-queued second ActionCommand to `forward_walk`; it auto-starts queued
   commands at DONE and would violate manual single-step operation.

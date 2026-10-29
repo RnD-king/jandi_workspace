@@ -174,6 +174,7 @@ struct Pipeline {
     // These scenarios exercise production's 6/10 entry contract, independently
     // of the historical fixture's seven-hit entry threshold.
     c.ball.entry_min_hits=6; c.ball.stable_window=10; c.ball.stable_min_hits=7;
+    c.ball.recovery_max_steps=0; // These motion-disabled tests isolate identity revalidation.
     return c;
   }
   void Tick(std::vector<PerceptionDetection> ds) {

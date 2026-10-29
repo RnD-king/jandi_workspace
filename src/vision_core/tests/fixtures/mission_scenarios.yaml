@@ -30,12 +30,15 @@ vision_algorithm:
     steering_deadband: 0.10
     in_place_turn_score: 10.0 # |라인 점수|가 이 값보다 크면 WALK 제자리 회전 1회 후 재관측
     ready_lead_sec: 0.25
+    observation_start_ratio: 0.40
     failure_observation_sec: 2.0
     recovery_observation_sec: 1.0
     failure_min_valid_samples: 5
-    no_evidence_max_retries: 5
+    visible_recovery_max_turns: 5
+    visible_recovery_turn_yaw_deg: 15
+    last_score_recovery_max_turns: 5
+    last_score_recovery_turn_yaw_deg: 15
     recovery_max_turns: 5
-    recovery_turn_yaw_deg: 15
 
   ball:
     # 단독 시험 순서
@@ -46,7 +49,8 @@ vision_algorithm:
     recovery_observation_sec: 1.0
     recovery_max_observations: 5
     recovery_walk_turn_max: 3
-    entry_recovery_walk_turn_max: 10
+    recovery_max_steps: 3
+    entry_recovery_max_steps: 3
     post_pickup_back_steps: 0
     stable_window: 10
     stable_min_hits: 7
@@ -90,6 +94,8 @@ vision_algorithm:
     recovery_center_tolerance_px: 76.8
 
   hurdle:
+    entry_recovery_max_steps: 3
+    recovery_max_steps: 3
     down_search_max_steps: 10
     down_search_inter_action_hold_sec: 0.0
     recovery_observation_sec: 1.0

@@ -100,6 +100,10 @@ inline void DeclareMissionParameters(rclcpp::Node& node,
   node.declare_parameter<double>("transition_settle_sec", c.transition_settle_sec);
   node.declare_parameter<double>("fine_motion_settle_sec", c.fine_motion_settle_sec);
   node.declare_parameter<int>("ball_recovery_walk_turn_max", c.ball.recovery_walk_turn_max);
+  node.declare_parameter<int>("ball_recovery_max_steps", c.ball.recovery_max_steps);
+  node.declare_parameter<int>("ball_entry_recovery_max_steps", c.ball.entry_recovery_max_steps);
+  node.declare_parameter<int>("hurdle_entry_recovery_max_steps", c.hurdle.entry_recovery_max_steps);
+  node.declare_parameter<int>("hurdle_recovery_max_steps", c.hurdle.recovery_max_steps);
   node.declare_parameter<int>("goal_recovery_turn_max", c.goal.recovery_turn_max);
   node.declare_parameter<double>("goal_edge_margin_px", c.goal.edge_margin_px);
   node.declare_parameter<double>("ball_fine_side_two_step_margin_px", c.ball.fine_side_two_step_margin_px);
@@ -181,6 +185,10 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   c.object_targets.hurdle_min_box_width=node.get_parameter("hurdle_min_box_width").as_double();
   c.object_targets.hurdle_min_box_height=node.get_parameter("hurdle_min_box_height").as_double();
   c.ball.recovery_walk_turn_max = turns("ball_recovery_walk_turn_max");
+  c.ball.recovery_max_steps = turns("ball_recovery_max_steps");
+  c.ball.entry_recovery_max_steps = turns("ball_entry_recovery_max_steps");
+  c.hurdle.entry_recovery_max_steps = turns("hurdle_entry_recovery_max_steps");
+  c.hurdle.recovery_max_steps = turns("hurdle_recovery_max_steps");
   c.goal.recovery_turn_max = turns("goal_recovery_turn_max");
   const double margin=node.get_parameter("goal_edge_margin_px").as_double();
   if (!std::isfinite(margin) || margin<0.0)

@@ -64,7 +64,8 @@ static void EmptyEntryViewRetriesLine() {
     else partial.ObserveOnly(Board(),{},640,480);
     partial.UseVerifiedObservation({}, {},misses,misses,640,480);
     auto g=partial.Compute({},{},{},640,480,1.1,true,goal_view,{false,false,true},true,{},false,image_only);
-    assert(g.mode==GoalMode::kRecoverySearch && partial.EntryLineRetries()==0);
+    assert(g.mode==(image_only?GoalMode::kRecoverySearch:GoalMode::kRecoveryForwardStep));
+    assert(partial.EntryLineRetries()==0);
     assert(g.camera_request==CameraRequest::kNone);
   }
 }
@@ -251,7 +252,23 @@ static void RotationBeforeTranslation() {
   r=stable.Compute({},Board(),rim_at(22),640,480,.1,true,camera,{});
   assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==20);
 }
+static void StatelessShotBench() {
+  auto c=LoadDefaultAlgorithmConfig().goal;
+  c.hoop_radius_m=.2;c.throw_landing_x_m=0;c.throw_landing_z_m=1;
+  c.position_tolerance_m=.02;c.shoot_yaw_limit_deg=20;
+  const GoalController controller(c,3);
+  assert(controller.PlanFineAction({}).action==MissionAction::kNone);
+  assert(controller.PlanFineAction(Pose(0,1.2)).action==MissionAction::kShoot);
+  assert(controller.PlanFineAction(Pose(0,2)).action==MissionAction::kStepForwardHalf);
+  assert(controller.PlanFineAction(Pose(0,.6)).action==MissionAction::kStepBack);
+  const double angle=10*3.14159265358979323846/180;
+  const auto shot=controller.PlanFineAction(Pose(std::sin(angle),.2+std::cos(angle)));
+  assert(shot.action==MissionAction::kShoot && shot.target_yaw_deg==-10);
+  assert(!controller.HasBall());
+  assert(controller.PlanFineAction(Pose(0,1.2)).action==MissionAction::kShoot);
+}
 int main() {
+  StatelessShotBench();
   EmptyEntryViewRetriesLine();
   TiltedBackboardNormal();
   RotationBeforeTranslation();
@@ -373,7 +390,7 @@ int main() {
   r=unseen.Compute({}, {}, {},640,480,.8,true,{CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kSearch && r.action.action==MissionAction::kNone);
 
-  // A previously centered target remains stationary when lost.
+  // A previously centered target advances exactly one ordinary step when lost.
   GoalController centered(c, 3.0);
   centered.StartAfterPickup(0); centered.UpdateBallState(carrying);
   centered.Compute({}, Board(), Pose(0,.7),640,480,0,true,{},{});
@@ -383,8 +400,11 @@ int main() {
   assert(r.mode==GoalMode::kApproach);
   centered.Compute({}, {}, {},640,480,.3,true,{CameraMode::kGoal,true},{});
   centered.Compute({}, {}, {},640,480,.4,true,{CameraMode::kGoal,true},{});
-  centered.Compute({}, {}, {},640,480,.5,true,{CameraMode::kGoal,true},{});
+  r=centered.Compute({}, {}, {},640,480,.5,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kRecoveryForwardStep && r.action.action==MissionAction::kStepForwardOne);
   r=centered.Compute({}, {}, {},640,480,.6,true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kRecoveryForwardStep && r.action.action==MissionAction::kNone);
+  r=centered.Compute({}, {}, {},640,480,1.7,true,{CameraMode::kGoal,true},{true,false,true});
   assert(r.mode==GoalMode::kRecoverySearch && r.action.action==MissionAction::kNone);
 
   // Off-center loss also remains stationary and uses a complete recovery window.

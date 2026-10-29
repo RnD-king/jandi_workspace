@@ -59,6 +59,12 @@ const char *BallController::ModeName(BallMode mode) {
     return "BALL_RECOVERY_FORWARD";
   case BallMode::kBallRecoveryWalkTurn:
     return "BALL_RECOVERY_WALK_TURN";
+  case BallMode::kForwardRecoveryTurn:
+    return "BALL_RECOVERY_TURN_THEN_STEP";
+  case BallMode::kForwardRecoveryStep:
+    return "BALL_RECOVERY_FORWARD_STEP";
+  case BallMode::kForwardRecoveryObserve:
+    return "BALL_RECOVERY_STEP_OBSERVE";
   case BallMode::kBallRecoveryDown:
     return "BALL_RECOVERY_DOWN";
   case BallMode::kFailed:
@@ -210,12 +216,11 @@ ActionRequest BallController::RecoveryAction() const {
 }
 
 void BallController::BeginForwardRecovery(double now, std::optional<double> u,
-                                           bool immediate_turn) {
+                                           bool entry_loss, bool rotation_only) {
   stationary_recovery_.Begin(now);
   state_enter_sec_ = now;
   recovery_walk_turns_completed_ = 0;
-  recovery_walk_turn_limit_ = immediate_turn ? config_.entry_recovery_walk_turn_max
-                                            : config_.recovery_walk_turn_max;
+  recovery_walk_turn_limit_ = config_.recovery_walk_turn_max;
   recovery_walk_turn_pending_ = recovery_walk_turn_done_ = false;
   recovery_turn_search_exhausted_ = false;
   recovery_turn_left_.reset();
@@ -224,8 +229,43 @@ void BallController::BeginForwardRecovery(double now, std::optional<double> u,
     if (std::abs(offset) > config_.recovery_center_tolerance_px)
       recovery_turn_left_ = offset < 0.0;
   }
-  mode_ = immediate_turn && recovery_turn_left_ && recovery_walk_turn_limit_ > 0
-      ? BallMode::kBallRecoveryWalkTurn : BallMode::kBallRecoveryForward;
+  ClearTracking();
+  forward_recovery_entry_ = entry_loss;
+  forward_recovery_steps_completed_ = 0;
+  forward_recovery_step_limit_ = entry_loss ? config_.entry_recovery_max_steps
+                                          : config_.recovery_max_steps;
+  forward_recovery_action_pending_ = false;
+  if (rotation_only) {
+    mode_ = BallMode::kBallRecoveryForward;
+    return;
+  }
+  if (forward_recovery_step_limit_ == 0 && !entry_loss) {
+    recovery_turn_search_exhausted_ = true;
+    mode_ = BallMode::kBallRecoveryForward;
+  } else if (forward_recovery_step_limit_ == 0) {
+    // No search motion: central observation below resolves the exhausted limit.
+    mode_ = BallMode::kForwardRecoveryObserve;
+  } else {
+    mode_ = recovery_turn_left_ ? BallMode::kForwardRecoveryTurn
+                               : BallMode::kForwardRecoveryObserve;
+  }
+}
+
+void BallController::ExhaustForwardRecovery(double now, BallResult &result) {
+  if (forward_recovery_entry_) {
+    // No pickup occurred. Release BALL; MissionController resumes normal LINE
+    // reacquisition/planning without the post-pickup rotation sequence.
+    ResetToLine();
+    result = {};
+    result.mode = BallMode::kLineFollow;
+  } else {
+    recovery_turn_search_exhausted_ = true;
+    stationary_recovery_.Begin(now);
+    ClearTracking();
+    mode_ = BallMode::kBallRecoveryForward;
+    result.mode = mode_;
+    result.tracked = {};
+  }
 }
 
 BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
@@ -293,6 +333,9 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   result.has_ball = has_ball_;
   result.pickup_failed = pickup_failed_;
   result.pickup_attempt_count = pickup_attempt_count_;
+  result.recovery_steps_completed = forward_recovery_steps_completed_;
+  result.recovery_step_limit = forward_recovery_step_limit_;
+  result.entry_recovery = forward_recovery_entry_;
   result.entry_frames = static_cast<int>(entry_hit_history_.size());
   result.entry_hits = static_cast<int>(std::count(
       entry_hit_history_.begin(), entry_hit_history_.end(), true));
@@ -330,7 +373,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
         }
         if (last_approach_zone_ == 4 || last_approach_zone_ == 6) {
           if (config_.recovery_walk_turn_max == 0) {
-            BeginForwardRecovery(now_sec,std::nullopt,false);
+            BeginForwardRecovery(now_sec,std::nullopt,false,true);
             result.mode=mode_;
             return result;
           }
@@ -420,7 +463,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       mid_recovery_turn_pending_ = false;
       mid_recovery_turn_ = MissionAction::kNone;
       // Count this actual DONE in the existing total recovery-turn budget.
-      BeginForwardRecovery(now_sec,std::nullopt,false);
+      BeginForwardRecovery(now_sec,std::nullopt,false,true);
       recovery_turn_left_ = left;
       recovery_walk_turns_completed_=1;
       recovery_turn_search_exhausted_=recovery_walk_turns_completed_>=config_.recovery_walk_turn_max;
@@ -724,6 +767,70 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   case BallMode::kPostPickupLineRecovery:
     result.active = false;
     return result;
+  case BallMode::kForwardRecoveryTurn:
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (forward_recovery_action_pending_) {
+      if (!feedback.action_done) return result;
+      forward_recovery_action_pending_ = false;
+      ++recovery_walk_turns_completed_;
+      ClearTracking();
+      mode_ = BallMode::kForwardRecoveryStep;
+      result.mode = mode_;
+      result.tracked = {};
+      return result;
+    }
+    // The direction is fixed from the entry/last stable position for this loss.
+    result.action = Locomotion(recovery_turn_left_.value_or(false)
+        ? MissionAction::kTurnLeftInPlace : MissionAction::kStepForwardRightOneHurdle);
+    if (allow_new_body_actions) forward_recovery_action_pending_ = true;
+    return result;
+  case BallMode::kForwardRecoveryStep:
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (forward_recovery_action_pending_) {
+      if (!feedback.action_done) return result;
+      forward_recovery_action_pending_ = false;
+      ++forward_recovery_steps_completed_;
+      result.recovery_steps_completed = forward_recovery_steps_completed_;
+      ClearTracking();
+      stationary_recovery_.Begin(now_sec);
+      mode_ = BallMode::kForwardRecoveryObserve;
+      result.mode = mode_;
+      result.tracked = {};
+      return result;
+    }
+    if (forward_recovery_steps_completed_ >= forward_recovery_step_limit_) {
+      ExhaustForwardRecovery(now_sec, result);
+      return result;
+    }
+    result.action = Locomotion(MissionAction::kStepForwardOne);
+    if (allow_new_body_actions) forward_recovery_action_pending_ = true;
+    return result;
+  case BallMode::kForwardRecoveryObserve: {
+    if (feedback.action_active && !feedback.action_done) return result;
+    const auto status = stationary_recovery_.Observe(
+        target.has_value(), now_sec, config_.stable_window,
+        config_.stable_min_hits, config_.recovery_observation_sec, 1);
+    if (status == StationaryObjectRecovery::Result::kFound) {
+      mode_ = BallMode::kApproachBall;
+      forward_recovery_entry_ = false;
+      forward_recovery_steps_completed_ = 0;
+      result.recovery_steps_completed = 0;
+      result.entry_recovery = false;
+      recovery_walk_turns_completed_ = 0;
+      result.mode = mode_;
+    } else if (status == StationaryObjectRecovery::Result::kFailed) {
+      if (forward_recovery_steps_completed_ >= forward_recovery_step_limit_)
+        ExhaustForwardRecovery(now_sec, result);
+      else {
+        ClearTracking();
+        mode_ = recovery_turn_left_ ? BallMode::kForwardRecoveryTurn
+                                   : BallMode::kForwardRecoveryStep;
+        result.mode = mode_;
+        result.tracked = {};
+      }
+    }
+    return result;
+  }
   case BallMode::kBallRecoveryDown: {
     if (feedback.action_active && !feedback.action_done)
       return result;
@@ -899,6 +1006,9 @@ void BallController::ResetToLine() {
   recovery_walk_turn_pending_ = false;
   recovery_walk_turn_done_ = false;
   recovery_turn_search_exhausted_ = false;
+  forward_recovery_entry_ = false;
+  forward_recovery_steps_completed_ = forward_recovery_step_limit_ = 0;
+  forward_recovery_action_pending_ = false;
   state_enter_sec_ = 0.0;
   test_camera_pending_ = false;
   fine_pose_entered_ = false;

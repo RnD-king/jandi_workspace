@@ -25,17 +25,24 @@ action의 ACK는 executor가 그 ID와 payload를 내부 one-action queue에 실
 분모로 집계되는 진단값이며 조향이나 미션 전환에 사용하지 않는다.
 
 첫 판단 실패는 2초 정지 관측한다. 유효 O/H 표본이 5개 이상이면 평균으로
-복귀한다. 부족하면 안정된 과거 방향 기억이 있을 때 같은 방향으로 15도
-회전한 뒤 다시 2초 관측하며 최대 5회 반복한다. 방향 기억이 없으면 회전 없이
-2초 관측을 최대 5회 추가한다. 한도를 넘으면 Reset 전까지 FINAL HOLD다.
+복귀한다. 부족하면 현재 프레임의 점선 중심점 2개 이상에서 평균 X의 좌/우를
+우선 사용한다. 1개 이하이거나 평균이 기준 중심과 같으면 마지막 유효 점수의
+부호를 사용한다(음수 좌, 0 이상/기록 없음 우). 직진 점수도 기억한다.
+`visible_recovery_*`와 `last_score_recovery_*`로 각도/횟수를 각각 설정한다.
+현재 각 15도/5회이며, 회전 DONE 후 공통 `recovery_observation_sec`(1초)를
+관측하고 다시 우선순위를 평가한다. 경로를 바꿔도 횟수는 누적되고, 선택한
+경로의 한도가 소진되면 Reset 전까지 FINAL HOLD다.
 
 긴 LINE action은 최초 ACK 이후부터 관측을 기록한다. READY 수신 시 남은
-0.25초를 반영해 전체 모션시간을 추정하고, **40% 지점부터 READY까지**의
+0.25초를 반영해 전체 모션시간을 추정하고,
+**`line.walk.observation_start_ratio` 지점(현재 20%)부터 READY까지**의
 유효한 O/H 표본을 끝으로 갈수록 1→3 가중 집계한다. DONE으로 종료되는
 경우에는 remaining=0으로 마무리한다. READY 예약 action도 최초 action과 같은
-direct selector로 결정한다. 현재 최소 표본 수 제한은 두지 않았으며,
+direct selector로 결정한다. 시작 비율은 YAML에서 `0 이상 1 미만`으로 설정한다.
+유효 표본은 `line.walk.failure_min_valid_samples`개 이상이어야 하며,
 `[LINE OBS]` 로그의 `window_frames`, `used_valid`, `est_motion`, `remaining`을
 실기 테스트에서 관찰해 결정한다.
+실행기 READY 발행도 같은 YAML의 `line.walk.ready_lead_sec`(현재 0.25초)를 읽는다.
 
 ## 객체 미션
 

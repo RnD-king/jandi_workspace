@@ -80,6 +80,7 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.line_features.image_center_u==baseline.line_features.image_center_u);
   assert(c.line.line_stable_window==baseline.line.line_stable_window);
   assert(c.line_p2p.ready_lead_sec==baseline.line_p2p.ready_lead_sec);
+  assert(c.line_p2p.observation_start_ratio==baseline.line_p2p.observation_start_ratio);
   assert(c.ball.pickup_v2_px==baseline.ball.pickup_v2_px);
   assert(c.hurdle.contact_steps==baseline.hurdle.contact_steps);
   assert(c.goal.throw_landing_z_m==baseline.goal.throw_landing_z_m);
@@ -126,6 +127,12 @@ static void CheckGroupedConfiguration(const std::string &text) {
   bad["vision_algorithm"]["goal"]["backboard"]["depth"].remove("min_depth_m");reject(bad);
   bad=YAML::Clone(root);
   bad["vision_algorithm"]["hurdle"].remove("candidate_tracking");reject(bad);
+  for (const auto *key : {"entry_recovery_max_steps", "recovery_max_steps"}) {
+    bad=YAML::Clone(root);
+    bad["vision_algorithm"]["hurdle"]["control"][key]=-1;reject(bad);
+    bad=YAML::Clone(root);
+    bad["vision_algorithm"]["hurdle"]["control"].remove(key);reject(bad);
+  }
   bad=YAML::Clone(root);
   bad["vision_algorithm"]["common"].remove("depth_roi_size_px");reject(bad);
 }
@@ -143,11 +150,17 @@ int main(int argc, char **argv) {
   assert(c.ball.fine_motion.max_repetitions==3 && !c.ball.fine_motion.HasCalibration());
   assert(defaults.command.first_action_id != 0);
   assert(c.line_p2p.failure_min_valid_samples == 5);
+  assert(c.line_p2p.observation_start_ratio == .40);
   assert(c.line_p2p.recovery_max_turns == 5);
-  assert(c.line_p2p.recovery_turn_yaw_deg == 15);
+  assert(c.line_p2p.visible_recovery_max_turns == 5);
+  assert(c.line_p2p.visible_recovery_turn_yaw_deg == 15);
+  assert(c.line_p2p.last_score_recovery_max_turns == 5);
+  assert(c.line_p2p.last_score_recovery_turn_yaw_deg == 15);
   assert(c.goal.shoot_yaw_limit_deg == 30.0);
   assert(c.hurdle.stable_window == 10);
   assert(c.hurdle.stable_min_hits == 7);
+  assert(c.hurdle.entry_recovery_max_steps == 3);
+  assert(c.hurdle.recovery_max_steps == 3);
   assert(c.ball.approach_left_top_u_px==250.0);
   assert(c.ball.approach_right_top_u_px==470.0);
   assert(c.post_motion_observation_sec == 1.0);
@@ -160,7 +173,8 @@ int main(int argc, char **argv) {
   assert(c.backboard_depth_strip_width_px==5);
   assert(c.line_p2p.recovery_observation_sec == 1.0);
   assert(c.goal.recovery_center_tolerance_px == 76.8);
-  assert(c.ball.entry_recovery_walk_turn_max == 10);
+  assert(c.ball.recovery_max_steps == 3);
+  assert(c.ball.entry_recovery_max_steps == 3);
   assert(c.ball.pickup_u1_px == 310);
   assert(c.ball.pickup_u2_px == 385);
   assert(c.ball.pickup_v1_px == 80);
@@ -189,6 +203,15 @@ int main(int argc, char **argv) {
   assert(c.line_features.ransac_max_outliers==2);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
   CheckGroupedConfiguration(text.str());
+  for (const auto* value : {"-0.1", "1.0", "1.1", ".nan", ".inf"})
+    Reject(text.str(), "observation_start_ratio: 0.40",
+           std::string("observation_start_ratio: ") + value);
+  Reject(text.str(), "observation_start_ratio: 0.40", "");
+  auto ratio_yaml = GroupedFixture(text.str());
+  ratio_yaml["vision_algorithm"]["line"]["walk"]["observation_start_ratio"] = .20;
+  assert(LoadText(YAML::Dump(ratio_yaml)).line_p2p.observation_start_ratio == .20);
+  ratio_yaml["vision_algorithm"]["line"]["walk"]["observation_start_ratio"] = 0.0;
+  assert(LoadText(YAML::Dump(ratio_yaml)).line_p2p.observation_start_ratio == 0.0);
   for (const auto* section : {"hurdle_candidate_tracking", "backboard_candidate_tracking"}) {
     const auto prefix=std::string(section)+":\n    enabled: true\n    max_center_distance_px: 200.0";
     Reject(text.str(), prefix, std::string(section)+":\n    enabled: true\n    max_center_distance_px: 0");
@@ -350,7 +373,11 @@ int main(int argc, char **argv) {
   Reject(text.str(), "object_ready_mean_actions: [22, 23]",
          "object_ready_mean_actions: 22");
   Reject(text.str(), "object_ready_mean_actions: [22, 23]", "");
-  Reject(text.str(), "entry_recovery_walk_turn_max: 10", "entry_recovery_walk_turn_max: -1");
+  for (const auto *key : {"recovery_max_steps", "entry_recovery_max_steps"}) {
+    const auto original = std::string(key) + ": 3";
+    Reject(text.str(), original, std::string(key) + ": -1");
+    Reject(text.str(), original, "");
+  }
   Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: -1.0");
   Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: .nan");
   Reject(text.str(), "edge_margin_px: 50.0", "edge_margin_px: .inf");
@@ -439,10 +466,18 @@ int main(int argc, char **argv) {
          "action_ack_timeout_sec: .nan");
   Reject(text.str(), "backboard_min_depth_m: 0.20",
          "backboard_min_depth_m: 6.00");
-  Reject(text.str(), "recovery_turn_yaw_deg: 15",
-         "recovery_turn_yaw_deg: 0");
-  Reject(text.str(), "recovery_turn_yaw_deg: 15",
-         "recovery_turn_yaw_deg: 181");
+  for (const auto *key : {"visible_recovery_turn_yaw_deg",
+                          "last_score_recovery_turn_yaw_deg"}) {
+    const auto original = std::string(key) + ": 15";
+    for (const auto *value : {"0", "181", ".nan"})
+      Reject(text.str(), original, std::string(key) + ": " + value);
+    Reject(text.str(), original, "");
+  }
+  for (const auto *key : {"visible_recovery_max_turns", "last_score_recovery_max_turns"}) {
+    const auto original = std::string(key) + ": 5";
+    Reject(text.str(), original, std::string(key) + ": -1");
+    Reject(text.str(), original, "");
+  }
   Reject(text.str(), "\n    confidence: 0.60\n    min_box_width: 1.0",
          "\n    confidence: .nan\n    min_box_width: 1.0");
   Reject(text.str(), "min_box_width: 1.0", "min_box_width: -1.0");

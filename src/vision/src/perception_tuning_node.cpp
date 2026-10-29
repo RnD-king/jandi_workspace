@@ -870,11 +870,17 @@ private:
       } catch(const std::exception& error) {
         response.successful=false; response.reason=error.what(); return response;
       }
-      if (name=="ball_recovery_walk_turn_max" || name=="goal_recovery_turn_max") {
+      if (name=="ball_recovery_walk_turn_max" || name=="ball_recovery_max_steps" ||
+          name=="ball_entry_recovery_max_steps" || name=="hurdle_entry_recovery_max_steps" ||
+          name=="hurdle_recovery_max_steps" || name=="goal_recovery_turn_max") {
         if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || parameter.as_int()<0 || parameter.as_int()>1000000) {
-          response.successful=false; response.reason="recovery turn maximum must be a nonnegative integer"; return response;
+          response.successful=false; response.reason="recovery maximum must be a nonnegative integer"; return response;
         }
         if (name=="ball_recovery_walk_turn_max") candidate.ball.recovery_walk_turn_max=parameter.as_int();
+        else if (name=="ball_recovery_max_steps") candidate.ball.recovery_max_steps=parameter.as_int();
+        else if (name=="ball_entry_recovery_max_steps") candidate.ball.entry_recovery_max_steps=parameter.as_int();
+        else if (name=="hurdle_entry_recovery_max_steps") candidate.hurdle.entry_recovery_max_steps=parameter.as_int();
+        else if (name=="hurdle_recovery_max_steps") candidate.hurdle.recovery_max_steps=parameter.as_int();
         else candidate.goal.recovery_turn_max=parameter.as_int();
         touched=true; continue;
       }
@@ -2025,7 +2031,7 @@ private:
         manual_observation_request_pending_;
     perception_input.delivery_feedback = action_delivery_feedback_;
     // The explicit observation trigger is cleared after the first real core step.
-    // Manual LINE uses the same cached 40%-to-READY measurement that the
+    // Manual LINE uses the same cached configured-start-to-READY measurement that the
     // existing line_p2p_tuning_node saves; never queue B in forward_walk.
     if (cached_ready_guide_ && !manual_action_active_ &&
         outstanding_actions_.empty() &&

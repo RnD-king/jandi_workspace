@@ -26,11 +26,24 @@ CruiseDecision LineP2pController::Compute(const LineGuide &guide) const {
 }
 
 LineGuideAccumulator::LineGuideAccumulator()
-    : LineGuideAccumulator(LoadDefaultAlgorithmConfig().line_p2p.failure_min_valid_samples) {}
+    : LineGuideAccumulator(LoadDefaultAlgorithmConfig().line_p2p) {}
 
 LineGuideAccumulator::LineGuideAccumulator(int minimum_valid_samples)
-    : minimum_valid_samples_(minimum_valid_samples) {
+    : LineGuideAccumulator(minimum_valid_samples,
+          LoadDefaultAlgorithmConfig().line_p2p.observation_start_ratio) {}
+
+LineGuideAccumulator::LineGuideAccumulator(const LineP2pConfig &config)
+    : LineGuideAccumulator(config.failure_min_valid_samples,
+                           config.observation_start_ratio) {}
+
+LineGuideAccumulator::LineGuideAccumulator(int minimum_valid_samples,
+                                         double observation_start_ratio)
+    : minimum_valid_samples_(minimum_valid_samples),
+      observation_start_ratio_(observation_start_ratio) {
   if (minimum_valid_samples < 1) throw std::invalid_argument("minimum LINE samples must be positive");
+  if (!std::isfinite(observation_start_ratio) || observation_start_ratio < 0.0 ||
+      observation_start_ratio >= 1.0)
+    throw std::invalid_argument("LINE observation_start_ratio must be in [0,1)");
 }
 
 void LineGuideAccumulator::Begin(std::uint64_t action_id, double now_sec) {
@@ -60,7 +73,7 @@ LineGuideAccumulator::Finish(std::uint64_t action_id, double now_sec,
   // READY occurs approximately 'remaining' seconds before the executor's DONE.
   // The first observed frame after ACK approximates the action's start time.
   const double estimated_motion_sec = end_sec - begin_sec_ + remaining;
-  const double cutoff = begin_sec_ + 0.40 * estimated_motion_sec;
+  const double cutoff = begin_sec_ + observation_start_ratio_ * estimated_motion_sec;
   const double span = std::max(0.0, end_sec - cutoff);
   LineWindowStats stats;
   stats.action_id = action_id;
