@@ -13,7 +13,7 @@ DONE = 2
 READY = 3
 LINE = 1
 CAMERA_COMMANDS = frozenset({1, 2, 3})
-# Matches forward_walk. Existing 10/26/27 never emit READY.
+# Matches forward_walk. The one-step actions 10/35 and 26/27 never emit READY.
 READY_ACTIONS = frozenset({11, 12, 13, 21, 22, 23, 24, 25, 32, 33, 34})
 
 

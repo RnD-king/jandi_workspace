@@ -220,9 +220,11 @@ LineGuide ComputeLineGuide(const std::vector<Point2> &points, double cx,
 } // namespace
 
 Features ComputeLineFeatures(const std::vector<Point2> &input, int image_width,
-                             int image_height, const FeatureConfig &cfg) {
+                             int image_height, const FeatureConfig &cfg,
+                             int minimum_input_points) {
   Features f{};
-  if (image_width <= 1 || image_height <= 1) return f;
+  if (image_width <= 1 || image_height <= 1 ||
+      minimum_input_points < 3 || minimum_input_points > 4) return f;
 
   std::vector<std::pair<Point2,std::size_t>> indexed;
   indexed.reserve(input.size());
@@ -247,9 +249,10 @@ Features ComputeLineFeatures(const std::vector<Point2> &input, int image_width,
   }
 
   f.n_visible = static_cast<double>(points.size());
-  // This input gate applies even when RANSAC is disabled; a filtered
-  // four-point input may still legitimately leave three fitting points.
-  if (points.size() <= 3 || points.front().v - points.back().v <= kMinVSpanPx)
+  // Normal LINE keeps its four-point input gate. The DOWN-view HURDLE caller
+  // explicitly permits three points without changing normal LINE behavior.
+  if (points.size() < static_cast<std::size_t>(minimum_input_points) ||
+      points.front().v - points.back().v <= kMinVSpanPx)
     return f;
   RemoveRansacOutliers(points, cfg, source_indices, f.ransac_outlier_indices);
   f.n_visible = static_cast<double>(points.size());

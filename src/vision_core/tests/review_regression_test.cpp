@@ -195,6 +195,12 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   assert(h.mode==HurdleMode::kWaitFinePose);
   h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},StraightLine(),true);
   h=hurdle.Compute({},640,480,now+=.1,down,done,StraightLine(),false);
+  assert(h.mode==HurdleMode::kFineLineAlign);
+  for(int i=0;i<10;++i) {
+    now+=.11;
+    hurdle.ObserveFineLine({},640,now);
+    h=hurdle.Compute(Target(.05,.9),640,480,now,down,{},StraightLine(),false);
+  }
   assert(h.mode==HurdleMode::kFineAdjust);
   h=hurdle.Compute(Target(.05,.9),640,480,now+=.7,down,{},StraightLine(),false);
   for(int i=1;i<10;++i)

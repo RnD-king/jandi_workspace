@@ -102,6 +102,24 @@ void Geometry() {
   const auto goal=ObjectApproachGuide(Target(),true,2,k,{0,.45,0,0,0},640,480,320,400,false,0,0);
   Check(goal.valid && std::abs(goal.offset)<1e-9,"GOAL view could not project an elevated target onto the floor");
 }
+void FinishProbe(Driver& d) {
+  d.current=d.out.command.action_id;
+  Check(d.current && LinePlan::IsUnit(d.out.command.action),
+        "probe fixture did not start an ordinary approach block");
+  d.Tick({d.current,true,false,false});
+  for(int i=0;i<12;++i)d.Tick();
+  d.Tick({d.current,true,false,true});
+  const auto second=d.out.command.action_id;
+  Check(second && second!=d.current && LinePlan::IsUnit(d.out.command.action),
+        "probe did not retain the configured second unit");
+  d.Tick({second,true,false,false});
+  d.Tick({d.current,true,true,false});d.current=second;
+  for(int i=0;i<12;++i)d.Tick();
+  d.Tick({d.current,true,false,true});
+  Check(d.out.command.action_id==d.current,
+        "probe reserved a successor before its actual DONE");
+  d.Tick({d.current,true,true,false});
+}
 void SoftLoss(int blocks) {
   Driver d(Config());d.Warm();
   d.Block(); // The already-running LINE block belongs to LINE, not the object.
@@ -113,13 +131,128 @@ void SoftLoss(int blocks) {
   d.Tick({d.last_done,true,true,false});
   Check(d.out.approach_completed_blocks==before,"duplicate DONE counted a second block");
   d.MissingBlock();
-  Check(d.out.active_mission==MissionType::kLine && d.out.approach_mission==MissionType::kNone &&
-        d.out.approach_completed_blocks==0 && !d.out.candidate_phase,
-        "lost soft target started stationary confirmation/search instead of releasing to LINE");
+  Check(d.out.active_mission==MissionType::kLine && d.out.approach_mission==MissionType::kBall &&
+        d.out.approach_completed_blocks==blocks && LinePlan::IsUnit(d.out.command.action),
+        "pre-lock loss did not start one ordinary approach probe block");
+  FinishProbe(d);
+  Check(d.out.approach_mission==MissionType::kNone && !d.out.candidate_phase,
+        "failed probe did not return to LINE without another probe");
   d.in.ball_target=Target();
   for(int i=0;i<12;++i)d.Tick();
   Check(LinePlan::IsUnit(d.out.command.action) && d.out.approach_completed_blocks==0,
         "soft loss failed to reconnect LINE without retaining old object lock");
+}
+void ProbeDisabled() {
+  auto c=Config();c.object_approach.prelock_loss_extra_blocks=0;
+  Driver d(c);d.Warm();d.Block();d.MissingBlock();
+  Check(d.out.approach_mission==MissionType::kNone &&
+        d.out.active_mission==MissionType::kLine,
+        "zero pre-lock probe budget did not restore direct LINE release");
+}
+void ProbeRediscoveryAndLineMemory() {
+  auto c=Config();
+  Driver d(c);
+  d.in.line_centers={{280,450},{280,400},{280,350},{280,300},{280,250}};
+  d.in.ball_target=Target(480,100);
+  for(int i=0;i<12;++i)d.Tick();
+  const auto expected=LineP2pController(c.line_p2p).Compute(d.out.line_features.guide);
+  Check(d.out.approach_mission==MissionType::kBall &&
+        d.out.approach_path_guide.has_value() && d.out.remembered_line_score &&
+        std::abs(*d.out.remembered_line_score-expected.error)<1e-9,
+        "far virtual BALL path replaced the remembered actual LINE score");
+  const auto remembered=*d.out.remembered_line_score;
+  d.in.line_centers.clear();
+  for(int i=0;i<12;++i)d.Tick();
+  Check(d.out.remembered_line_score &&
+        std::abs(*d.out.remembered_line_score-remembered)<1e-9,
+        "invalid actual LINE erased the far-approach directional memory");
+
+  Driver recovered(Config());recovered.Warm();recovered.Block();
+  recovered.MissingBlock();
+  const int completed=recovered.out.approach_completed_blocks;
+  recovered.current=recovered.out.command.action_id;
+  Check(recovered.current && LinePlan::IsUnit(recovered.out.command.action),
+        "rediscovery fixture did not start a probe");
+  recovered.Tick({recovered.current,true,false,false});
+  recovered.in.ball_target=Target();
+  recovered.Tick();
+  Check(recovered.out.approach_mission==MissionType::kBall &&
+        recovered.out.approach_completed_blocks==completed &&
+        recovered.out.approach_missing_frames==0,
+        "rediscovery did not immediately clear loss while preserving lock blocks");
+  for(int i=0;i<12;++i)recovered.Tick();
+  recovered.Tick({recovered.current,true,false,true});
+  const auto next=recovered.out.command.action_id;
+  Check(next && next!=recovered.current && LinePlan::IsUnit(recovered.out.command.action),
+        "rediscovery did not replace an unissued probe repeat with normal approach");
+  recovered.Tick({next,true,false,false});
+  recovered.Tick({recovered.current,true,true,false});
+  Check(recovered.out.approach_completed_blocks==completed &&
+        recovered.out.approach_mission==MissionType::kBall &&
+        LinePlan::IsUnit(recovered.out.command.action),
+        "aborted probe counted toward lock or failed to resume normal approach");
+  recovered.current=next;
+  recovered.Block();
+  Check(recovered.out.approach_completed_blocks==completed+1,
+        "normal block after rediscovery did not retain the original lock count");
+  recovered.MissingBlock();
+  Check(recovered.out.approach_mission==MissionType::kBall &&
+        LinePlan::IsUnit(recovered.out.command.action) &&
+        recovered.out.approach_completed_blocks==completed+1,
+        "a later distinct loss did not permit one new probe");
+}
+void PrelockProbeForMission(MissionType mission) {
+  auto c=Config();c.enable_ball=false;
+  c.enable_hurdle=mission==MissionType::kHurdle;
+  c.enable_goal=mission==MissionType::kGoal;
+  c.initial_has_ball=c.goal_trial_start_goal=mission==MissionType::kGoal;
+  Driver d(c);d.in.ball_target.reset();
+  if(mission==MissionType::kHurdle) {
+    d.in.hurdle_target=Target();d.in.hurdle_track_id=5;
+    d.Warm();d.Block();d.Block();
+  } else {
+    d.in.camera_feedback={CameraMode::kGoal,true};
+    d.in.line_centers.clear();d.in.backboard_target=Target();
+    d.in.backboard_track_id=9;d.in.backboard_center_depth_m=2;
+    d.in.goal_pose={true,0,2,0,1};
+    for(int i=0;i<12;++i)d.Tick();
+    d.current=d.out.command.action_id;
+    Check(d.current && LinePlan::IsUnit(d.out.command.action),
+          "far GOAL probe fixture did not start an approach block");
+    d.Block();
+  }
+  const int completed=d.out.approach_completed_blocks;
+  Check(completed<3,"probe fixture locked before object loss");
+  if(mission==MissionType::kHurdle)
+    Check(d.out.remembered_line_score.has_value(),
+          "far HURDLE approach did not remember its actual LINE");
+  d.in.hurdle_target.reset();d.in.backboard_target.reset();
+  d.in.backboard_center_depth_m.reset();d.in.goal_pose={};
+  for(int i=0;i<12;++i)d.Tick();
+  d.Tick({d.current,true,false,true});
+  const auto second=d.out.command.action_id;
+  Check(second && second!=d.current && LinePlan::IsUnit(d.out.command.action),
+        "pre-lock loss interrupted the running HURDLE/GOAL block");
+  d.Tick({second,true,false,false});
+  d.Tick({d.current,true,true,false});d.current=second;
+  for(int i=0;i<12;++i)d.Tick();
+  d.Tick({d.current,true,false,true});
+  Check(d.out.command.action_id==d.current,
+        "HURDLE/GOAL loss booked a normal successor without evidence");
+  d.Tick({d.current,true,true,false});
+  Check(d.out.approach_mission==mission &&
+        d.out.approach_completed_blocks==completed &&
+        LinePlan::IsUnit(d.out.command.action),
+        "pre-lock HURDLE/GOAL loss did not start one shared probe block");
+  FinishProbe(d);
+  Check(d.out.approach_mission==MissionType::kNone,
+        "failed HURDLE/GOAL probe did not release to LINE");
+  if(mission==MissionType::kHurdle)
+    Check(d.out.remembered_line_score.has_value(),
+          "HURDLE probe release erased the actual LINE memory");
+  if(mission==MissionType::kGoal)
+    Check(d.out.command.camera_request==CameraRequest::kForward,
+          "failed GOAL probe did not request FORWARD before LINE recovery");
 }
 void LockAndLoss() {
   Driver d(Config());d.Warm();d.Block();
@@ -214,6 +347,10 @@ void NearAndIdentity() {
   Check(replacement.out.approach_completed_blocks==1,
         "replacement identity cancelled a walking block before its evidence window");
   replacement.MissingBlock();
+  Check(replacement.out.approach_mission==MissionType::kBall &&
+        replacement.out.approach_completed_blocks==1,
+        "replacement identity incorrectly inherited a new lock during probe");
+  FinishProbe(replacement);
   replacement.in.ball_target=Target();
   for(int i=0;i<12;++i) replacement.Tick();
   Check(replacement.out.approach_completed_blocks==0 && !replacement.out.approach_locked,
@@ -348,7 +485,9 @@ void FarGoalDepthRecovery(bool found,bool acquired=false) {
   for(int n=1;n<=3;++n) {
     for(int i=0;i<40 && (d.out.command.action_id==0 || d.out.command.action_id==completed);++i)d.Tick();
     const auto id=d.out.command.action_id;
-    Check(id && id!=completed && d.out.command.action==MissionAction::kStepForwardOne,
+    const auto expected=n%2 ? MissionAction::kStepForwardOne :
+        MissionAction::kStepForwardOneAlternate;
+    Check(id && id!=completed && d.out.command.action==expected,
           "far GOAL with visible image/invalid Depth did not request one bounded WALK step");
     d.Tick({id,true,false,false});
     Check(d.out.goal.depth_recovery_steps==n-1,"Depth recovery ACK consumed a step");
@@ -572,7 +711,7 @@ void FarReacquisitionReturnsToSharedPath(MissionType mission) {
 }
 }
 int main() {
-  Geometry();SoftLoss(1);SoftLoss(2);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
+  Geometry();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
   FarGoalDepthRecovery(false,true);FarGoalDepthRecovery(true,true);
   for(auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {

@@ -26,6 +26,8 @@ void MissionController::ReleaseContinuousApproach() {
   line_plan_.Abort();
   line_failure_pending_done_=false;
   last_ready_line_guide_.reset();
+  line_stability_history_.clear();
+  actual_line_stability_history_.clear();
   if (mission==MissionType::kBall) {
     ball_candidate_tracker_.Reset(); ball_association_tracker_.Reset();
     ball_target_id_=0;ball_target_locked_=ball_reacquiring_=false;
@@ -85,6 +87,7 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
     recovering_approach_=route;recovering_approach_->mission_started=true;
   } else {
     recovering_approach_.reset();last_line_score_.reset();
+    actual_line_stability_history_.clear();
   }
   continuous_={};approach_evidence_={};
   approach_goal_probe_=approach_return_forward_=false;
@@ -159,6 +162,7 @@ bool MissionController::ResumeContinuousApproach(const MissionFrameInput& input)
   line_plan_.Reset();line_state_=LineState::kNormal;
   line_guard_turns_completed_=0;line_failure_pending_done_=false;
   line_stability_history_.clear();line_ready_handled_id_=line_auxiliary_id_=0;
+  actual_line_stability_history_.clear();
   line_auxiliary_done_=line_auxiliary_observing_=line_observation_active_=false;
   decision_observation_active_=decision_observation_restart_pending_=false;
   deferred_done_={};last_command_={};
@@ -175,6 +179,11 @@ bool MissionController::ResumeContinuousApproach(const MissionFrameInput& input)
 
 bool MissionController::PrepareGoalDepthRecovery(const MissionFrameInput& input,
     bool visible,bool usable,bool idle,RouteDecision& result) {
+  if (visible && !usable && continuous_.probe_active) {
+    // Depth loss is a separate GOAL recovery episode. The current motor ID
+    // still drains normally, but an aborted probe must not remain armed.
+    continuous_.probe_active=false;
+  }
   if (usable || !visible) approach_goal_bad_depth_frames_=0;
   else ++approach_goal_bad_depth_frames_;
   if (!goal_controller_.DepthRecoveryActive()) {
@@ -213,9 +222,11 @@ bool MissionController::PrepareGoalDepthRecovery(const MissionFrameInput& input,
     }
   } else if (recovery.recovered) {
     approach_goal_bad_depth_frames_=0;
+    continuous_.probe_used=false;
     line_plan_.Reset();line_auxiliary_id_=0;
     line_auxiliary_done_=line_auxiliary_observing_=false;
     line_stability_history_.clear();
+    actual_line_stability_history_.clear();
   } else if (can_issue && recovery.action.action!=MissionAction::kNone) {
     result.action=recovery.action;result.depth_recovery_step=true;
   }
@@ -251,6 +262,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     }
     approach_return_forward_=false;approach_camera_started_=-1;
     line_stability_history_.clear();
+    actual_line_stability_history_.clear();
   }
   // Preserve the carrying/post-pickup gate. Camera transitions still drain all
   // issued locomotion before requesting GOAL, even in continuous mode.
@@ -266,6 +278,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     approach_goal_probe_=false;approach_camera_started_=-1;
     approach_goal_empty_frames_=0;approach_evidence_={};
     line_stability_history_.clear();
+    actual_line_stability_history_.clear();
   }
   if (!settled || !advance || line_state_==LineState::kFinalHold) {
     result.hold=true;return result;
@@ -364,6 +377,19 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     continuous_.missing=0;
   } else ++continuous_.missing;
   result.object_visible=target.has_value();
+  if (target && !continuous_.locked && !continuous_.near &&
+      (continuous_.probe_active || continuous_.loss_pending)) {
+    // A fresh sighting starts a new detection episode, but already completed
+    // physical approach blocks remain part of the same target's lock.
+    continuous_.hits.clear();continuous_.good_hits.clear();
+    continuous_.pose_hits.clear();continuous_.near_hits.clear();
+    approach_evidence_[i].hits.clear();
+    Push(approach_evidence_[i].hits,true,windows[i]);
+    if (continuous_.probe_active)
+      line_plan_.Abort(); // Issued IDs drain; only unissued probe repeats stop.
+    continuous_.missing=0;continuous_.loss_pending=false;
+    continuous_.probe_active=false;continuous_.probe_used=false;
+  }
   if (!acquired) Push(continuous_.hits,target.has_value(),windows[i]);
   Push(continuous_.pose_hits,target && input.goal_pose.valid,windows[i]);
   Push(continuous_.near_hits,target && continuous_.near,windows[i]);
@@ -372,6 +398,23 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   if (lost && !continuous_.locked && !continuous_.near) {
     line_plan_.Abort();result.hold=true;
     if (!idle) return result;
+    const bool probe_available=!continuous_.probe_used &&
+        cfg.prelock_loss_extra_blocks>0 && continuous_.last_guide.valid;
+    if (probe_available) {
+      if (!input.allow_new_commands || !input.allow_new_body_actions ||
+          !input.allow_new_line_action || !input.allow_new_line_plan ||
+          command_coordinator_.ActionAckTimedOut() ||
+          input.now_sec+1e-9<settle_until_sec_) return result;
+      const auto direction=line_p2p_controller_.Compute(continuous_.last_guide).direction;
+      const auto cruise=direction==CruiseDirection::kLeft ? MissionAction::kStepForwardLeft :
+          direction==CruiseDirection::kStraight ? MissionAction::kStepForwardFour :
+          direction==CruiseDirection::kRight ? MissionAction::kStepForwardRight : MissionAction::kNone;
+      if (cruise!=MissionAction::kNone) {
+        result.action={cruise,ActionCategory::kLocomotion,0,false};
+        result.probe_start=true;
+        return result;
+      }
+    }
     const bool restore=goal_view;
     ReleaseContinuousApproach();
     if (restore) {
@@ -391,6 +434,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       return result;
     }
     last_line_score_.reset();
+    actual_line_stability_history_.clear();
     if (!idle) return result;
     if (continuous_.near_motion_id) {
       if (input.delivery_feedback.done &&
@@ -474,11 +518,14 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   // recovery. A visible near board must never issue another WALK search step.
   if (i == 1 && PrepareGoalDepthRecovery(input, target.has_value() ||
       input.backboard_image_without_depth, target && goal_guide.valid, idle, result)) return result;
+  const bool probe_final_edge=continuous_.probe_active &&
+      line_plan_.LastUnit(input.delivery_feedback.action_id) &&
+      (input.delivery_feedback.ready || input.delivery_feedback.done);
   if (!target) {
     // Missing frames inside a walking block retain the last path. Only that
     // block's READY evidence may declare loss and stop its successor.
     result.guide=continuous_.last_guide.valid ? continuous_.last_guide : line.guide;
-    result.hold=!result.guide->valid;
+    result.hold=!result.guide->valid || probe_final_edge;
     return result;
   }
   LineGuide guide=line.guide;
@@ -502,7 +549,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   if (guide.valid) continuous_.last_guide=guide;
   // HURDLE follows the actual LINE, including its bounded loss recovery.
   // Holding the router on an invalid floor guide would bypass that FSM forever.
-  result.hold=i!=2 && !guide.valid;
+  result.hold=(i!=2 && !guide.valid) || probe_final_edge;
   return result;
 }
 

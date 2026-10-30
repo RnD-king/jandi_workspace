@@ -16,6 +16,15 @@ bool IsLongLineAction(MissionAction action) {
          action == MissionAction::kStepForwardLeft ||
          action == MissionAction::kStepForwardRight;
 }
+ActionRequest SelectOneStep(const ActionRequest& request, MissionAction preceding) {
+  ActionRequest selected = request;
+  if (request.action == MissionAction::kStepForwardOne ||
+      request.action == MissionAction::kStepForwardOneAlternate)
+    selected.action = preceding == MissionAction::kStepForwardOne
+        ? MissionAction::kStepForwardOneAlternate
+        : MissionAction::kStepForwardOne;
+  return selected;
+}
 } // namespace
 ControlCommandCoordinator::ControlCommandCoordinator()
     : ControlCommandCoordinator(LoadDefaultAlgorithmConfig().command) {}
@@ -28,36 +37,40 @@ ControlCommandCoordinator::ControlCommandCoordinator(
 
 ControlCommand ControlCommandCoordinator::BeginAction(
     ControlCommand command, const ActionRequest &request) {
+  const ActionRequest selected = SelectOneStep(request, last_completed_action_);
   pending_action_id_ = next_action_id_++;
   if (next_action_id_ == 0) next_action_id_ = 1;
   pending_mission_ = command.mission;
-  pending_request_ = request;
+  pending_request_ = selected;
   pending_issued_sec_ = now_sec_;
   pending_acknowledged_ = false;
   pending_ready_ = false;
   command.command_type = CommandType::kAction;
   command.control_phase = ControlPhase::kWaitingActionAck;
   command.action_id = pending_action_id_;
-  command.action = request.action;
-  command.action_category = request.category;
-  command.target_yaw_deg = request.target_yaw_deg;
+  command.action = selected.action;
+  command.action_category = selected.category;
+  command.target_yaw_deg = selected.target_yaw_deg;
   return command;
 }
 
 ControlCommand ControlCommandCoordinator::BeginQueuedAction(
     ControlCommand command, const ActionRequest &request) {
+  // The queued action executes directly after the current action, whose DONE
+  // has not arrived yet. Select its motion from that committed predecessor.
+  const ActionRequest selected = SelectOneStep(request, pending_request_.action);
   queued_action_id_ = next_action_id_++;
   if (next_action_id_ == 0) next_action_id_ = 1;
-  queued_request_ = request;
+  queued_request_ = selected;
   queued_mission_ = command.mission;
   queued_issued_sec_ = now_sec_;
   queued_acknowledged_ = false;
   command.command_type = CommandType::kAction;
   command.control_phase = ControlPhase::kWaitingQueuedActionAck;
   command.action_id = queued_action_id_;
-  command.action = request.action;
-  command.action_category = request.category;
-  command.target_yaw_deg = request.target_yaw_deg;
+  command.action = selected.action;
+  command.action_category = selected.category;
+  command.target_yaw_deg = selected.target_yaw_deg;
   return command;
 }
 
@@ -120,6 +133,7 @@ ControlCommand ControlCommandCoordinator::Compute(
     pending_acknowledged_ = pending_acknowledged_ || feedback.acknowledged;
     pending_ready_ = pending_ready_ || feedback.ready;
     if (feedback.done) {
+      last_completed_action_ = pending_request_.action;
       if (pending_request_.category == ActionCategory::kMission)
         suppressed_mission_action_ = pending_request_.action;
       if (queued_action_id_ != 0) {
@@ -204,6 +218,7 @@ void ControlCommandCoordinator::Reset(bool preserve_action_ids) {
   queued_mission_ = MissionType::kLine;
   queued_issued_sec_ = 0.0;
   queued_acknowledged_ = false;
+  last_completed_action_ = MissionAction::kNone;
   action_ack_timed_out_ = false;
   suppressed_mission_action_ = MissionAction::kNone;
   line_execution_sec_ = execution_observed_sec_ = 0.0;

@@ -2,7 +2,6 @@
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/cruise_selector.hpp"
-#include "vision_core/cruise_selector.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -46,12 +45,86 @@ const char *HurdleController::ModeName(HurdleMode mode) {
   case HurdleMode::kWaitFinePose: return "HURDLE_TO_FINE_FEET";
   case HurdleMode::kRecoveryStep: return "HURDLE_RECOVERY_STEP";
   case HurdleMode::kRecoveryStepObserve: return "HURDLE_RECOVERY_STEP_OBSERVE";
+  case HurdleMode::kFineLineAlign: return "HURDLE_FINE_LINE_ALIGN";
   }
   return "UNKNOWN";
 }
 
 double HurdleController::Clamp(double value, double low, double high) {
   return std::max(low, std::min(high, value));
+}
+
+void HurdleController::BeginFineLineObservation(double now_sec) {
+  fine_line_history_.clear();
+  fine_line_fresh_.reset();
+  fine_line_qualified_ = false;
+  fine_line_observing_ = true;
+  fine_line_observation_started_ = true;
+  fine_line_observation_start_sec_ = now_sec;
+}
+
+void HurdleController::ObserveFineLine(const LineGuide &guide, int image_width,
+                                      double now_sec) {
+  if (!fine_line_monitoring_ || !fine_line_observing_ || image_width <= 1)
+    return;
+  if (fine_line_last_sample_sec_ &&
+      now_sec <= *fine_line_last_sample_sec_ + kEpsilon)
+    return;
+  fine_line_last_sample_sec_ = now_sec;
+  std::optional<FineLineSample> sample;
+  if (guide.valid && std::isfinite(guide.offset) &&
+      std::isfinite(guide.heading_rad)) {
+    constexpr double kDegreesPerRadian = 180.0 / 3.14159265358979323846;
+    sample = FineLineSample{guide.offset * (0.5 * image_width),
+                            guide.heading_rad * kDegreesPerRadian};
+  }
+  fine_line_history_.push_back(sample);
+  while (fine_line_history_.size() >
+         static_cast<std::size_t>(config_.fine_line_stable_window))
+    fine_line_history_.pop_front();
+  if (fine_line_history_.size() <
+      static_cast<std::size_t>(config_.fine_line_stable_window))
+    return;
+  int hits = 0;
+  double offset_sum = 0.0, heading_sum = 0.0;
+  for (const auto &entry : fine_line_history_) {
+    if (!entry) continue;
+    ++hits;
+    offset_sum += entry->offset_px;
+    heading_sum += entry->heading_deg;
+  }
+  if (hits < config_.fine_line_stable_min_hits) {
+    fine_line_qualified_ = false;
+    return;
+  }
+  // The first complete 10/5 window may end in a missing frame. It still
+  // qualifies, but later missing frames must not count as new evidence.
+  const bool new_evidence = sample.has_value() || !fine_line_qualified_;
+  fine_line_qualified_ = true;
+  if (!new_evidence) return;
+  fine_line_last_valid_ = FineLineSample{offset_sum / hits, heading_sum / hits};
+  fine_line_stale_corrections_ = 0;
+  if (mode_ == HurdleMode::kFineLineAlign && fine_line_observation_started_ &&
+      now_sec + kEpsilon >= fine_line_observation_start_sec_)
+    fine_line_fresh_ = fine_line_last_valid_;
+}
+
+void HurdleController::OnActualMotionDone(MissionAction action, double now_sec) {
+  if (mode_ == HurdleMode::kFineLineAlign &&
+      fine_line_pending_action_ == action && !fine_line_observation_started_)
+    BeginFineLineObservation(now_sec);
+}
+
+void HurdleController::FinishFineLineAlign(HurdleResult &result) {
+  fine_line_history_.clear();
+  fine_line_fresh_.reset();
+  fine_line_pending_action_ = MissionAction::kNone;
+  fine_line_pending_stale_ = false;
+  fine_line_monitoring_ = false;
+  fine_line_observing_ = false;
+  fine_line_observation_started_ = false;
+  mode_ = HurdleMode::kFineAdjust;
+  result.mode = mode_;
 }
 
 void HurdleController::UpdateTracker(const std::optional<ObjectTarget> &target,
@@ -146,6 +219,8 @@ HurdleResult HurdleController::Compute(
     ClearTracking();
   if (!verified && mode_ != HurdleMode::kWaitCameraDown &&
       mode_ != HurdleMode::kReturnCameraToLine &&
+      !(mode_ == HurdleMode::kFineLineAlign &&
+        (camera.actual_mode != CameraMode::kDown || !camera.settled)) &&
       !(mode_ == HurdleMode::kFineAdjust &&
         (feedback.action_active || feedback.action_done)))
     UpdateTracker(target, image_width, image_height);
@@ -167,6 +242,18 @@ HurdleResult HurdleController::Compute(
   result.recovery_steps_completed = recovery_steps_completed_;
   result.recovery_step_limit = recovery_step_limit_;
   result.entry_recovery = entry_step_recovery_;
+  result.fine_line_fresh = fine_line_fresh_.has_value();
+  result.fine_line_turns = fine_line_turns_;
+  result.fine_line_side_steps = fine_line_side_steps_;
+  result.fine_line_search_steps = fine_line_search_steps_;
+  const auto &reported_line = fine_line_fresh_ ? fine_line_fresh_ : fine_line_last_valid_;
+  if (reported_line) {
+    result.fine_line_offset_px = reported_line->offset_px;
+    result.fine_line_heading_deg = reported_line->heading_deg;
+  }
+  if (fine_line_monitoring_ && tracked_.visible &&
+      tracked_.center_px.v >= config_.contact_v_px)
+    fine_line_close_ = true;
   switch (mode_) {
   case HurdleMode::kLineFollow:
     return result;
@@ -267,6 +354,14 @@ HurdleResult HurdleController::Compute(
     result.camera_request = CameraRequest::kDown;
     if (camera.actual_mode == CameraMode::kDown && camera.settled) {
       ClearTracking();  // Intermediate camera observations are discarded.
+      fine_line_monitoring_ = true;
+      fine_line_observing_ = true;
+      fine_line_history_.clear();
+      fine_line_qualified_ = false;
+      fine_line_last_sample_sec_.reset();
+      fine_line_last_valid_.reset();
+      fine_line_fresh_.reset();
+      fine_line_close_ = false;
       last_seen_u_px_ = config_.target_u_px;
       mode_ = HurdleMode::kDownSearch;
       down_search_.Reset();
@@ -332,11 +427,99 @@ HurdleResult HurdleController::Compute(
     return result;
   case HurdleMode::kWaitFinePose:
     if (feedback.action_done) {
-      fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; ClearTracking();
+      fine_pose_entered_=true; mode_=HurdleMode::kFineLineAlign; ClearTracking();
+      fine_line_turns_ = fine_line_side_steps_ = 0;
+      fine_line_stale_corrections_ = fine_line_search_steps_ = 0;
+      fine_line_pending_action_ = MissionAction::kNone;
+      BeginFineLineObservation(now_sec);
 
       result.mode=mode_; result.tracked={}; return result;
     }
     result.action=Locomotion(MissionAction::kDefaultPoseMode); return result;
+  case HurdleMode::kFineLineAlign: {
+    if (fine_line_pending_action_ != MissionAction::kNone) {
+      if (!feedback.action_done) return result;
+      const auto completed = fine_line_pending_action_;
+      fine_line_pending_action_ = MissionAction::kNone;
+      if (fine_line_pending_stale_) ++fine_line_stale_corrections_;
+      fine_line_pending_stale_ = false;
+      if (completed == MissionAction::kTurnLeft || completed == MissionAction::kTurnRight)
+        ++fine_line_turns_;
+      else if (completed == MissionAction::kLeftSideStep ||
+               completed == MissionAction::kRightSideStep)
+        ++fine_line_side_steps_;
+      else if (completed == MissionAction::kStepForwardHalf)
+        ++fine_line_search_steps_;
+      if (!fine_line_observation_started_)
+        BeginFineLineObservation(now_sec);
+      result.fine_line_turns = fine_line_turns_;
+      result.fine_line_side_steps = fine_line_side_steps_;
+      result.fine_line_search_steps = fine_line_search_steps_;
+    }
+    if (feedback.action_active && !feedback.action_done) return result;
+    if (camera.actual_mode != CameraMode::kDown || !camera.settled) {
+      fine_line_history_.clear();
+      fine_line_fresh_.reset();
+      fine_line_qualified_ = false;
+      fine_line_observing_ = false;
+      fine_line_observation_started_ = false;
+      return result;
+    }
+    if (!fine_line_observation_started_)
+      BeginFineLineObservation(now_sec);
+    if (!fine_line_observation_started_ ||
+        now_sec + kEpsilon < fine_line_observation_start_sec_ +
+                             config_.fine_line_observation_sec ||
+        fine_line_history_.size() <
+            static_cast<std::size_t>(config_.fine_line_stable_window))
+      return result;
+
+    const auto &line = fine_line_fresh_ ? fine_line_fresh_ : fine_line_last_valid_;
+    const bool fresh = fine_line_fresh_.has_value();
+    if (fresh &&
+        std::abs(line->heading_deg) <= config_.fine_line_heading_tolerance_deg &&
+        std::abs(line->offset_px) <= config_.fine_line_offset_tolerance_px) {
+      FinishFineLineAlign(result);
+      return result;
+    }
+    MissionAction correction = MissionAction::kNone;
+    if (line && (fresh || fine_line_stale_corrections_ <
+                                  config_.fine_line_max_stale_corrections)) {
+      if (std::abs(line->heading_deg) > config_.fine_line_heading_tolerance_deg) {
+        if (fine_line_turns_ >= config_.fine_line_max_turns) {
+          FinishFineLineAlign(result);
+          return result;
+        }
+        correction = line->heading_deg < 0.0 ? MissionAction::kTurnLeft
+                                             : MissionAction::kTurnRight;
+      } else if (std::abs(line->offset_px) > config_.fine_line_offset_tolerance_px) {
+        if (fine_line_side_steps_ >= config_.fine_line_max_side_steps) {
+          FinishFineLineAlign(result);
+          return result;
+        }
+        correction = line->offset_px < 0.0 ? MissionAction::kLeftSideStep
+                                            : MissionAction::kRightSideStep;
+      }
+    }
+    if (correction == MissionAction::kNone) {
+      if (fine_line_search_steps_ >= config_.fine_line_max_search_steps ||
+          fine_line_close_) {
+        FinishFineLineAlign(result);
+        return result;
+      }
+      correction = MissionAction::kStepForwardHalf;
+    }
+    result.action = Locomotion(correction,
+        correction == MissionAction::kTurnLeft || correction == MissionAction::kTurnRight
+            ? static_cast<std::int16_t>(config_.fine_line_turn_yaw_deg) : 0);
+    if (allow_new_body_actions) {
+      fine_line_pending_action_ = correction;
+      fine_line_pending_stale_ = !fresh && correction != MissionAction::kStepForwardHalf;
+      fine_line_observing_ = false;
+      fine_line_observation_started_ = false;
+    }
+    return result;
+  }
   case HurdleMode::kFineAdjust: {
     if (feedback.action_active && !feedback.action_done) return result;
     if (!tracked_.visible) {
@@ -543,6 +726,18 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   ClearTracking();
   last_seen_u_px_ = config_.target_u_px;
   state_enter_sec_ = 0.0;
+  fine_line_history_.clear();
+  fine_line_qualified_ = false;
+  fine_line_last_sample_sec_.reset();
+  fine_line_last_valid_.reset();
+  fine_line_fresh_.reset();
+  fine_line_monitoring_ = fine_line_observing_ = fine_line_observation_started_ = false;
+  fine_line_close_ = false;
+  fine_line_pending_action_ = MissionAction::kNone;
+  fine_line_pending_stale_ = false;
+  fine_line_observation_start_sec_ = 0.0;
+  fine_line_turns_ = fine_line_side_steps_ = fine_line_stale_corrections_ =
+      fine_line_search_steps_ = 0;
   test_camera_pending_=false; fine_pose_entered_=false; approach_two_issued_=false;
   last_approach_steps_=0; awaiting_approach_observation_=false;
   last_approach_pending_=false;

@@ -177,6 +177,19 @@ vision_algorithm:
       down_one_step_v_px: 80.0 # 위 가로선 (2걸음)
       fine_mode_v_px: 180 # 아래 가로선 (1걸음)
 
+      # DOWN 완료부터 LINE O/H 기억; 2번 자세 DONE 후 FINE 정렬에만 사용
+      fine_line_reference_u_px: 380.0 # 허들 DOWN 화면의 로봇 기준선
+      fine_line_offset_tolerance_px: 20.0 # |O| 허용 범위 (px)
+      fine_line_heading_tolerance_deg: 5.0 # |H| 허용 범위 (도)
+      fine_line_observation_sec: 1.0 # 각 실제 DONE 이후 정지 관측 (초)
+      fine_line_stable_window: 10
+      fine_line_stable_min_hits: 5
+      fine_line_turn_yaw_deg: 15 # 7/8번 회전 1회 요청각 (도)
+      fine_line_max_turns: 4
+      fine_line_max_side_steps: 4
+      fine_line_max_stale_corrections: 2 # 같은 마지막 유효 O/H 재사용 한도
+      fine_line_max_search_steps: 3 # 유실 시 3번 FINE 전진 한도
+
       # 허들 접촉·넘기
       contact_v_px: 240 # 접촉 선 (반걸음)
       contact_steps: 2 # 접촉 보행 반 걸음 횟수
@@ -282,6 +295,7 @@ vision_algorithm:
       # AUTO 객체 접근: LINE과 공통 O/H·32/33/34 보행
       object_approach:
         lock_blocks: 3 # 같은 ID의 보행 묶음 전체가 실제 DONE된 횟수 (전송/ACK/READY 아님)
+        prelock_loss_extra_blocks: 1 # 락 전 유실 시 마지막 접근 방향으로 추가 탐색할 묶음 수 (0 또는 1)
         blend_frames: 5 # LINE→가상 경로의 전환 프레임 수
         reference_v_ratio: 0.80 # 실제 LINE 기준 높이를 못 구하는 GOAL 뷰의 기준
         # 임시값: 사용자 요청으로 우선 사용. 광학 중심의 몸통 기준 위치/자세를 실측 후 교체!

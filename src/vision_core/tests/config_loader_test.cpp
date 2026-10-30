@@ -90,6 +90,7 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.command.first_action_id==baseline.command.first_action_id);
   assert(c.object_ready_mean_actions==baseline.object_ready_mean_actions);
   assert(c.object_approach.lock_blocks==3);
+  assert(c.object_approach.prelock_loss_extra_blocks==1);
   assert(c.object_approach.goal_empty_max_retries==3);
   root["vision_algorithm"]["common"]["mission"]["object_approach"]["forward_camera"]["right_m"]=-.07;
   const auto continuous=LoadText(YAML::Dump(root));
@@ -210,6 +211,7 @@ int main(int argc, char **argv) {
     Reject(text.str(), "  mission:\n",
            std::string("  mission:\n    object_approach_continous: ") + old_value + "\n");
   Reject(text.str(),"lock_blocks: 3","lock_blocks: 0");
+  Reject(text.str(),"prelock_loss_extra_blocks: 1","prelock_loss_extra_blocks: 2");
   Reject(text.str(),"goal_empty_max_retries: 3","goal_empty_max_retries: -1");
   Reject(text.str(),"down_recovery_max_actions: 3","down_recovery_max_actions: 0");
   Reject(text.str(),"depth_recovery_max_steps: 3","depth_recovery_max_steps: 0");

@@ -16,7 +16,7 @@ const LinePlan::Block* LinePlan::Find(std::uint64_t id) const {
   for (const auto& block : blocks_) if (block.id == id) return &block;
   return nullptr;
 }
-ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner) {
+ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner, bool probe) {
   if (!IsCruise(cruise)) return {};
   // Retain recent IDs for idempotent late feedback, without unbounded growth.
   while (blocks_.size() >= 32 && blocks_.front().reported) {
@@ -34,6 +34,7 @@ ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner) {
       right ? config_.right_repetitions : config_.straight_repetitions;
   blocks_.emplace_back(next_block_++, cruise, unit, count, config_,window_,required_hits_);
   blocks_.back().owner=owner;
+  blocks_.back().probe=probe;
   return UnitRequest(unit);
 }
 ActionRequest LinePlan::Continue(std::uint64_t ready_id) const {
@@ -98,7 +99,7 @@ void LinePlan::ObserveObject(double now, std::uint64_t owner, bool visible,
                              int window, int minimum_hits) {
   if (!owner || window < 1 || minimum_hits < 1) return;
   for (auto& block : blocks_) {
-    if (block.owner != owner || block.aborted || block.window_finished ||
+    if (block.owner != owner || block.probe || block.aborted || block.window_finished ||
         !block.start || now < *block.start || block.completed == block.count) continue;
     block.object_hits.push_back(visible);
     while (block.object_hits.size() > static_cast<std::size_t>(window))
@@ -117,6 +118,11 @@ bool LinePlan::ObjectOwned(std::uint64_t action_id, std::uint64_t owner) const {
   const auto it=units_.find(action_id);
   const auto* block=it==units_.end() ? nullptr : Find(it->second.block);
   return block && owner && block->owner==owner;
+}
+bool LinePlan::IsProbe(std::uint64_t action_id) const {
+  const auto it=units_.find(action_id);
+  const auto* block=it==units_.end() ? nullptr : Find(it->second.block);
+  return block && block->probe;
 }
 std::optional<LinePlan::ObjectEvidence> LinePlan::CurrentObjectEvidence(std::uint64_t owner) const {
   if (!owner) return std::nullopt;
@@ -181,7 +187,7 @@ std::vector<LinePlan::CompletedBlock> LinePlan::TakeCompletedBlocks() {
   for (auto& block : blocks_) {
     if (!block.reported && block.completed == block.issued &&
         (block.aborted || block.completed == block.count)) {
-      if (!block.aborted) result.push_back({block.cruise,block.owner,block.object_qualified});
+      if (!block.aborted) result.push_back({block.cruise,block.owner,block.object_qualified,block.probe});
       block.reported = true;
     }
   }

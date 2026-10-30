@@ -26,7 +26,7 @@ public:
            action == MissionAction::kStepForwardRight;
   }
   void UpdateConfig(const LineP2pConfig& config) { config_ = config; }
-  ActionRequest Begin(MissionAction cruise, std::uint64_t owner = 0);
+  ActionRequest Begin(MissionAction cruise, std::uint64_t owner = 0, bool probe = false);
   ActionRequest Continue(std::uint64_t ready_id = 0) const;
   void Issued(const ControlCommand& command, std::uint64_t parent_id);
   void Feedback(const CommandDeliveryFeedback& feedback, double now, double hold);
@@ -35,6 +35,7 @@ public:
                      int window, int minimum_hits);
   bool ObjectQualified(std::uint64_t action_id) const;
   bool ObjectOwned(std::uint64_t action_id, std::uint64_t owner) const;
+  bool IsProbe(std::uint64_t action_id) const;
   struct ObjectEvidence { int hits{}, frames{}; bool qualified{}; };
   std::optional<ObjectEvidence> CurrentObjectEvidence(std::uint64_t owner) const;
   bool Contains(std::uint64_t id) const { return units_.count(id) != 0; }
@@ -47,7 +48,7 @@ public:
   std::optional<LineGuide> Finish(std::uint64_t id, double now, double remaining);
   std::optional<LineWindowStats> Stats(std::uint64_t id) const;
   std::vector<MissionAction> TakeCompleted();
-  struct CompletedBlock { MissionAction cruise; std::uint64_t owner; bool object_qualified; };
+  struct CompletedBlock { MissionAction cruise; std::uint64_t owner; bool object_qualified; bool probe; };
   std::vector<CompletedBlock> TakeCompletedBlocks();
   void Abort();
   void ClearEvidence();
@@ -62,7 +63,7 @@ private:
     MissionAction cruise, unit;
     std::uint64_t owner{0};
     int count, issued{0}, completed{0};
-    bool aborted{false}, reported{false}, window_finished{false};
+    bool aborted{false}, reported{false}, window_finished{false}, probe{false};
     std::optional<double> start;
     LineGuideAccumulator observations;
     std::optional<LineGuide> mean;

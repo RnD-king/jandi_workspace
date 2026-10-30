@@ -7,6 +7,7 @@
 namespace vision_core {
 
 Features ComputeLineFeatures(const std::vector<Point2> &points, int image_width,
-                             int image_height, const FeatureConfig &config);
+                             int image_height, const FeatureConfig &config,
+                             int minimum_input_points = 4);
 
 } // namespace vision_core

@@ -5,6 +5,7 @@
 #endif
 #include <cassert>
 #include <cmath>
+#include <string>
 
 using namespace vision_core;
 static CruiseDecision StraightLine() { CruiseDecision d; d.applicable=true; d.direction=CruiseDirection::kStraight; return d; }
@@ -289,6 +290,7 @@ void TestGoalForwardTrial() {
 void TestHurdleSearchAndContact() {
   auto c=Config(); c.enable_ball=false; c.enable_hurdle=true;
   c.hurdle.upper_acquire_v_px=480;
+  c.hurdle.fine_line_reference_u_px=410;
 
   Trial t(c); t.in.hurdle_target=Target(.5,.85);
   // HURDLE now aligns using LINE O/H, so supply a straight guide.
@@ -303,8 +305,9 @@ void TestHurdleSearchAndContact() {
   t.Tick(true); assert(t.out.hurdle.mode==HurdleMode::kCoarseAdjust && t.permit==0);
   for(int i=0;i<7;++i)t.Tick();
   t.Commit(); assert(t.out.command.action==MissionAction::kDefaultPoseMode);
-  t.Tick(true); assert(t.out.hurdle.mode==HurdleMode::kFineAdjust);
-  for(int i=0;i<10;++i)t.Tick();
+  t.Tick(true); assert(t.out.hurdle.mode==HurdleMode::kFineLineAlign);
+  for(int i=0;i<11;++i)t.Tick();
+  assert(t.out.hurdle.mode==HurdleMode::kFineAdjust);
   t.Commit(); assert(t.out.hurdle.mode==HurdleMode::kContactWalk);
   assert(t.out.command.action==MissionAction::kStepForwardHalf);
   const auto contact_scope=t.permit;
@@ -371,7 +374,11 @@ void TestGoalEdgeSingleCommit(bool left) {
   assert(t.Preview().command.action==MissionAction::kStepForwardThree);
 }
 } // namespace
-int main() {
+int main(int argc, char **argv) {
+  if (argc > 1 && std::string(argv[1]) == "hurdle") {
+    TestHurdleSearchAndContact();
+    return 0;
+  }
   // Near GOAL commits to FINE feet before considering another WALK primitive.
   auto gc=LoadDefaultAlgorithmConfig().goal;
   gc.stable_window=gc.stable_min_hits=1;

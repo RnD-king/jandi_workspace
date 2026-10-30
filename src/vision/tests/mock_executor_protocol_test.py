@@ -68,13 +68,13 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(self.events(), [StatusEvent('body', 8, DONE)])
 
     def test_line_unit_ready_and_legacy_one_step_policy(self):
-        for action in (10, 26, 27, 32, 33, 34):
+        for action in (10, 26, 27, 32, 33, 34, 35):
             p = MockExecutorProtocol()
             p.receive_body(100, 1, action, 0)
             p.take_events()
             p.ready_body()
             self.assertEqual(p.take_events(),
-                             [StatusEvent('body', 100, READY)] if action >= 32 else [])
+                             [StatusEvent('body', 100, READY)] if 32 <= action <= 34 else [])
 
     def test_camera_dedup_independent(self):
         self.p.receive_body(1, 1, 13, 0)

@@ -27,6 +27,7 @@ enum class HurdleMode {
   kWaitFinePose,
   kRecoveryStep,
   kRecoveryStepObserve,
+  kFineLineAlign,
 };
 
 struct HurdleConfig {
@@ -52,6 +53,17 @@ struct HurdleConfig {
   double fine_mode_v_px{};
   double hurdle_ignore_duration_sec{};
   double recovery_center_tolerance_px{};
+  double fine_line_reference_u_px{};
+  double fine_line_offset_tolerance_px{};
+  double fine_line_heading_tolerance_deg{};
+  double fine_line_observation_sec{};
+  int fine_line_stable_window{};
+  int fine_line_stable_min_hits{};
+  int fine_line_turn_yaw_deg{};
+  int fine_line_max_turns{};
+  int fine_line_max_side_steps{};
+  int fine_line_max_stale_corrections{};
+  int fine_line_max_search_steps{};
 };
 
 struct TrackedHurdle {
@@ -73,6 +85,9 @@ struct HurdleResult {
   int down_search_steps_remaining{0};
   bool down_search_found{false};
   int detection_hits{0}, detection_frames{0}, lost_frames{0};
+  bool fine_line_fresh{false};
+  int fine_line_turns{0}, fine_line_side_steps{0}, fine_line_search_steps{0};
+  std::optional<double> fine_line_offset_px, fine_line_heading_deg;
   bool active{false};
   CameraRequest camera_request{CameraRequest::kNone};
   HurdleMode mode{HurdleMode::kLineFollow};
@@ -112,6 +127,8 @@ public:
     down_search_.InvalidateDetection();
   }
   void ObserveOnly(const std::optional<ObjectTarget> &target, int width, int height);
+  void ObserveFineLine(const LineGuide &guide, int image_width, double now_sec);
+  void OnActualMotionDone(MissionAction action, double now_sec);
   void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
       const std::deque<bool>& hits, int width, int height);
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
@@ -126,6 +143,7 @@ public:
     state_enter_sec_+=duration;
     down_search_.ShiftTimers(duration);
     if (contact_next_step_sec_>0.0) contact_next_step_sec_+=duration;
+    if (fine_line_observation_started_) fine_line_observation_start_sec_+=duration;
   }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
   void StartTestNear() { Reset(); mode_=HurdleMode::kWaitCameraDown; test_camera_pending_=true; }
@@ -158,6 +176,8 @@ private:
   void ExhaustStepRecovery(double now_sec, HurdleResult &result);
   void ResetToLine(bool clear_ignore);
   void ClearTracking();
+  void BeginFineLineObservation(double now_sec);
+  void FinishFineLineAlign(HurdleResult &result);
 
   HurdleConfig config_;
   double camera_motion_timeout_sec_{};
@@ -192,6 +212,20 @@ private:
   double last_seen_u_px_{0.0};
   double state_enter_sec_{0.0};
   double ignore_until_sec_{0.0};
+  struct FineLineSample { double offset_px{}, heading_deg{}; };
+  std::deque<std::optional<FineLineSample>> fine_line_history_;
+  std::optional<FineLineSample> fine_line_last_valid_, fine_line_fresh_;
+  bool fine_line_monitoring_{false};
+  bool fine_line_observing_{false};
+  bool fine_line_observation_started_{false};
+  bool fine_line_qualified_{false};
+  bool fine_line_close_{false};
+  MissionAction fine_line_pending_action_{MissionAction::kNone};
+  bool fine_line_pending_stale_{false};
+  double fine_line_observation_start_sec_{0.0};
+  std::optional<double> fine_line_last_sample_sec_;
+  int fine_line_turns_{0}, fine_line_side_steps_{0};
+  int fine_line_stale_corrections_{0}, fine_line_search_steps_{0};
 };
 
 } // namespace vision_core

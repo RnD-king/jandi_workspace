@@ -9,6 +9,13 @@ ActionRequest WalkTurn(bool left) {
   return {left ? MissionAction::kTurnLeftInPlace : MissionAction::kStepForwardRightOneHurdle,
           ActionCategory::kLocomotion, 0, false};
 }
+bool SameIssuedAction(MissionAction requested, MissionAction issued) {
+  const auto one_step = [](MissionAction action) {
+    return action == MissionAction::kStepForwardOne ||
+        action == MissionAction::kStepForwardOneAlternate;
+  };
+  return requested == issued || (one_step(requested) && one_step(issued));
+}
 }
 
 void MissionController::ObserveLineFeedback(const CommandDeliveryFeedback& feedback, double now) {
@@ -70,7 +77,11 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   for (const auto& block : line_plan_.TakeCompletedBlocks()) {
     if (automatic_approach && block.owner && block.owner==continuous_.epoch) {
-      if (block.object_qualified) {
+      if (block.probe) {
+        continuous_.probe_active=false;
+        continuous_.loss_pending=true;
+        continue;
+      } else if (block.object_qualified) {
         ++continuous_.blocks;
         continuous_.locked=continuous_.blocks>=config_.object_approach.lock_blocks;
       } else continuous_.loss_pending=true;
@@ -88,6 +99,7 @@ MissionFrameResult MissionController::StepPlannedLine(
                                             input.image_height, features);
   output.line_computed = true;
   auto raw = output.line_features.guide;
+  const auto actual_line_guide=raw;
   LineGuide decision = input.line_decision_guide_override.value_or(raw);
   output.line_decision_guide = decision;
   last_line_image_width_ = input.image_width;
@@ -123,6 +135,12 @@ MissionFrameResult MissionController::StepPlannedLine(
     }
   }
   if (input.advance_line_fsm) {
+    actual_line_stability_history_.push_back(line_state_==LineState::kNormal &&
+        actual_line_guide.valid && std::isfinite(actual_line_guide.offset) &&
+        std::isfinite(actual_line_guide.heading_rad));
+    while (actual_line_stability_history_.size() >
+        static_cast<std::size_t>(config_.line.line_stable_window))
+      actual_line_stability_history_.pop_front();
     line_stability_history_.push_back(line_state_ == LineState::kNormal && raw.valid &&
                                       std::isfinite(raw.offset) && std::isfinite(raw.heading_rad));
     while (line_stability_history_.size() > static_cast<std::size_t>(config_.line.line_stable_window))
@@ -140,6 +158,19 @@ MissionFrameResult MissionController::StepPlannedLine(
       line_stability_history_.size()==static_cast<std::size_t>(config_.line.line_stable_window) &&
       std::count(line_stability_history_.begin(), line_stability_history_.end(), true) >=
           config_.line.line_stable_min_hits;
+  // Remember only stable, actual floor LINE evidence. The router may have
+  // replaced raw with a BALL/GOAL virtual path (or a HURDLE held path).
+  const bool actual_line_valid=actual_line_stability_history_.size()==
+      static_cast<std::size_t>(config_.line.line_stable_window) &&
+      std::count(actual_line_stability_history_.begin(),
+                 actual_line_stability_history_.end(),true)>=config_.line.line_stable_min_hits;
+  if (automatic_approach && !continuous_.near && line_state_==LineState::kNormal &&
+      actual_line_valid && actual_line_guide.valid &&
+      std::isfinite(actual_line_guide.offset) &&
+      std::isfinite(actual_line_guide.heading_rad)) {
+    const auto real=line_p2p_controller_.Compute(actual_line_guide);
+    if (real.direction!=CruiseDirection::kNone) last_line_score_=real.error;
+  }
   ActionRequest request;
   CameraRequest camera = route.camera;
   bool manual_line_hold = false;
@@ -340,6 +371,7 @@ MissionFrameResult MissionController::StepPlannedLine(
         if (!decision.valid && !idle) line_failure_pending_done_ = true;
         if (automatic_approach && continuous_.mission!=MissionType::kNone &&
             line_plan_.ObjectOwned(id,continuous_.epoch) &&
+            !line_plan_.IsProbe(id) &&
             !line_plan_.ObjectQualified(id)) {
           continuous_.loss_pending=true;
           line_plan_.Abort();
@@ -415,6 +447,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   const bool wants_fine = request.action == MissionAction::kTurnLeft || request.action == MissionAction::kTurnRight;
   const bool wants_walk = LinePlan::IsCruise(request.action) || LinePlan::IsUnit(request.action) ||
       request.action==MissionAction::kStepForwardOne ||
+      request.action==MissionAction::kStepForwardOneAlternate ||
       request.action==MissionAction::kStepForwardTwo ||
       request.action == MissionAction::kTurnLeftInPlace || request.action == MissionAction::kStepForwardRightOneHurdle;
   bool pose_transition = false;
@@ -430,7 +463,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   if (LinePlan::IsCruise(request.action)) {
     if (input.allow_new_line_plan) request = line_plan_.Begin(request.action,
-        automatic_approach ? continuous_.epoch : 0);
+        automatic_approach ? continuous_.epoch : 0,route.probe_start);
     else request = {};
   }
   if (!input.allow_new_commands) camera = CameraRequest::kNone;
@@ -442,11 +475,19 @@ MissionFrameResult MissionController::StepPlannedLine(
   const auto& command = output.command;
   if (LinePlan::IsUnit(command.action)) line_plan_.Issued(command,
       command.control_phase == ControlPhase::kWaitingQueuedActionAck ? parent_id : 0);
+  if (route.probe_start) {
+    if (command.command_type==CommandType::kAction && command.action_id &&
+        LinePlan::IsUnit(command.action)) {
+      continuous_.probe_active=true;
+      continuous_.probe_used=true;
+      continuous_.loss_pending=false;
+    } else line_plan_.Abort();
+  }
   if (route.near_final_action && command.command_type==CommandType::kAction &&
-      command.action_id && command.action==route.action.action)
+      command.action_id && SameIssuedAction(route.action.action, command.action))
     continuous_.near_motion_id=command.action_id;
   if (command.command_type == CommandType::kAction && command.action_id &&
-      request.action != MissionAction::kNone && command.action == request.action &&
+      request.action != MissionAction::kNone && SameIssuedAction(request.action, command.action) &&
       !LinePlan::IsUnit(command.action)) {
     if (!pose_transition && (candidate_.phase == CandidatePhase::kSearch || candidate_.phase == CandidatePhase::kRestore)) {
       candidate_.turn_id = command.action_id;

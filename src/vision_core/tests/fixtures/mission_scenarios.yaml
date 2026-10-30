@@ -111,6 +111,17 @@ vision_algorithm:
 
     down_one_step_v_px: 100.0
     fine_mode_v_px: 180
+    fine_line_reference_u_px: 380.0
+    fine_line_offset_tolerance_px: 20.0
+    fine_line_heading_tolerance_deg: 5.0
+    fine_line_observation_sec: 1.0
+    fine_line_stable_window: 10
+    fine_line_stable_min_hits: 5
+    fine_line_turn_yaw_deg: 15
+    fine_line_max_turns: 4
+    fine_line_max_side_steps: 4
+    fine_line_max_stale_corrections: 2
+    fine_line_max_search_steps: 3
 
     contact_v_px: 260
     contact_steps: 3
@@ -241,6 +252,7 @@ vision_algorithm:
   mission:
     object_approach:
       lock_blocks: 3
+      prelock_loss_extra_blocks: 1
       blend_frames: 5
       goal_empty_max_retries: 3
       reference_v_ratio: 0.80

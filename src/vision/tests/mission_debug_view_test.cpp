@@ -140,6 +140,33 @@ int main() {
   m.active_mission=vision_core::MissionType::kBall;
   m.ball.mode=vision_core::BallMode::kApproachBall;
   const vision_core::CameraFeedback forward{vision_core::CameraMode::kForward,true};
+  m.active_mission=vision_core::MissionType::kLine;
+  m.approach_mission=vision_core::MissionType::kBall;
+  m.approach_near_observing=true;
+  auto observing=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  Check(observing.image.at<cv::Vec3b>(200,290)!=cv::Vec3b(0,0,0),
+        "near BALL stopped observation must show the approach grid");
+  m.approach_near_observing=false;
+  auto moving=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  Check(moving.image.at<cv::Vec3b>(200,290)==cv::Vec3b(0,0,0),
+        "near BALL grid must end with the stopped observation");
+  vision_core::LineGuide virtual_path;
+  virtual_path.valid=true;
+  virtual_path.offset=.25;
+  virtual_path.heading_rad=.2;
+  m.approach_path_guide=virtual_path;
+  m.approach_path_reference_px={320,240};
+  auto blue=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  Check(blue.image.at<cv::Vec3b>(240,400)==cv::Vec3b(255,0,0),
+        "BALL virtual approach path must be blue");
+  m.approach_mission=vision_core::MissionType::kGoal;
+  const vision_core::CameraFeedback goal_camera{vision_core::CameraMode::kGoal,true};
+  auto blue_goal=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
+  Check(blue_goal.image.at<cv::Vec3b>(240,400)==cv::Vec3b(255,0,0),
+        "GOAL virtual approach path must be blue");
+  m.approach_path_guide.reset();
+  m.approach_mission=vision_core::MissionType::kNone;
+  m.active_mission=vision_core::MissionType::kBall;
   auto direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
   Check(direct.image.at<cv::Vec3b>(355,380)!=cv::Vec3b(0,0,0) &&
         direct.image.at<cv::Vec3b>(355,200)==cv::Vec3b(0,0,0) &&

@@ -116,6 +116,9 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.line_p2p.right_repetitions, "line_p2p.right_repetitions");
   NonnegativeInt(c.candidate_search_max_turns, "mission.candidate_search_max_turns");
   PositiveInt(c.object_approach.lock_blocks,"object_approach.lock_blocks");
+  NonnegativeInt(c.object_approach.prelock_loss_extra_blocks,"object_approach.prelock_loss_extra_blocks");
+  if (c.object_approach.prelock_loss_extra_blocks>1)
+    throw std::runtime_error("object_approach.prelock_loss_extra_blocks must be 0 or 1");
   PositiveInt(c.object_approach.blend_frames,"object_approach.blend_frames");
   NonnegativeInt(c.object_approach.goal_empty_max_retries,"object_approach.goal_empty_max_retries");
   Positive(c.object_approach.reference_v_ratio,"object_approach.reference_v_ratio");
@@ -304,6 +307,26 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
               "hurdle.hurdle_ignore_duration_sec");
   Nonnegative(c.hurdle.recovery_center_tolerance_px,
        "hurdle.recovery_center_tolerance_px");
+  Nonnegative(c.hurdle.fine_line_reference_u_px, "hurdle.fine_line_reference_u_px");
+  Nonnegative(c.hurdle.fine_line_offset_tolerance_px,
+              "hurdle.fine_line_offset_tolerance_px");
+  Nonnegative(c.hurdle.fine_line_heading_tolerance_deg,
+              "hurdle.fine_line_heading_tolerance_deg");
+  Positive(c.hurdle.fine_line_observation_sec, "hurdle.fine_line_observation_sec");
+  HitsWithinWindow(c.hurdle.fine_line_stable_min_hits,
+                   c.hurdle.fine_line_stable_window,
+                   "hurdle.fine_line_stable_min_hits", "hurdle.fine_line_stable_window");
+  if (c.hurdle.fine_line_stable_window < 3)
+    throw std::runtime_error("hurdle.fine_line_stable_window must be >= 3");
+  PositiveInt(c.hurdle.fine_line_turn_yaw_deg, "hurdle.fine_line_turn_yaw_deg");
+  if (c.hurdle.fine_line_turn_yaw_deg > 32767)
+    throw std::runtime_error("hurdle.fine_line_turn_yaw_deg exceeds action protocol range");
+  NonnegativeInt(c.hurdle.fine_line_max_turns, "hurdle.fine_line_max_turns");
+  NonnegativeInt(c.hurdle.fine_line_max_side_steps, "hurdle.fine_line_max_side_steps");
+  NonnegativeInt(c.hurdle.fine_line_max_stale_corrections,
+                 "hurdle.fine_line_max_stale_corrections");
+  NonnegativeInt(c.hurdle.fine_line_max_search_steps,
+                 "hurdle.fine_line_max_search_steps");
 
   HitsWithinWindow(c.goal.stable_min_hits, c.goal.stable_window,
                    "goal.stable_min_hits", "goal.stable_window");
@@ -548,6 +571,17 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "approach_two_step_v_px", c.hurdle.approach_two_step_v_px);
   Assign(h, "hurdle_ignore_duration_sec", c.hurdle.hurdle_ignore_duration_sec);
   Assign(h, "recovery_center_tolerance_px", c.hurdle.recovery_center_tolerance_px);
+  Assign(h, "fine_line_reference_u_px", c.hurdle.fine_line_reference_u_px);
+  Assign(h, "fine_line_offset_tolerance_px", c.hurdle.fine_line_offset_tolerance_px);
+  Assign(h, "fine_line_heading_tolerance_deg", c.hurdle.fine_line_heading_tolerance_deg);
+  Assign(h, "fine_line_observation_sec", c.hurdle.fine_line_observation_sec);
+  Assign(h, "fine_line_stable_window", c.hurdle.fine_line_stable_window);
+  Assign(h, "fine_line_stable_min_hits", c.hurdle.fine_line_stable_min_hits);
+  Assign(h, "fine_line_turn_yaw_deg", c.hurdle.fine_line_turn_yaw_deg);
+  Assign(h, "fine_line_max_turns", c.hurdle.fine_line_max_turns);
+  Assign(h, "fine_line_max_side_steps", c.hurdle.fine_line_max_side_steps);
+  Assign(h, "fine_line_max_stale_corrections", c.hurdle.fine_line_max_stale_corrections);
+  Assign(h, "fine_line_max_search_steps", c.hurdle.fine_line_max_search_steps);
 
   const auto g = a["goal"];
   Assign(g, "edge_margin_px", c.goal.edge_margin_px);
@@ -661,6 +695,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     throw std::runtime_error("mission.object_approach_continous was removed; AUTO always uses shared object approach. Remove the obsolete key.");
   const auto approach=m["object_approach"];
   Assign(approach,"lock_blocks",c.object_approach.lock_blocks);
+  Assign(approach,"prelock_loss_extra_blocks",c.object_approach.prelock_loss_extra_blocks);
   Assign(approach,"blend_frames",c.object_approach.blend_frames);
   Assign(approach,"goal_empty_max_retries",c.object_approach.goal_empty_max_retries);
   Assign(approach,"reference_v_ratio",c.object_approach.reference_v_ratio);

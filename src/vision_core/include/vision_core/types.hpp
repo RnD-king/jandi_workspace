@@ -22,7 +22,7 @@ struct Intrinsics {
 
 struct FeatureConfig {
   int max_centers{};
-  // O/H fit은 필터 후 최소 3점. 최초 입력은 최소 4점을 요구한다.
+  // O/H fit은 최소 3점. 일반 LINE 입력은 4점, 허들 DOWN 전용 입력은 3점이다.
   int guide_min_points{};
   double image_center_u{};
   int curve_min_points{};
@@ -151,6 +151,8 @@ enum class MissionAction {
   kLineLeftUnit = 32,
   kLineStraightUnit = 33,
   kLineRightUnit = 34,
+  // Alternate WALK one-step motion; normal STEP_FORWARD_ONE remains the default.
+  kStepForwardOneAlternate = 35,
 };
 
 enum class CruiseDirection {

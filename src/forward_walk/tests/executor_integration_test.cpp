@@ -245,7 +245,7 @@ int main() {
               "ordinary action lost JSON/arm/gripper behavior or overwrote the fixed GOAL camera hold");
         std::cout<<"PASS fixed full-body shoot pose, one interpolation, duplicate/busy handling and persistent GOAL hold\n";
 
-        for(uint16_t code=1;code<=34;++code) {
+        for(uint16_t code=1;code<=35;++code) {
             const bool excluded=code==14||code==15||code==16||code==17||code==29||code==30;
             Check(MainNode::UsesOutwardArmPose(code)==!excluded,"action arm exclusion mismatch");
         }

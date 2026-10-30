@@ -379,6 +379,7 @@ private:
     std::uint64_t id{}, epoch{};
     int blocks{}, missing{}, blend{};
     bool locked{false}, near{false}, mission_started{false}, loss_pending{false};
+    bool probe_active{false}, probe_used{false};
     std::optional<ObjectTarget> last;
     GoalPoseObservation pose;
     std::optional<double> depth;
@@ -398,6 +399,7 @@ private:
     std::optional<LineGuide> guide;
     CameraRequest camera{CameraRequest::kNone};
     bool hold{false}, entered{false}, object_visible{false}, near_final_action{false};
+    bool probe_start{false};
   };
   std::array<ApproachEvidence,3> approach_evidence_;
   std::uint64_t next_approach_epoch_{1};
@@ -548,6 +550,7 @@ private:
   bool line_failure_pending_done_{false};
   LineState line_state_{LineState::kNormal};
   std::optional<double> last_line_score_;
+  std::deque<bool> actual_line_stability_history_;
   bool line_recovery_uses_visible_centers_{false};
   bool line_recovery_left_{false};
   double line_observation_start_sec_{0.0};

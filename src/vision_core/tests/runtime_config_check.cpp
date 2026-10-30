@@ -62,6 +62,7 @@ void CheckConfiguration(const std::string& path) {
 #define MISSION(key) CheckAlgorithmField(a, "mission", #key, c.key)
   const auto approach=AlgorithmField(a,"mission","object_approach");
   CheckField(approach,"lock_blocks",c.object_approach.lock_blocks,"object_approach");
+  CheckField(approach,"prelock_loss_extra_blocks",c.object_approach.prelock_loss_extra_blocks,"object_approach");
   CheckField(approach,"blend_frames",c.object_approach.blend_frames,"object_approach");
   CheckField(approach,"goal_empty_max_retries",c.object_approach.goal_empty_max_retries,"object_approach");
   CheckField(approach,"reference_v_ratio",c.object_approach.reference_v_ratio,"object_approach");
@@ -157,6 +158,17 @@ void CheckConfiguration(const std::string& path) {
   FIELD(hurdle, target_u_px);
   FIELD(hurdle, down_one_step_v_px);
   FIELD(hurdle, fine_mode_v_px);
+  FIELD(hurdle, fine_line_reference_u_px);
+  FIELD(hurdle, fine_line_offset_tolerance_px);
+  FIELD(hurdle, fine_line_heading_tolerance_deg);
+  FIELD(hurdle, fine_line_observation_sec);
+  FIELD(hurdle, fine_line_stable_window);
+  FIELD(hurdle, fine_line_stable_min_hits);
+  FIELD(hurdle, fine_line_turn_yaw_deg);
+  FIELD(hurdle, fine_line_max_turns);
+  FIELD(hurdle, fine_line_max_side_steps);
+  FIELD(hurdle, fine_line_max_stale_corrections);
+  FIELD(hurdle, fine_line_max_search_steps);
   FIELD(hurdle, contact_v_px);
   FIELD(hurdle, contact_steps);
   FIELD(hurdle, contact_inter_action_hold_sec);

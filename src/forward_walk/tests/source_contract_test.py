@@ -37,7 +37,8 @@ checks = {
     "failure IDs logged before reset": main.index('action_id=%llu queued_id=%llu camera_id=%llu') < main.index('action_transactions_.Abort();'),
 }
 for action, filename in {
-    'STEP_FORWARD_ONE': 'motions/보행_1걸음_초기X_수정.json',
+    'STEP_FORWARD_ONE': 'motions/보행_1걸음_초기X_수정_수정중.json',
+    'STEP_FORWARD_ONE_ALTERNATE': 'motions/보행_1걸음_초기X_수정_수저중.json',
     'LINE_LEFT_UNIT': 'motions/보행_좌회전전진_20도_최종_초기X_수정.json',
     'LINE_STRAIGHT_UNIT': 'missions/2걸음.json',
     'LINE_RIGHT_UNIT': 'motions/보행_우회전전진_20도_최종_초기X_찐.json',
@@ -61,6 +62,8 @@ for action, filename in {
     match = re.search(r'case vision::msg::ActionCommand::'+action+r':\s*return "([^"]+)";', main)
     checks[action+' mapping'] = match is not None and match.group(1)==filename
 checks['TURN_LEFT_IN_PLACE action number'] = 'uint16 TURN_LEFT_IN_PLACE=31' in (
+    root.parent / 'vision/msg/ActionCommand.msg').read_text()
+checks['STEP_FORWARD_ONE_ALTERNATE action number'] = 'uint16 STEP_FORWARD_ONE_ALTERNATE=35' in (
     root.parent / 'vision/msg/ActionCommand.msg').read_text()
 # Live JSON contents/references are validated by motion_assets_check.
 gripper_switch = main.split('static bool UsesFixedGripperPose', 1)[1].split('default:', 1)[0]

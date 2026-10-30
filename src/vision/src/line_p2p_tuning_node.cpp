@@ -258,6 +258,7 @@ private:
     case MissionAction::kLineStraightUnit: return "LINE_STRAIGHT_UNIT";
     case MissionAction::kLineRightUnit: return "LINE_RIGHT_UNIT";
     case MissionAction::kStepForwardOne: return "STEP_FORWARD_ONE";
+    case MissionAction::kStepForwardOneAlternate: return "STEP_FORWARD_ONE_ALTERNATE";
     case MissionAction::kStepForwardFive: return "STEP_FORWARD_FIVE";
     case MissionAction::kTurnLeft: return "TURN_LEFT";
     case MissionAction::kTurnRight: return "TURN_RIGHT";

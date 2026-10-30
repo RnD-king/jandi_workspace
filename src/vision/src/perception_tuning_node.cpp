@@ -1496,6 +1496,7 @@ private:
     case vision_core::MissionAction::kStepForwardRight:
       return std::max(0.0, simulate_curve_step_duration_sec_);
     case vision_core::MissionAction::kStepForwardOne:
+    case vision_core::MissionAction::kStepForwardOneAlternate:
     case vision_core::MissionAction::kStepBack:
     case vision_core::MissionAction::kLeftSideStep:
     case vision_core::MissionAction::kRightSideStep:

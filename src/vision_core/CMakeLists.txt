@@ -135,7 +135,11 @@ if(BUILD_TESTING)
   add_executable(shared_vision_core_unified_sequence_test tests/unified_sequence_test.cpp)
   target_link_libraries(shared_vision_core_unified_sequence_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_unified_sequence_test COMMAND shared_vision_core_unified_sequence_test)
+  add_test(NAME shared_vision_core_hurdle_unified_sequence_test
+    COMMAND shared_vision_core_unified_sequence_test hurdle)
   set_tests_properties(shared_vision_core_unified_sequence_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+  set_tests_properties(shared_vision_core_hurdle_unified_sequence_test PROPERTIES ENVIRONMENT
     "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_config_loader_test
     tests/config_loader_test.cpp
@@ -170,6 +174,14 @@ if(BUILD_TESTING)
     NAME shared_vision_core_hurdle_controller_test
     COMMAND shared_vision_core_hurdle_controller_test
   )
+  add_executable(shared_vision_core_hurdle_fine_line_align_test
+    tests/hurdle_fine_line_align_test.cpp
+  )
+  target_link_libraries(shared_vision_core_hurdle_fine_line_align_test
+    PRIVATE shared_vision_core
+  )
+  add_test(NAME shared_vision_core_hurdle_fine_line_align_test
+    COMMAND shared_vision_core_hurdle_fine_line_align_test)
 
   add_executable(shared_vision_core_goal_controller_test
     tests/goal_controller_test.cpp
@@ -252,6 +264,7 @@ if(BUILD_TESTING)
     shared_vision_core_config_loader_test
     shared_vision_core_ball_controller_test
     shared_vision_core_hurdle_controller_test
+    shared_vision_core_hurdle_fine_line_align_test
     shared_vision_core_goal_controller_test
     shared_vision_core_line_detection_stability_test
     shared_vision_core_control_command_test

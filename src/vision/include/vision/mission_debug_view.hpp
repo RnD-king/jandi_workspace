@@ -102,6 +102,7 @@ inline const char *DebugActionName(vision_core::MissionAction action) {
   case MissionAction::kTurnRight: return "TURN_RIGHT";
   case MissionAction::kWalkMode: return "WALK_MODE";
   case MissionAction::kStepForwardOne: return "STEP_FORWARD_ONE";
+  case MissionAction::kStepForwardOneAlternate: return "STEP_FORWARD_ONE_ALTERNATE";
   case MissionAction::kStepForwardLeft: return "STEP_FORWARD_LEFT_THREE";
   case MissionAction::kStepForwardRight: return "STEP_FORWARD_RIGHT_THREE";
   case MissionAction::kStepForwardFive: return "STEP_FORWARD_FIVE";

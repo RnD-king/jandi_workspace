@@ -11,6 +11,7 @@ struct ApproachCameraPose {
 };
 struct ObjectApproachConfig {
   int lock_blocks{}, blend_frames{};
+  int prelock_loss_extra_blocks{};
   int goal_empty_max_retries{};
   double reference_v_ratio{};
   ApproachCameraPose forward_camera, goal_camera;

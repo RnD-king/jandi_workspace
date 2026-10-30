@@ -149,12 +149,20 @@ int main() {
   r=controller.Compute(H(.9),640,480,.32,{CameraMode::kDown,true},{}, straight);
   assert(r.action.action==MissionAction::kDefaultPoseMode);
   r=controller.Compute({},640,480,.33,{CameraMode::kDown,true},done, straight);
+  assert(r.mode==HurdleMode::kFineLineAlign);
+  LineGuide aligned;aligned.valid=true;
+  double fine_now=.33;
+  for(int i=0;i<10;++i) {
+    fine_now+=.11;
+    controller.ObserveFineLine(aligned,640,fine_now);
+    r=controller.Compute(H(.9),640,480,fine_now,{CameraMode::kDown,true},{},straight);
+  }
   assert(r.mode==HurdleMode::kFineAdjust);
-  r=controller.Compute(H(.9),640,480,.34,{CameraMode::kDown,true},{}, straight);
+  r=controller.Compute(H(.9),640,480,fine_now+.1,{CameraMode::kDown,true},{}, straight);
   assert(r.mode==HurdleMode::kContactWalk);
   assert(r.action.action == MissionAction::kStepForwardHalf);
   assert(r.action.action != MissionAction::kContactWalk);
-  r = controller.Compute(H(0.8), 640,480, .4,
+  r = controller.Compute(H(0.8), 640,480, fine_now+.2,
                          {CameraMode::kDown, true}, done, straight);
   assert(r.action.action == MissionAction::kHurdle);
   // Camera-transition observations cannot contaminate the DOWN-view evidence.

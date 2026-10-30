@@ -287,6 +287,7 @@ void MissionController::BeginLineReacquisition() {
   mission_recovery_qualified_ = false;
   mission_recovery_hits_.clear();
   last_line_score_.reset();
+  actual_line_stability_history_.clear();
   line_recovery_uses_visible_centers_ = line_recovery_left_ = false;
   line_visible_recovery_turns_ = line_last_score_recovery_turns_ = 0;
   line_no_evidence_observations_=0;
@@ -339,6 +340,7 @@ void MissionController::FinishMission() {
     return;
   }
   last_line_score_.reset();recovering_approach_.reset();
+  actual_line_stability_history_.clear();
   if (active_mission_ == MissionType::kBall && has_ball_ &&
       config_.enable_goal) {
     // Start counting only after the BALL mission's confirmed line recovery,
@@ -631,6 +633,7 @@ void MissionController::BeginDecisionObservation(
     hurdle_controller_.ClearObservationHistory();
     goal_controller_.ClearObservationHistory();
     line_stability_history_.clear();
+    actual_line_stability_history_.clear();
   }
 }
 
@@ -948,6 +951,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                                     ? config_.fine_motion_settle_sec
                                     : 0.0);
     settle_until_sec_ = std::max(settle_until_sec_, input.now_sec + delay);
+    if (last_command_.mission == MissionType::kHurdle)
+      hurdle_controller_.OnActualMotionDone(action, settle_until_sec_);
   }
   const bool pose_done =
       input.delivery_feedback.done && last_command_.action_id != 0 &&
@@ -1164,6 +1169,19 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         input.now_sec);
     PopulateDiagnostics(output, input.now_sec);
     return output;
+  }
+  if (active_mission_ == MissionType::kHurdle &&
+      input.camera_feedback.actual_mode == CameraMode::kDown &&
+      input.camera_feedback.settled &&
+      input.now_sec + 1e-9 >= settle_until_sec_) {
+    FeatureConfig hurdle_line_config = config_.line_features;
+    hurdle_line_config.image_center_u = config_.hurdle.fine_line_reference_u_px;
+    hurdle_line_config.guide_min_points = 3;
+    hurdle_line_config.ransac_enabled = false;
+    const auto guide = ComputeLineFeatures(
+        input.line_centers, input.image_width, input.image_height,
+        hurdle_line_config, 3).guide;
+    hurdle_controller_.ObserveFineLine(guide, input.image_width, input.now_sec);
   }
   if (fresh_after_search_) {
     fresh_after_search_ = false;
@@ -1630,11 +1648,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
          hurdle_result_.tracked.center_px.v>=config_.hurdle.approach_two_step_v_px) ||
         hurdle_result_.mode==HurdleMode::kWaitCameraDown || hurdle_result_.mode==HurdleMode::kDownSearch ||
         hurdle_result_.mode==HurdleMode::kCoarseAdjust || hurdle_result_.mode==HurdleMode::kWaitFinePose ||
+        hurdle_result_.mode==HurdleMode::kFineLineAlign ||
         hurdle_result_.mode==HurdleMode::kFineAdjust)) ||
       (active_mission_==MissionType::kGoal &&
        (goal_result_.mode==GoalMode::kCoarseAdjust || goal_result_.mode==GoalMode::kWaitFinePose ||
         goal_result_.mode==GoalMode::kFineAdjust)))
     last_line_score_.reset();
+    actual_line_stability_history_.clear();
   ActionRequest request;
   CameraRequest camera_request = CameraRequest::kNone;
   int phase = 0;
@@ -1685,6 +1705,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   const bool wants_walk = action_number == 9 ||
                           (action_number >= 10 && action_number <= 13) ||
                           (action_number >= 21 && action_number <= 28) ||
+                          request.action == MissionAction::kStepForwardOneAlternate ||
                           request.action == MissionAction::kTurnLeftInPlace;
   const bool wants_fine = (action_number >= 1 && action_number <= 8) ||
                           (action_number >= 14 && action_number <= 17);
@@ -2805,6 +2826,7 @@ void MissionController::ClearObservationEvidence() {
   moving_object_samples_.clear();
   moving_object_ready_mean_.reset();
   line_stability_history_.clear();
+  actual_line_stability_history_.clear();
   if(!ball_target_locked_ && !ball_reacquiring_) {
     ball_association_tracker_.Reset(); ball_candidate_tracker_.Reset(); ball_target_id_=0;
   }
@@ -2861,6 +2883,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   has_ball_ = config_.initial_has_ball;
   line_state_ = LineState::kNormal;
   last_line_score_.reset();
+  actual_line_stability_history_.clear();
   line_recovery_uses_visible_centers_ = line_recovery_left_ = false;
   line_observation_active_ = false;
   line_observation_hits_.clear();
