@@ -142,6 +142,7 @@ vision_algorithm:
     lost_frames: 5
     smooth_alpha: 0.45
 
+    post_pickup_straight_blocks_required: 1
     post_pickup_walk_fallback_actions: 3
 
     target_u_px: 360.0

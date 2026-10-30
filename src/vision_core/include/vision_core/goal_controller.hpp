@@ -45,7 +45,8 @@ struct GoalConfig {
   int stable_min_hits{};
   int lost_frames{};
   double smooth_alpha{};
-  int post_pickup_walk_fallback_actions{}; // after three completed LINE walks if no 5-step DONE
+  int post_pickup_straight_blocks_required{}; // 0 disables the straight-block shortcut.
+  int post_pickup_walk_fallback_actions{}; // 0 preserves immediate GOAL entry.
   int entry_line_retry_max_attempts{}; // Extra LINE blocks after an entirely empty first GOAL view; 0 disables.
   double target_u_px{};
   double approach_u_deadband_px{};

@@ -171,6 +171,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, stable_min_hits);
   FIELD(goal, lost_frames);
   FIELD(goal, smooth_alpha);
+  FIELD(goal, post_pickup_straight_blocks_required);
   FIELD(goal, post_pickup_walk_fallback_actions);
   FIELD(goal, entry_line_retry_max_attempts);
   FIELD(goal, target_u_px);

@@ -1,5 +1,6 @@
 #include "vision_core/config_loader.hpp"
 #include "vision_core/mission_controller.hpp"
+#include <algorithm>
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -203,8 +204,9 @@ void SearchAndRestore(bool left, int found_after, bool hurdle = false,
   assert(LinePlan::IsUnit(d.out.command.action));
 }
 
-void GoalBlocks(bool straight, int fallback) {
+void GoalBlocks(bool straight, int fallback, int straight_required = 1) {
   auto c = Configuration(); c.enable_goal = true; c.initial_has_ball = true;
+  c.goal.post_pickup_straight_blocks_required = straight_required;
   c.goal.post_pickup_walk_fallback_actions = fallback;
   Driver d(c); if (!straight) d.Line(384);
   d.Tick();
@@ -214,7 +216,7 @@ void GoalBlocks(bool straight, int fallback) {
   }
   auto current = d.out.command.action_id;
   d.Tick(.01, {current,true,false,false});
-  const int plans = straight ? 1 : fallback;
+  const int plans = straight && straight_required > 0 ? std::min(straight_required, fallback) : fallback;
   const int repeats = straight ? 4 : 3;
   for (int block=0;block<plans;++block) for (int step=0;step<repeats;++step) {
     for (int frame=0;frame<12;++frame) d.Tick(.04);
@@ -227,10 +229,13 @@ void GoalBlocks(bool straight, int fallback) {
     }
     d.Tick(.01, {current,true,true,false});
     assert(d.out.goal_walk_actions_completed == block + (step+1==repeats ? 1 : 0));
+    assert(d.out.goal_straight_blocks_completed ==
+           (straight ? block + (step+1==repeats ? 1 : 0) : 0));
     if (last) {
       assert(d.out.active_mission == MissionType::kGoal);
       assert(d.out.command.camera_request == CameraRequest::kGoal);
-      assert(d.out.goal_five_step_completed == straight);
+      assert(d.out.goal_five_step_completed ==
+             (straight && straight_required > 0 && plans >= straight_required));
     } else assert(d.out.active_mission == MissionType::kLine);
     current = next;
   }
@@ -580,6 +585,7 @@ int main() {
   // classes still obey the same search budget and opposite restoration.
   SearchAndRestore(true,0,false,6.0); SearchAndRestore(false,0,true,6.0);
   GoalBlocks(true,3); GoalBlocks(false,1); GoalBlocks(false,3); GoalBlocks(true,0);
+  GoalBlocks(true,3,2); GoalBlocks(true,2,0);
   GoalEmptyViewLineRetry(true); GoalEmptyViewLineRetry(false);
   PauseDuringSearch();
   LossRecoveryPriority();LossRecoveryBudgets();

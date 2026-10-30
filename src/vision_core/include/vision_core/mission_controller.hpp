@@ -187,7 +187,8 @@ struct MissionFrameResult {
   bool foot_transition{false};
   bool physical_reset_complete{false};
   int goal_walk_actions_completed{0}, goal_walk_actions_remaining{0};
-  bool goal_five_step_completed{false}; // Legacy field name: now tracks LINE straight 23 DONE.
+  int goal_straight_blocks_completed{0};
+  bool goal_five_step_completed{false}; // Legacy field name: true when the configured straight-block gate is reached.
   bool goal_walk_gate_active{false};
   BallResult ball;
   HurdleResult hurdle;
@@ -447,6 +448,7 @@ private:
   std::optional<LineGuide> DecisionLineGuide() const;
   void EnterMission(MissionType mission);
   void FinishMission();
+  bool StraightGoalGateReached(int additional_straight_blocks = 0) const;
   void PopulateDiagnostics(MissionFrameResult &output, double now_sec) const;
   void InitializeTest();
   bool TestExecutionReady() const;
@@ -503,6 +505,7 @@ private:
   bool post_pickup_goal_line_gate_active_{false};
   int post_pickup_line_actions_issued_{0};
   int post_pickup_line_actions_completed_{0};
+  int post_pickup_straight_blocks_completed_{0};
   bool post_pickup_five_step_completed_{false};
   std::unordered_map<std::uint64_t, MissionAction> post_pickup_line_actions_;
   std::deque<bool> mission_recovery_hits_;

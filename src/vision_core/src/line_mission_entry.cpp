@@ -77,7 +77,9 @@ MissionFrameResult MissionController::StepPlannedLine(
     }
     if (!post_pickup_goal_line_gate_active_) continue;
     ++post_pickup_line_actions_completed_;
-    if (block.cruise == MissionAction::kStepForwardFour) post_pickup_five_step_completed_ = true;
+    if (block.cruise == MissionAction::kStepForwardFour)
+      ++post_pickup_straight_blocks_completed_;
+    post_pickup_five_step_completed_ = StraightGoalGateReached();
   }
   FeatureConfig features = config_.line_features;
   if (image_center && std::isfinite(*image_center) && *image_center >= 0 &&
@@ -299,6 +301,8 @@ MissionFrameResult MissionController::StepPlannedLine(
           !command_coordinator_.HasQueuedAction();
       const bool final_edge = line_plan_.LastUnit(id) &&
           (input.delivery_feedback.ready || input.delivery_feedback.done);
+      const int completing_straight = final_edge && !line_plan_.Done(id) &&
+          line_plan_.CruiseFor(id) == MissionAction::kStepForwardFour ? 1 : 0;
       // The previous block may not have reached sensory DONE yet; count the
       // qualifying block prospectively ONLY to suppress its final READY queue.
       const bool goal_will_enter = has_ball_ && config_.enable_goal &&
@@ -309,13 +313,13 @@ MissionFrameResult MissionController::StepPlannedLine(
           (post_pickup_five_step_completed_ ||
            post_pickup_line_actions_completed_ + (line_plan_.Done(id) ? 0 : 1) >=
                goal_controller_.RequiredLineWalkActions());
-      // Straight-block completion also satisfies GOAL regardless of fallback.
+      // Only the configured number of completed straight blocks satisfies the shortcut.
       const bool straight_goal = has_ball_ && config_.enable_goal &&
           (!automatic_approach || (input.camera_feedback.actual_mode==CameraMode::kForward &&
             post_pickup_line_actions_completed_+(line_plan_.Done(id)?0:1)>=approach_goal_retry_after_)) &&
           goal_controller_.CanEnterFromLine() &&
           post_pickup_goal_line_gate_active_ && line_valid && final_edge &&
-          line_plan_.CruiseFor(id) == MissionAction::kStepForwardFour;
+          StraightGoalGateReached(completing_straight);
       if (final_edge) {
         const auto mean = line_plan_.Finish(id, input.now_sec,
             input.delivery_feedback.ready && !input.delivery_feedback.done ? config_.line_p2p.ready_lead_sec : 0.0);

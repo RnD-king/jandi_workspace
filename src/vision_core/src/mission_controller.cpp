@@ -59,6 +59,12 @@ MissionController::MissionController(const MissionControllerConfig &config)
   InitializeTest();
 }
 
+bool MissionController::StraightGoalGateReached(int additional_straight_blocks) const {
+  const int required = config_.goal.post_pickup_straight_blocks_required;
+  return required > 0 &&
+      post_pickup_straight_blocks_completed_ + additional_straight_blocks >= required;
+}
+
 ActionRequest MissionController::CruiseAction(const LineGuide &guide,
                                               bool queue_eligible) {
   const CruiseDecision decision = line_p2p_controller_.Compute(guide);
@@ -300,6 +306,7 @@ void MissionController::EnterMission(MissionType mission) {
     // A new pickup starts a fresh GOAL walk gate only after line reacquisition.
     post_pickup_goal_line_gate_active_ = false;
     post_pickup_line_actions_issued_ = post_pickup_line_actions_completed_ = 0;
+    post_pickup_straight_blocks_completed_ = 0;
     post_pickup_five_step_completed_ = false;
     post_pickup_line_actions_.clear();
     ++ball_mission_index_;
@@ -337,6 +344,7 @@ void MissionController::FinishMission() {
     post_pickup_goal_line_gate_active_ = true;
     post_pickup_line_actions_issued_ = 0;
     post_pickup_line_actions_completed_ = 0;
+    post_pickup_straight_blocks_completed_ = 0;
     post_pickup_five_step_completed_ = false;
     post_pickup_line_actions_.clear();
   }
@@ -795,7 +803,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       // The unique action ID is counted exactly once, only at physical DONE.
       ++post_pickup_line_actions_completed_;
       if (it->second == MissionAction::kStepForwardFour)
-        post_pickup_five_step_completed_ = true;
+        ++post_pickup_straight_blocks_completed_;
+      post_pickup_five_step_completed_ = StraightGoalGateReached();
       post_pickup_line_actions_.erase(it);
     }
   }
@@ -1589,6 +1598,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         deferred_done_ = {};
         post_pickup_goal_line_gate_active_ = true;
         post_pickup_line_actions_issued_ = post_pickup_line_actions_completed_ = 0;
+        post_pickup_straight_blocks_completed_ = 0;
         post_pickup_five_step_completed_ = false;
         post_pickup_line_actions_.clear();
       } else {
@@ -1707,8 +1717,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   // request만 제거하여 READY/DONE 조기 반환 경로까지 동일하게 막는다.
   if (active_mission_ == MissionType::kLine && !input.allow_new_line_action)
     request = {};
-  // Stop booking another cruise once the current 23 (four-step) or the
-  // third post-pickup LINE walk is committed. GOAL camera follows its DONE.
+  // Stop booking after either configured post-pickup LINE threshold is committed.
+  // GOAL camera still follows the qualifying action's actual DONE.
   // Recovery turns remain available if the line itself becomes invalid.
   if (active_mission_ == MissionType::kLine &&
       post_pickup_goal_line_gate_active_ &&
@@ -1716,9 +1726,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       IsLongLineAction(request.action) &&
       (post_pickup_line_actions_issued_ >=
            goal_controller_.RequiredLineWalkActions() ||
-       (last_command_.mission == MissionType::kLine &&
-        last_command_.action_id != 0 &&
-        last_command_.action == MissionAction::kStepForwardFour)))
+       StraightGoalGateReached(static_cast<int>(std::count_if(
+           post_pickup_line_actions_.begin(), post_pickup_line_actions_.end(),
+           [](const auto& entry) { return entry.second == MissionAction::kStepForwardFour; })))))
     request = {};
   // Manual tuning freezes NEW body actions but permits automatic camera
   // requests; unlike allow_new_commands, feedback still advances.
@@ -1867,6 +1877,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
   output.recovery_failed = mission_recovery_failed_;
   output.recovery_verifying = mission_recovery_verifying_;
   output.goal_walk_actions_completed = post_pickup_line_actions_completed_;
+  output.goal_straight_blocks_completed = post_pickup_straight_blocks_completed_;
   output.goal_walk_actions_remaining =
       std::max(0, goal_controller_.RequiredLineWalkActions() -
                       post_pickup_line_actions_completed_);
@@ -2841,6 +2852,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   mission_recovery_qualified_ = false;
   post_pickup_goal_line_gate_active_ = false;
   post_pickup_line_actions_issued_ = post_pickup_line_actions_completed_ = 0;
+  post_pickup_straight_blocks_completed_ = 0;
   post_pickup_five_step_completed_ = false;
   post_pickup_line_actions_.clear();
   active_mission_ = MissionType::kLine;

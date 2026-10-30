@@ -530,6 +530,25 @@ int main(int argc, char **argv) {
   try { vision_core::ValidateAlgorithmConfig(invalid_goal); }
   catch (const std::runtime_error &) { rejected_goal = true; }
   assert(rejected_goal);
+  assert(c.goal.post_pickup_straight_blocks_required == 1);
+  assert(c.goal.post_pickup_walk_fallback_actions == 3);
+  Reject(text.str(), "post_pickup_straight_blocks_required: 1", "");
+  Reject(text.str(), "post_pickup_straight_blocks_required: 1",
+         "post_pickup_straight_blocks_required: -1");
+  {
+    auto yaml = text.str();
+    const std::string original = "post_pickup_straight_blocks_required: 1";
+    const auto pos = yaml.find(original);
+    assert(pos != std::string::npos);
+    yaml.replace(pos, original.size(), "post_pickup_straight_blocks_required: 0");
+    assert(LoadText(yaml).goal.post_pickup_straight_blocks_required == 0);
+  }
+  auto invalid_straight_gate = c;
+  invalid_straight_gate.goal.post_pickup_straight_blocks_required = -1;
+  bool rejected_straight_gate = false;
+  try { vision_core::ValidateAlgorithmConfig(invalid_straight_gate); }
+  catch (const std::runtime_error &) { rejected_straight_gate = true; }
+  assert(rejected_straight_gate);
 
   auto relaxed_association = c;
   relaxed_association.object_association.max_center_distance_norm = 1.2;

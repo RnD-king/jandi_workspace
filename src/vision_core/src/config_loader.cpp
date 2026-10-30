@@ -309,6 +309,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "goal.stable_min_hits", "goal.stable_window");
   PositiveInt(c.goal.lost_frames, "goal.lost_frames");
   Unit(c.goal.smooth_alpha, "goal.smooth_alpha");
+  NonnegativeInt(c.goal.post_pickup_straight_blocks_required, "goal.post_pickup_straight_blocks_required");
   NonnegativeInt(c.goal.post_pickup_walk_fallback_actions, "goal.post_pickup_walk_fallback_actions");
   NonnegativeInt(c.goal.entry_line_retry_max_attempts, "goal.entry_line_retry_max_attempts");
   Nonnegative(c.goal.target_u_px, "goal.target_u_px");
@@ -567,6 +568,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "stable_min_hits", c.goal.stable_min_hits);
   Assign(g, "lost_frames", c.goal.lost_frames);
   Assign(g, "smooth_alpha", c.goal.smooth_alpha);
+  Assign(g, "post_pickup_straight_blocks_required", c.goal.post_pickup_straight_blocks_required);
   Assign(g, "post_pickup_walk_fallback_actions", c.goal.post_pickup_walk_fallback_actions);
   Assign(g, "entry_line_retry_max_attempts", c.goal.entry_line_retry_max_attempts);
   Assign(g, "target_u_px", c.goal.target_u_px);

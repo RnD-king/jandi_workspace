@@ -665,9 +665,9 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   add_row(footer_rows,mission_result.recovery_failed ? "LINE SEARCH LIMIT: HOLD / RESET" :
       std::string("Approved: ")+DebugRepeatLabel(view.approved_repeat_scope,config,&ball_cmd),text_color);
   if (mission_result.goal_walk_gate_active) {
-    std::snprintf(buf, sizeof(buf), "GOAL LINE walks %d / %d | 4-step DONE=%s | %s",
+    std::snprintf(buf, sizeof(buf), "GOAL LINE blocks %d / %d | straight %d / %d | %s",
         mission_result.goal_walk_actions_completed, gc.post_pickup_walk_fallback_actions,
-        mission_result.goal_five_step_completed ? "YES" : "NO",
+        mission_result.goal_straight_blocks_completed, gc.post_pickup_straight_blocks_required,
         mission_result.goal_walk_actions_remaining == 0 ||
         mission_result.goal_five_step_completed ? "CAMERA NEXT" : "WAITING WALK DONE");
     add_row(goal_approach_rows,buf,goal_color);
