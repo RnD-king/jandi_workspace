@@ -16,7 +16,7 @@ const LinePlan::Block* LinePlan::Find(std::uint64_t id) const {
   for (const auto& block : blocks_) if (block.id == id) return &block;
   return nullptr;
 }
-ActionRequest LinePlan::Begin(MissionAction cruise) {
+ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner) {
   if (!IsCruise(cruise)) return {};
   // Retain recent IDs for idempotent late feedback, without unbounded growth.
   while (blocks_.size() >= 32 && blocks_.front().reported) {
@@ -32,7 +32,8 @@ ActionRequest LinePlan::Begin(MissionAction cruise) {
       right ? MissionAction::kLineRightUnit : MissionAction::kLineStraightUnit;
   const int count = left ? config_.left_repetitions :
       right ? config_.right_repetitions : config_.straight_repetitions;
-  blocks_.emplace_back(next_block_++, cruise, unit, count, config_);
+  blocks_.emplace_back(next_block_++, cruise, unit, count, config_,window_,required_hits_);
+  blocks_.back().owner=owner;
   return UnitRequest(unit);
 }
 ActionRequest LinePlan::Continue(std::uint64_t ready_id) const {
@@ -93,6 +94,39 @@ void LinePlan::Observe(double now, const LineGuide& guide) {
     block.observations.Add(block.id, now, guide);
   }
 }
+void LinePlan::ObserveObject(double now, std::uint64_t owner, bool visible,
+                             int window, int minimum_hits) {
+  if (!owner || window < 1 || minimum_hits < 1) return;
+  for (auto& block : blocks_) {
+    if (block.owner != owner || block.aborted || block.window_finished ||
+        !block.start || now < *block.start || block.completed == block.count) continue;
+    block.object_hits.push_back(visible);
+    while (block.object_hits.size() > static_cast<std::size_t>(window))
+      block.object_hits.pop_front();
+    if (block.object_hits.size() == static_cast<std::size_t>(window) &&
+        std::count(block.object_hits.begin(), block.object_hits.end(), true) >= minimum_hits)
+      block.object_qualified = true;
+  }
+}
+bool LinePlan::ObjectQualified(std::uint64_t action_id) const {
+  const auto it = units_.find(action_id);
+  const auto* block = it == units_.end() ? nullptr : Find(it->second.block);
+  return block && block->object_qualified;
+}
+bool LinePlan::ObjectOwned(std::uint64_t action_id, std::uint64_t owner) const {
+  const auto it=units_.find(action_id);
+  const auto* block=it==units_.end() ? nullptr : Find(it->second.block);
+  return block && owner && block->owner==owner;
+}
+std::optional<LinePlan::ObjectEvidence> LinePlan::CurrentObjectEvidence(std::uint64_t owner) const {
+  if (!owner) return std::nullopt;
+  for (auto it=blocks_.rbegin();it!=blocks_.rend();++it) {
+    if (it->owner!=owner || it->reported || it->aborted) continue;
+    return ObjectEvidence{static_cast<int>(std::count(it->object_hits.begin(),it->object_hits.end(),true)),
+                          static_cast<int>(it->object_hits.size()),it->object_qualified};
+  }
+  return std::nullopt;
+}
 bool LinePlan::Done(std::uint64_t id) const {
   const auto it = units_.find(id);
   return it != units_.end() && it->second.done;
@@ -139,10 +173,15 @@ std::optional<LineWindowStats> LinePlan::Stats(std::uint64_t id) const {
 }
 std::vector<MissionAction> LinePlan::TakeCompleted() {
   std::vector<MissionAction> result;
+  for (const auto& block:TakeCompletedBlocks()) result.push_back(block.cruise);
+  return result;
+}
+std::vector<LinePlan::CompletedBlock> LinePlan::TakeCompletedBlocks() {
+  std::vector<CompletedBlock> result;
   for (auto& block : blocks_) {
     if (!block.reported && block.completed == block.issued &&
         (block.aborted || block.completed == block.count)) {
-      if (!block.aborted) result.push_back(block.cruise);
+      if (!block.aborted) result.push_back({block.cruise,block.owner,block.object_qualified});
       block.reported = true;
     }
   }
@@ -158,6 +197,9 @@ void LinePlan::ClearEvidence() {
   for (auto& block : blocks_) {
     block.observations.Reset();
     block.mean.reset();
+    block.window_finished = false;
+    block.object_hits.clear();
+    block.object_qualified = false;
     // Retain execution origin and DONE counters; new frames must independently
     // satisfy the block window following RESUME.
   }

@@ -57,6 +57,10 @@ void BallMiddleLoss(int zone) {
     assert(r.mode==BallMode::kBallRecoveryWalkTurn);
     r=ball.Compute({},640,480,2.8,{},{});
     assert(r.action.action==turn);
+    r=ball.Compute(Target(u,150),640,480,2.81,{},active);
+    assert(r.mode==BallMode::kBallRecoveryWalkTurn && r.action.action==MissionAction::kNone);
+    r=ball.Compute(Target(u,150),640,480,2.82,{},done);
+    assert(r.mode==BallMode::kBallRecoveryWalkTurn); // Real DONE still needs fresh stationary evidence.
     done.observation_complete=true;
     r=ball.Compute({},640,480,3.9,{},done);
     assert(ball.RecoveryWalkTurnsCompleted()==2 && r.action.action==MissionAction::kNone);
@@ -206,8 +210,8 @@ void SearchOnlyFiveHits() {
   ActionExecutionFeedback done;done.action_done=true;
   b=ball.Compute({},640,480,1.3,down,done);
   h=hurdle.Compute({},640,480,1.3,down,done,{});
-  assert(b.mode==BallMode::kCoarseAdjust && h.mode==HurdleMode::kCoarseAdjust);
-  assert(b.action.action==MissionAction::kNone && h.action.action==MissionAction::kNone);
+  assert(b.mode==BallMode::kWaitFinePose && h.mode==HurdleMode::kCoarseAdjust);
+  assert(b.action.action==MissionAction::kDefaultPoseMode && h.action.action==MissionAction::kNone);
   // The relaxed search threshold must never authorize FINE with five hits.
   ball.StartTestExecute();hurdle.StartTestExecute();
   const std::deque<bool> five{true,true,true,true,true,false,false,false,false,false};
@@ -245,9 +249,10 @@ void CountedDownSearch(bool found_on_last) {
     if(i<3) {
       assert(b.action.action==MissionAction::kStepForwardOne && h.action.action==b.action.action);
     } else {
-      assert(b.mode==(found_on_last?BallMode::kCoarseAdjust:BallMode::kFailed));
+      assert(b.mode==(found_on_last?BallMode::kWaitFinePose:BallMode::kFailed));
       assert(h.mode==(found_on_last?HurdleMode::kCoarseAdjust:HurdleMode::kFailed));
-      assert(b.action.action==MissionAction::kNone && h.action.action==MissionAction::kNone);
+      assert(b.action.action==(found_on_last ? MissionAction::kDefaultPoseMode : MissionAction::kNone) &&
+             h.action.action==MissionAction::kNone);
     }
   }
   ball.Reset();hurdle.Reset();

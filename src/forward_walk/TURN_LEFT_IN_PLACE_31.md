@@ -5,10 +5,10 @@ The core emits it as a locomotion action for the near-left BALL/GOAL/HURDLE
 approach region. It requires WALK stance, executes once, and does not emit READY.
 The existing actions and their numeric IDs are retained.
 
-The motion author's original files from `RnD-king/2026_motion/10.14.3` are used:
+The WALK-stance in-place turn assets are mapped as follows:
 
 ```text
-31 -> forward_walk/motions/좌회전_최종.json
+31 -> forward_walk/motions/좌회전_최종__.json
 28 -> forward_walk/motions/우회전_최종.json
 ```
 

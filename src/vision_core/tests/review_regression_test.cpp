@@ -23,6 +23,7 @@ void TestClockAndGoalReservationDrain() {
   auto cfg=LoadDefaultAlgorithmConfig(); cfg.transition_settle_sec=0; cfg.initial_has_ball=true;
   cfg.enable_ball=cfg.enable_hurdle=false;
   cfg.goal.post_pickup_walk_fallback_actions=3;
+  cfg.goal.lost_frames=1000; // Isolate execution-clock admission from empty-view retries.
   cfg.line_features.image_center_u=320;
   cfg.line.line_stable_window=cfg.line.line_stable_min_hits=1;
   MissionController core(cfg);
@@ -43,7 +44,7 @@ void TestClockAndGoalReservationDrain() {
   assert(r.goal_walk_actions_completed==0);
   f.now_sec=23; f.delivery_feedback={a,true,true,false}; r=core.Step(f);
   assert(r.goal_walk_actions_completed==1 && r.goal_five_step_completed);
-  assert(r.active_mission==MissionType::kGoal && r.goal.mode==GoalMode::kWaitCameraGoal);
+  assert(r.active_mission==MissionType::kLine);
   assert(r.command.action_id==0 && r.command.camera_request==CameraRequest::kGoal);
   f.now_sec=23.1; f.delivery_feedback={};
   f.camera_feedback={CameraMode::kGoal,true}; r=core.Step(f);
@@ -51,7 +52,7 @@ void TestClockAndGoalReservationDrain() {
     f.now_sec=23.2+.1*i; f.camera_feedback={CameraMode::kGoal,true};
     r=core.Step(f);
   }
-  assert(r.command.action_id==0 && r.goal.mode==GoalMode::kSearch);
+  assert(r.command.action_id==0 && r.approach_mission==MissionType::kNone);
   assert(r.goal_walk_actions_completed==1); // Camera/observation time excluded.
 }
 void TestCommonLineEvidence() {
@@ -61,9 +62,15 @@ void TestCommonLineEvidence() {
   assert(!a.Finish(1,1));
   a.Begin(2,0); for(int i=0;i<4;++i)a.Add(2,.1*i,g);
   assert(!a.FinishAll(2));
-  a.Begin(3,0); for(int i=0;i<5;++i)a.Add(3,.5+.1*i,g);
+  a.Begin(3,0); for(int i=0;i<10;++i) {
+    LineGuide sample=g;sample.valid=i<5;
+    a.Add(3,.5+.05*i,sample);
+  }
   assert(a.Finish(3,1));
-  a.Begin(4,0); for(int i=0;i<5;++i)a.Add(4,.1*i,g);
+  a.Begin(4,0); for(int i=0;i<10;++i) {
+    LineGuide sample=g;sample.valid=i<5;
+    a.Add(4,.1*i,sample);
+  }
   assert(a.FinishAll(4));
 }
 void TestClockExcludesIdleAndDeferredDone() {
@@ -132,19 +139,18 @@ void TestManualPerceptionStationaryRecovery() {
   for(int i=0;i<10 && !core.NeedsStationaryObservation();++i) { in.now_sec+=.1; out=core.StepPerception(in); }
   assert(core.NeedsStationaryObservation());
   auto reacquired=core; auto found_input=in;
-  for(int i=0;i<60 && out.mission.ball.mode!=BallMode::kFailed;++i) {
+  for(int i=0;i<60;++i) {
     in.now_sec+=.1; out=core.StepPerception(in);
     assert(!out.mission.post_motion_observing && out.mission.command.action_id==0);
   }
-  assert(out.mission.ball.mode==BallMode::kFailed && out.mission.ball.recovery_observations_completed==5);
+  assert(out.mission.ball.mode==BallMode::kBallRecoveryDown);
   for(int i=0;i<12;++i) {
     found_input.now_sec+=.1; found_input.detections={detection(.7)};
     out=reacquired.StepPerception(found_input);
     assert(out.mission.command.action_id==0);
   }
-  assert(out.mission.ball.mode==BallMode::kFineAdjustForPickup);
-  assert(out.mission.ball.recovery_observations_completed==1);
-  assert(!reacquired.NeedsStationaryObservation());
+  assert(out.mission.ball.mode==BallMode::kBallRecoveryDown);
+  assert(out.mission.command.action_id==0);
 }
 void TestStationaryRecoveryAndNoHurdleCentering() {
   auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;
@@ -171,11 +177,10 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   assert(b.mode==BallMode::kFineAdjustForPickup);
   for(int i=0;i<10;++i)b=ball.Compute({},640,480,now+=.1,down,{},false);
   assert(b.mode==BallMode::kBallRecoveryDown);
-  for(int i=0;i<60 && b.mode!=BallMode::kFailed;++i) {
+  for(int i=0;i<60;++i) {
     b=ball.Compute({},640,480,now+=.1,down,{},false);
-    assert(b.action.action==MissionAction::kNone);
   }
-  assert(b.mode==BallMode::kFailed && ball.RecoveryObservationsCompleted()==5);
+  assert(b.mode==BallMode::kBallRecoveryDown && ball.RecoveryObservationsCompleted()==0);
 
   HurdleController hurdle(c.hurdle,3); HurdleResult h; now=0;
   for(int i=0;i<10;++i)h=hurdle.Compute(Target(.05,(c.hurdle.approach_short_v_px-10)/480.0),640,480,now+=.1,forward,{},StraightLine(),false);

@@ -154,7 +154,7 @@ private:
             return "motions/미세보행_미세전진.json";
 
         case vision::msg::ActionCommand::STEP_BACK:
-            return "motions/미세보행_후진.json";
+            return "motions/미세보행_후진__찐.json";
 
         case vision::msg::ActionCommand::LEFT_SIDE_STEP:
             return "motions/미세보행_좌로이동.json";

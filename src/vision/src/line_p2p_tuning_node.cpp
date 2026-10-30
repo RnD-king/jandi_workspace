@@ -379,15 +379,15 @@ private:
                   static_cast<unsigned long>(trial_id_),
                   last_guide_.offset, last_guide_.heading_rad);
     } else {
-      // The first action or insufficient moving evidence needs a fresh 1s
-      // stationary observation before a motion may be selected.
+      // The first action or insufficient moving evidence needs the configured
+      // observation time and a complete LINE window before selecting motion.
       last_guide_ = {};
       accumulator_.Begin(trial_id_, start_sec_);
       state_ = State::kObserving;
       response->success = true;
-      response->message = "collecting a fresh stationary guide for " +
-                          std::to_string(observation_sec_) + " sec";
-      RCLCPP_INFO(get_logger(), "Trial %lu: stationary observation %.2f sec",
+      response->message = "collecting a fresh stationary guide for at least " +
+                          std::to_string(observation_sec_) + " sec and one full LINE window";
+      RCLCPP_INFO(get_logger(), "Trial %lu: stationary observation at least %.2f sec plus full LINE window",
                   static_cast<unsigned long>(trial_id_), observation_sec_);
     }
   }
@@ -466,7 +466,8 @@ private:
       return false;
     }
     if (state_ == State::kObserving &&
-        now_sec - start_sec_ >= observation_sec_) {
+        now_sec - start_sec_ >= observation_sec_ &&
+        accumulator_.HasFullWindow(trial_id_)) {
       const auto guide = accumulator_.FinishAll(trial_id_);
       if (!guide) {
         state_ = State::kHolding;
@@ -731,7 +732,7 @@ private:
     label(448, 98, "NEXT ACTION (INTERNAL)", 0.53, muted);
     label(448, 135, ActionName(next), 0.75, preview_guide ? accent : muted);
     if (!preview_guide)
-      label(448, 162, "No guide: next trial observes 1s", 0.42, muted);
+      label(448, 162, "No guide: next trial >=1s and full window", 0.42, muted);
 
     char text[180];
     label(24, 210, "STORED GUIDE / CURRENT GAINS", 0.62, muted);

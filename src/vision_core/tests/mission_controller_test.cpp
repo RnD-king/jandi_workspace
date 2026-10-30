@@ -15,6 +15,13 @@ static MissionFrameInput Frame(double now) {
   f.line_centers={{320,450},{320,400},{320,350},{320,300},{320,250}};
   return f;
 }
+// These regressions isolate the stationary/manual GOAL admission contract;
+// after admission, normal AUTO observation/READY behavior remains under test.
+static MissionFrameResult StepStationaryGoalAdmission(MissionController& core, MissionFrameInput frame) {
+  if (core.MissionStateKey()/10000==static_cast<int>(MissionType::kLine))
+    frame.manual_observation_control=true;
+  return core.Step(frame);
+}
 static LineGuide Guide(double offset) {
   LineGuide g; g.valid=true; g.offset=offset; g.heading_rad=0; return g;
 }
@@ -118,8 +125,8 @@ int main() {
   assert(two_point_result.line_in_recovery);
   assert(two_point_result.command.action_id==0);
   assert(two_point_result.command.mission_phase==1); // FailureObserve.
-  for (int i=1;i<=4;++i) {
-    two_point_input=Frame(.4*i);
+  for (int i=1;i<=9;++i) {
+    two_point_input=Frame(.2*i);
     two_point_result=two_point_controller.Step(two_point_input);
     assert(two_point_result.command.action_id==0);
   }
@@ -140,7 +147,7 @@ int main() {
   r=controller.Step(in);
   assert(!r.line_features.guide.valid && !r.line_in_recovery);
   assert(r.command.command_type==CommandType::kHold);
-  for (double time : {0.8, 1.4, 1.6, 1.8, 2.0, 2.2}) {
+  for (double time : {0.5, 0.8, 1.4, 1.6, 1.8, 2.0, 2.2}) {
     in=Frame(time); r=controller.Step(in);
   }
   in=Frame(2.55); in.delivery_feedback={id,true,false,true};
@@ -165,7 +172,7 @@ int main() {
   in=Frame(.7); ShiftLine(in, 500); r=controller.Step(in);
   in=Frame(.8); in.delivery_feedback={delayed_ack_id,true,false,false};
   r=controller.Step(in);
-  for (double time : {1.3, 1.7, 1.8, 2.0, 2.1, 2.3}) {
+  for (double time : {1.0, 1.3, 1.5, 1.7, 1.8, 2.0, 2.1, 2.3}) {
     in=Frame(time); r=controller.Step(in);
   }
   in=Frame(2.55); in.delivery_feedback={delayed_ack_id,true,false,true};
@@ -190,8 +197,7 @@ int main() {
   assert(r.command.command_type==CommandType::kHold);
   assert(r.line_in_recovery);
 
-  // 마지막 유효 점수의 부호를 기억하고, 첫 실패 관측 2초 뒤 같은 방향으로
-  // 양수 15도 TURN을 발행한다.
+  // 마지막 유효 점수의 부호를 기억하고, 실패 관측 뒤 WALK 자세로 회전한다.
   controller.Reset();
   in=Frame(0); in.line_decision_guide_override=Guide(-.2);
   r=controller.Step(in);
@@ -200,81 +206,42 @@ int main() {
   in=Frame(.1); in.line_centers.clear(); in.line_decision_guide_override.reset();
   in.delivery_feedback={left_id,true,true,false};
   r=controller.Step(in); assert(r.command.command_type==CommandType::kHold);
+  for(int i=1;i<=10;++i) {
+    in=Frame(.1+.1*i);in.line_centers.clear();r=controller.Step(in);
+  }
   in=Frame(2.2); in.line_centers.clear();
   r=controller.Step(in);
-  // Recovery turns use the FINE stance: the real pose transition must
-  // complete before TURN_LEFT can be dispatched.
-  assert(r.command.action==MissionAction::kDefaultPoseMode);
-  const auto recovery_pose_id=r.command.action_id;
-  assert(recovery_pose_id!=0);
-  in=Frame(2.3); in.line_centers.clear();
-  in.delivery_feedback={recovery_pose_id,true,true,false};
-  r=controller.Step(in);
-  assert(r.foot_pose==FootPose::kFine);
-  in=Frame(2.4); in.line_centers.clear();
-  r=controller.Step(in);
-  // DEFAULT_POSE_MODE DONE starts a fresh 1s stationary observation window.
-  // Never start turning while that post-pose window is active.
-  assert(r.post_motion_observing);
-  assert(r.command.action==MissionAction::kNone);
-  in=Frame(3.4); in.line_centers.clear();
-  r=controller.Step(in);
-  assert(!r.post_motion_observing);
-  assert(r.command.action==MissionAction::kTurnLeft);
-  assert(r.command.target_yaw_deg==15);
+  assert(r.command.action==MissionAction::kTurnLeftInPlace);
+  assert(r.foot_pose==FootPose::kWalk);
 
-  // No history defaults to RIGHT after the first failed stationary window.
-  // Only five real turns are allowed, then fresh valid frames cannot resume it.
+  // 방향 근거가 없으면 회전하지 않고 다섯 정지 관측 후 최종 정지한다.
   controller.Reset();
   in=Frame(0); in.line_centers.clear(); r=controller.Step(in);
-  std::uint64_t completed_recovery_id=0;
-  int default_right_turns=0;
   for (int i=1;i<=200 && r.command.mission_phase!=4;++i) {
     in=Frame(.1*i); in.line_centers.clear();
-    if (r.command.action_id && r.command.action_id!=completed_recovery_id) {
-      completed_recovery_id=r.command.action_id;
-      if (r.command.action==MissionAction::kTurnRight) ++default_right_turns;
-      else assert(r.command.action==MissionAction::kDefaultPoseMode);
-      in.delivery_feedback={completed_recovery_id,true,true,false};
-    }
     r=controller.Step(in);
+    assert(r.command.action==MissionAction::kNone);
   }
-  assert(default_right_turns==5 && r.command.mission_phase==4);
+  assert(r.command.mission_phase==4);
   in=Frame(21.0); in.line_decision_guide_override=Guide(0);
   r=controller.Step(in);
   assert(r.command.action==MissionAction::kNone);
   assert(r.command.mission_phase==4);
 
-  // A reliable STRAIGHT score of zero is retained and recovers to RIGHT.
+  // 중앙 점수 0은 방향 근거가 아니므로 임의의 우회전을 하지 않는다.
   controller.Reset();
-  in=Frame(0); in.line_decision_guide_override=Guide(.3);
+  in=Frame(0); in.line_decision_guide_override=Guide(0);
   r=controller.Step(in);
-  const auto right_id=r.command.action_id;
-  in=Frame(.1); in.delivery_feedback={right_id,true,false,false};
-  r=controller.Step(in);
-  for (double time : {.6, .7, .8, .9}) {
-    in=Frame(time); r=controller.Step(in);
-  }
-  in=Frame(1.0); in.delivery_feedback={right_id,true,false,true};
-  r=controller.Step(in);
-  const auto straight_id=r.command.action_id;
   assert(r.command.action==MissionAction::kLineStraightUnit);
-  in=Frame(1.1); in.delivery_feedback={straight_id,true,false,false};
-  r=controller.Step(in);
-  in=Frame(1.2); in.delivery_feedback={right_id,true,true,false};
-  r=controller.Step(in);
-  in=Frame(1.3); in.line_centers.clear();
+  const auto straight_id=r.command.action_id;
+  in=Frame(.1); in.line_centers.clear();
   in.delivery_feedback={straight_id,true,true,false};
   r=controller.Step(in);
-  in=Frame(3.4); in.line_centers.clear();
-  r=controller.Step(in);
-  assert(r.command.action==MissionAction::kDefaultPoseMode);
-  const auto straight_recovery_pose=r.command.action_id;
-  in=Frame(3.5); in.line_centers.clear();
-  in.delivery_feedback={straight_recovery_pose,true,true,false}; r=controller.Step(in);
-  in=Frame(3.6); in.line_centers.clear(); r=controller.Step(in);
-  in=Frame(4.7); in.line_centers.clear(); r=controller.Step(in);
-  assert(r.command.action==MissionAction::kTurnRight);
+  for(int i=1;i<=100;++i) {
+    in=Frame(.1+i*.1); in.line_centers.clear(); r=controller.Step(in);
+    assert(r.command.action==MissionAction::kNone);
+  }
+  assert(r.command.mission_phase==4);
 
   // FINAL HOLD에서는 유효한 object detection도 새 mission을 시작하지 않는다.
   auto terminal_config=c;
@@ -287,18 +254,20 @@ int main() {
   terminal_config.ball.stable_min_hits=1;
   MissionController terminal(terminal_config);
   in=Frame(0); in.line_centers.clear(); r=terminal.Step(in);
-  in=Frame(.1); in.line_centers.clear(); r=terminal.Step(in);
+  for(int i=1;i<=50;++i) {
+    in=Frame(.1*i); in.line_centers.clear(); r=terminal.Step(in);
+  }
   assert(r.command.mission_phase==4);
-  in=Frame(.2); in.line_centers.clear(); in.ball_target=Ball(.5,.3);
+  in=Frame(5.1); in.line_centers.clear(); in.ball_target=Ball(.5,.3);
   r=terminal.Step(in);
   assert(r.active_mission==MissionType::kLine);
   assert(r.command.action==MissionAction::kNone);
   assert(r.command.mission_phase==4);
 
-  // directional recovery는 정확히 설정된 5회만 TURN하고 그 뒤 terminal이다.
+  // 방향성 복구는 설정된 5회만 WALK 회전하고 그 뒤 terminal이다.
   auto turn_config=c;
   turn_config.line_p2p.failure_observation_sec=0.0;
-  turn_config.line_p2p.recovery_observation_sec=0.0; // Legacy instant-turn fixture.
+  turn_config.line_p2p.recovery_observation_sec=0.0; // Frame count still requires a full 10-frame window.
   turn_config.line_p2p.last_score_recovery_max_turns=5;
   MissionController turning(turn_config);
   in=Frame(0); in.line_decision_guide_override=Guide(-.3);
@@ -307,29 +276,21 @@ int main() {
   in=Frame(.1); in.line_centers.clear();
   in.delivery_feedback={action_id,true,true,false};
   r=turning.Step(in);
-  in=Frame(.2); in.line_centers.clear(); r=turning.Step(in);
-  assert(r.command.action==MissionAction::kDefaultPoseMode);
-  const auto turn_pose_id=r.command.action_id;
-  assert(turn_pose_id!=0);
-  in=Frame(.25); in.line_centers.clear();
-  in.delivery_feedback={turn_pose_id,true,true,false};
-  r=turning.Step(in);
-  assert(r.foot_pose==FootPose::kFine);
-  in=Frame(.3); in.line_centers.clear(); r=turning.Step(in);
-  assert(r.post_motion_observing);
-  assert(r.command.action==MissionAction::kNone);
-  in=Frame(1.3); in.line_centers.clear(); r=turning.Step(in);
-  assert(!r.post_motion_observing);
+  double turn_time=.1;
   for (int turn=1; turn<=5; ++turn) {
-    assert(r.command.action==MissionAction::kTurnLeft);
-    assert(r.command.target_yaw_deg==15);
+    for(int sample=0;sample<10;++sample) {
+      turn_time+=.1;
+      in=Frame(turn_time);in.line_centers.clear();r=turning.Step(in);
+    }
+    assert(r.command.action==MissionAction::kTurnLeftInPlace);
     action_id=r.command.action_id;
-    const double done_time=1.3+turn*.2-.1;
-    in=Frame(done_time); in.line_centers.clear();
+    turn_time+=.1;
+    in=Frame(turn_time); in.line_centers.clear();
     in.delivery_feedback={action_id,true,true,false};
     r=turning.Step(in);
-    in=Frame(done_time+.1); in.line_centers.clear();
-    r=turning.Step(in);
+  }
+  for(int sample=0;sample<10;++sample) {
+    turn_time+=.1;in=Frame(turn_time);in.line_centers.clear();r=turning.Step(in);
   }
   assert(r.command.action==MissionAction::kNone);
   assert(r.command.mission_phase==4);
@@ -364,8 +325,8 @@ int main() {
   in=Frame(.1); in.delivery_feedback={current_id,true,false,false};
   r=queued.Step(in);
   // Simulate a 2.8s long LINE action: READY occurs ~0.25s before DONE.
-  // The estimated 40%-to-READY window must actually contain valid frames.
-  for (double time : {0.8, 1.4, 1.6, 1.8, 2.0, 2.2}) {
+  // ACK부터 READY까지의 창에 10프레임 이상, 그중 5개 이상 유효해야 한다.
+  for (double time : {.2, .4, .6, .8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2}) {
     in=Frame(time); r=queued.Step(in);
   }
   in=Frame(2.55); in.delivery_feedback={current_id,true,false,true};
@@ -373,7 +334,7 @@ int main() {
   const auto queued_id=r.command.action_id;
   assert(queued_id!=0 && queued_id!=current_id);
   assert(r.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
-  assert(r.line_window_stats && r.line_window_stats->window_frames >= 5);
+  assert(r.line_window_stats && r.line_window_stats->window_frames >= 10);
   assert(r.line_window_stats->used_frames >= 5);
   in=Frame(2.6); in.allow_new_line_action=false;
   in.delivery_feedback={queued_id,true,false,false};
@@ -551,11 +512,11 @@ int main() {
   camera_config.goal.stable_window=camera_config.goal.stable_min_hits=1;
   MissionController goal_timeout(camera_config);
   in=Frame(0); in.backboard_target=Ball(.5,.3); in.backboard_center_depth_m=.7;
-  r=goal_timeout.Step(in);
+  r=StepStationaryGoalAdmission(goal_timeout,in);
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
-  in.now_sec=(.4) + 3.0; r=goal_timeout.Step(in);
+  in.now_sec=(.4) + 3.0; r=StepStationaryGoalAdmission(goal_timeout,in);
   assert(r.goal.mode==GoalMode::kWaitCameraGoal);
-  in.now_sec=(.5) + 3.0; r=goal_timeout.Step(in);
+  in.now_sec=(.5) + 3.0; r=StepStationaryGoalAdmission(goal_timeout,in);
   assert(r.goal.mode==GoalMode::kFailed);
   // GOAL camera DONE starts a fresh 1-second observation. Its final mean
   // must also satisfy recent 10/7 object evidence without extending 1 s.
@@ -575,17 +536,17 @@ int main() {
     in = Frame(.1 * i);
     in.allow_new_line_action = false;
     in.backboard_target=Ball(.5,.3); in.backboard_center_depth_m=.7;
-    r = camera_gate.Step(in);
+    r = StepStationaryGoalAdmission(camera_gate,in);
   }
   assert(r.active_mission == MissionType::kGoal);
   assert(r.goal.mode == GoalMode::kWaitCameraGoal);
   in = Frame(1.0);
   in.camera_feedback = {CameraMode::kTransition, false};
-  r = camera_gate.Step(in);
+  r = StepStationaryGoalAdmission(camera_gate,in);
   assert(r.command.action_id == 0);
   in = Frame(1.1);
   in.camera_feedback = {CameraMode::kGoal, true};
-  r = camera_gate.Step(in);
+  r = StepStationaryGoalAdmission(camera_gate,in);
   assert(r.goal.mode == GoalMode::kSearch);
   assert(r.command.action_id == 0);
   assert(r.post_motion_observing);
@@ -594,7 +555,7 @@ int main() {
     in = Frame(1.2 + 0.1 * i);
     in.camera_feedback = {CameraMode::kGoal, true};
     if (i < 7) in.backboard_target = Ball(.8, .3);
-    r = camera_gate.Step(in);
+    r = StepStationaryGoalAdmission(camera_gate,in);
     assert(r.command.action_id == 0);
     assert(r.command.action == MissionAction::kNone);
     assert(r.post_motion_observing);
@@ -603,7 +564,7 @@ int main() {
   in = Frame(2.1);
   in.camera_feedback = {CameraMode::kGoal, true};
   in.backboard_target = Ball(.8, .3);
-  r = camera_gate.Step(in);
+  r = StepStationaryGoalAdmission(camera_gate,in);
   assert(r.active_mission == MissionType::kGoal);
   assert(r.command.action == MissionAction::kStepForwardRightOne);
   assert(r.command.action_id != 0);
@@ -614,19 +575,19 @@ int main() {
   in.camera_feedback = {CameraMode::kGoal, true};
   in.backboard_target = Ball(.8, .3);
   in.delivery_feedback = {approach_id, true, false, false};
-  r = camera_gate.Step(in);
+  r = StepStationaryGoalAdmission(camera_gate,in);
   assert(r.command.command_type == CommandType::kHold);
   in = Frame(2.2);
   in.camera_feedback = {CameraMode::kGoal, true};
   in.backboard_target = Ball(.8, .3);
   in.delivery_feedback = {approach_id, true, true, false};
-  r = camera_gate.Step(in);
+  r = StepStationaryGoalAdmission(camera_gate,in);
   assert(r.post_motion_observing);
   for (int i = 1; i <= 9; ++i) {
     in = Frame(2.2 + 0.1 * i);
     in.camera_feedback = {CameraMode::kGoal, true};
     in.backboard_target = Ball(.8, .3);
-    r = camera_gate.Step(in);
+    r = StepStationaryGoalAdmission(camera_gate,in);
     assert(r.command.command_type == CommandType::kHold);
     assert(r.post_motion_observing);
   }
@@ -635,7 +596,7 @@ int main() {
   in = Frame(3.2);
   in.camera_feedback = {CameraMode::kGoal, true};
   in.backboard_target = Ball(.8, .3);
-  r = camera_gate.Step(in);
+  r = StepStationaryGoalAdmission(camera_gate,in);
   assert(!r.post_motion_observing);
   assert(r.command.command_type == CommandType::kAction);
   assert(r.command.action_id != 0 && r.command.action_id != approach_id);
@@ -679,7 +640,7 @@ int main() {
   mi.camera_feedback={CameraMode::kDown,true};
   mi.ball_target=Ball(.5,.7);
   mr=manual.Step(mi);
-  assert(mr.ball.mode==BallMode::kCoarseAdjust);
+  assert(mr.ball.mode==BallMode::kWaitFinePose);
   mi.now_sec=(.31) + 3.0; mi.manual_observation_control=true; mi.allow_new_body_actions=true;
   mr=manual.Step(mi);
   assert(mr.command.action==MissionAction::kDefaultPoseMode);
@@ -744,22 +705,22 @@ int main() {
   for (int i=0;i<7;++i) {
     in=Frame(.1*i);
     in.allow_new_line_action=false;
-    r=sparse_gate.Step(in);
+    r=StepStationaryGoalAdmission(sparse_gate,in);
   }
   in=Frame(1.0); in.camera_feedback={CameraMode::kTransition,false};
-  r=sparse_gate.Step(in);
+  r=StepStationaryGoalAdmission(sparse_gate,in);
   in=Frame(1.1); in.camera_feedback={CameraMode::kGoal,true};
-  r=sparse_gate.Step(in);
+  r=StepStationaryGoalAdmission(sparse_gate,in);
   for (int i=0;i<9;++i) {
     in=Frame(1.2+.1*i);
     in.camera_feedback={CameraMode::kGoal,true};
     // Only one valid frame: previously this would block indefinitely.
     if (i==7) in.backboard_target=Ball(.8,.3);
-    r=sparse_gate.Step(in);
+    r=StepStationaryGoalAdmission(sparse_gate,in);
     assert(r.post_motion_observing);
   }
   in=Frame(2.1); in.camera_feedback={CameraMode::kGoal,true};
-  r=sparse_gate.Step(in);
+  r=StepStationaryGoalAdmission(sparse_gate,in);
   assert(!r.post_motion_observing);
   assert(r.active_mission==MissionType::kGoal);
   // One accidental detection near the end cannot become a tracked mean.
@@ -812,6 +773,10 @@ int main() {
   manual_input.now_sec = (0.7) + 3.0;
   manual_result = explicitly_previewed.Step(manual_input);
   assert(manual_result.post_motion_observing);
+  for(int i=1;i<=8;++i) {
+    manual_input.now_sec=(.7+.05*i)+3.0;
+    manual_result=explicitly_previewed.Step(manual_input);
+  }
   manual_input.now_sec = (1.2) + 3.0;
   manual_result = explicitly_previewed.Step(manual_input);
   assert(!manual_result.post_motion_observing);
@@ -1214,49 +1179,44 @@ int main() {
   assert(ready_result.command.action==MissionAction::kStepForwardThree);
   assert(ready_result.command.action_id==hurdle_queued_id);
 
-  // GOAL: center-depth mean prevents premature close-walk entry at DONE.
+  // Full AUTO GOAL uses shared units, and near commitment drains its real
+  // current unit instead of queuing another far walk from a READY mean.
   auto goal_ready_cfg=ready_cfg;
-  goal_ready_cfg.enable_ball=false; goal_ready_cfg.enable_goal=true;
+  goal_ready_cfg.enable_ball=false;goal_ready_cfg.enable_goal=true;
   goal_ready_cfg.goal_trial_start_goal=true;
   goal_ready_cfg.goal.stable_window=goal_ready_cfg.goal.stable_min_hits=1;
   MissionController goal_ready(goal_ready_cfg);
-  // Complete the new camera/observation startup without admitting a walk.
   for(int i=0;i<40;++i) {
-    auto startup=Frame(.05*i);
-    startup.camera_feedback={CameraMode::kGoal,true};
+    auto startup=Frame(.05*i);startup.camera_feedback={CameraMode::kGoal,true};
     startup.backboard_target=Ball(.5,.3);startup.backboard_center_depth_m=1.8;
     startup.allow_new_body_actions=false;
-    const auto prepared=goal_ready.Step(startup);
-    assert(prepared.command.action_id==0);
+    assert(goal_ready.Step(startup).command.action_id==0);
   }
-  ready_frame=Frame(2.0); ready_frame.backboard_target=Ball(.5,.3);
-  ready_frame.camera_feedback={CameraMode::kGoal,true};
-  ready_frame.backboard_center_depth_m=1.8;
+  ready_frame=Frame(2);ready_frame.camera_feedback={CameraMode::kGoal,true};
+  ready_frame.backboard_target=Ball(.5,.3);ready_frame.backboard_center_depth_m=1.8;
   ready_result=goal_ready.Step(ready_frame);
-  assert(ready_result.command.action==MissionAction::kStepForwardThree);
+  assert(LinePlan::IsUnit(ready_result.command.action));
   const auto goal_ready_id=ready_result.command.action_id;
-  for (int i=1;i<=27;++i) {
-    ready_frame=Frame(2.0+i*.1);
-    ready_frame.camera_feedback={CameraMode::kGoal,true};
+  for(int i=1;i<=27;++i) {
+    ready_frame=Frame(2+i*.1);ready_frame.camera_feedback={CameraMode::kGoal,true};
     ready_frame.backboard_target=Ball(.5,.3);
-    // A transient near-range reading early in the moving action must
-    // not leave a latched close-walk trigger after the verified READY mean.
-    ready_frame.backboard_center_depth_m=i==3 ? .5 : (i>=12 ? 1.0 : 1.8);
+    ready_frame.backboard_center_depth_m=i==3 ? .5 : 1.8;
     ready_frame.delivery_feedback={goal_ready_id,true,false,i==27};
     ready_result=goal_ready.Step(ready_frame);
   }
-  assert(ready_result.command.control_phase==ControlPhase::kWaitingQueuedActionAck);
-  assert(ready_result.command.action==MissionAction::kStepForwardThree);
-  const auto goal_queued_id=ready_result.command.action_id;
-  ready_frame=Frame(5.0); ready_frame.backboard_target=Ball(.5,.3);
-  ready_frame.camera_feedback={CameraMode::kGoal,true};
-  ready_frame.backboard_center_depth_m=.5;
-  ready_frame.delivery_feedback={goal_ready_id,true,true,false};
+  assert(ready_result.approach_near && ready_result.command.action_id==goal_ready_id);
+  assert(ready_result.command.control_phase!=ControlPhase::kWaitingQueuedActionAck);
+  ready_frame.delivery_feedback={goal_ready_id,true,true,false};ready_frame.now_sec+=.1;
   ready_result=goal_ready.Step(ready_frame);
-  assert(!ready_result.post_motion_observing);
-  assert(ready_result.object_ready_mean_used);
-  assert(ready_result.command.action==MissionAction::kStepForwardThree);
-  assert(ready_result.command.action_id==goal_queued_id);
+  assert(ready_result.active_mission==MissionType::kLine);
+  for(int j=1;j<=11 && ready_result.active_mission==MissionType::kLine;++j) {
+    ready_frame.now_sec+=.1;
+    ready_frame.delivery_feedback={};
+    ready_result=goal_ready.Step(ready_frame);
+  }
+  assert(ready_result.active_mission==MissionType::kGoal);
+  assert(ready_result.command.action==MissionAction::kDefaultPoseMode);
+  assert(ready_result.command.action_id && ready_result.command.action_id!=goal_ready_id);
   // A physical RESET must publish a fresh camera FORWARD request even when
   // the last software camera feedback already claims FORWARD/settled.
   MissionController reset_probe(c);
@@ -1337,8 +1297,7 @@ int main() {
   goal_step=five_step_goal.Step(goal_frame);
   assert(goal_step.goal_five_step_completed);
   assert(goal_step.goal_walk_actions_completed==1);
-  assert(goal_step.active_mission==MissionType::kGoal);
-  assert(goal_step.goal.mode==GoalMode::kWaitCameraGoal);
+  assert(goal_step.active_mission==MissionType::kLine);
   assert(goal_step.command.camera_request==CameraRequest::kGoal);
 
   // No straight-five choice: three finished turning-forward (12) walks
@@ -1383,13 +1342,12 @@ int main() {
   three_result=send_three(8.4,current_walk,true,true,false);
   assert(three_result.goal_walk_actions_completed==3);
   assert(!three_result.goal_five_step_completed);
-  assert(three_result.active_mission==MissionType::kGoal);
+  assert(three_result.active_mission==MissionType::kLine);
   assert(three_result.command.camera_request==CameraRequest::kGoal);
   three_result=send_three(8.5,current_walk,true,true,false); // duplicate DONE
   assert(three_result.goal_walk_actions_completed==3);
 
-  // A recovery-only in-place turn and the preceding FINE pose transition
-  // must not count as a post-pickup LINE walking action.
+  // 복구용 제자리 회전은 post-pickup LINE 보행 블록으로 세지 않는다.
   MissionController rotation_only(post_pickup_cfg);
   auto turn_frame=Frame(0.0); ShiftLine(turn_frame,500);
   auto turn_result=rotation_only.Step(turn_frame);
@@ -1407,19 +1365,8 @@ int main() {
   assert(turn_result.goal_walk_actions_completed==1);
   turn_frame=Frame(2.3); turn_frame.line_centers.clear();
   turn_result=rotation_only.Step(turn_frame);
-  assert(turn_result.command.action==MissionAction::kDefaultPoseMode);
-  const auto goal_recovery_pose_id=turn_result.command.action_id;
-  turn_frame=Frame(2.4); turn_frame.line_centers.clear();
-  turn_frame.delivery_feedback={goal_recovery_pose_id,true,true,false};
-  turn_result=rotation_only.Step(turn_frame);
-  assert(turn_result.goal_walk_actions_completed==1);
-  turn_frame=Frame(2.5); turn_frame.line_centers.clear();
-  turn_result=rotation_only.Step(turn_frame); // pose DONE starts normal 1s observation
-  assert(turn_result.command.action_id==0);
-  turn_frame=Frame(3.6); turn_frame.line_centers.clear();
-  turn_result=rotation_only.Step(turn_frame);
-  assert(turn_result.command.action==MissionAction::kTurnRight ||
-         turn_result.command.action==MissionAction::kTurnLeft);
+  assert(turn_result.command.action==MissionAction::kTurnLeftInPlace ||
+         turn_result.command.action==MissionAction::kStepForwardRightOneHurdle);
   const auto recovery_turn_id=turn_result.command.action_id;
   turn_frame=Frame(3.9); turn_frame.line_centers.clear();
   turn_frame.delivery_feedback={recovery_turn_id,true,true,false};
@@ -1445,8 +1392,7 @@ int main() {
     assert(trial_toggle.Step(Frame(.1)).active_mission==MissionType::kLine);
     trial_toggle.Reset(true);
     const auto near_start=trial_toggle.Step(Frame(1.));
-    assert(near_start.active_mission==MissionType::kGoal);
-    assert(near_start.goal.mode==GoalMode::kWaitCameraGoal);
+    assert(near_start.active_mission==MissionType::kLine);
     assert(near_start.command.action_id==0 && near_start.command.camera_request==CameraRequest::kGoal);
     trial_toggle.SetGoalTrialStartGoal(false);
     trial_toggle.Reset(true);

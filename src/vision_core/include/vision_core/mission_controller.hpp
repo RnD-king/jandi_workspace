@@ -17,6 +17,8 @@
 #include "vision_core/line_feature_extractor.hpp"
 #include "vision_core/line_p2p_controller.hpp"
 #include "vision_core/line_plan.hpp"
+#include "vision_core/object_approach.hpp"
+#include <array>
 #include "vision_core/object_target_extractor.hpp"
 #include "vision_core/object_association_tracker.hpp"
 #include "vision_core/object_target_tracker.hpp"
@@ -49,6 +51,7 @@ struct MissionControllerConfig {
   // MANUAL reuses the mean for Preview/Commit without reserving B.
   // Empty means all object walks use post-DONE stationary observation.
   std::vector<int> object_ready_mean_actions;
+  ObjectApproachConfig object_approach;
   bool UsesObjectReadyMean(MissionAction action) const {
     return std::find(object_ready_mean_actions.begin(),
                      object_ready_mean_actions.end(), static_cast<int>(action)) !=
@@ -67,7 +70,6 @@ struct MissionControllerConfig {
   int test_ball_mission_index{};
   int test_goal_mission_index{};
   int mission_recovery_max_turns{};
-  int mission_recovery_yaw_deg{};
   MissionType test_mission{MissionType::kNone};
   int test_stage{}; // 0 full, 1 far approach, 2 near alignment, 3 mission execution/recovery
   int backboard_depth_strip_width_px{};
@@ -77,6 +79,11 @@ enum class FootPose { kWalk, kFine };
 
 struct MissionFrameInput {
   std::vector<Point2> line_centers;
+  Intrinsics intrinsics;
+  bool rectify_approach{false};
+  double approach_roll_rad{}, approach_pitch_rad{};
+  std::uint64_t ball_track_id{}, hurdle_track_id{}, backboard_track_id{};
+  std::optional<int> backboard_entry_track_hits;
   std::optional<ObjectTarget> ball_target;
   // StepPerception supplies per-ID entry evidence within upper_acquire_v_px.
   // Candidates already passed confidence, bbox, aspect and optional depth gates.
@@ -136,6 +143,9 @@ struct MissionFrameResult {
   MissionType active_mission{MissionType::kLine};
   Features line_features;
   bool line_computed{false};
+  std::optional<double> remembered_line_score;
+  bool approach_goal_search_failed{false};
+  bool approach_goal_depth_failed{false};
   // The guide supplied to LINE selector (raw, READY-cache, or post-DONE mean).
   std::optional<LineGuide> line_decision_guide;
   std::optional<LineWindowStats> line_window_stats;
@@ -150,6 +160,12 @@ struct MissionFrameResult {
   int candidate_phase{0}, candidate_search_turns{0}, candidate_restore_turns{0};
   bool line_plan_active{false};
   bool object_ready_mean_used{false}; // True only on the real object-action DONE.
+  bool approach_locked{false}, approach_near{false};
+  MissionType approach_mission{MissionType::kNone};
+  std::uint64_t approach_track_id{};
+  int approach_completed_blocks{}, approach_missing_frames{};
+  int approach_sequence_hits{}, approach_sequence_frames{};
+  bool approach_sequence_qualified{};
   std::size_t post_motion_frames{0};
   std::size_t post_motion_window_frames{0};
   int post_motion_valid{0};
@@ -347,6 +363,52 @@ public:
   void Reset(bool preserve_action_ids);
 
 private:
+  struct ApproachEvidence {
+    std::uint64_t id{};
+    std::optional<ObjectTarget> last;
+    std::deque<bool> hits;
+  };
+  struct ContinuousApproach {
+    MissionType mission{MissionType::kNone};
+    std::uint64_t id{}, epoch{};
+    int blocks{}, missing{}, blend{};
+    bool locked{false}, near{false}, mission_started{false}, loss_pending{false};
+    std::optional<ObjectTarget> last;
+    GoalPoseObservation pose;
+    std::optional<double> depth;
+    LineGuide last_guide;
+    bool near_observing{false}, near_qualified{false};
+    double near_observation_started_sec{0.0}, near_sum_u{0.0}, near_sum_v{0.0};
+    int near_valid_count{0}, near_attempts{0};
+    std::deque<bool> near_observation_hits;
+    ActionRequest near_motion;
+    std::uint64_t near_motion_id{0};
+    std::deque<bool> hits, good_hits, pose_hits, near_hits;
+  } continuous_;
+  std::optional<ContinuousApproach> recovering_approach_;
+  struct RouteDecision {
+    ActionRequest action;
+    bool depth_recovery_step{false};
+    std::optional<LineGuide> guide;
+    CameraRequest camera{CameraRequest::kNone};
+    bool hold{false}, entered{false}, object_visible{false}, near_final_action{false};
+  };
+  std::array<ApproachEvidence,3> approach_evidence_;
+  std::uint64_t next_approach_epoch_{1};
+  bool approach_goal_probe_{false}, approach_return_forward_{false};
+  int approach_goal_empty_frames_{0}, approach_goal_retry_after_{0};
+  int approach_goal_empty_retries_{0};
+  bool approach_goal_search_failed_{false};
+  bool approach_goal_depth_failed_{false};
+  int approach_goal_bad_depth_frames_{0};
+  std::uint64_t approach_goal_depth_action_id_{0};
+  double approach_camera_started_{-1.0};
+  RouteDecision PrepareContinuousApproach(const MissionFrameInput&,const Features&,bool idle);
+  void ReleaseContinuousApproach();
+  void EnterContinuousMission(const MissionFrameInput&,bool lost);
+  bool ResumeContinuousApproach(const MissionFrameInput&);
+  void PopulateApproachDiagnostics(MissionFrameResult&) const;
+  bool PrepareGoalDepthRecovery(const MissionFrameInput&,bool visible,bool usable,bool idle,RouteDecision&);
   enum class LineState {
     kNormal,
     kFailureObserve,
@@ -364,7 +426,8 @@ private:
                                   const MissionFrameInput &input,
                                   bool action_active,
                                   bool action_done,
-                                  bool *reference_valid);
+                                  bool *reference_valid,
+                                  bool append_stability = true);
   ActionRequest CruiseAction(const LineGuide &guide, bool queue_eligible);
   void BeginObservation(LineState state, double now_sec);
   void AddObservation(const LineGuide &guide);
@@ -410,7 +473,6 @@ private:
   bool line_auxiliary_done_{false};
   MissionAction line_auxiliary_action_{MissionAction::kNone};
   bool line_auxiliary_observing_{false};
-  int line_invalid_frames_{0};
   MissionControllerConfig config_;
   LinePlan line_plan_;
   bool goal_trial_complete_{false}; // Shared trial completion, retained name for compatibility.
@@ -436,6 +498,7 @@ private:
   bool mission_recovery_failed_{false};
   bool mission_recovery_found_{false};
   bool mission_recovery_verifying_{false};
+  bool mission_recovery_qualified_{false};
   double mission_recovery_verify_start_sec_{0.0};
   bool post_pickup_goal_line_gate_active_{false};
   int post_pickup_line_actions_issued_{0};
@@ -487,8 +550,11 @@ private:
   double observation_curvature_sum_{0.0};
   int observation_valid_count_{0};
   int observation_curvature_count_{0};
+  std::deque<bool> line_observation_hits_;
+  bool line_observation_qualified_{false};
   int line_visible_recovery_turns_{0};
   int line_last_score_recovery_turns_{0};
+  int line_no_evidence_observations_{0};
   bool recovery_turn_issued_{false};
   std::deque<bool> line_stability_history_;
   bool decision_observation_active_{false};
@@ -500,7 +566,11 @@ private:
   double settle_until_sec_{0.0};
   std::uint64_t last_settle_done_id_{0};
   std::deque<bool> decision_object_hits_;
+  std::deque<bool> decision_qualified_object_hits_;
+  bool decision_object_qualified_{false};
   std::deque<bool> decision_goal_pose_hits_;
+  std::deque<bool> decision_qualified_goal_pose_hits_;
+  bool decision_goal_pose_qualified_{false};
   std::deque<bool> decision_goal_near_hits_;
   std::size_t decision_observation_total_frames_{0};
   // Raw (already associated) object samples for the 1s stationary mean.
@@ -514,6 +584,8 @@ private:
   double decision_pose_sin_sum_{0.0}, decision_pose_cos_sum_{0.0};
   int decision_pose_count_{0};
   int decision_line_valid_count_{0};
+  std::deque<bool> decision_line_hits_;
+  bool decision_line_qualified_{false};
   double decision_line_offset_sum_{0.0};
   double decision_line_heading_sum_{0.0};
   double decision_line_confidence_sum_{0.0};

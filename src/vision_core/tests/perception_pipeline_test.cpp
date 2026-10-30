@@ -10,7 +10,7 @@
 using namespace vision_core;
 
 namespace {
-void TestGoalEntryImagePresenceSurvivesInvalidDepthAndWindow() {
+void TestBackboardDepthFilteringAcrossFrames() {
   for(bool missing_depth:{false,true})for(int seen_frames:{0,1,6}) {
     auto c=LoadDefaultAlgorithmConfig();
     c.initial_has_ball=c.goal_trial_start_goal=c.enable_goal=true;
@@ -19,14 +19,14 @@ void TestGoalEntryImagePresenceSurvivesInvalidDepthAndWindow() {
     MissionController controller(c);
     PerceptionFrameInput in;in.image_width=640;in.image_height=480;
     in.command_transport_enabled=true;
+    in.manual_observation_control=true; // Exercise GOAL-view image/depth parsing without AUTO line routing.
     in.camera_feedback={CameraMode::kForward,true};
     controller.StepPerception(in);
     in.now_sec=.05;in.camera_feedback={CameraMode::kTransition,false};
     controller.StepPerception(in);
     in.now_sec=.1;in.camera_feedback={CameraMode::kGoal,true};
     auto result=controller.StepPerception(in);
-    assert(result.mission.goal.mode==GoalMode::kSearch);
-    for(int i=1;i<=40 && result.mission.goal.mode==GoalMode::kSearch;++i) {
+    for(int i=1;i<=40;++i) {
       in.now_sec=.1+.05*i;in.detections.clear();
       if(i<=seen_frames) {
         PerceptionDetection board;
@@ -37,15 +37,9 @@ void TestGoalEntryImagePresenceSurvivesInvalidDepthAndWindow() {
         in.detections.push_back(board);
       }
       result=controller.StepPerception(in);
-    }
-    assert(result.mission.has_ball && result.mission.command.action_id==0);
-    if(seen_frames==0) {
-      assert(result.mission.goal.mode==GoalMode::kEntryRetryCameraForward);
-      assert(result.mission.goal.entry_line_retries==1);
-    } else {
-      assert(result.mission.goal.mode==GoalMode::kRecoverySearch);
-      assert(result.mission.goal.entry_line_retries==0);
-      assert(result.mission.command.camera_request==CameraRequest::kNone);
+      const bool depth_valid=i<=seen_frames && !missing_depth;
+      assert(result.perception.targets.backboard.has_value()==depth_valid);
+      assert(result.perception.backboard_center_depth_m.has_value()==depth_valid);
     }
   }
 }
@@ -223,9 +217,9 @@ void TestPauseDoesNotAcquireNewMission() {
   input.allow_new_mission_entry=true;
   auto active=controller.StepPerception(input);
   assert(active.mission.active_mission==MissionType::kLine);
-  assert(active.mission.candidate_mission==MissionType::kBall);
+  assert(active.mission.approach_mission==MissionType::kBall);
   for(int i=0;i<12;++i) { input.now_sec=.3+.1*i; active=controller.StepPerception(input); }
-  assert(active.mission.active_mission==MissionType::kBall);
+  assert(active.mission.approach_mission==MissionType::kBall);
 }
 
 void TestGlobalPauseGateForBallAndCamera() {
@@ -326,7 +320,7 @@ void TestDebugCandidatesUseCoreFiltersBeforeTemporalVoting() {
 } // namespace
 
 int main() {
-  TestGoalEntryImagePresenceSurvivesInvalidDepthAndWindow();
+  TestBackboardDepthFilteringAcrossFrames();
   TestSharedLineRansacAfterRectification();
   auto c=LoadDefaultAlgorithmConfig();
   c.enable_ball=c.enable_hurdle=c.enable_goal=false;

@@ -14,11 +14,12 @@ public:
                  double duration, int max_observations) {
     hits_.push_back(detected);
     while (hits_.size() > static_cast<std::size_t>(window)) hits_.pop_front();
+    if (hits_.size()==static_cast<std::size_t>(window) &&
+        std::count(hits_.begin(),hits_.end(),true)>=min_hits) qualified_=true;
     if (Elapsed(now) + 1e-9 < duration || hits_.size()<static_cast<std::size_t>(window))
       return Result::kWaiting;
     ++completed_;
-    if (hits_.size() == static_cast<std::size_t>(window) &&
-        std::count(hits_.begin(), hits_.end(), true) >= min_hits) return Result::kFound;
+    if (qualified_) return Result::kFound;
     if (completed_ >= max_observations) return Result::kFailed;
     BeginWindow(now);
     return Result::kRetry;
@@ -28,13 +29,15 @@ public:
   // Keep the window clock/count so target changes cannot reset retry limits.
   void DiscardDetections() {
     std::fill(hits_.begin(),hits_.end(),false);
+    qualified_=false;
   }
   double Elapsed(double now) const { return std::max(0.0, now - start_); }
 private:
   void BeginWindow(double now) {
-    start_ = now; hits_.clear();
+    start_ = now; hits_.clear(); qualified_=false;
   }
   std::deque<bool> hits_;
+  bool qualified_{false};
   int completed_{0};
   double start_{0.0};
 };

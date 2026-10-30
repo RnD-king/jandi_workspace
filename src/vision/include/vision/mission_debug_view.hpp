@@ -187,10 +187,11 @@ inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
       static_cast<int>(std::lround(det.box.width)),static_cast<int>(std::lround(det.box.height)));
   const auto clipped=box & cv::Rect(0,0,vis.cols,vis.rows);
   if (clipped.empty()) return;
-  cv::Scalar color(0,0,255); // GOAL and BACKBOARD
+  cv::Scalar color(0,0,255); // BACKBOARD
   const bool is_line=det.class_id==config.line_detection.class_id;
   if (is_line) color=line_outlier ? cv::Scalar(255,0,255) : cv::Scalar(0,255,0);
   else if (det.class_id==config.object_targets.ball_class_id) color=cv::Scalar(0,165,255);
+  else if (det.class_id==config.object_targets.goal_class_id) color=cv::Scalar(255,0,128);
   else if (det.class_id==config.object_targets.hurdle_class_id) color=cv::Scalar(0,255,255);
   cv::rectangle(vis,clipped,color,2);
   // A center belongs to a displayed tracking ID, not filter acceptance alone.
@@ -359,9 +360,6 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
               cv::FONT_HERSHEY_SIMPLEX,0.45,color,1,cv::LINE_AA);
         }
       }
-    } else if (camera.actual_mode==vision_core::CameraMode::kDown) {
-      draw_v_line(c.down_one_step_v_px,cv::Scalar(0,200,255));
-      draw_v_line(std::min(c.fine_mode_v_px,c.pickup_v1_px),cv::Scalar(0,100,255));
     }
   }
   if (selected_goal && (goal_cmd.mode == vision_core::GoalMode::kForwardApproach ||
@@ -423,7 +421,25 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   };
   const auto state=mission_result.terminal_hold ? std::string("HOLD / RESET REQUIRED") : view.control_state;
   add_row(header_rows,"CONTROL: "+state+" | RGB: LIVE",mission_result.terminal_hold ? cv::Scalar(0,0,255) : ball_color);
+  if (mission_result.approach_goal_search_failed)
+    add_row(header_rows,"GOAL SEARCH FAILED: empty view retry limit / RESET REQUIRED",cv::Scalar(0,0,255));
+  if (mission_result.approach_goal_depth_failed)
+    add_row(header_rows,"GOAL DEPTH FAILED: forward search exhausted / RESET REQUIRED",cv::Scalar(0,0,255));
   char buf[256];
+  if (goal_cmd.depth_recovery_active) {
+    std::snprintf(buf,sizeof(buf),"GOAL DEPTH recovery: forward %d / %d",
+        goal_cmd.depth_recovery_steps,config.goal.depth_recovery_max_steps);
+    add_row(header_rows,buf,cv::Scalar(0,200,255));
+  }
+  if (mission_result.approach_mission != vision_core::MissionType::kNone) {
+    std::snprintf(buf,sizeof(buf),"APPROACH %s id=%llu blocks=%d/%d %s miss=%d%s",
+        DebugMissionName(mission_result.approach_mission),
+        static_cast<unsigned long long>(mission_result.approach_track_id),
+        mission_result.approach_completed_blocks,config.object_approach.lock_blocks,
+        mission_result.approach_locked ? "LOCK" : "OPEN",mission_result.approach_missing_frames,
+        mission_result.approach_near ? " NEAR/DRAIN" : "");
+    add_row(header_rows,buf,text_color);
+  }
   std::snprintf(buf,sizeof(buf),"ACTION: %s | mission=%s",DebugActionName(mission_result.command.action),DebugMissionName(mission_result.active_mission));
   add_row(header_rows,std::string(buf)+" | "+DebugRepeatLabel(view.preview_ready ? mission_result.repeat_scope : view.approved_repeat_scope,config,&ball_cmd),text_color);
   const int ball_index=view.control_state=="WAIT_START" ? config.test_ball_mission_index : mission_result.ball_mission_index;
@@ -636,9 +652,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   std::snprintf(buf,sizeof(buf),"BALL v lines: 3-step=%.1fpx 2-step=%.1fpx",
       bc.approach_short_v_px,bc.approach_two_step_v_px);
   add_row(ball_approach_rows,buf,ball_color);
-  std::snprintf(buf,sizeof(buf),"DOWN 1-step=%.1fpx FINE=%.1fpx",
-      bc.down_one_step_v_px,std::min(bc.fine_mode_v_px,bc.pickup_v1_px));
-  add_row(ball_fine_rows,buf,ball_color);
+  add_row(ball_fine_rows,"DOWN: acquired ball -> FINE feet -> pickup rectangle",ball_color);
   std::snprintf(buf,sizeof(buf),"HURDLE v: 3-step=%.1fpx 2-step=%.1fpx",
       hc.approach_short_v_px,hc.approach_two_step_v_px);
   add_row(hurdle_approach_rows,buf,hurdle_color);
@@ -674,6 +688,11 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     std::snprintf(buf,sizeof(buf),"%s recovery | forward steps %d / %d | %s",
         ball_cmd.entry_recovery ? "ENTRY" : "FORWARD", ball_cmd.recovery_steps_completed,
         ball_cmd.recovery_step_limit, vision_core::BallController::ModeName(ball_cmd.mode));
+    add_row(ball_recovery_rows,buf,ball_color);
+  }
+  if (selected_ball && ball_cmd.mode==vision_core::BallMode::kBallRecoveryDown) {
+    std::snprintf(buf,sizeof(buf),"DOWN recovery | FINE attempts %d / %d | pickup rectangle",
+        ball_cmd.recovery_steps_completed,ball_cmd.recovery_step_limit);
     add_row(ball_recovery_rows,buf,ball_color);
   }
   if (selected_hurdle && (hurdle_cmd.mode==vision_core::HurdleMode::kRecoveryStep ||

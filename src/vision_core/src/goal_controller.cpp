@@ -160,6 +160,28 @@ void GoalController::StartForwardTrial() {
   ClearTracking();
 }
 
+void GoalController::EnterContinuousApproach(const ObjectTarget& target,
+    const GoalPoseObservation& pose,const std::deque<bool>& hits,
+    const std::deque<bool>& pose_hits,const std::deque<bool>& near_hits,
+    int width,int height,double now,bool lost) {
+  StartGoalTrial();
+  mode_=GoalMode::kApproach;
+  UseVerifiedObservation(target,pose,hits,pose_hits,width,height,near_hits);
+  entry_recovery_pending_=false;
+  if (lost) BeginLostRecovery(now,false,target.center_px.u);
+}
+
+void GoalController::EnterContinuousNear(const ObjectTarget& target,
+    const GoalPoseObservation& pose,const std::deque<bool>& hits,
+    const std::deque<bool>& pose_hits,const std::deque<bool>& near_hits,
+    int width,int height,double now,bool lost) {
+  StartGoalTrial();mode_=GoalMode::kWaitFinePose;
+  UseVerifiedObservation(target,pose,hits,pose_hits,width,height,near_hits);
+  entry_recovery_pending_=false;fine_trigger_latched_=true;
+  // Near loss is handled only after the real FINE stance DONE and fresh observation.
+  (void)now;(void)lost;
+}
+
 void GoalController::SetHasBall(bool has_ball) {
   if (!has_ball) {
     has_ball_ = false;
@@ -398,6 +420,44 @@ GoalController::FineAction(const GoalPoseObservation &pose) const {
                                   : MissionAction::kLeftSideStep);
 }
 
+void GoalController::BeginDepthRecovery(bool fine) {
+  depth_recovery_={};depth_recovery_.active=true;depth_recovery_.fine=fine;
+}
+
+GoalController::DepthRecoveryResult GoalController::StepDepthRecovery(
+    bool visible,bool usable,double now,const ActionExecutionFeedback& feedback,bool allow) {
+  DepthRecoveryResult result;
+  auto& d=depth_recovery_;
+  if (!d.active || (feedback.action_active && !feedback.action_done)) return result;
+  if (d.pending) {
+    if (!feedback.action_done) return result;
+    d.pending=false;++d.steps;d.observing=true;d.observer.Begin(now);
+    ClearTracking();return result;
+  }
+  if (!d.observing) {
+    if (!visible) { d.active=false;result.missing=true;return result; }
+    if (usable) { d.observing=true;d.observer.Begin(now); }
+    else {
+      if (d.steps>=config_.depth_recovery_max_steps) {
+        d.active=false;result.failed=true;return result;
+      }
+      result.action=Locomotion(d.fine ? MissionAction::kStepForwardHalf : MissionAction::kStepForwardOne);
+      if (allow) d.pending=true;
+      return result;
+    }
+  }
+  const auto status=d.observer.Observe(visible && usable,now,config_.stable_window,
+      config_.stable_min_hits,config_.recovery_observation_sec,1);
+  if (status==StationaryObjectRecovery::Result::kFound) {
+    d.active=false;d.steps=0;result.recovered=true;
+  } else if (status==StationaryObjectRecovery::Result::kFailed) {
+    d.observing=false;
+    if (!visible) { d.active=false;result.missing=true; }
+    else if (d.steps>=config_.depth_recovery_max_steps) { d.active=false;result.failed=true; }
+  }
+  return result;
+}
+
 GoalResult GoalController::Compute(
     const std::optional<ObjectTarget> &,
     const std::optional<ObjectTarget> &backboard,
@@ -449,6 +509,57 @@ GoalResult GoalController::Compute(
           ? ComputeShootYawRad(tracked_pose_.x_m, tracked_pose_.z_m,
                                tracked_pose_.yaw_rad)
           : shoot_yaw_rad_;
+  // Near commitment precedes coordinate-loss recovery, including image-visible
+  // boards whose depth is near but full pose estimation is temporarily invalid.
+  const bool far_recovery = mode_ == GoalMode::kRecoverySearch ||
+      ((mode_ == GoalMode::kRecoveryTurn || mode_ == GoalMode::kRecoveryForwardStep ||
+        mode_ == GoalMode::kRecoveryExtraTurn) && turn_resume_mode_ != GoalMode::kFineAdjust);
+  const bool approaching = mode_ == GoalMode::kSearch ||
+                           mode_ == GoalMode::kApproach || far_recovery;
+  const bool center_near=center_depth_m && std::isfinite(*center_depth_m) &&
+      *center_depth_m>0 && *center_depth_m<=config_.fine_adjust_start_z_m;
+  if (approaching && camera.actual_mode==CameraMode::kGoal && camera.settled) {
+    fine_trigger_latched_=fine_trigger_latched_ || PoseReadyForFineAdjust() ||
+        (tracked_.visible && tracked_.stable && center_near);
+    if (fine_trigger_latched_) {
+      if (!feedback.action_active || feedback.action_done) {
+        turn_pending_ = turn_done_ = false;
+        depth_recovery_ = {};
+        depth_recovery_in_mission_ = false;
+        mode_=GoalMode::kWaitFinePose;result.mode=mode_;
+        result.action=Locomotion(MissionAction::kDefaultPoseMode);
+      }
+      return result;
+    }
+  }
+  const bool fine_recovery_mode=mode_==GoalMode::kFineAdjust || mode_==GoalMode::kFineRecovery;
+  const bool depth_search_mode=mode_==GoalMode::kSearch || mode_==GoalMode::kApproach ||
+      mode_==GoalMode::kRecoverySearch || fine_recovery_mode;
+  if (!depth_recovery_in_mission_ && depth_search_mode && board_visible && !pose_valid &&
+      pose_lost_count_>=config_.lost_frames && camera.actual_mode==CameraMode::kGoal && camera.settled &&
+      !feedback.action_active && !turn_pending_) {
+    depth_recovery_resume_mode_=fine_recovery_mode ? GoalMode::kFineAdjust :
+        mode_==GoalMode::kApproach ? GoalMode::kApproach : GoalMode::kSearch;
+    BeginDepthRecovery(fine_recovery_mode);depth_recovery_in_mission_=true;
+    entry_recovery_pending_=false;
+    mode_=fine_recovery_mode ? GoalMode::kFineRecovery : GoalMode::kRecoverySearch;
+  }
+  if (depth_recovery_in_mission_) {
+    const auto recovery=StepDepthRecovery(board_visible,backboard && pose_valid,now_sec,feedback,allow_new_body_actions);
+    result.action=recovery.action;
+    if (recovery.recovered) {
+      depth_recovery_in_mission_=false;mode_=depth_recovery_resume_mode_;
+      recovery_turns_completed_=0;recovery_exhausted_=false;
+    } else if (recovery.failed) {
+      depth_recovery_in_mission_=false;mode_=GoalMode::kFailed;
+    } else if (recovery.missing) {
+      depth_recovery_in_mission_=false;mode_=depth_recovery_resume_mode_;
+      BeginLostRecovery(now_sec,mode_==GoalMode::kFineAdjust);
+    }
+    result.depth_recovery_active=depth_recovery_.active;
+    result.depth_recovery_steps=depth_recovery_.steps;
+    result.mode=mode_;return result;
+  }
   // A failed first GOAL-view window must not erase the direction seen
   // before the camera moved, or leave an unseen board in SEARCH forever.
   if (mode_ == GoalMode::kSearch && entry_recovery_pending_ &&
@@ -487,8 +598,7 @@ GoalResult GoalController::Compute(
     entry_recovery_pending_ = false;
   // The WALK boundary guard precedes ordinary distance/zone selection.
   const bool walk_approach = mode_ == GoalMode::kForwardApproach ||
-      mode_ == GoalMode::kSearch || mode_ == GoalMode::kApproach ||
-      mode_ == GoalMode::kCoarseAdjust;
+      mode_ == GoalMode::kSearch || mode_ == GoalMode::kApproach;
   if (walk_approach && image_width > 1 && camera.settled && backboard &&
       backboard->box_px.width > 0 && backboard->box_px.height > 0 && tracked_.stable &&
       !(feedback.action_active && !feedback.action_done)) {
@@ -601,14 +711,7 @@ GoalResult GoalController::Compute(
       result.mode = mode_;
       return result;
     }
-    const bool center_near = center_depth_m && std::isfinite(*center_depth_m) &&
-                             *center_depth_m > 0 &&
-                             *center_depth_m <= config_.fine_adjust_start_z_m;
-    if (PoseReadyForFineAdjust() ||
-        (tracked_.stable && tracked_.visible && center_near)) {
-      mode_ = GoalMode::kCoarseAdjust;
-      result.mode = mode_;
-    } else if (tracked_.stable && tracked_.visible) {
+    if (tracked_.stable && tracked_.visible) {
       mode_ = GoalMode::kApproach;
       result.mode = mode_;
       const auto decision = SelectCruiseDecision(
@@ -619,19 +722,6 @@ GoalResult GoalController::Compute(
     return result;
   }
   case GoalMode::kApproach: {
-    const bool center_near = center_depth_m && std::isfinite(*center_depth_m) &&
-                             *center_depth_m > 0 &&
-                             *center_depth_m <= config_.fine_adjust_start_z_m;
-    fine_trigger_latched_ =
-        fine_trigger_latched_ || PoseReadyForFineAdjust() ||
-        (tracked_.visible && tracked_.stable && center_near);
-    if (fine_trigger_latched_) {
-      if (feedback.action_active && !feedback.action_done)
-        return result;
-      mode_ = GoalMode::kCoarseAdjust;
-      result.mode = mode_;
-      return result;
-    }
     if (lost_count_ >= std::max(1, config_.lost_frames)) {
       if (!board_visible) BeginLostRecovery(now_sec, false);
       else { mode_=GoalMode::kRecoverySearch; stationary_recovery_.Begin(now_sec); }
@@ -646,51 +736,11 @@ GoalResult GoalController::Compute(
     result.action = Locomotion(GoalApproachWalk(decision.direction, center_depth_m.value_or(tracked_pose_.z_m) > 0 && center_depth_m.value_or(tracked_pose_.z_m) <= config_.approach_short_z_m));
     return result;
   }
-  case GoalMode::kCoarseAdjust: {
-    if (feedback.action_active && !feedback.action_done)
-      return result;
-    if (feedback.action_done && !verified)
-      return result;
-    if (!pose_valid) {
-      if (pose_lost_count_ >= config_.lost_frames) {
-        if (!board_visible && lost_count_ >= config_.lost_frames) {
-          BeginLostRecovery(now_sec, false);
-        } else {
-          mode_ = GoalMode::kCoarseRecovery;
-          ClearTracking();
-          stationary_recovery_.Begin(now_sec);
-        }
-        result.mode = mode_;
-      }
-      return result;
-    }
-    const double rim_x =
-        pose.x_m - config_.hoop_radius_m * std::sin(pose.yaw_rad);
-    const double rim_z =
-        pose.z_m - config_.hoop_radius_m * std::cos(pose.yaw_rad);
-    const double error = std::hypot(rim_x, rim_z) - ThrowRangeM();
-    result.fine_decision_pose = pose;
-    result.fine_decision_pose_used = true;
-    if (error >= config_.fine_one_step_range_error_m &&
-        error > config_.position_tolerance_m) {
-      // Use FINE's angular side-step criterion while still in WALK stance.
-      // Once close enough, switch stance before applying FINE corrections.
-      const double yaw_deg =
-          ComputeShootYawRad(pose.x_m, pose.z_m, pose.yaw_rad) * 180.0 / kPi;
-      if (std::abs(yaw_deg) > config_.shoot_yaw_limit_deg) {
-        result.action = Locomotion(yaw_deg < 0.0
-            ? MissionAction::kStepForwardRightOneHurdle
-            : MissionAction::kTurnLeftInPlace);
-      } else {
-        result.action = Locomotion(error >= config_.fine_two_step_range_error_m
-                                       ? MissionAction::kStepForwardTwo
-                                       : MissionAction::kStepForwardOne);
-      }
-    } else {
-      mode_ = GoalMode::kWaitFinePose;
-      result.mode = mode_;
-      result.action = Locomotion(MissionAction::kDefaultPoseMode);
-    }
+  case GoalMode::kCoarseAdjust:
+  case GoalMode::kCoarseRecovery: { // Reserved phase IDs; near always enters FINE.
+    if (feedback.action_active && !feedback.action_done) return result;
+    mode_=GoalMode::kWaitFinePose;result.mode=mode_;
+    result.action=Locomotion(MissionAction::kDefaultPoseMode);
     return result;
   }
   case GoalMode::kWaitFinePose:
@@ -704,9 +754,7 @@ GoalResult GoalController::Compute(
     }
     result.action = Locomotion(MissionAction::kDefaultPoseMode);
     return result;
-  case GoalMode::kCoarseRecovery:
   case GoalMode::kFineRecovery: {
-    const bool was_fine = mode_ == GoalMode::kFineRecovery;
     const auto status = stationary_recovery_.Observe(
         backboard.has_value() && pose_valid, now_sec, config_.stable_window,
         config_.stable_min_hits, config_.recovery_observation_sec,
@@ -714,7 +762,7 @@ GoalResult GoalController::Compute(
     if (status == StationaryObjectRecovery::Result::kFound) {
       recovery_turns_completed_ = 0;
       recovery_exhausted_ = false;
-      mode_ = was_fine ? GoalMode::kFineAdjust : GoalMode::kCoarseAdjust;
+      mode_ = GoalMode::kFineAdjust;
     } else if (status == StationaryObjectRecovery::Result::kFailed)
       mode_ = GoalMode::kFailed;
     else if (status == StationaryObjectRecovery::Result::kRetry)
@@ -899,9 +947,10 @@ GoalResult GoalController::Compute(
         backboard.has_value(), now_sec, config_.stable_window,
         config_.stable_min_hits, config_.recovery_observation_sec,
         config_.recovery_max_observations);
-    if (status == StationaryObjectRecovery::Result::kFound)
+    if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = GoalMode::kSearch;
-    else if (status == StationaryObjectRecovery::Result::kFailed)
+      recovery_turns_completed_=0;recovery_exhausted_=false;
+    } else if (status == StationaryObjectRecovery::Result::kFailed)
       mode_ = GoalMode::kFailed;
     else if (status == StationaryObjectRecovery::Result::kRetry)
       ClearTracking();
@@ -912,15 +961,6 @@ GoalResult GoalController::Compute(
     return result;
   }
   return result;
-}
-
-ActionRequest GoalController::SearchRecoveryAction() const {
-  const double error = last_seen_u_px_ - config_.target_u_px;
-  if (std::abs(error) <= config_.recovery_center_tolerance_px)
-    return {};
-  const MissionAction turn =
-      error < 0.0 ? MissionAction::kTurnLeft : MissionAction::kTurnRight;
-  return {turn, ActionCategory::kLocomotion, 15, false};
 }
 
 void GoalController::ObserveOnly(const std::optional<ObjectTarget> &target,
@@ -989,22 +1029,24 @@ void GoalController::BeginLostRecovery(double now_sec, bool fine,
     recovery_turns_completed_ = 0;
     mode_ = GoalMode::kRecoveryTurn;
   } else {
-    mode_ = fine ? GoalMode::kFineRecovery :
-        (turn_resume_mode_ == GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
+    mode_ = fine ? GoalMode::kFineRecovery : GoalMode::kRecoverySearch;
     stationary_recovery_.Begin(now_sec);
   }
   ClearTracking();
 }
 
 void GoalController::BeginStationaryRecovery(double now_sec) {
-  mode_ = turn_resume_mode_ == GoalMode::kFineAdjust ? GoalMode::kFineRecovery :
-      (turn_resume_mode_ == GoalMode::kCoarseAdjust ? GoalMode::kCoarseRecovery : GoalMode::kRecoverySearch);
+  mode_ = turn_resume_mode_ == GoalMode::kFineAdjust ? GoalMode::kFineRecovery : GoalMode::kRecoverySearch;
   turn_pending_ = turn_done_ = false;
   stationary_recovery_.Begin(now_sec);
   ClearTracking();
 }
 
-void GoalController::ClearObservationHistory() { ClearTracking(); }
+void GoalController::ClearObservationHistory() {
+  ClearTracking();
+  stationary_recovery_.DiscardDetections();
+  depth_recovery_.observer.DiscardDetections();
+}
 
 void GoalController::ClearTracking() {
   verified_observation_pending_ = false;
@@ -1023,6 +1065,8 @@ void GoalController::ClearTracking() {
 }
 
 void GoalController::Reset() {
+  depth_recovery_={};depth_recovery_in_mission_=false;
+  depth_recovery_resume_mode_=GoalMode::kSearch;
   entry_view_board_seen_ = entry_line_retry_pending_ = false;
   entry_line_retries_ = 0;
   edge_turns_completed_ = 0;

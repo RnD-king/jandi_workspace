@@ -26,12 +26,12 @@ vision_algorithm:
 
     stability:
       line_stable_window: 10
-      line_stable_min_hits: 7
+      line_stable_min_hits: 5
 
     # 라인 보행 방향 판단과 유실 복구
     walk:
       left_repetitions: 2
-      straight_repetitions: 3
+      straight_repetitions: 1
       right_repetitions: 2
       offset_gain: 0.3 # 게인 3개
       heading_gain: 0.3
@@ -39,15 +39,13 @@ vision_algorithm:
       in_place_turn_score: 0.5 # |라인 점수|가 이 값보다 크면 WALK 제자리 회전 1회 후 재관측
 
       ready_lead_sec: 0.20 # 비전 관측 계산과 실행기 READY 발행이 함께 읽는 종료 전 여유 시간
-      observation_start_ratio: 0.20 # LINE 수집 시작 비율 (0 이상 1 미만). 0.20=20%, 시작~READY에서 기존 1→3 가중평균
+      observation_start_ratio: 0.0 # ACK부터 마지막 READY까지 전체 프레임으로 10중 5 판정·유효 가이드 평균
 
       failure_observation_sec: 2.0 # 라인 복구 대기
       failure_min_valid_samples: 5 # 한 시퀀스에서 적어도 이 정도 프레임 동안은 관측되어야 한다~
       recovery_observation_sec: 1.0 # 두 유실 복구 경로의 회전 후 정지 관측 시간
       visible_recovery_max_turns: 5 # 1순위: 현재 점선 2개 이상, 평균 X 쪽으로 회전
-      visible_recovery_turn_yaw_deg: 15
-      last_score_recovery_max_turns: 5 # 2순위: 마지막 유효 점수 부호, 0/기록 없음은 우회전
-      last_score_recovery_turn_yaw_deg: 15
+      last_score_recovery_max_turns: 5 # 2순위: 마지막 유효 점수 부호; 0/기록 없음은 정지 관측 5회 후 FINAL HOLD
       recovery_max_turns: 5 # 유효한 |점수| > in_place_turn_score일 때 WALK 회전 보정 한도
 
   # Pixel thresholds refer to the actual input image (defaults: 640x480).
@@ -101,8 +99,6 @@ vision_algorithm:
       approach_direct_down_v_px: 355.0 # 8번 중앙 가로선 (1걸음 후 down)
 
       # DOWN 접근·미세조정
-      down_one_step_v_px: 0.0 # 위 가로선 (2걸음)
-      fine_mode_v_px: 1 # 아래 가로선 (1걸음 / 미세보행)  < pickup_v1_px
       fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
       fine_motion:
         max_repetitions: 3 # 같은 방향만 최대 3회. 아래 값은 DOWN 화면의 공 중심 변화량.
@@ -132,6 +128,7 @@ vision_algorithm:
       recovery_walk_turn_max: 3 # 중간 좌/우(4·6) 구역의 회전 후 제자리 관측 한도
       recovery_max_steps: 3 # 일반 FORWARD 유실: 좌우 회전 후/중앙 정지 관측 후 1걸음, 전진 한도
       entry_recovery_max_steps: 1 # 진입 직후 첫 관측 실패의 전진 한도; 소진 후 공 없이 LINE 복귀
+      down_recovery_max_actions: 3 # DOWN 유실: 마지막 pickup 사각형 기준 방향으로 FINE 1회→관측, 한도 후 실패
       recovery_center_tolerance_px: 50 # 복구 방향 선택 기준 - 중앙에서 얼마나
 
   # HURDLE: 검출·Depth 필터 → 후보 추적 → 미션 동작
@@ -239,16 +236,12 @@ vision_algorithm:
       fine_adjust_start_z_m: 0.80 # GOAL 카메라에서 근거리 접근 진입 기준
       camera_goal_start_z_m: 0.80 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
 
-      # 근거리 접근
-      fine_two_step_range_error_m: 0.30 # 2걸음 → 1걸음 경계
-      fine_one_step_range_error_m: 0.15 # 1걸음 → 미세조정 경계
-
       # 투척 위치·방향
       hoop_radius_m: 0.10 # 림 위치 보정에 사용하는 반지름
       throw_landing_x_m: -0.12 # 카메라 기준 허리 0도 공 낙하 X (m)
       throw_landing_z_m: 0.45 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
       position_tolerance_m: 0.06 # 목표 거리의 허용 오차
-      shoot_yaw_limit_deg: 20.0 # ±이 값: COARSE 회전 및 FINE 투척/좌우 이동 판단 기준
+      shoot_yaw_limit_deg: 20.0 # ±이 값: FINE 투척 허리각 및 좌우 미세 이동 판단 기준
       edge_margin_px: 50.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
 
       # 투척 후 복귀
@@ -256,6 +249,7 @@ vision_algorithm:
 
       # 유실 복구
       recovery_turn_max: 5 # 좌우 탐색 회전 한도. 재발견 뒤 같은 방향 추가 1회전은 별도
+      depth_recovery_max_steps: 3 # 백보드는 보이나 Depth/좌표 실패: WALK 1걸음 또는 FINE 전진→정지 관측, 소진 시 실패
       recovery_observation_sec: 1.0
       recovery_max_observations: 5
       recovery_center_tolerance_px: 1 # 마지막 안정 위치가 target_u_px ±이 값이면 WALK 1걸음/FINE 미세 1회 전진 후 관측
@@ -277,13 +271,22 @@ vision_algorithm:
 
     # 여러 미션에 공통으로 적용되는 설정
     mission:
+      # AUTO: LINE→원거리 객체를 항상 공통 O/H·32/33/34 보행으로 추종.
+      object_approach:
+        lock_blocks: 3 # 같은 ID의 보행 묶음 전체가 실제 DONE된 횟수 (전송/ACK/READY 아님)
+        blend_frames: 5 # LINE→가상 경로의 전환 프레임 수
+        goal_empty_max_retries: 3 # 최초 GOAL 확인 후 FORWARD→LINE 1묶음→GOAL 재확인 한도; 소진 시 FINAL HOLD
+        reference_v_ratio: 0.80 # 실제 LINE 기준 높이를 못 구하는 GOAL 뷰의 기준
+        # 임시값: 사용자 요청으로 우선 사용. 광학 중심의 몸통 기준 위치/자세를 실측 후 교체!
+        # 위치: 오른쪽/위/전방 +m. 각도: 아래로 pitch+, 오른쪽으로 yaw+ (모터 tick 아님).
+        forward_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 20.0, yaw_deg: 0.0}
+        goal_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 0.0, yaw_deg: 0.0}
       candidate_search_max_turns: 2
       test_mission: 0 # 0 전체 미션, 2 공, 3 골대, 4 허들
       test_stage: 0 # 0 전체 과정, 1 접근, 2 정렬, 3 실행
 
       # 미션 전후 라인 복구
       mission_recovery_max_turns: 30 # 미션 전후 라인 복구 최대 회전 횟수
-      mission_recovery_yaw_deg: 15 # 미션 전후 라인 복구 요청 각도 (도)
 
       # 카메라 전환 완료 제한
       camera_motion_timeout_sec: 30.0 # 카메라 전환 완료를 기다리는 제한 시간 (초)

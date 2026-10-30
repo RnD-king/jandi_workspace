@@ -37,9 +37,8 @@ struct GoalConfig {
   int recovery_turn_max{3};
   double recovery_observation_sec{};
   int recovery_max_observations{};
+  int depth_recovery_max_steps{};
   double approach_short_z_m{};
-  double fine_one_step_range_error_m{};
-  double fine_two_step_range_error_m{};
   double camera_goal_start_z_m{};
   int post_shoot_back_steps{};
   int stable_window{};
@@ -97,6 +96,8 @@ struct TrackedGoal {
 };
 
 struct GoalResult {
+  bool depth_recovery_active{false};
+  int depth_recovery_steps{0};
   int entry_line_retries{0};
   int detection_hits{0}, detection_frames{0}, lost_frames{0}, pose_lost_frames{0};
   int recovery_observations_completed{0};
@@ -115,6 +116,17 @@ struct GoalResult {
 
 class GoalController {
 public:
+  struct DepthRecoveryResult {
+    ActionRequest action;
+    bool recovered{false}, failed{false}, missing{false};
+  };
+  void BeginDepthRecovery(bool fine);
+  // Clear this observation episode only; transport still owns any issued action.
+  void ClearDepthRecovery() { depth_recovery_ = {}; depth_recovery_in_mission_ = false; }
+  DepthRecoveryResult StepDepthRecovery(bool visible,bool usable,double now,
+      const ActionExecutionFeedback&,bool allow);
+  bool DepthRecoveryActive() const { return depth_recovery_.active; }
+  int DepthRecoverySteps() const { return depth_recovery_.steps; }
   bool CanEnterFromLine() const { return has_ball_ && goal_entry_armed_ && !ball_consumed_; }
   bool EntryLineRetryPending() const { return entry_line_retry_pending_; }
   int EntryLineRetries() const { return entry_line_retries_; }
@@ -130,6 +142,15 @@ public:
   GoalController();
   GoalController(const GoalConfig &config, double camera_motion_timeout_sec);
   void StartAfterPickup(double now_sec);
+  void EnterContinuousApproach(const ObjectTarget&,const GoalPoseObservation&,
+      const std::deque<bool>& hits,const std::deque<bool>& pose_hits,
+      const std::deque<bool>& near_hits,int width,int height,double now,bool lost);
+  void EnterContinuousNear(const ObjectTarget&,const GoalPoseObservation&,
+      const std::deque<bool>& hits,const std::deque<bool>& pose_hits,
+      const std::deque<bool>& near_hits,int width,int height,double now,bool lost);
+  const std::deque<bool>& ObservationHits() const { return hit_history_; }
+  const std::deque<bool>& PoseObservationHits() const { return pose_hit_history_; }
+  const std::deque<bool>& NearObservationHits() const { return fine_enter_history_; }
   void StartForwardTrial();
   void StartGoalTrial() { Reset(); StartAfterPickup(0); mode_=GoalMode::kWaitCameraGoal; }
   void StartTestNear() { StartGoalTrial(); }
@@ -143,12 +164,16 @@ public:
         pose_hit_history_.size()>=static_cast<std::size_t>(config_.stable_window);
   }
   int RecoveryTurnsCompleted() const { return recovery_turns_completed_; }
-  int RecoveryObservationsCompleted() const { return stationary_recovery_.Completed(); }
+  int RecoveryObservationsCompleted() const {
+    return depth_recovery_.active ? depth_recovery_.observer.Completed() : stationary_recovery_.Completed();
+  }
   int LostFrames() const { return lost_count_; }
   int PoseLostFrames() const { return pose_lost_count_; }
   int DetectionFrames() const { return static_cast<int>(hit_history_.size()); }
   int DetectionHits() const { return static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true)); }
-  double RecoveryObservationElapsed(double now) const { return stationary_recovery_.Elapsed(now); }
+  double RecoveryObservationElapsed(double now) const {
+    return depth_recovery_.active ? depth_recovery_.observer.Elapsed(now) : stationary_recovery_.Elapsed(now);
+  }
   GoalResult Compute(const std::optional<ObjectTarget> &goal_target,
                      const std::optional<ObjectTarget> &backboard_target,
                      const GoalPoseObservation &goal_pose,
@@ -167,7 +192,6 @@ public:
   void ClearObservationHistory();
   void InvalidateDetectionEvidence() {
     ClearObservationHistory();
-    stationary_recovery_.DiscardDetections();
     ClearMovingApproachTriggers();
   }
   // When validated moving READY evidence replaces in-motion samples at
@@ -216,7 +240,6 @@ private:
   double LandingErrorM(double rim_x_m, double rim_z_m, double shoot_yaw_rad) const;
   double ThrowRangeM() const;
   void ClearTracking();
-  ActionRequest SearchRecoveryAction() const;
 
   GoalConfig config_;
   double camera_motion_timeout_sec_{};
@@ -270,6 +293,13 @@ private:
   int completed_back_steps_{0};
   bool back_away_issued_{false};
   StationaryObjectRecovery stationary_recovery_;
+  struct DepthRecovery {
+    bool active{false}, fine{false}, pending{false}, observing{false};
+    int steps{0};
+    StationaryObjectRecovery observer;
+  } depth_recovery_;
+  bool depth_recovery_in_mission_{false};
+  GoalMode depth_recovery_resume_mode_{GoalMode::kSearch};
 };
 
 } // namespace vision_core

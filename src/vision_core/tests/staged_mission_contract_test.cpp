@@ -83,7 +83,7 @@ void FarStageStopsAfterCamera(MissionType mission) {
     t.in.hurdle_target=Target(320,400); // grid zone 8
   if(mission==MissionType::kGoal) {
     t.in.backboard_center_depth_m=1.5;
-    t.in.goal_pose={};
+    t.in.goal_pose={true,0,1.5,0,1};
   }
   t.PrepareStage(mission,1);
   assert(t.out.foot_pose==FootPose::kWalk);
@@ -107,6 +107,8 @@ void FarStageStopsAfterCamera(MissionType mission) {
     t.in.backboard_center_depth_m=.7;
     for(int n=0;n<10 && !t.out.trial_complete;++n)t.Tick();
     assert(t.out.trial_complete);
+    assert(t.out.goal.mode==GoalMode::kWaitFinePose);
+    assert(t.out.foot_pose==FootPose::kWalk && t.Preview().command.action==MissionAction::kNone);
   }
   assert(t.out.command.action_id==0);
 }
@@ -256,6 +258,8 @@ void ExecuteStageCompletesRecovery(MissionType mission) {
       case MissionAction::kHurdle: ++crossed; break;
       case MissionAction::kTurnLeft:
       case MissionAction::kTurnRight:
+      case MissionAction::kTurnLeftInPlace:
+      case MissionAction::kStepForwardRightOneHurdle:
         ++turned;
         t.in.line_centers={{420,450},{420,350},{420,250},{420,150}};
         break;
@@ -324,8 +328,8 @@ void NearGoalWithoutPoseCannotStride() {
   goal.Compute({}, {}, {},640,480,0,true,camera,{});
   GoalResult result;
   for(int i=0;i<8;++i) result=goal.Compute({},Target(),{},640,480,.12*(i+1),true,camera,{},true,.5);
-  assert(result.mode==GoalMode::kCoarseAdjust || result.mode==GoalMode::kCoarseRecovery);
-  assert(result.action.action==MissionAction::kNone);
+  assert(result.mode==GoalMode::kWaitFinePose);
+  assert(result.action.action==MissionAction::kDefaultPoseMode); // Pose first, never a WALK stride.
 }
 void AutoPoseDonePrecedesFreshObservation() {
   auto c=Config(MissionType::kBall,2);MissionController core(c);MissionFrameInput in;

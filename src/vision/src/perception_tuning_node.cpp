@@ -188,16 +188,12 @@ public:
     declare_parameter<double>("line_p2p_offset_gain", algorithm_defaults.line_p2p.offset_gain);
     declare_parameter<double>("line_p2p_heading_gain", algorithm_defaults.line_p2p.heading_gain);
     declare_parameter<double>("line_p2p_steering_deadband", algorithm_defaults.line_p2p.steering_deadband);
-    declare_parameter<double>("ball_down_one_step_v_px", algorithm_defaults.ball.down_one_step_v_px);
-    declare_parameter<double>("ball_fine_mode_v_px", algorithm_defaults.ball.fine_mode_v_px);
     declare_parameter<double>("ball_approach_short_v_px", algorithm_defaults.ball.approach_short_v_px);
     declare_parameter<double>("hurdle_down_one_step_v_px", algorithm_defaults.hurdle.down_one_step_v_px);
     declare_parameter<double>("hurdle_fine_mode_v_px", algorithm_defaults.hurdle.fine_mode_v_px);
     declare_parameter<double>("hurdle_approach_short_v_px", algorithm_defaults.hurdle.approach_short_v_px);
     declare_parameter<double>("hurdle_target_u_px", algorithm_defaults.hurdle.target_u_px);
     declare_parameter<double>("hurdle_contact_v_px", algorithm_defaults.hurdle.contact_v_px);
-    declare_parameter<double>("goal_fine_one_step_range_error_m",algorithm_defaults.goal.fine_one_step_range_error_m);
-    declare_parameter<double>("goal_fine_two_step_range_error_m",algorithm_defaults.goal.fine_two_step_range_error_m);
     declare_parameter<double>("goal_approach_short_z_m", algorithm_defaults.goal.approach_short_z_m);
     declare_parameter<double>("goal_camera_goal_start_z_m", algorithm_defaults.goal.camera_goal_start_z_m);
     declare_parameter<int>("mission_recovery_max_turns",algorithm_defaults.mission_recovery_max_turns);
@@ -413,16 +409,12 @@ public:
     mission_config.mission_recovery_max_turns=static_cast<int>(get_parameter("mission_recovery_max_turns").as_int());
     mission_config.test_ball_mission_index=static_cast<int>(get_parameter("test_ball_mission_index").as_int());
     mission_config.test_goal_mission_index=static_cast<int>(get_parameter("test_goal_mission_index").as_int());
-    mission_config.ball.down_one_step_v_px=get_parameter("ball_down_one_step_v_px").as_double();
-    mission_config.ball.fine_mode_v_px=get_parameter("ball_fine_mode_v_px").as_double();
     mission_config.ball.approach_short_v_px=get_parameter("ball_approach_short_v_px").as_double();
     mission_config.hurdle.down_one_step_v_px=get_parameter("hurdle_down_one_step_v_px").as_double();
     mission_config.hurdle.fine_mode_v_px=get_parameter("hurdle_fine_mode_v_px").as_double();
     mission_config.hurdle.approach_short_v_px=get_parameter("hurdle_approach_short_v_px").as_double();
     mission_config.hurdle.target_u_px=get_parameter("hurdle_target_u_px").as_double();
     mission_config.hurdle.contact_v_px=get_parameter("hurdle_contact_v_px").as_double();
-    mission_config.goal.fine_one_step_range_error_m=get_parameter("goal_fine_one_step_range_error_m").as_double();
-    mission_config.goal.fine_two_step_range_error_m=get_parameter("goal_fine_two_step_range_error_m").as_double();
     mission_config.goal.approach_short_z_m=get_parameter("goal_approach_short_z_m").as_double();
     mission_config.goal.camera_goal_start_z_m=get_parameter("goal_camera_goal_start_z_m").as_double();
 
@@ -507,7 +499,7 @@ public:
           if (direct_goal_start) run_state_=RunState::kRunning;
           else BeginFreshObservation(get_clock()->now().seconds());
           response->success = true;
-          response->message = direct_goal_start ? "START accepted; preparing GOAL camera" : "START accepted; observing for 1.0 s";
+          response->message = direct_goal_start ? "START accepted; preparing GOAL camera" : "START accepted; observing for at least 1.0 s and a full LINE window";
           RCLCPP_INFO(get_logger(), "[CONTROL] %s", response->message.c_str());
         });
     preview_service_ = create_service<std_srvs::srv::Trigger>(
@@ -906,10 +898,6 @@ private:
       else if (name == "fine_motion_settle_sec") target=&candidate.fine_motion_settle_sec;
       else if (name == "goal_edge_margin_px") target=&candidate.goal.edge_margin_px;
       else if (name == "ball_fine_side_two_step_margin_px") target=&candidate.ball.fine_side_two_step_margin_px;
-      else if (name == "goal_fine_one_step_range_error_m") target=&candidate.goal.fine_one_step_range_error_m;
-      else if (name == "goal_fine_two_step_range_error_m") target=&candidate.goal.fine_two_step_range_error_m;
-      else if (name == "ball_down_one_step_v_px") target=&candidate.ball.down_one_step_v_px;
-      else if (name == "ball_fine_mode_v_px") target=&candidate.ball.fine_mode_v_px;
       else if (name == "ball_approach_short_v_px") target = &candidate.ball.approach_short_v_px;
       else if (name == "hurdle_down_one_step_v_px") target=&candidate.hurdle.down_one_step_v_px;
       else if (name == "hurdle_fine_mode_v_px") target=&candidate.hurdle.fine_mode_v_px;
@@ -1131,7 +1119,11 @@ private:
       result.line_decision_guide_override = cached_ready_guide_;
       return result;
     }
-    if (window.size() < 10) return std::nullopt;
+    const int stable_window = mission==vision_core::MissionType::kBall ? tuning_config_.ball.stable_window :
+        mission==vision_core::MissionType::kGoal ? tuning_config_.goal.stable_window : tuning_config_.hurdle.stable_window;
+    const int minimum_hits = mission==vision_core::MissionType::kBall ? tuning_config_.ball.stable_min_hits :
+        mission==vision_core::MissionType::kGoal ? tuning_config_.goal.stable_min_hits : tuning_config_.hurdle.stable_min_hits;
+    if (window.size() < static_cast<std::size_t>(stable_window)) return std::nullopt;
     const auto target_of = [mission](const ReadyMotionSample &sample)
         -> const std::optional<vision_core::ObjectTarget> & {
       if (mission == vision_core::MissionType::kBall)
@@ -1140,34 +1132,44 @@ private:
         return sample.prepared.targets.backboard;
       return sample.prepared.targets.hurdle;
     };
-    int last_ten_hits = 0;
-    for (std::size_t j = window.size() - 10; j < window.size(); ++j)
-      if (target_of(*window[j])) ++last_ten_hits;
-    if (last_ten_hits < 7) return std::nullopt;
     const bool identity_tracking = mission==vision_core::MissionType::kBall ? tuning_config_.ball_candidate_tracking.enabled :
         mission==vision_core::MissionType::kHurdle ? tuning_config_.hurdle_candidate_tracking.enabled :
         tuning_config_.backboard_candidate_tracking.enabled;
+    const auto id_of = [mission](const vision_core::PreparedPerceptionFrame& frame) {
+      return mission==vision_core::MissionType::kBall ? frame.ball_target_id :
+          mission==vision_core::MissionType::kHurdle ? frame.hurdle_target_id : frame.backboard_target_id;
+    };
+    std::uint64_t selected_id=0;
     if(identity_tracking) {
-      const auto id_of = [mission](const vision_core::PreparedPerceptionFrame& frame) {
-        return mission==vision_core::MissionType::kBall ? frame.ball_target_id :
-            mission==vision_core::MissionType::kHurdle ? frame.hurdle_target_id : frame.backboard_target_id;
-      };
-      const auto id=id_of(window.back()->prepared);
-      if(!id) return std::nullopt;
-      for(const auto* sample:window) if(target_of(*sample) && id_of(sample->prepared)!=id)
-        return std::nullopt;
-      if(mission==vision_core::MissionType::kBall) result.ball_target_id=id;
-      else if(mission==vision_core::MissionType::kHurdle) result.hurdle_target_id=id;
-      else result.backboard_target_id=id;
+      for (auto it=window.rbegin();it!=window.rend();++it)
+        if (target_of(**it) && id_of((*it)->prepared)) { selected_id=id_of((*it)->prepared);break; }
+      if(!selected_id) return std::nullopt;
+      if(mission==vision_core::MissionType::kBall) result.ball_target_id=selected_id;
+      else if(mission==vision_core::MissionType::kHurdle) result.hurdle_target_id=selected_id;
+      else result.backboard_target_id=selected_id;
     }
+    const auto valid_target = [&](const ReadyMotionSample &sample) {
+      return target_of(sample).has_value() &&
+          (!identity_tracking || id_of(sample.prepared)==selected_id);
+    };
+    std::optional<std::size_t> qualified_start;
+    int recent_hits=0;
+    for (std::size_t j=0;j<window.size();++j) {
+      recent_hits+=valid_target(*window[j]) ? 1 : 0;
+      if (j>=static_cast<std::size_t>(stable_window))
+        recent_hits-=valid_target(*window[j-stable_window]) ? 1 : 0;
+      if (j+1>=static_cast<std::size_t>(stable_window) && recent_hits>=minimum_hits)
+        qualified_start=j+1-stable_window;
+    }
+    if (!qualified_start) return std::nullopt;
 
     result.manual_object_hits.clear();
     result.manual_pose_hits.clear();
     result.manual_near_hits.clear();
-    for (std::size_t j = window.size()-10; j < window.size(); ++j) {
-      result.manual_object_hits.push_back(target_of(*window[j]).has_value());
+    for (std::size_t j = *qualified_start; j < *qualified_start+stable_window; ++j) {
+      result.manual_object_hits.push_back(valid_target(*window[j]));
       const auto& pose=window[j]->prepared.goal_pose;
-      result.manual_pose_hits.push_back(target_of(*window[j]) && pose.valid &&
+      result.manual_pose_hits.push_back(valid_target(*window[j]) && pose.valid &&
           std::isfinite(pose.x_m) && std::isfinite(pose.z_m) && pose.z_m>0 &&
           std::isfinite(pose.yaw_rad));
       result.manual_near_hits.push_back(result.manual_pose_hits.back() && pose.z_m<=tuning_config_.goal.fine_adjust_start_z_m);
@@ -1179,8 +1181,8 @@ private:
     double object_weight=0.0;
     int class_id=0;
     for (const auto *sample : window) {
+      if (!valid_target(*sample)) continue;
       const auto &obj = target_of(*sample);
-      if (!obj) continue;
       ++hits;
       class_id = obj->class_id;
       const double weight=mission==vision_core::MissionType::kGoal ? 1.0 :
@@ -1210,16 +1212,16 @@ private:
         }
       }
     }
-    if (hits < 7) return std::nullopt;
-    if (mission == vision_core::MissionType::kGoal && center_hits < 7)
+    if (hits < minimum_hits) return std::nullopt;
+    if (mission == vision_core::MissionType::kGoal && center_hits < minimum_hits)
       return std::nullopt;
     vision_core::PerceptionDetection mean;
     mean.detection.class_id = class_id;
     mean.detection.confidence = confidence / object_weight;
     mean.detection.box = {sx / object_weight, sy / object_weight, sw / object_weight, sh / object_weight};
-    if (center_hits >= 7) mean.center_depth_m = center_depth / center_hits;
-    if (left_hits >= 7) { mean.left_depth_m = left_depth / left_hits; mean.left_depth_u_px=left_u/left_hits; }
-    if (right_hits >= 7) { mean.right_depth_m = right_depth / right_hits; mean.right_depth_u_px=right_u/right_hits; }
+    if (center_hits >= minimum_hits) mean.center_depth_m = center_depth / center_hits;
+    if (left_hits >= minimum_hits) { mean.left_depth_m = left_depth / left_hits; mean.left_depth_u_px=left_u/left_hits; }
+    if (right_hits >= minimum_hits) { mean.right_depth_m = right_depth / right_hits; mean.right_depth_u_px=right_u/right_hits; }
     // Only the tracked object corresponding to the committed mission may
     // generate the next object Action; no competing old RGB detections.
     result.detections.clear();
@@ -1476,7 +1478,7 @@ private:
       vision_core::MissionAction action) const {
     switch (action) {
     case vision_core::MissionAction::kLineStraightUnit:
-      return simulate_step_forward_one_duration_sec_;
+      return 2.0 * simulate_step_forward_one_duration_sec_;
     case vision_core::MissionAction::kLineLeftUnit:
     case vision_core::MissionAction::kLineRightUnit:
       return simulate_curve_step_duration_sec_ / 3.0;
@@ -1998,13 +2000,15 @@ private:
     const bool finishing_observation =
         run_state_ == RunState::kObserving &&
         frame_now_sec - observation_start_sec_ >= observation_required_sec_ &&
+        (manual_observation_session_ ||
+         observation_accumulator_.HasFullWindow(observation_cycle_id_)) &&
         (!manual_observation_session_ || mission_controller_->ManualObservationCanFinish(perception_input.now_sec));
     perception_input.allow_new_commands =
         run_state_ == RunState::kRunning || finishing_observation;
     const bool continuing_repeat=authorized_repeat_scope_!=0 &&
         mission_controller_->RepeatScope()==authorized_repeat_scope_ && run_state_==RunState::kRunning;
     perception_input.allow_new_body_actions = continuing_repeat;
-    // One manual COMMIT authorizes one complete 3/4/3 block. It does not
+    // One manual COMMIT authorizes one complete configured LINE block. It does not
     // authorize the next block at the current block's final READY.
     perception_input.allow_new_line_plan = !continuing_repeat;
     const bool stage_setup_was_pending =
@@ -2215,7 +2219,7 @@ private:
                 vision_core::CameraRequest::kNone)
           EnterWaitPreview(frame_now_sec);
         RCLCPP_INFO(get_logger(),
-                    "[CONTROL] fresh 1s observation finished: %s",
+                    "[CONTROL] fresh observation finished: %s",
                     preview_ready_ ? "WAIT_COMMIT" : "WAIT_PREVIEW or camera");
       } else {
         observation_accumulator_.Add(

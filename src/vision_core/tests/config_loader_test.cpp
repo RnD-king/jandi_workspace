@@ -13,7 +13,9 @@
 static void Reject(const std::string &yaml, const std::string &from,
                    const std::string &to) {
   std::string bad = yaml;
-  const auto pos = bad.find(from); assert(pos != std::string::npos);
+  const auto pos = bad.find(from);
+  if(pos==std::string::npos) std::fprintf(stderr,"Missing fixture key: %s\n",from.c_str());
+  assert(pos != std::string::npos);
   bad.replace(pos, from.size(), to);
   const char *path = "invalid_algorithm.yaml";
   { std::ofstream out(path); out << bad; }
@@ -87,6 +89,11 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.object_association.max_center_distance_norm==baseline.object_association.max_center_distance_norm);
   assert(c.command.first_action_id==baseline.command.first_action_id);
   assert(c.object_ready_mean_actions==baseline.object_ready_mean_actions);
+  assert(c.object_approach.lock_blocks==3);
+  assert(c.object_approach.goal_empty_max_retries==3);
+  root["vision_algorithm"]["common"]["mission"]["object_approach"]["forward_camera"]["right_m"]=-.07;
+  const auto continuous=LoadText(YAML::Dump(root));
+  assert(continuous.object_approach.forward_camera.right_m==-.07);
   auto a=root["vision_algorithm"];
   // Distinct values detect accidental cross-object filter/tracker wiring.
   a["ball"]["detection"]["class_id"]=11;
@@ -150,12 +157,10 @@ int main(int argc, char **argv) {
   assert(c.ball.fine_motion.max_repetitions==3 && !c.ball.fine_motion.HasCalibration());
   assert(defaults.command.first_action_id != 0);
   assert(c.line_p2p.failure_min_valid_samples == 5);
-  assert(c.line_p2p.observation_start_ratio == .40);
+  assert(c.line_p2p.observation_start_ratio == 0.0);
   assert(c.line_p2p.recovery_max_turns == 5);
   assert(c.line_p2p.visible_recovery_max_turns == 5);
-  assert(c.line_p2p.visible_recovery_turn_yaw_deg == 15);
   assert(c.line_p2p.last_score_recovery_max_turns == 5);
-  assert(c.line_p2p.last_score_recovery_turn_yaw_deg == 15);
   assert(c.goal.shoot_yaw_limit_deg == 30.0);
   assert(c.hurdle.stable_window == 10);
   assert(c.hurdle.stable_min_hits == 7);
@@ -179,8 +184,6 @@ int main(int argc, char **argv) {
   assert(c.ball.pickup_u2_px == 385);
   assert(c.ball.pickup_v1_px == 80);
   assert(c.ball.pickup_v2_px == 130);
-  assert(c.ball.down_one_step_v_px == 0);
-  assert(c.ball.fine_mode_v_px == 10);
   assert(c.ball.pickup_max_attempts == 100);
   assert(c.ball.pickup_verify_min_hits == 3);
   assert(c.goal.entry_line_retry_max_attempts == 3);
@@ -190,8 +193,6 @@ int main(int argc, char **argv) {
   assert(c.hurdle.down_search_inter_action_hold_sec == 0.0);
   assert(c.hurdle.down_one_step_v_px == 100);
   assert(c.hurdle.fine_mode_v_px == 180);
-  assert(c.goal.fine_one_step_range_error_m == 0.15);
-  assert(c.goal.fine_two_step_range_error_m == 0.30);
   assert(c.backboard_max_depth_m == 2.50);
   assert(c.line_features.image_center_u == 410.0);
   assert(c.camera_motion_timeout_sec == 3.0);
@@ -203,10 +204,20 @@ int main(int argc, char **argv) {
   assert(c.line_features.ransac_max_outliers==2);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
   CheckGroupedConfiguration(text.str());
+  // Old F/T configuration must fail explicitly, never silently restore or
+  // appear to select a second AUTO approach policy.
+  for (const auto* old_value : {"false", "true"})
+    Reject(text.str(), "  mission:\n",
+           std::string("  mission:\n    object_approach_continous: ") + old_value + "\n");
+  Reject(text.str(),"lock_blocks: 3","lock_blocks: 0");
+  Reject(text.str(),"goal_empty_max_retries: 3","goal_empty_max_retries: -1");
+  Reject(text.str(),"down_recovery_max_actions: 3","down_recovery_max_actions: 0");
+  Reject(text.str(),"depth_recovery_max_steps: 3","depth_recovery_max_steps: 0");
+  Reject(text.str(),"reference_v_ratio: 0.80","reference_v_ratio: .nan");
   for (const auto* value : {"-0.1", "1.0", "1.1", ".nan", ".inf"})
-    Reject(text.str(), "observation_start_ratio: 0.40",
+    Reject(text.str(), "observation_start_ratio: 0.0",
            std::string("observation_start_ratio: ") + value);
-  Reject(text.str(), "observation_start_ratio: 0.40", "");
+  Reject(text.str(), "observation_start_ratio: 0.0", "");
   auto ratio_yaml = GroupedFixture(text.str());
   ratio_yaml["vision_algorithm"]["line"]["walk"]["observation_start_ratio"] = .20;
   assert(LoadText(YAML::Dump(ratio_yaml)).line_p2p.observation_start_ratio == .20);
@@ -408,7 +419,7 @@ int main(int argc, char **argv) {
          "camera_motion_timeout_sec: .inf");
   Reject(text.str(), "heading_gain: 0.3", "heading_gain: -1.0");
   Reject(text.str(), "steering_deadband: 0.10", "steering_deadband: -0.1");
-  Reject(text.str(), "line_stable_min_hits: 7", "line_stable_min_hits: 11");
+  Reject(text.str(), "line_stable_min_hits: 5", "line_stable_min_hits: 11");
   Reject(text.str(), "failure_min_valid_samples: 5",
          "failure_min_valid_samples: 0");
   Reject(text.str(), "pickup_u1_px: 310", "pickup_u1_px: -1.0");
@@ -466,13 +477,6 @@ int main(int argc, char **argv) {
          "action_ack_timeout_sec: .nan");
   Reject(text.str(), "backboard_min_depth_m: 0.20",
          "backboard_min_depth_m: 6.00");
-  for (const auto *key : {"visible_recovery_turn_yaw_deg",
-                          "last_score_recovery_turn_yaw_deg"}) {
-    const auto original = std::string(key) + ": 15";
-    for (const auto *value : {"0", "181", ".nan"})
-      Reject(text.str(), original, std::string(key) + ": " + value);
-    Reject(text.str(), original, "");
-  }
   for (const auto *key : {"visible_recovery_max_turns", "last_score_recovery_max_turns"}) {
     const auto original = std::string(key) + ": 5";
     Reject(text.str(), original, std::string(key) + ": -1");

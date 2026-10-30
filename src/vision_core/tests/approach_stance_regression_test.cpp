@@ -15,8 +15,7 @@ void BallStages() {
   c.entry_min_hits=1; c.down_search_min_hits=1; c.stable_window=c.stable_min_hits=1;
   c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.lost_frames=1;
-  // Isolate legacy two-step / one-step / fine transitions from live tuning values.
-  c.down_one_step_v_px=216.0; c.fine_mode_v_px=278.4;
+  // DOWN acquisition changes feet immediately, regardless of image height.
   c.pickup_v1_px=307.2; c.pickup_v2_px=364.8;
   BallController ball(c,3);
   auto r=ball.Compute(Target(380,400),640,480,0,{},{});
@@ -27,11 +26,10 @@ void BallStages() {
   r=ball.Compute({},640,480,.2,{},done); assert(r.camera_request==CameraRequest::kDown);
   CameraFeedback down{CameraMode::kDown,true};
   r=ball.Compute({},640,480,.3,down,{}); assert(r.mode==BallMode::kDownSearch);
-  r=ball.Compute(Target(320,200),640,480,.4,down,{}); assert(r.mode==BallMode::kCoarseAdjust);
-  r=ball.Compute(Target(320,200),640,480,.5,down,{}); assert(r.action.action==MissionAction::kStepForwardTwo);
-  r=ball.Compute(Target(320,250),640,480,.6,down,{}); assert(r.action.action==MissionAction::kStepForwardOne);
-  r=ball.Compute(Target(320,320),640,480,.7,down,{});
+  r=ball.Compute(Target(320,200),640,480,.4,down,{});
   assert(r.mode==BallMode::kWaitFinePose && r.action.action==MissionAction::kDefaultPoseMode);
+  r=ball.Compute(Target(320,10),640,480,.5,down,busy);
+  assert(r.mode==BallMode::kWaitFinePose); // A distant ball cannot restore WALK.
   r=ball.Compute(Target(320,320),640,480,.8,down,done); assert(r.mode==BallMode::kFineAdjustForPickup);
   r=ball.Compute(Target(320,200),640,480,.9,down,{}); assert(r.action.action==MissionAction::kStepForwardHalf);
 }

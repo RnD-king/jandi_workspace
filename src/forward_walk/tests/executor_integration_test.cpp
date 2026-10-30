@@ -361,7 +361,7 @@ int main() {
         std::cout<<"PASS all six new action ACK/READY/queue/DONE and arm targets\n";
         // A missing action-31 asset must not ACK or move.
         const auto left_in_place=directory/node->ProgramFileForAction(31);
-        Check(left_in_place==directory/"motions/좌회전_최종.json", "action 31 asset path mismatch");
+        Check(left_in_place==directory/"motions/좌회전_최종__.json", "action 31 asset path mismatch");
         action(35031,31);flush();
         Check(Count(actions,35031,Status::ACK)==0 &&
               Count(actions,35031,Status::DONE)==0 &&

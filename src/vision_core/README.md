@@ -5,6 +5,10 @@ ROS와 하드웨어에 의존하지 않는 C++ perception·mission-control 라�
 `config/vision_algorithm.yaml`이 단일 원본이다. 필수 키가 없거나 범위를
 벗어나면 설정 로딩 단계에서 예외를 발생시킨다.
 
+AUTO의 LINE→객체 공통 접근, 3회 완료 후 락, 카메라 임시 보정값과 검증 명령은
+[CONTINUOUS_OBJECT_APPROACH.md](CONTINUOUS_OBJECT_APPROACH.md)를 참고한다.
+전환 점검과 발견한 문제·검증 범위는 [AUDIT_20261030.md](AUDIT_20261030.md)에 기록했다.
+
 ## 객체별 YAML 구성
 
 운영 `config/vision_algorithm.yaml`은 다음 다섯 묶음을 사용한다.
@@ -126,60 +130,36 @@ curvature는 진단값이며 steering, mission 전환, recovery 결정에 사용
 
 ## Mission 요약
 
-BALL의 진입 직후 첫 관측 실패와 일반 FORWARD 연속 유실은 같은 탐색 순서를
-사용한다. 저장된 공 위치가 중심 허용 범위 밖이면 해당 방향 WALK 제자리 회전
-1회 → 전진 1걸음 → 정지 관측이다. 중앙/방향 미확인은 정지 관측부터 시작하고,
-실패하면 회전 없이 전진한다. 각 전진 뒤 새 10프레임/7회 검출과
-`ball.control.recovery_observation_sec`(1초)를 확인한다.
-전진 실제 DONE 한도는 `entry_recovery_max_steps`(진입 직후)와
-`recovery_max_steps`(일반 접근), 각각 현재 3회다. 진입 직후 한도 소진 시에는
-픽업 성공 처리 없이 공 모드를 해제하고 정상 LINE 재획득·보행으로 복귀한다.
-일반 접근은 한도 소진 후 정지 관측 최대 5회, 이후 FAILED다.
-중간 좌우 구역(4·6)은 기존 `recovery_walk_turn_max`(3회)의 회전 후 제자리
-관측만 사용한다. 기존 `entry_recovery_walk_turn_max` 키는 제거했다.
+실전 AUTO에서 LINE과 원거리 BALL/GOAL/HURDLE은 같은 32/33/34 보행 계획기를 쓴다.
+기본 반복은 좌/직/우 2/2/2다. 공/골대는 가상 접근 직선, 허들은 실제 LINE으로 조향한다.
+`object_approach_continous` 선택 항목은 제거했다. 수동 승인/단계별 시험은 자신의
+단발 계약을 유지하며, 아래와 다른 과거 격자 접근은 이 시험 경로에서만 사용한다.
 
-HURDLE 진입 직후 첫 정지 관측이 실패하면 직진 1걸음 → 정지 관측을
-`hurdle.control.entry_recovery_max_steps`(현재 3회)까지 시도한다. 끝까지
-못 찾으면 허들 넘기를 실행하지 않고 정상 LINE 재획득·보행으로 복귀한다.
-DOWN 접근/미세 조정 중 `lost_frames`(15) 연속 유실이면 접근은 일반 1걸음,
-FINE은 미세 전진 1회 → 정지 관측을 `hurdle.control.recovery_max_steps`
-(현재 3회)까지 반복한다. 그 뒤에도 못 찾으면 기존 1초 정지 관측 최대 5회,
-이후 FAILED다. 복구 전진의 실제 DONE만 횟수에 포함하고 매번 새 10/7 표본과
-`recovery_observation_sec`를 확인한다. 초기 DOWN 탐색과 접촉/넘기 시퀀스의
-별도 한도는 이 복구 전진 횟수와 독립적이다.
+원거리 후보는 실제 보행 묶음 3개 완료 전까지 임시 추적이다. 연속 3프레임 유실이면
+LINE으로 복귀한다. 3개 완료 뒤에는 락하고 객체별 bounded 복구로 인계한다.
+정지 재발견이 확정되면 락과 미션 번호를 보존하여 공통 접근으로 돌아간다.
+근거리는 한 번 진입하면 유지하고, 락 전이라도 LINE 대신 근거리 복구를 사용한다.
 
-BALL/HURDLE 후보의 탐색 방향에는 시간 만료를 적용하지 않는다. 최초 후보의
-좌우 위치를 기준으로 탐색 방향을 고정하고, 실제 DONE으로 완료한 탐색 회전과
-반대 방향 복원 횟수를 관리한다. 탐색 한도는
-`common.mission.candidate_search_max_turns`를 사용한다.
+- BALL: 중심 v가 `approach_two_step_v_px` 이상이면 접수된 보행의 DONE 뒤 DOWN.
+  최초 DOWN 탐색에서 발견하면 즉시 FINE 발 전환을 요청하고, 실제 DONE 및 새 관측 뒤
+  pickup 사각형 기준 상하좌우 미세 정렬/픽업한다. 이후 유실은 마지막 DOWN 위치의
+  사각형 초과 방향으로 미세 1회→관측, 기본 최대 3회다. 원거리 락 후 복구는 기존
+  회전→전진→정지 관측을 기본 3회, 이후 정지 관측 최대 5회와 FAILED로 제한한다.
+- GOAL: 근거리 Z 기준을 만족하면 즉시 FINE 발 전환. 실제 DONE 뒤 미세 정렬과
+  허용 정수 허리각의 착탄 오차를 비교하여 SHOOT한다. 최초 GOAL 화면이 비면
+  FORWARD→LINE 한 묶음→GOAL을 기본 추가 3회 시도한다. 영상은 있으나 Depth/좌표가
+  실패하면 현재 자세에 맞는 전진 1회→관측을 최대 3회 수행한다. 좌우 유실 탐색은
+  기본 최대 5회, 안정 재발견 시 횟수를 초기화한다. 원거리 회복은 공통 접근으로 돌아간다.
+- HURDLE: 원거리는 실제 LINE과 같은 조향/복구를 사용한다. 중심 v가
+  `approach_two_step_v_px` 이상이면 접수된 보행 DONE 뒤 DOWN. DOWN에서는 기존
+  일반 보행 접근을 더 하고 `fine_mode_v_px`에서 FINE으로 전환한다. 접촉 미세 전진의
+  실제 DONE 횟수를 센 뒤 허들 넘기를 수행한다. DOWN 유실은 현재 자세의 전진 1회→관측
+  기본 3회, 이후 정지 관측 최대 5회와 FAILED로 제한한다.
 
-- BALL: 원거리 direct cruise → 카메라 DOWN → lateral 우선 fine → 전후 보정
-  → PICK_BALL(내부 재그립·일어나기 포함) → 잔존 공 확인 → 기본 자세
-  → 설정된 후진(`post_pickup_back_steps`, 기본 0회)
-  → 카메라 FORWARD → LINE recovery
-  (PICK_BALL(일어나기 포함) DONE 후 10-frame verification에서 3회 이상 검출되면 남은 attempt에
-  한해 FineAdjust로 복귀한다. 잔존 공 기준은 `ball.control.pickup_verify_min_hits`이며,
-  일반 안정 검출의 `stable_min_hits`와 별개다. 이 관찰 상태에서만 association 없이 raw 최상위
-  ball 후보를 사용하며, 다음 일반 tracking은 새 identity를 acquire한다.)
-- HURDLE: F5 반복 → raw v 0.75, 10-window/7-hit latch → 현재 action DONE
-  → camera DOWN → STEP_FORWARD_ONE(10) → HUDDLE(16)
-- GOAL: camera GOAL → backboard RGB-D geometry → 거리 우선 fine → shoot yaw
-  ±30도 이내 signed SHOOT, 아니면 side step 후 settle → 현재 frame의 fresh
-  raw RGB-D pose로 geometry 재계산. 첫 GOAL 정지 관측에서 백보드가 한 번도
-  보이지 않으면 FORWARD 도달 확인 → 기존 LINE 복구/판단 → 새 LINE 보행
-  1블록의 실제 DONE → GOAL 재관측을 수행한다. 추가 재탐색 한도는
-  `goal.control.entry_line_retry_max_attempts`(기본 3회)이며, 한도 뒤의 관측도
-  비어 있으면 FAILED에서 정지한다. 0이면 기존 방향/정지 복구를 사용한다.
-  LINE 블록 길이는 기존 `line.walk.*_repetitions`를 따른다. READY나 과거 DONE은
-  재관측을 허용하지 않으며, 재탐색은 공 보유 상태와 GOAL 미션 번호를 유지한다.
-  접근·근거리에서 백보드를 연속 `goal.control.lost_frames`만큼 잃으면 마지막
-  안정 위치로 복구한다. 중앙(`recovery_center_tolerance_px` 이내)이면 WALK는
-  일반 전진 1걸음(10), FINE은 미세 전진 1회(3) 후 새 정지 관측을 한다.
-  좌우면 기존 방향으로 회전하고, 실제 DONE 뒤 관측에서 다시 찾으면 같은
-  방향으로 추가 1회 회전한 뒤 다시 관측하고 이전 단계로 복귀한다. 추가 회전은
-  탐색 회전 한도와 별도이며 반복해서 추가하지 않는다. 전진·추가 회전 뒤에도
-  못 찾으면 기존 정지 복구로 넘어간다. 방향 기록이 없거나 백보드 영상은 있지만
-  Depth·자세만 실패하면 정지 관측한다. 화면 끝 보정의 고정 2회전은 별도다.
+공 픽업은 실행기 내부 재그립/일어나기를 포함하고, 실제 DONE 뒤 잔존 공 검출로 검증한다.
+미션 이후 후진 횟수는 운영 YAML을 따른다. 공/골대는 카메라 FORWARD와 미션별 LINE 복구,
+보행 자세 복귀를 마친 뒤 정상 LINE으로 돌아간다. 미션 완료 후와 근거리 진입 때에는
+이전 실제 LINE 조향 점수를 지운다. 수동 후보 탐색/복원 횟수는 별도 시험 계약이다.
 
 카메라 trigger는 진행 중 locomotion을 취소하지 않는다. DONE 뒤 camera request를
 내고, 카메라 모션이 끝날 때까지 새 locomotion을 HOLD한다.

@@ -485,7 +485,7 @@ public:
           response->success = true;
           response->message = goal_trial_start_goal_pending_
               ? "START accepted; GOAL camera -> settle -> fresh observation"
-              : "START accepted; observing for 1.0 s before motion";
+              : "START accepted; observing for at least 1.0 s and a full LINE window before motion";
           RCLCPP_INFO(get_logger(), "[CONTROL] %s", response->message.c_str());
         });
     pause_service_ = create_service<std_srvs::srv::Trigger>(
@@ -520,7 +520,7 @@ public:
           mission_controller_->ClearObservationEvidence();
           BeginFreshObservation(now);
           response->success = true;
-          response->message = "RESUME accepted; discarded old evidence, observing for 1.0 s";
+          response->message = "RESUME accepted; discarded old evidence, observing for at least 1.0 s and a full LINE window";
           RCLCPP_INFO(get_logger(), "[CONTROL] RESUME -> OBSERVING");
         });
     reset_service_ = create_service<std_srvs::srv::Trigger>(
@@ -932,7 +932,7 @@ private:
       vision_core::MissionAction action) const {
     switch (action) {
     case vision_core::MissionAction::kLineStraightUnit:
-      return simulate_step_forward_one_duration_sec_;
+      return 2.0 * simulate_step_forward_one_duration_sec_;
     case vision_core::MissionAction::kLineLeftUnit:
     case vision_core::MissionAction::kLineRightUnit:
       return simulate_curve_step_duration_sec_ / 3.0;
@@ -1426,11 +1426,12 @@ private:
     }
     const bool finishing_observation =
         run_state_ == RunState::kObserving &&
-        frame_now_sec - observation_start_sec_ >= 1.0;
+        frame_now_sec - observation_start_sec_ >= 1.0 &&
+        observation_accumulator_.HasFullWindow(observation_cycle_id_);
     perception_input.allow_new_commands =
         run_state_ == RunState::kRunning || finishing_observation;
     if (finishing_observation) {
-      // Same 1s uniform O/H average and validity threshold as tuning.
+      // At least 1s, then a full configured LINE window; average all valid guides equally.
       // NONE (invalid average) falls into normal LINE failure observation.
       const auto averaged =
           observation_accumulator_.FinishAll(observation_cycle_id_);
@@ -1453,7 +1454,7 @@ private:
       if (finishing_observation) {
         run_state_ = RunState::kRunning;
         RCLCPP_INFO(get_logger(),
-                    "[CONTROL] 1s fresh observation complete -> RUNNING");
+                    "[CONTROL] fresh LINE observation complete -> RUNNING");
       } else {
         observation_accumulator_.Add(
             observation_cycle_id_, frame_now_sec,

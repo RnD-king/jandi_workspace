@@ -32,7 +32,9 @@ struct SearchPair {
     h=hurdle.Compute(target,640,480,now,down,feedback,{});
   }
   void NoStep() const {
-    assert(b.action.action==MissionAction::kNone && h.action.action==MissionAction::kNone);
+    assert((b.action.action==MissionAction::kNone ||
+        (b.mode==BallMode::kWaitFinePose && b.action.action==MissionAction::kDefaultPoseMode)) &&
+        h.action.action==MissionAction::kNone);
   }
   void Verify(double now,const std::optional<ObjectTarget>& mean,const std::deque<bool>& hits) {
     ball.UseVerifiedObservation(mean,hits,640,480);
@@ -69,7 +71,7 @@ void RetuneAndDetection() {
   ObjectTarget target;target.center_px={320,200};target.box_px={310,190,20,20};
   target.width_px=target.height_px=20;target.area_px=400;target.confidence=1;
   s.Tick(1.7,false,false,target);
-  assert(s.b.mode==BallMode::kCoarseAdjust && s.h.mode==HurdleMode::kCoarseAdjust);
+  assert(s.b.mode==BallMode::kWaitFinePose && s.h.mode==HurdleMode::kCoarseAdjust);
   s.NoStep(); // Detection while stationary needs no additional search step.
   s.ball.StartTestNear();s.hurdle.StartTestNear();s.Tick(1.8);s.Tick(1.9);
   assert(s.b.action.action==MissionAction::kStepForwardOne && s.h.action.action==s.b.action.action);
@@ -106,7 +108,7 @@ void FoundSurvivesIdentityChangeUntilDone() {
   for(int i=0;i<6;++i){s.Tick(1+.1*i,true);s.NoStep();}
   assert(s.ball.DownSearchFound() && s.hurdle.DownSearchFound());
   s.Tick(2,false,true);
-  assert(s.b.mode==BallMode::kCoarseAdjust && s.h.mode==HurdleMode::kCoarseAdjust);
+  assert(s.b.mode==BallMode::kWaitFinePose && s.h.mode==HurdleMode::kCoarseAdjust);
   s.NoStep();
   // Filter invalidation and a new search still discard old-view decisions.
   s.ball.InvalidateDetectionEvidence();s.hurdle.InvalidateDetectionEvidence();
@@ -115,57 +117,61 @@ void FoundSurvivesIdentityChangeUntilDone() {
   assert(!s.ball.DownSearchFound() && !s.hurdle.DownSearchFound());
 }
 void FailedSearchConfirmationResumes(bool partial_hits) {
-  auto c=Config(.5,.5);
-  c.ball.stable_window=c.hurdle.stable_window=10;
-  c.ball.stable_min_hits=c.hurdle.stable_min_hits=7;
-  c.ball.down_search_min_hits=3;c.hurdle.down_search_min_hits=5;
-  c.ball.down_search_max_steps=c.hurdle.down_search_max_steps=3;
-  c.ball.lost_frames=c.hurdle.lost_frames=1;
-  c.ball.down_one_step_v_px=c.hurdle.down_one_step_v_px=100;
-  c.ball.fine_mode_v_px=c.hurdle.fine_mode_v_px=180;
-  c.ball.pickup_v1_px=200;
-  c.ball.pickup_v2_px=250;
-  SearchPair s(c);s.Tick(.1);
-  ObjectTarget target;target.center_px={320,50};target.box_px={300,30,40,40};
-  target.width_px=target.height_px=40;target.area_px=1600;target.confidence=1;
-  for(int i=0;i<7;++i)s.Tick(.2+.1*i,true,false,target);
-  s.Tick(1,false,true);s.NoStep();
-  assert(s.b.mode==BallMode::kCoarseAdjust && s.h.mode==HurdleMode::kCoarseAdjust);
-  std::deque<bool> failed(10,false);
-  if(partial_hits)for(int i=0;i<5;++i)failed[i]=true;
-  // Core passes no stationary mean both for total loss and insufficient 7/10.
-  s.Verify(2.1,{},failed);s.NoStep();
-  assert(s.b.mode==BallMode::kDownSearch && s.h.mode==HurdleMode::kDownSearch);
-  assert(!s.ball.DownSearchFound() && !s.hurdle.DownSearchFound());
-  assert(s.ball.DownSearchStepsRemaining()==2 && s.hurdle.DownSearchStepsRemaining()==2);
-  s.Tick(2.2);
-  assert(s.b.action.action==MissionAction::kStepForwardOne && s.h.action.action==s.b.action.action);
-  s.Tick(2.3,true);s.NoStep();
-  assert(s.ball.DownSearchStepsRemaining()==2 && s.hurdle.DownSearchStepsRemaining()==2);
-  for(int i=0;i<7;++i)s.Tick(2.4+.1*i,true,false,target);
-  s.Tick(3.2,false,true);s.NoStep();
-  assert(s.b.mode==BallMode::kCoarseAdjust && s.h.mode==HurdleMode::kCoarseAdjust);
-  s.Verify(4.3,target,std::deque<bool>(10,true));
-  assert(s.b.action.action==MissionAction::kStepForwardTwo && s.h.action.action==s.b.action.action);
-  assert(!s.ball.DownSearchFound() && !s.hurdle.DownSearchFound());
-  assert(s.ball.DownSearchStepsRemaining()==1 && s.hurdle.DownSearchStepsRemaining()==1);
-  // A later ordinary approach loss still uses the existing recovery FSM.
-  s.Verify(5.4,{},std::deque<bool>(10,false));s.NoStep();
-  assert(s.b.mode==BallMode::kBallRecoveryDown && s.h.mode==HurdleMode::kRecoveryStep);
+  // HURDLE retains DOWN WALK confirmation/retry; BALL now commits to FINE.
+  auto c=Config(.5,.5);auto hc=c.hurdle;
+  hc.stable_window=10;hc.stable_min_hits=7;hc.down_search_min_hits=5;
+  hc.down_search_max_steps=3;hc.lost_frames=1;
+  hc.down_one_step_v_px=100;hc.fine_mode_v_px=180;
+  HurdleController h(hc,3);HurdleResult r;
+  const CameraFeedback down{CameraMode::kDown,true};
+  auto tick=[&](double now,std::optional<ObjectTarget> t={},ActionExecutionFeedback fb={}) {
+    r=h.Compute(t,640,480,now,down,fb,{});
+  };
+  ObjectTarget t;t.center_px={320,50};t.box_px={300,30,40,40};
+  t.width_px=t.height_px=40;t.area_px=1600;t.confidence=1;
+  h.StartTestNear();tick(0);tick(.1);
+  for(int i=0;i<7;++i)tick(.2+.1*i,t,{false,true,false});
+  tick(1,{}, {true,false,false});assert(r.mode==HurdleMode::kCoarseAdjust);
+  std::deque<bool> failed(10,false);if(partial_hits)for(int i=0;i<5;++i)failed[i]=true;
+  h.UseVerifiedObservation({},failed,640,480);tick(2.1,{}, {false,false,true});
+  assert(r.mode==HurdleMode::kDownSearch && h.DownSearchStepsRemaining()==2);
+  tick(2.2);assert(r.action.action==MissionAction::kStepForwardOne);
+  for(int i=0;i<7;++i)tick(2.4+.1*i,t,{false,true,false});
+  tick(3.2,{}, {true,false,false});assert(r.mode==HurdleMode::kCoarseAdjust);
+  h.UseVerifiedObservation(t,std::deque<bool>(10,true),640,480);tick(4.3,{}, {false,false,true});
+  assert(r.action.action==MissionAction::kStepForwardTwo && h.DownSearchStepsRemaining()==1);
+  h.UseVerifiedObservation({},std::deque<bool>(10,false),640,480);tick(5.4,{}, {false,false,true});
+  assert(r.mode==HurdleMode::kRecoveryStep);
+
+  auto bc=c.ball;bc.stable_window=10;bc.stable_min_hits=7;bc.down_search_min_hits=3;bc.lost_frames=1;
+  bc.pickup_u1_px=300;bc.pickup_u2_px=340;bc.pickup_v1_px=100;bc.pickup_v2_px=150;
+  BallController ball(bc,3);ball.StartTestNear();ball.Compute({},640,480,0,down,{});
+  ball.Compute({},640,480,.1,down,{});
+  for(int i=0;i<7;++i)ball.Compute(t,640,480,.2+.1*i,down,{false,true,false});
+  auto bres=ball.Compute({},640,480,1,down,{true,false,false});
+  assert(bres.mode==BallMode::kWaitFinePose && bres.action.action==MissionAction::kDefaultPoseMode);
+  bres=ball.Compute({},640,480,1.1,down,{false,true,false});
+  assert(bres.mode==BallMode::kWaitFinePose);
+  bres=ball.Compute({},640,480,1.2,down,{true,false,false});
+  assert(bres.mode==BallMode::kFineAdjustForPickup);
+  ball.UseVerifiedObservation({},failed,640,480);
+  bres=ball.Compute({},640,480,2.3,down,{false,false,true});
+  assert(bres.mode==BallMode::kBallRecoveryDown);
+  bres=ball.Compute({},640,480,2.4,down,{});
+  assert(bres.action.action==MissionAction::kStepForwardHalf);
+  assert(ball.DownSearchStepsRemaining()==bc.down_search_max_steps-1); // No WALK search restart.
 }
 void FailedSearchConfirmationRetainsLimitAndHold() {
   auto c=Config(.5,.5);
   c.ball.down_search_max_steps=c.hurdle.down_search_max_steps=1;
   SearchPair s(c);s.Tick(.1);
-  ObjectTarget target;target.center_px={320,50};target.box_px={300,30,40,40};
-  target.width_px=target.height_px=40;target.area_px=1600;target.confidence=1;
-  s.Tick(.2,true,false,target);s.Tick(1,false,true);s.NoStep();
+  s.Tick(.2,true,false);s.Tick(1,false,true);s.NoStep();
   s.Verify(2,{},std::deque<bool>(10,false));s.NoStep();s.Tick(2.1);s.NoStep();
   assert(s.b.mode==BallMode::kFailed && s.h.mode==HurdleMode::kFailed);
   assert(s.ball.DownSearchStepsRemaining()==0 && s.hurdle.DownSearchStepsRemaining()==0);
   // Even an early manual confirmation cannot discard the last DONE's hold.
   c.ball.down_search_max_steps=c.hurdle.down_search_max_steps=2;
-  SearchPair held(c);held.Tick(.1);held.Tick(.2,true,false,target);held.Tick(1,false,true);
+  SearchPair held(c);held.Tick(.1);held.Tick(.2,true,false);held.Tick(1,false,true);
   held.Verify(1.1,{},std::deque<bool>(10,false));held.Tick(1.49);held.NoStep();
   held.Tick(1.5);
   assert(held.b.action.action==MissionAction::kStepForwardOne && held.h.action.action==held.b.action.action);

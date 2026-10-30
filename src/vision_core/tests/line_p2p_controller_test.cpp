@@ -68,7 +68,7 @@ int main() {
   assert(boundary.Compute(Guide(0.10, 0.0, 0.0)).direction ==
          CruiseDirection::kStraight);
 
-  LineGuideAccumulator accumulator(1); // Isolate weighting from sample-count admission.
+  LineGuideAccumulator accumulator(1, .40, 3, 2); // Isolate weighting from sample-count admission.
   accumulator.Begin(7, 0.0);
   accumulator.Add(7, 0.0, Guide(-1.0, -1.0, -1.0));
   accumulator.Add(7, 1.0, Guide(-0.8, -0.8, -0.8));
@@ -121,8 +121,37 @@ int main() {
   accumulator.Add(9, 0.5, malformed);
   assert(!accumulator.FinishAll(9).has_value());
 
+  // Stationary admission needs five hits inside one complete ten-frame window.
+  LineGuideAccumulator stationary(5, 0.0, 10, 5);
+  stationary.Begin(10, 0.0);
+  for (int i = 0; i < 17; ++i) {
+    auto guide = Guide(double(i), 0.0, 0.0);
+    guide.valid = i % 4 == 0;
+    stationary.Add(10, 0.1 * i, guide);
+  }
+  assert(stationary.HasFullWindow(10));
+  assert(!stationary.FinishAll(10)); // Five isolated hits never form 10/5.
+
+  stationary.Begin(11, 2.0);
+  for (int i = 0; i < 9; ++i)
+    stationary.Add(11, 2.0 + 0.1 * i, Guide(double(i), 0.0, 0.0));
+  assert(!stationary.HasFullWindow(11));
+  stationary.Add(11, 2.9, Guide(9.0, 0.0, 0.0));
+  assert(stationary.HasFullWindow(11));
+  const auto stationary_mean = stationary.FinishAll(11);
+  assert(stationary_mean && std::abs(stationary_mean->offset - 4.5) < kEps);
+
+  stationary.Begin(12, 4.0);
+  for (int i = 0; i < 15; ++i) {
+    auto guide = Guide(double(i), 0.0, 0.0);
+    guide.valid = i < 5 || i == 12;
+    stationary.Add(12, 4.0 + 0.1 * i, guide);
+  }
+  const auto latched_mean = stationary.FinishAll(12);
+  assert(latched_mean && std::abs(latched_mean->offset - 22.0 / 6.0) < kEps);
+
   // A custom 20% start keeps the same 1->3 time weights through READY.
-  LineGuideAccumulator earlier(3, .20);
+  LineGuideAccumulator earlier(3, .20, 3, 3);
   earlier.Begin(90, 10.0);
   earlier.Add(90, 10.79, Guide(-100.0, 0.0, 0.0));
   earlier.Add(90, 10.8, Guide(1.0, 0.0, 0.0));
@@ -135,7 +164,7 @@ int main() {
   assert(std::abs(earlier_stats->window_start_sec - 10.8) < kEps);
   assert(std::abs(earlier_stats->remaining_sec - .25) < kEps);
 
-  LineGuideAccumulator from_start(1, 0.0);
+  LineGuideAccumulator from_start(1, 0.0, 2, 1);
   from_start.Begin(91, 0.0);
   from_start.Add(91, 0.0, Guide(1.0, 0.0, 0.0));
   from_start.Add(91, 1.0, Guide(3.0, 0.0, 0.0));
@@ -143,7 +172,7 @@ int main() {
   assert(full_mean && std::abs(full_mean->offset - 2.5) < kEps);
 
   // A configured start after READY gives no evidence; never widen it silently.
-  LineGuideAccumulator too_late(1, .99);
+  LineGuideAccumulator too_late(1, .99, 1, 1);
   too_late.Begin(92, 0.0);
   too_late.Add(92, 3.75, Guide(1.0, 0.0, 0.0));
   assert(!too_late.Finish(92, 3.75, .25));

@@ -12,6 +12,7 @@ inline void AdmitObjectAtRest(vision_core::MissionController& controller,
   frame.image_width=640; frame.image_height=480;
   frame.camera_feedback={vision_core::CameraMode::kForward,true};
   frame.command_transport_enabled=true;
+  frame.manual_observation_control=true; // This fixture explicitly tests stationary manual admission.
   frame.allow_new_line_action=false;
   frame.allow_new_body_actions=false;
   if (mission==vision_core::MissionType::kBall) frame.ball_target=target;

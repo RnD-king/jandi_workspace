@@ -20,6 +20,8 @@ add_library(shared_vision_core SHARED
   src/line_p2p_controller.cpp
   src/line_plan.cpp
   src/line_mission_entry.cpp
+  src/object_approach.cpp
+  src/continuous_object_approach.cpp
   src/object_target_extractor.cpp
   src/ball_candidate_tracker.cpp
   src/object_association_tracker.cpp
@@ -273,16 +275,36 @@ if(BUILD_TESTING)
   set_tests_properties(shared_vision_core_ball_forward_recovery_test PROPERTIES
     LABELS "logic" ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_hurdle_recovery_steps_test tests/hurdle_recovery_steps_test.cpp)
+  add_executable(shared_vision_core_ball_down_recovery_test tests/ball_down_recovery_test.cpp)
+  target_link_libraries(shared_vision_core_ball_down_recovery_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_ball_down_recovery_test COMMAND shared_vision_core_ball_down_recovery_test)
+  set_tests_properties(shared_vision_core_ball_down_recovery_test PROPERTIES
+    ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   target_link_libraries(shared_vision_core_hurdle_recovery_steps_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_hurdle_recovery_steps_test COMMAND shared_vision_core_hurdle_recovery_steps_test)
   set_tests_properties(shared_vision_core_hurdle_recovery_steps_test PROPERTIES
     ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_goal_recovery_policy_test tests/goal_recovery_policy_test.cpp)
+  add_executable(shared_vision_core_goal_depth_recovery_test tests/goal_depth_recovery_test.cpp)
+  add_executable(shared_vision_core_immediate_fine_entry_test tests/immediate_fine_entry_test.cpp)
+  target_link_libraries(shared_vision_core_immediate_fine_entry_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_immediate_fine_entry_test COMMAND shared_vision_core_immediate_fine_entry_test)
+  set_tests_properties(shared_vision_core_immediate_fine_entry_test PROPERTIES
+    ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+  target_link_libraries(shared_vision_core_goal_depth_recovery_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_goal_depth_recovery_test COMMAND shared_vision_core_goal_depth_recovery_test)
+  set_tests_properties(shared_vision_core_goal_depth_recovery_test PROPERTIES
+    ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   target_link_libraries(shared_vision_core_goal_recovery_policy_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_goal_recovery_policy_test COMMAND shared_vision_core_goal_recovery_policy_test)
   set_tests_properties(shared_vision_core_goal_recovery_policy_test PROPERTIES
     ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   get_property(_logic_tests DIRECTORY PROPERTY TESTS)
+  add_executable(shared_vision_core_continuous_object_approach_test tests/continuous_object_approach_test.cpp)
+  target_link_libraries(shared_vision_core_continuous_object_approach_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_continuous_object_approach_test COMMAND shared_vision_core_continuous_object_approach_test)
+  set_tests_properties(shared_vision_core_continuous_object_approach_test PROPERTIES LABELS "logic"
+    ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   set_tests_properties(${_logic_tests} PROPERTIES LABELS "logic")
 
   add_executable(shared_vision_core_runtime_config_check tests/runtime_config_check.cpp)

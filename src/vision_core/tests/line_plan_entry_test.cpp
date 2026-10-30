@@ -39,6 +39,8 @@ struct Driver {
     frame.image_width = 640; frame.image_height = 480;
     frame.camera_feedback = {CameraMode::kForward, true};
     frame.command_transport_enabled = true;
+    // Stationary/manual admission contracts; full AUTO is covered by continuous_object_approach_test.
+    frame.manual_observation_control = true;
     Line(320);
   }
   void Line(double u) { frame.line_centers = {{u,450},{u,400},{u,350},{u,300},{u,250}}; }
@@ -244,6 +246,8 @@ void GoalEmptyViewLineRetry(bool straight) {
   const auto mission_index=d.out.goal_mission_index;
   d.frame.camera_feedback={CameraMode::kTransition,false};d.Tick();
   d.frame.camera_feedback={CameraMode::kGoal,true};d.Tick();
+  d.frame.begin_manual_observation=true;d.Tick();
+  d.frame.begin_manual_observation=false;
   for(int i=0;i<40 && d.out.goal.mode!=GoalMode::kEntryRetryCameraForward;++i)
     d.Tick(.05);
   assert(d.out.goal.mode==GoalMode::kEntryRetryCameraForward && d.out.has_ball);
@@ -297,6 +301,8 @@ void GoalEmptyViewLineRetry(bool straight) {
   // A second empty look consumes no extra walk after the configured budget.
   d.frame.camera_feedback={CameraMode::kTransition,false};d.Tick();
   d.frame.camera_feedback={CameraMode::kGoal,true};d.Tick();
+  d.frame.begin_manual_observation=true;d.Tick();
+  d.frame.begin_manual_observation=false;
   for(int i=0;i<40 && d.out.goal.mode!=GoalMode::kFailed;++i)d.Tick(.05);
   assert(d.out.goal.mode==GoalMode::kFailed && d.out.has_ball);
   assert(d.out.goal.entry_line_retries==1 && d.out.command.action_id==0);
@@ -329,12 +335,36 @@ void StartEstimatesAndReset() {
   assert(!p.StartEstimate(11)); // No queued acceptance confirmation yet.
   p.Feedback({11,true,false,false},1.7,.4);
   assert(p.StartEstimate(11)==1.7);
+
+  // RESUME discards a previously finished window, not the action/DONE state.
+  LinePlan resumed(c);resumed.Begin(MissionAction::kStepForwardFour);resumed.Issued(a,0);
+  resumed.Feedback({10,true,false,false},0,0);
+  LineGuide old;old.valid=true;old.offset=-.4;
+  for(int i=0;i<10;++i)resumed.Observe(.5+.04*i,old);
+  assert(resumed.Finish(10,1,0) && resumed.WindowFinished(10));
+  resumed.ClearEvidence();
+  assert(!resumed.WindowFinished(10) && resumed.Contains(10) && !resumed.Done(10));
+  auto fresh=old;fresh.offset=.4;
+  for(int i=0;i<10;++i)resumed.Observe(1.1+.04*i,fresh);
+  const auto rebuilt=resumed.Finish(10,1.5,0);
+  assert(rebuilt && rebuilt->offset>.39);
+
+  LinePlan object(c,10,5);
+  object.Begin(MissionAction::kStepForwardFour,77);object.Issued(a,0);
+  object.Feedback({10,true,false,false},0,0);
+  for(int i=0;i<10;++i)object.ObserveObject(.1*i,77,true,10,7);
+  assert(object.ObjectQualified(10));
+  object.ClearEvidence();
+  assert(!object.ObjectQualified(10));
+  const auto evidence=object.CurrentObjectEvidence(77);
+  assert(evidence && evidence->frames==0 && !evidence->qualified);
 }
 
 void SparseUnitsAndFreshVerification() {
   {
     Driver d(Configuration()); d.Tick(); auto id=d.out.command.action_id;
     d.Tick(.01,{id,true,false,false});
+    d.frame.line_centers.clear();
     for(int n=0;n<4;++n) {
       d.Tick(.01,{id,true,false,true});
       const auto next=d.out.command.action_id;
@@ -403,7 +433,7 @@ void FineRecoveryTurnSettle(bool left) {
   Driver d(c);d.Line(left?256:384);d.Tick();
   assert(d.out.command.action_id!=0);
   d.frame.line_centers.clear();
-  const auto turn=left?MissionAction::kTurnLeft:MissionAction::kTurnRight;
+  const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
   std::uint64_t completed=0;
   for(int i=0;i<200;++i) {
     CommandDeliveryFeedback feedback;
@@ -416,8 +446,7 @@ void FineRecoveryTurnSettle(bool left) {
   assert(d.out.command.action==turn && d.out.command.action_id!=0);
   const auto id=d.out.command.action_id;
   d.Tick(.05,{id,true,true,false});
-  const double decision_at=d.frame.now_sec+c.fine_motion_settle_sec+
-      c.line_p2p.recovery_observation_sec;
+  const double decision_at=d.frame.now_sec+c.line_p2p.recovery_observation_sec;
   bool decided=false;
   for(int i=0;i<40;++i) {
     d.Tick(.05);
@@ -437,8 +466,8 @@ MissionAction AwaitLossTurn(Driver &d) {
   std::uint64_t completed=0;
   for (int i=0;i<400;++i) {
     const auto &command=d.out.command;
-    if (command.action_id && (command.action==MissionAction::kTurnLeft ||
-                              command.action==MissionAction::kTurnRight))
+    if (command.action_id && (command.action==MissionAction::kTurnLeftInPlace ||
+                              command.action==MissionAction::kStepForwardRightOneHurdle))
       return command.action;
     if (d.out.terminal_hold) return MissionAction::kNone;
     CommandDeliveryFeedback feedback;
@@ -456,8 +485,6 @@ void LossRecoveryPriority() {
   for (int points : {0,1,2,3}) for (bool visible_left : {false,true}) {
     auto c=Configuration();
     c.line_p2p.left_repetitions=c.line_p2p.straight_repetitions=c.line_p2p.right_repetitions=1;
-    c.line_p2p.visible_recovery_turn_yaw_deg=30;
-    c.line_p2p.last_score_recovery_turn_yaw_deg=45;
     Driver d(c);
     // Deliberately opposite history, within STRAIGHT deadband: its sign counts.
     d.Line(320+(visible_left?16:-16));d.Tick();
@@ -466,16 +493,13 @@ void LossRecoveryPriority() {
     for (int n=0;n<points;++n)
       d.frame.line_centers.push_back({visible_left?200.:440.,450.-n*50});
     const bool expected_left=points>=2?visible_left:!visible_left;
-    assert(AwaitLossTurn(d)==(expected_left?MissionAction::kTurnLeft:MissionAction::kTurnRight));
-    assert(d.out.command.target_yaw_deg==(points>=2?30:45));
+    assert(AwaitLossTurn(d)==(expected_left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle));
   }
   // Exact center falls through to the signed history, not an arbitrary side.
   auto c=Configuration();c.line_p2p.straight_repetitions=1;
-  c.line_p2p.last_score_recovery_turn_yaw_deg=45;
   Driver centered(c);centered.Line(304);centered.Tick();
   centered.frame.line_centers={{300,450},{340,400}};
-  assert(AwaitLossTurn(centered)==MissionAction::kTurnLeft);
-  assert(centered.out.command.target_yaw_deg==45);
+  assert(AwaitLossTurn(centered)==MissionAction::kTurnLeftInPlace);
 
   // Exact zero replaces an older negative score; Reset also removes history.
   Driver zero(c);zero.Line(304);zero.Tick();
@@ -488,41 +512,32 @@ void LossRecoveryPriority() {
   assert(straight && straight!=old);
   zero.Tick(.01,{straight,true,false,false});zero.Tick(.01,{old,true,true,false});
   zero.frame.line_centers.clear();
-  assert(AwaitLossTurn(zero)==MissionAction::kTurnRight);
+  assert(AwaitLossTurn(zero)==MissionAction::kNone && zero.out.terminal_hold);
   zero.core.Reset();zero.frame.line_centers.clear();zero.out={};zero.Tick();
-  assert(AwaitLossTurn(zero)==MissionAction::kTurnRight);
+  assert(AwaitLossTurn(zero)==MissionAction::kNone && zero.out.terminal_hold);
 
   // Nonfinite coordinates do not qualify as two current centers.
   Driver malformed(c);malformed.Line(304);malformed.Tick();
   malformed.frame.line_centers={{440,450},{std::numeric_limits<double>::quiet_NaN(),400}};
-  assert(AwaitLossTurn(malformed)==MissionAction::kTurnLeft);
+  assert(AwaitLossTurn(malformed)==MissionAction::kTurnLeftInPlace);
 
-  // Fresh start with no history waits the full initial window, then turns RIGHT.
+  // Fresh start with no direction evidence observes five windows, then holds.
   Driver fresh(c);fresh.frame.line_centers.clear();fresh.Tick();
   fresh.Tick(1.9);assert(fresh.out.command.action_id==0);
-  assert(AwaitLossTurn(fresh)==MissionAction::kTurnRight);
+  assert(AwaitLossTurn(fresh)==MissionAction::kNone && fresh.out.terminal_hold);
 }
 
 void LossRecoveryBudgets() {
   auto c=Configuration();
   c.line_p2p.visible_recovery_max_turns=2;
   c.line_p2p.last_score_recovery_max_turns=1;
-  c.line_p2p.visible_recovery_turn_yaw_deg=30;
-  c.line_p2p.last_score_recovery_turn_yaw_deg=45;
   Driver d(c);d.frame.line_centers={{200,450},{200,400}};d.Tick();
-  assert(AwaitLossTurn(d)==MissionAction::kTurnLeft);
-  assert(d.out.command.target_yaw_deg==30);
+  assert(AwaitLossTurn(d)==MissionAction::kTurnLeftInPlace);
   auto id=d.out.command.action_id;
-  d.frame.line_centers.clear();d.Tick(.05,{id,true,true,false});
-  assert(AwaitLossTurn(d)==MissionAction::kTurnRight);
-  assert(d.out.command.target_yaw_deg==45);
+  d.frame.line_centers={{440,450},{440,400}};d.Tick(.05,{id,true,true,false});
+  assert(AwaitLossTurn(d)==MissionAction::kStepForwardRightOneHurdle);
   id=d.out.command.action_id;
   d.frame.line_centers={{440,450},{440,400}};d.Tick(.05,{id,true,true,false});
-  assert(AwaitLossTurn(d)==MissionAction::kTurnRight);
-  assert(d.out.command.target_yaw_deg==30);
-  id=d.out.command.action_id;
-  d.frame.line_centers.clear();d.Tick(.05,{id,true,true,false});
-  // Switching back must not replenish the exhausted last-score budget.
   assert(AwaitLossTurn(d)==MissionAction::kNone && d.out.terminal_hold);
   d.Line(320);d.Tick(3);assert(d.out.terminal_hold && !d.out.command.action_id);
 

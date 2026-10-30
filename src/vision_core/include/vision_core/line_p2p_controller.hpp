@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <deque>
 #include <optional>
 #include <vector>
 
@@ -28,9 +29,7 @@ struct LineP2pConfig {
   // Loss recovery: current visible centers take priority over the last score.
   // Counts remain cumulative across source switches until a valid guide returns.
   int visible_recovery_max_turns{};
-  int visible_recovery_turn_yaw_deg{};
   int last_score_recovery_max_turns{};
-  int last_score_recovery_turn_yaw_deg{};
   // Separate limit for WALK corrections when a valid score is too large.
   int recovery_max_turns{};
 };
@@ -58,13 +57,16 @@ public:
   explicit LineGuideAccumulator(int minimum_valid_samples);
   explicit LineGuideAccumulator(const LineP2pConfig &config);
   LineGuideAccumulator(int minimum_valid_samples, double observation_start_ratio);
+  LineGuideAccumulator(int minimum_valid_samples, double observation_start_ratio,
+                       int window, int required_hits);
   void Begin(std::uint64_t action_id, double now_sec);
   void Add(std::uint64_t action_id, double now_sec, const LineGuide &guide);
   std::optional<LineGuide> Finish(std::uint64_t action_id, double now_sec,
                                   double estimated_remaining_sec = 0.0);
   std::optional<LineWindowStats> LastStats() const { return last_stats_; }
-  // 짧은 action 뒤의 고정 관측 구간은 전체 유효 표본을 동일 가중 평균한다.
+  // 정지 관측은 완전한 window 중 required_hits를 만족한 뒤 전체 유효 표본을 동일 가중 평균한다.
   std::optional<LineGuide> FinishAll(std::uint64_t action_id);
+  bool HasFullWindow(std::uint64_t action_id) const;
   void Reset();
   bool ActiveFor(std::uint64_t action_id) const;
 
@@ -78,9 +80,11 @@ private:
   double begin_sec_{0.0};
   std::vector<Sample> samples_;
   std::vector<double> frame_times_;
+  std::vector<bool> frame_valid_;
   std::optional<LineWindowStats> last_stats_;
   int minimum_valid_samples_;
   double observation_start_ratio_;
+  int window_{10}, required_hits_{5};
 };
 
 } // namespace vision_core

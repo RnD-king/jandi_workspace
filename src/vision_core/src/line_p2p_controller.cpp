@@ -38,9 +38,18 @@ LineGuideAccumulator::LineGuideAccumulator(const LineP2pConfig &config)
 
 LineGuideAccumulator::LineGuideAccumulator(int minimum_valid_samples,
                                          double observation_start_ratio)
+    : LineGuideAccumulator(minimum_valid_samples, observation_start_ratio,
+          LoadDefaultAlgorithmConfig().line.line_stable_window,
+          LoadDefaultAlgorithmConfig().line.line_stable_min_hits) {}
+LineGuideAccumulator::LineGuideAccumulator(int minimum_valid_samples,
+                                         double observation_start_ratio,
+                                         int window, int required_hits)
     : minimum_valid_samples_(minimum_valid_samples),
-      observation_start_ratio_(observation_start_ratio) {
+      observation_start_ratio_(observation_start_ratio),
+      window_(window), required_hits_(required_hits) {
   if (minimum_valid_samples < 1) throw std::invalid_argument("minimum LINE samples must be positive");
+  if (window < 1 || required_hits < 1 || required_hits > window)
+    throw std::invalid_argument("LINE sequence hits must be within its window");
   if (!std::isfinite(observation_start_ratio) || observation_start_ratio < 0.0 ||
       observation_start_ratio >= 1.0)
     throw std::invalid_argument("LINE observation_start_ratio must be in [0,1)");
@@ -51,6 +60,7 @@ void LineGuideAccumulator::Begin(std::uint64_t action_id, double now_sec) {
   begin_sec_ = std::isfinite(now_sec) ? now_sec : 0.0;
   samples_.clear();
   frame_times_.clear();
+  frame_valid_.clear();
   last_stats_.reset();
 }
 
@@ -58,8 +68,10 @@ void LineGuideAccumulator::Add(std::uint64_t action_id, double now_sec,
                                const LineGuide &guide) {
   if (!ActiveFor(action_id) || !std::isfinite(now_sec)) return;
   frame_times_.push_back(now_sec);
-  if (!guide.valid || !std::isfinite(guide.offset) ||
-      !std::isfinite(guide.heading_rad)) return;
+  const bool valid=guide.valid && std::isfinite(guide.offset) &&
+      std::isfinite(guide.heading_rad);
+  frame_valid_.push_back(valid);
+  if (!valid) return;
   samples_.push_back({now_sec, guide});
 }
 
@@ -83,8 +95,17 @@ LineGuideAccumulator::Finish(std::uint64_t action_id, double now_sec,
   stats.window_start_sec = cutoff;
   stats.window_end_sec = end_sec;
   stats.remaining_sec = remaining;
-  for (double time : frame_times_)
-    if (time >= cutoff && time <= end_sec) ++stats.window_frames;
+  std::deque<bool> recent;
+  bool qualified=false;
+  for (std::size_t i=0;i<frame_times_.size();++i) {
+    if (frame_times_[i] < cutoff || frame_times_[i] > end_sec) continue;
+    ++stats.window_frames;
+    recent.push_back(frame_valid_[i]);
+    while (recent.size()>static_cast<std::size_t>(window_)) recent.pop_front();
+    if (recent.size()==static_cast<std::size_t>(window_) &&
+        std::count(recent.begin(),recent.end(),true)>=required_hits_)
+      qualified=true;
+  }
   double offset_sum=0, heading_sum=0, curvature_sum=0, curvature_weight=0;
   double confidence_sum=0, total_weight=0;
   for (const Sample& sample : samples_) {
@@ -104,7 +125,7 @@ LineGuideAccumulator::Finish(std::uint64_t action_id, double now_sec,
     total_weight += weight;
   }
   LineGuide result;
-  if (stats.used_frames >= static_cast<std::size_t>(minimum_valid_samples_) && total_weight > 0) {
+  if (qualified && stats.used_frames >= static_cast<std::size_t>(minimum_valid_samples_) && total_weight > 0) {
     result.offset = offset_sum / total_weight;
     result.heading_rad = heading_sum / total_weight;
     if (curvature_weight > 0) {
@@ -121,7 +142,21 @@ LineGuideAccumulator::Finish(std::uint64_t action_id, double now_sec,
 
 std::optional<LineGuide>
 LineGuideAccumulator::FinishAll(std::uint64_t action_id) {
-  if (!ActiveFor(action_id) || samples_.size() < static_cast<std::size_t>(minimum_valid_samples_)) {
+  if (!ActiveFor(action_id)) {
+    Reset();
+    return std::nullopt;
+  }
+
+  std::deque<bool> recent;
+  bool qualified = false;
+  for (const bool valid : frame_valid_) {
+    recent.push_back(valid);
+    while (recent.size() > static_cast<std::size_t>(window_)) recent.pop_front();
+    if (recent.size() == static_cast<std::size_t>(window_) &&
+        std::count(recent.begin(), recent.end(), true) >= required_hits_)
+      qualified = true;
+  }
+  if (!qualified || samples_.size() < static_cast<std::size_t>(minimum_valid_samples_)) {
     Reset();
     return std::nullopt;
   }
@@ -153,11 +188,16 @@ LineGuideAccumulator::FinishAll(std::uint64_t action_id) {
   return result;
 }
 
+bool LineGuideAccumulator::HasFullWindow(std::uint64_t action_id) const {
+  return ActiveFor(action_id) && frame_valid_.size() >= static_cast<std::size_t>(window_);
+}
+
 void LineGuideAccumulator::Reset() {
   action_id_ = 0;
   begin_sec_ = 0.0;
   samples_.clear();
   frame_times_.clear();
+  frame_valid_.clear();
 }
 
 bool LineGuideAccumulator::ActiveFor(std::uint64_t action_id) const {

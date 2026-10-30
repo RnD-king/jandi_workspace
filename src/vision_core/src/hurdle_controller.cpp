@@ -98,7 +98,8 @@ ActionRequest HurdleController::RecoveryAction() const {
 void HurdleController::BeginStepRecovery(double now_sec, bool entry_loss) {
   entry_step_recovery_ = entry_loss;
   recovery_resume_mode_ = entry_loss ? HurdleMode::kApproach
-      : (fine_pose_entered_ ? HurdleMode::kFineAdjust : HurdleMode::kCoarseAdjust);
+      : (mode_ == HurdleMode::kApproach ? HurdleMode::kApproach
+         : fine_pose_entered_ ? HurdleMode::kFineAdjust : HurdleMode::kCoarseAdjust);
   recovery_step_action_ = !entry_loss && fine_pose_entered_
       ? MissionAction::kStepForwardHalf : MissionAction::kStepForwardOne;
   recovery_step_limit_ = entry_loss ? config_.entry_recovery_max_steps : config_.recovery_max_steps;
@@ -110,7 +111,9 @@ void HurdleController::BeginStepRecovery(double now_sec, bool entry_loss) {
   ClearTracking();
   stationary_recovery_.Begin(now_sec);
   mode_ = recovery_step_limit_ > 0 || entry_loss
-      ? HurdleMode::kRecoveryStep : HurdleMode::kRecoveryDown;
+      ? HurdleMode::kRecoveryStep
+      : recovery_resume_mode_ == HurdleMode::kApproach
+          ? HurdleMode::kRecoveryForward : HurdleMode::kRecoveryDown;
 }
 
 void HurdleController::ExhaustStepRecovery(double now_sec, HurdleResult &result) {
@@ -121,7 +124,8 @@ void HurdleController::ExhaustStepRecovery(double now_sec, HurdleResult &result)
   } else {
     ClearTracking();
     stationary_recovery_.Begin(now_sec);
-    mode_ = HurdleMode::kRecoveryDown;
+    mode_ = recovery_resume_mode_ == HurdleMode::kApproach
+        ? HurdleMode::kRecoveryForward : HurdleMode::kRecoveryDown;
     result.mode = mode_;
     result.tracked = {};
   }
@@ -171,7 +175,7 @@ HurdleResult HurdleController::Compute(
     if (entry_observation_pending_ && feedback.observation_complete) {
       entry_observation_pending_ = false;
       if (!tracked_.visible || !tracked_.stable) {
-        BeginStepRecovery(now_sec, true);
+        BeginStepRecovery(now_sec, entry_recovery_allowed_);
         result.mode = mode_;
         result.tracked = {};
         return result;
@@ -189,7 +193,7 @@ HurdleResult HurdleController::Compute(
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
-          BeginStepRecovery(now_sec,true);result.mode=mode_;result.tracked={};
+          BeginStepRecovery(now_sec,entry_recovery_allowed_);result.mode=mode_;result.tracked={};
         }
         return result;
       }
@@ -200,7 +204,7 @@ HurdleResult HurdleController::Compute(
           mode_=HurdleMode::kWaitCameraDown; state_enter_sec_=now_sec;
           result.mode=mode_; result.camera_request=CameraRequest::kDown;
         } else {
-          if (entry_observation_pending_) BeginStepRecovery(now_sec,true);
+          if (entry_observation_pending_) BeginStepRecovery(now_sec,entry_recovery_allowed_);
           else {mode_=HurdleMode::kRecoveryForward;stationary_recovery_.Begin(now_sec);state_enter_sec_=now_sec;}
           recovery_visible_count_=0;result.mode=mode_;result.tracked=tracked_;
         }
@@ -438,7 +442,7 @@ HurdleResult HurdleController::Compute(
         config_.recovery_observation_sec,config_.recovery_max_observations);
     if (status==StationaryObjectRecovery::Result::kFound) {
       mode_=HurdleMode::kApproach;
-
+      recovery_steps_completed_=0;entry_step_recovery_=false;
     } else if (status==StationaryObjectRecovery::Result::kFailed) mode_=HurdleMode::kFailed;
     else if (status==StationaryObjectRecovery::Result::kRetry) ClearTracking();
     result.mode=mode_; result.tracked=tracked_; return result;
@@ -452,6 +456,7 @@ HurdleResult HurdleController::Compute(
         config_.recovery_observation_sec, config_.recovery_max_observations);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = fine_pose_entered_ ? HurdleMode::kFineAdjust : HurdleMode::kCoarseAdjust;
+      recovery_steps_completed_=0;entry_step_recovery_=false;
     } else if (status == StationaryObjectRecovery::Result::kFailed) mode_ = HurdleMode::kFailed;
     else if (status == StationaryObjectRecovery::Result::kRetry) ClearTracking();
     result.mode = mode_; result.tracked = tracked_; return result;
@@ -465,10 +470,12 @@ bool HurdleController::EntryReady() const {
       std::count(acquire_history_.begin(), acquire_history_.end(), true) >= config_.stable_min_hits;
 }
 void HurdleController::EnterVerified(const std::optional<ObjectTarget>& mean,
-    const std::deque<bool>& hits, int width, int height, double now) {
+    const std::deque<bool>& hits, int width, int height, double now,
+    bool allow_entry_recovery) {
   UseVerifiedObservation(mean, hits, width, height);
   mode_ = HurdleMode::kApproach;
   entry_observation_pending_ = true;
+  entry_recovery_allowed_ = allow_entry_recovery;
   state_enter_sec_ = now;
 }
 
@@ -477,6 +484,17 @@ void HurdleController::ObserveOnly(const std::optional<ObjectTarget> &target,
   if (mode_ != HurdleMode::kWaitCameraDown &&
       mode_ != HurdleMode::kReturnCameraToLine)
     UpdateTracker(target, width, height);
+}
+
+void HurdleController::EnterContinuousRecovery(const ObjectTarget& target,
+    const std::deque<bool>& hits,int width,int height,double now) {
+  EnterVerified(target,hits,width,height,now,false);
+  BeginStepRecovery(now,false);
+}
+
+void HurdleController::EnterContinuousNear(double now) {
+  Reset();entry_recovery_allowed_=false;
+  mode_=HurdleMode::kWaitCameraDown;state_enter_sec_=now;
 }
 
 void HurdleController::UseVerifiedObservation(
@@ -496,6 +514,7 @@ void HurdleController::UseVerifiedObservation(
 
 void HurdleController::ClearObservationHistory() {
   ClearTracking();
+  stationary_recovery_.DiscardDetections();
 }
 
 void HurdleController::ClearTracking() {
@@ -512,6 +531,7 @@ void HurdleController::ClearTracking() {
 void HurdleController::ResetToLine(bool clear_ignore) {
   mode_ = HurdleMode::kLineFollow;
   entry_observation_pending_=entry_step_recovery_=recovery_step_pending_=false;
+  entry_recovery_allowed_=true;
   recovery_steps_completed_=recovery_step_limit_=0;
   recovery_resume_mode_=HurdleMode::kApproach;
   recovery_step_action_=MissionAction::kStepForwardOne;

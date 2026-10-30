@@ -94,31 +94,36 @@ void TestDownSearchHoldTuning() {
   assert(t.out.command.action_id!=0 && t.out.command.action_id!=old_id);
   assert(t.out.command.action==MissionAction::kStepForwardOne && t.permit==scope);
 }
-void TestSearchConfirmationRetriesThroughObservationGate(bool manual) {
+void TestAcquiredDownCannotRestartWalk(bool manual) {
   auto t=BallSearch();t.Commit();
-  const auto first_id=t.out.command.action_id;
-  t.in.ball_target=Target();
+  const auto search_id=t.out.command.action_id;
+  t.in.ball_target=Target(.4,.7); // Outside pickup rectangle: recovery has a safe FINE direction.
   for(int i=0;i<7;++i)t.Tick();
   t.Tick(true);
-  assert(t.out.ball.mode==BallMode::kCoarseAdjust && t.permit==0);
-  const int remaining=t.out.ball.down_search_steps_remaining;
-  // The same post-search check is automatic in real execution and explicitly
-  // requested by PREVIEW in manual tuning. Both use the core's real window.
+  assert(t.out.ball.mode==BallMode::kWaitFinePose && t.permit==0);
   t.in.manual_observation_control=manual;
-  t.in.begin_manual_observation=manual;
-  t.in.ball_target.reset();t.Tick();
-  t.in.begin_manual_observation=false;
-  assert(t.out.post_motion_observing && t.out.command.action_id==0);
-  for(int i=0;i<9;++i) {
-    t.Tick();assert(t.out.post_motion_observing && t.out.command.action_id==0);
-  }
-  t.Tick();
-  assert(!t.out.post_motion_observing && t.out.ball.mode==BallMode::kDownSearch);
-  assert(!t.out.ball.down_search_found && t.out.ball.down_search_steps_remaining==remaining);
-  assert(t.out.command.action_id==0 && t.permit==0);
-  assert(t.Preview().command.action==MissionAction::kStepForwardOne);
+  t.in.ball_target.reset();
+  const auto proposed=t.Preview();
+  assert(proposed.command.action==MissionAction::kDefaultPoseMode);
   t.Commit();
-  assert(t.out.command.action==MissionAction::kStepForwardOne && t.out.command.action_id!=first_id);
+  const auto feet_id=t.out.command.action_id;
+  assert(feet_id && feet_id!=search_id);
+  for(int i=0;i<3;++i) {
+    t.Tick();
+    assert(t.out.command.action_id==feet_id && t.out.ball.mode==BallMode::kWaitFinePose);
+  }
+  t.Tick(true);
+  for(int i=0;i<45;++i) {
+    t.Tick();
+    assert(t.out.ball.mode!=BallMode::kDownSearch);
+    assert(t.out.command.action!=MissionAction::kStepForwardOne);
+  }
+  assert(t.out.foot_pose==FootPose::kFine && t.out.ball.mode==BallMode::kBallRecoveryDown);
+  const auto recovery=t.Preview();
+  assert(recovery.command.action==MissionAction::kStepForwardHalf ||
+      recovery.command.action==MissionAction::kStepBack ||
+      recovery.command.action==MissionAction::kLeftSideStep ||
+      recovery.command.action==MissionAction::kRightSideStep);
 }
 void TestCameraLatchSurvivesLoss() {
   auto c=Config(); c.ball.entry_min_hits=1; c.ball.down_search_min_hits=1; c.ball.stable_window=c.ball.stable_min_hits=1; c.ball.lost_frames=1;
@@ -170,7 +175,7 @@ Trial PickAndReturn() {
     t.Tick(i%2==1);
     assert(t.out.ball.mode==BallMode::kDownSearch); // Finish accepted motion first.
   }
-  t.Tick(true); assert(t.out.ball.mode==BallMode::kCoarseAdjust);
+  t.Tick(true); assert(t.out.ball.mode==BallMode::kWaitFinePose);
   assert(t.out.command.action_id==0 && t.permit==0);
   for(int i=0;i<7;++i)t.Tick();
   assert(t.Preview().command.action==MissionAction::kDefaultPoseMode);
@@ -202,8 +207,12 @@ Trial PickAndReturn() {
 void TestAlternatingBoundedRecovery() {
   auto right=PickAndReturn(); auto left=right;
   assert(left.core.SetTestMissionIndices(2,1));
-  left.Commit(); assert(left.out.command.action==MissionAction::kTurnLeft);
-  right.Commit(); assert(right.out.command.action==MissionAction::kTurnRight);
+  left.Commit(); assert(left.out.command.action==MissionAction::kWalkMode);
+  right.Commit(); assert(right.out.command.action==MissionAction::kWalkMode);
+  left.Tick(true);right.Tick(true);
+  for(int i=0;i<11;++i) {left.Tick();right.Tick();}
+  left.Commit(); assert(left.out.command.action==MissionAction::kTurnLeftInPlace);
+  right.Commit(); assert(right.out.command.action==MissionAction::kStepForwardRightOneHurdle);
   auto found_on_last=right;
   for(int i=0;i<10;++i)right.Tick(true);
   assert(right.out.recovery_turns_completed==10 && right.out.recovery_verifying);
@@ -229,11 +238,9 @@ void TestAlternatingBoundedRecovery() {
   assert(lost_after_rotation.out.recovery_turns_completed==10);
   assert(lost_after_rotation.out.command.action_id==0);
   for (int i=0;i<11;++i) found_on_last.Tick();
-  assert(found_on_last.out.active_mission==MissionType::kBall);
-  assert(found_on_last.out.command.action_id==0 && found_on_last.permit==0);
-  assert(found_on_last.Preview().command.action==MissionAction::kWalkMode);
-  found_on_last.Commit(); found_on_last.Tick(true);
   assert(found_on_last.out.active_mission==MissionType::kLine);
+  assert(found_on_last.out.command.action_id==0 && found_on_last.permit==0);
+  assert(!found_on_last.out.remembered_line_score); // New normal LINE episode discards mission-era memory.
   assert(found_on_last.out.foot_pose==FootPose::kWalk);
   assert(found_on_last.out.command.action_id==0 && found_on_last.permit==0);
 }
@@ -267,14 +274,13 @@ void TestGoalForwardTrial() {
   assert(t.out.command.camera_request==CameraRequest::kForward);
   assert(t.out.command.action==MissionAction::kNone);
   t.in.camera_feedback={CameraMode::kForward,true}; t.Tick();
-  t.Commit(); assert(t.out.command.action==MissionAction::kTurnLeft);
+  t.Commit(); assert(t.out.command.action==MissionAction::kWalkMode);
+  t.Tick(true);for(int i=0;i<11;++i)t.Tick();
+  t.Commit(); assert(t.out.command.action==MissionAction::kTurnLeftInPlace);
   t.in.line_centers={{420,450},{420,350},{420,250},{420,150}};
-  for(int i=0;i<7;++i)t.Tick(); t.Tick(true);
+  for(int i=0;i<10;++i)t.Tick(); t.Tick(true);
   assert(t.out.recovery_verifying && !t.out.trial_complete);
   for(int i=0;i<11;++i)t.Tick();
-  assert(!t.out.trial_complete && t.out.command.action_id==0);
-  assert(t.Preview().command.action==MissionAction::kWalkMode);
-  t.Commit(); t.Tick(true);
   assert(t.out.trial_complete && t.out.command.action_id==0);
   t.Tick(); assert(t.out.trial_complete && t.out.command.action_id==0);
   assert(t.core.SetTestMissionIndices(1,3));
@@ -334,6 +340,7 @@ void TestGoalEdgeSingleCommit(bool left) {
   t.in.camera_feedback={CameraMode::kGoal,true};
   t.in.backboard_target=Target(left?.05:.95,.3);
   t.in.backboard_center_depth_m=2;
+  t.in.goal_pose={true,0,2,0,1};
   for(int i=0;i<7;++i)t.Tick();
   assert(t.out.goal.mode==GoalMode::kEdgeTurn && t.out.command.action_id==0);
   const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
@@ -365,7 +372,7 @@ void TestGoalEdgeSingleCommit(bool left) {
 }
 } // namespace
 int main() {
-  // Distance thresholds keep raw GOAL pose geometry, changing only primitive length.
+  // Near GOAL commits to FINE feet before considering another WALK primitive.
   auto gc=LoadDefaultAlgorithmConfig().goal;
   gc.stable_window=gc.stable_min_hits=1;
   GoalController goal(gc,3); goal.StartForwardTrial();
@@ -373,12 +380,12 @@ int main() {
   goal.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
   goal.Compute({},Target(),{true,0,.7,0,1},640,480,.2,true,{CameraMode::kGoal,true},{});
   auto large=goal.Compute({},Target(),{true,0,.9,0,1},640,480,.3,true,{CameraMode::kGoal,true},{});
-  assert(large.fine_decision_pose_used && large.action.action==MissionAction::kStepForwardTwo);
+  assert(large.mode==GoalMode::kWaitFinePose && large.action.action==MissionAction::kDefaultPoseMode);
   auto medium=goal.Compute({},Target(),{true,0,.75,0,1},640,480,.4,true,{CameraMode::kGoal,true},{});
-  assert(medium.fine_decision_pose_used && medium.action.action==MissionAction::kStepForwardOne);
+  assert(medium.mode==GoalMode::kWaitFinePose && medium.action.action==MissionAction::kDefaultPoseMode);
   TestCameraLatchSurvivesLoss(); TestWindowAndDeadline(); TestAlternatingBoundedRecovery();
   TestGoalForwardTrial(); TestHurdleSearchAndContact();TestDownSearchHoldTuning();
-  TestSearchConfirmationRetriesThroughObservationGate(false);
-  TestSearchConfirmationRetriesThroughObservationGate(true);
+  TestAcquiredDownCannotRestartWalk(false);
+  TestAcquiredDownCannotRestartWalk(true);
   for(bool left:{false,true})TestGoalEdgeSingleCommit(left);
 }

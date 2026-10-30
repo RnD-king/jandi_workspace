@@ -118,7 +118,26 @@ void EntryExhaustionResumesLine() {
   assert(walking);
 }
 }
+static void LockedHandoffUsesGeneralBudget(bool lost_at_handoff) {
+  const auto c=Configuration();Driver d(c);
+  if(lost_at_handoff)
+    d.core.EnterContinuousRecovery(Target(),std::deque<bool>(10,true),640,480,d.now);
+  else {
+    d.core.EnterVerified(Target(),std::deque<bool>(10,true),640,480,d.now,false);
+    d.core.UseVerifiedObservation({},std::deque<bool>(10,false),640,480);
+    d.Tick({}, {false,false,true},false);
+  }
+  assert(!d.core.EntryRecovery() && d.core.RecoveryStepLimit()==c.recovery_max_steps);
+  for(int n=1;n<=c.recovery_max_steps;++n) {
+    d.Tick();assert(d.out.action.action==MissionAction::kStepForwardOne);
+    d.Tick({}, {true,false,false});d.Observe(false,0);
+  }
+  assert(d.out.mode==HurdleMode::kRecoveryForward);
+  for(int i=0;i<30 && d.out.mode!=HurdleMode::kFailed;++i)d.Tick();
+  assert(d.out.mode==HurdleMode::kFailed);
+}
 int main() {
+  LockedHandoffUsesGeneralBudget(false);LockedHandoffUsesGeneralBudget(true);
   for(int phase:{0,1,2})for(bool found:{false,true})Recovery(phase,found);
   EntryExhaustionResumesLine();
 }

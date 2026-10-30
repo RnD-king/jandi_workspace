@@ -1,5 +1,11 @@
 # PC 통합 미션 튜닝 — 2026-10-13
 
+현재 실전 AUTO는 LINE·원거리 객체 접근을 항상 32/33/34와 기본 2/2/2 반복으로 연결한다.
+T/F 선택은 제거했다. 아래 격자 접근 표는 수동 승인·단계별 시험 경로의 설명이다.
+공은 DOWN 발견 즉시, 골대는 근거리 판단 즉시 FINE 발 전환을 요청한다.
+실전 정책과 최신 복구 상세는 코어의 CONTINUOUS_OBJECT_APPROACH.md를 따른다.
+
+
 현재 PC의 forward_walk는 친구 2026_motion의 10.13.2/forward_walk 원본이다.
 12번의 기존 이름과 번호는 유지하며 최신 JSON 매핑을 따른다.
 이 수정은 PC의 my_cv/src/vision 및 ~/vision_core에서 개발한다.
@@ -63,17 +69,11 @@ DONE 이후 1초 정지 관측을 사용한다. 나중에 JSON 모션을 검증�
 실제 DONE 횟수로 제한하며 시간 제한은 없다. 최근 최대 10프레임에서
 down_search_min_hits(기본 5회) 검출과 현재 프레임 검출로 탐색 종료를 결정한다.
 발견 조건을 채워도 현재 수락된 걸음의 실제 DONE까지 기다린다.
-이후 큰 보행으로 거리만 조정한다:
-
-- v < down_one_step_v_px: 21번, 2걸음.
-- down_one_step_v_px ≤ v < fine_mode_v_px: 10번, 1걸음.
-- v ≥ fine_mode_v_px: 2번 자세 전환 → 새 관측 → 미세보행.
-
-공이 줍기 영역의 v 구간까지 도달한 경우에도 더 전진하지 않고 미세보행으로 전환한다.
-전환선은 fine_mode_v_px와 pickup_v1_px 중 먼저 도달하는 실제 기준을 표시한다.
-공 DOWN 화면은 줍기 사각형 하나와 가로선 2개다. 허들 DOWN도 가로선 2개만 표시하며
-접촉 기준은 글자 패널과 contact_v_px에서 확인한다.
-미세보행 진입 후 공은 3/4/5/6, 허들은 3번만 사용한다. 10/21로 자동 복귀하지 않는다.
+공은 DOWN에서 발견 조건을 채우면 즉시 FINE 발 전환을 요청하고 실제 DONE 뒤 새 관측으로
+pickup 사각형에 맞춘다. 공의 DOWN 일반 보행 구간과 전환 임계값은 없다.
+공 DOWN 화면은 pickup 사각형을 표시하며 상하좌우 3/4/5/6만 사용한다.
+허들은 기존 DOWN 일반 보행/미세 전환 경계를 유지한다.
+골대도 근거리 기준에 진입하면 즉시 FINE 발 전환을 요청한다. 이 두 정책은 AUTO·수동·단계별 시험에 공통이다.
 
 | rqt 파라미터 | 기본값(px) | 의미 |
 |---|---:|---|
@@ -83,8 +83,6 @@ down_search_min_hits(기본 5회) 검출과 현재 프레임 검출로 탐색 �
 | ball_approach_u_deadband_px | 16 | 공 좌우 허용 반폭 |
 | ball_approach_short_v_px | 288 | 중앙 4→3걸음 경계 |
 | ball_approach_two_step_v_px | 360 | 공 아래 행 2걸음→DOWN 경계 |
-| ball_down_one_step_v_px | 216 | DOWN 2→1걸음 경계 |
-| ball_fine_mode_v_px | 278.4 | 미세보행 진입선 |
 | ball_pickup_u1_px / ball_pickup_u2_px | 281.6 / 358.4 | 줍기 영역 왼쪽 / 오른쪽 |
 | ball_pickup_v1_px / ball_pickup_v2_px | 307.2 / 364.8 | 줍기 영역 위쪽 / 아래쪽 |
 | hurdle_approach_short_v_px | 312 | 허들 4→3걸음 경계 |
@@ -96,7 +94,7 @@ down_search_min_hits(기본 5회) 검출과 현재 프레임 검출로 탐색 �
 
 기존 ball_tilt_down_v_px/hurdle_tilt_trigger_v_px는 approach_two_step_v_px로,
 hurdle_acquire_min_v_px는 hurdle_upper_acquire_v_px로 대체한다.
-공·허들의 fine_one_step_v_error_px/fine_two_step_v_error_px는 두 절대 v 경계로 대체한다.
+허들의 옛 fine_one_step_v_error_px/fine_two_step_v_error_px는 두 절대 v 경계로 대체한다. 공은 DOWN 전환 경계 없이 바로 FINE으로 간다.
 hurdle_fine_target_v_px 대신 접촉 목표는 hurdle_contact_v_px를 사용한다.
 
 ## 발 자세와 미션
@@ -108,18 +106,17 @@ hurdle_fine_target_v_px 대신 접촉 목표는 hurdle_contact_v_px를 사용한
 미션 완료는 보행 자세 복귀 DONE 뒤 확정하며, 골대 단독 시험 완료도 동일하다.
 일반 LINE 실패 복구의 7/8 회전에도 필요한 발 전환을 적용한다.
 
-BALL: 접근 → 2걸음/DOWN → 검색 → 21/10 거리 조정 → 2 전환 → 미세 정렬
+BALL: 접근 → DOWN → 최초 검색 → 발견 즉시 2 발 전환 → 미세 정렬
 → 14 PICK(모션 내부 재그립) → 잔존 공 관측 → 성공이면 1 기본 자세
 → 4 후진 3회 → FORWARD → 같은 방향 회전·라인 확인 → 9 → LINE.
 PICK 실패 시 다시 미세 정렬하며 최대 10회다. 성공 판정은 기존 잔존 공 10/7 기준이다.
 
-GOAL: 공 보유/라인 복귀 뒤 LINE 실행시간 5초 → 수락된 보행 DONE → GOAL 시야
-→ 접근 → 림 거리 오차로 21/10 조정 → 2 → 3/4/5/6 미세 정렬 → 17 슛
-→ 4 후진 2회 → FORWARD → 회전·라인 확인 → 9 → LINE.
+GOAL: 공 보유/라인 복귀 뒤 운영 YAML의 완료 LINE 묶음 기준 → GOAL 시야
+→ 공통 원거리 접근 → 근거리 판단 → 2 발 전환 → 3/4/5/6 미세 정렬 → 17 슛
+→ 설정된 후진 → FORWARD → 회전·라인 확인 → 9 → LINE.
 골대 단독 전체(0) 시험은 FORWARD 접근부터 시작한다. 골대 접근(1) 시험은
-GOAL 카메라를 먼저 준비하고 GOAL_CLOSE_WALK 진입 직전에 종료한다.
-GOAL로 올렸는데 아직 골대를 못 본
-상태에서는 의도대로 정지한다. 팔 전환을 포함한 실제 LINE 보행 시간만 5초에 포함한다.
+GOAL 카메라를 준비하고 GOAL_TO_FINE_FEET에서 발 전환을 실행하기 전에 종료한다.
+빈 첫 화면과 좌표 실패는 각각 정해진 재시도 한도로 복구한다.
 
 HURDLE: 접근 → DOWN → 검색 → 21/10 거리 조정 → 2 → 3 미세 접근
 → contact_v_px 도달 → 3 접촉 반복(hurdle_contact_steps 기본 3) → 16 넘기

@@ -51,7 +51,7 @@ void InvalidAndNearWindows() {
   goal.Compute({},{},{},640,480,0,true,camera,{});
   goal.UseVerifiedObservation(Target(320),{true,0,.7,0,1},hits,hits,640,480,hits);
   auto g=goal.Compute({},{},{},640,480,1,true,camera,{});
-  assert(g.mode==GoalMode::kCoarseAdjust); // no second near-detection window
+  assert(g.mode==GoalMode::kWaitFinePose); // no second near-detection window
 }
 void GoalRecovery(bool fine, bool left) {
   auto c=LoadDefaultAlgorithmConfig().goal;
@@ -100,11 +100,12 @@ void GoalRecovery(bool fine, bool left) {
     goal.StartTestExecute();
     goal.Compute({},target,{true,0,1,0,1},640,480,3,true,camera,{},false);
     g=goal.Compute({},target,{},640,480,3.1,true,camera,{});
-    assert(g.mode==GoalMode::kFineRecovery && g.action.action==MissionAction::kNone);
+    assert(g.mode==GoalMode::kFineRecovery && g.action.action==MissionAction::kStepForwardHalf);
   }
 }
 void GoalEdges() {
   auto c=LoadDefaultAlgorithmConfig().goal;c.stable_window=c.stable_min_hits=1;
+  c.lost_frames=100; // Isolate edge-turn behavior from Depth-loss recovery.
   const CameraFeedback camera{CameraMode::kGoal,true};
   for(double margin:{0.0,35.0,50.0,80.0}) for(bool left:{false,true}) {
     c.edge_margin_px=margin;
@@ -232,7 +233,7 @@ void BallEntryAndReadyQueue(bool already_queued) {
   c.ball.upper_acquire_v_px=470;
   MissionController core(c);
   auto frame=[&](double at) {
-    auto f=Frame(at);f.advance_line_fsm=true;
+    auto f=Frame(at);f.advance_line_fsm=true;f.manual_observation_control=true;
     for(double v:{450.,400.,350.,300.,250.,200.,150.,100.})
       f.line_centers.push_back({c.line_features.image_center_u,v});
     return f;
@@ -291,7 +292,7 @@ void BallEntryUsesCandidateIdentity() {
   c.object_association.missing_frame_limit=100;
   MissionController core(c);
   PerceptionFrameInput f;f.image_width=640;f.image_height=480;
-  f.advance_line_fsm=false;f.allow_new_body_actions=false;
+  f.advance_line_fsm=false;f.allow_new_body_actions=false;f.manual_observation_control=true;
   PerceptionDetection d;d.detection.class_id=c.object_targets.ball_class_id;
   d.detection.confidence=1;d.detection.box={90,450,20,20};
   // A appears once, then B appears five times. Raw detections total six,
@@ -337,7 +338,7 @@ void BallEntryRawFallbackIsExplicit() {
   c.object_association.missing_frame_limit=100;
   MissionController core(c);
   PerceptionFrameInput f;f.image_width=640;f.image_height=480;
-  f.advance_line_fsm=false;f.allow_new_body_actions=false;
+  f.advance_line_fsm=false;f.allow_new_body_actions=false;f.manual_observation_control=true;
   PerceptionDetection d;d.detection.class_id=c.object_targets.ball_class_id;
   d.detection.confidence=1;d.detection.box={90,450,20,20};
   PerceptionMissionFrameResult out;
@@ -361,27 +362,19 @@ void DirectGoalStartAndReset() {
   for(auto initial:{CameraMode::kForward,CameraMode::kGoal}) {
     MissionController core(c);
     auto f=Frame(0);f.camera_feedback={initial,true};
-    // Disarmed frames cannot consume the mandatory camera request.
     f.allow_new_commands=false;
     auto r=core.Step(f);
     assert(r.command.camera_request==CameraRequest::kNone && r.command.action_id==0);
     f.now_sec=.1;f.allow_new_commands=true;r=core.Step(f);
-    assert(r.active_mission==MissionType::kGoal && r.goal.mode==GoalMode::kWaitCameraGoal);
-    assert(r.command.camera_request==CameraRequest::kGoal && r.command.action_id==0);
-    // No board is needed to start the camera; body motion waits for its DONE.
+    assert(r.active_mission==MissionType::kLine && r.command.action_id==0);
+    assert(r.command.camera_request==(initial==CameraMode::kForward ? CameraRequest::kGoal : CameraRequest::kNone));
     f.now_sec=.2;f.camera_feedback={CameraMode::kTransition,false};r=core.Step(f);
-    assert(r.command.action_id==0 && r.goal.mode==GoalMode::kWaitCameraGoal);
-    f.now_sec=.5;f.camera_feedback={CameraMode::kGoal,true};
+    assert(r.command.action_id==0);
+    f.camera_feedback={CameraMode::kGoal,true};f.advance_line_fsm=true;
     f.backboard_target=Target(320);f.backboard_center_depth_m=1.6;
-    r=core.Step(f);assert(r.post_motion_observing && r.command.action_id==0);
-    // GOAL camera DONE + .6s settle + 1s observation, with real 10/7 samples.
-    for(int i=1;i<16;++i) {
-      f.now_sec=.5+.1*i;r=core.Step(f);
-      assert(r.post_motion_observing && r.command.action_id==0);
-    }
-    f.now_sec=2.1;r=core.Step(f);
-    assert(!r.post_motion_observing && r.command.action==MissionAction::kStepForwardThree);
-    assert(r.goal.mode==GoalMode::kApproach);
+    for(int i=0;i<12;++i){f.now_sec=.5+.1*i;r=core.Step(f);}
+    assert(r.active_mission==MissionType::kLine && r.approach_mission==MissionType::kGoal);
+    assert(LinePlan::IsUnit(r.command.action) && r.command.action_id);
   }
   MissionController reset(c);reset.BeginPhysicalReset();
   auto r=reset.StepPhysicalReset({}, {CameraMode::kGoal,true},0);
@@ -396,7 +389,7 @@ void DirectGoalStartAndReset() {
   assert(r.physical_reset_complete);
   auto f=Frame(.4);f.camera_feedback={CameraMode::kGoal,true};
   r=reset.Step(f);
-  assert(r.command.camera_request==CameraRequest::kGoal && r.command.action_id==0);
+  assert(r.active_mission==MissionType::kLine && r.command.action_id==0);
   // Default false retains LINE entry and FORWARD reset.
   c.goal_trial_start_goal=false;
   MissionController normal(c);f=Frame(0);r=normal.Step(f);
@@ -544,15 +537,15 @@ void RecoveryWithoutLastDetectionDeadline() {
   }
 }
 void FineTurnObservationTiming(bool left) {
-  auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kGoal;c.test_stage=3;
+  auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kGoal;c.test_stage=2;
   c.enable_ball=c.enable_hurdle=false;c.transition_settle_sec=0;
   c.fine_motion_settle_sec=.25;c.post_motion_observation_sec=1;
   c.goal.lost_frames=1;c.goal.smooth_alpha=1;
   MissionController core(c);
   auto f=Frame(0);f.camera_feedback={CameraMode::kGoal,true};
-  f.allow_new_body_actions=false;f.allow_test_setup_body_actions=true;
-  f.backboard_target=Target(left?150:550);f.goal_pose={true,0,1.5,0,1};
-  f.backboard_center_depth_m=1.5;
+  f.allow_new_body_actions=true;f.allow_test_setup_body_actions=true;
+  f.backboard_target=Target(left?150:550);f.goal_pose={true,0,.7,0,1};
+  f.backboard_center_depth_m=.7;
   MissionFrameResult r;
   std::uint64_t setup_done=0;
   for(int i=0;i<=100;++i) {
@@ -565,6 +558,13 @@ void FineTurnObservationTiming(bool left) {
        !r.post_motion_observing)break;
   }
   assert(r.goal.mode==GoalMode::kFineAdjust && r.goal.tracked.stable);
+  if(r.command.action_id) {
+    const auto pending=r.command.action_id;
+    f.now_sec+=.05;
+    f.allow_new_body_actions=false;
+    f.delivery_feedback={pending,true,true,false};
+    r=core.Step(f);
+  }
   f.allow_new_body_actions=true;f.backboard_target.reset();
   f.goal_pose={};f.backboard_center_depth_m.reset();
   const auto turn=left?MissionAction::kTurnLeft:MissionAction::kTurnRight;
@@ -614,7 +614,7 @@ void ImageDetectionWithMissingDepth() {
   f.now_sec+=.1;out=core.StepPerception(f);
   assert(!out.perception.targets.backboard);
   assert(out.mission.goal.mode==GoalMode::kFineRecovery);
-  assert(out.mission.goal.action.action==MissionAction::kNone);
+  assert(out.mission.goal.action.action==MissionAction::kStepForwardHalf);
 }
 void FineSidePairDirect(bool left) {
   auto c=LoadDefaultAlgorithmConfig().ball;
@@ -747,7 +747,7 @@ void EntryDirectionTransport(bool left) {
   c.ball.entry_min_hits=6;c.ball.stable_min_hits=7;c.ball.stable_window=10;
   c.initial_has_ball=false;c.goal_trial_start_goal=false;
   MissionController core(c);
-  auto f=Frame(0);f.advance_line_fsm=true;
+  auto f=Frame(0);f.advance_line_fsm=true;f.manual_observation_control=true;
   for(double v:{450.,400.,350.,300.})f.line_centers.push_back({c.line_features.image_center_u,v});
   auto r=core.Step(f);const auto a=r.command.action_id;
   assert(r.command.action==MissionAction::kLineStraightUnit);
@@ -867,7 +867,7 @@ void GoalEntryFallbackAndDepth() {
     goal.UseVerifiedObservation({}, {},misses,misses,640,480);
     g=goal.Compute({},{},{},640,480,2,true,camera,{false,false,true},true,{},false,scenario==3);
     assert(g.mode==(scenario==1?GoalMode::kRecoveryForwardStep:GoalMode::kRecoverySearch));
-    assert(g.action.action==MissionAction::kNone);
+    assert(g.action.action==(scenario==3 ? MissionAction::kStepForwardOne : MissionAction::kNone));
     // RESET must also discard an earlier directional sighting.
     goal.StartGoalTrial();goal.Compute({},{},{},640,480,3,true,camera,{});
     goal.UseVerifiedObservation({}, {},misses,misses,640,480);
@@ -892,9 +892,9 @@ void GoalEntryFallbackAndDepth() {
   pose.UseVerifiedObservation(Target(c.target_u_px),{},hits,misses,640,480);
   g=pose.Compute({},Target(c.target_u_px),{},640,480,1.5,true,camera,
       {false,false,true},true,.5);
-  assert(g.mode==GoalMode::kCoarseAdjust);
+  assert(g.mode==GoalMode::kWaitFinePose);
   g=pose.Compute({},Target(c.target_u_px),{},640,480,1.6,true,camera,{});
-  assert(g.mode==GoalMode::kCoarseRecovery && g.action.action==MissionAction::kNone);
+  assert(g.mode==GoalMode::kWaitFinePose && g.action.action==MissionAction::kDefaultPoseMode);
 }
 
 void GoalEntryCameraTransport(bool left, bool manual) {
@@ -904,7 +904,7 @@ void GoalEntryCameraTransport(bool left, bool manual) {
   c.goal.post_pickup_walk_fallback_actions=1;c.transition_settle_sec=.5;
   c.goal.stable_window=10;c.goal.stable_min_hits=7;c.goal.edge_margin_px=50;
   MissionController core(c);
-  auto f=Frame(0);f.advance_line_fsm=true;
+  auto f=Frame(0);f.advance_line_fsm=true;f.manual_observation_control=true;
   for(double v:{450.,400.,350.,300.})f.line_centers.push_back({c.line_features.image_center_u,v});
   auto r=core.Step(f);const auto id=r.command.action_id;
   assert(r.command.action==MissionAction::kLineStraightUnit);
@@ -960,7 +960,7 @@ void Defaults() {
   auto c=LoadDefaultAlgorithmConfig();
   assert(CruiseAction(CruiseDirection::kStraight)==MissionAction::kStepForwardFour);
   assert(c.transition_settle_sec==.6 && c.fine_motion_settle_sec==0 && c.walk_inter_action_hold_sec==0);
-  assert(c.ball.down_one_step_v_px==0 && c.ball.fine_mode_v_px==10);
+
   assert(c.ball.recovery_walk_turn_max==3 && c.ball.entry_recovery_max_steps==3 && c.goal.recovery_turn_max==3);
   for(int field=0;field<4;++field) {
     auto bad=c;

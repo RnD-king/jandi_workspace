@@ -37,7 +37,7 @@ void MissionController::BeginCandidateObservation(double now) {
   candidate_.phase = CandidatePhase::kObserve;
   candidate_.observe_after_turn = false;
   // This clears all moving observation/association histories, while the
-  // candidate's six-hit direction and completed turns remain independent.
+  // candidate's entry-window direction and completed turns remain independent.
   BeginDecisionObservation(now, candidate_.mission, false, {});
 }
 
@@ -51,7 +51,6 @@ void MissionController::ReleaseCandidate() {
   ball_controller_.ClearEntryEvidence();
   hurdle_controller_.ClearObservationHistory();
   line_plan_.Reset();
-  line_invalid_frames_ = 0;
   line_auxiliary_id_ = 0;
   line_auxiliary_done_ = line_auxiliary_observing_ = false;
   BeginLineReacquisition();
@@ -61,10 +60,24 @@ MissionFrameResult MissionController::StepPlannedLine(
     const MissionFrameInput& input, std::optional<double> image_center) {
   MissionFrameResult output;
   ObserveLineFeedback(input.delivery_feedback, input.now_sec);
-  for (const auto cruise : line_plan_.TakeCompleted()) {
+  // Full AUTO has one approach policy. Manual approval and isolated stages
+  // retain their stationary, one-command-at-a-time execution contract.
+  const bool automatic_approach = !input.manual_observation_control &&
+                                  config_.test_mission == MissionType::kNone;
+  if (automatic_approach && has_ball_ && config_.enable_goal) {
+    BallResult carrying;carrying.has_ball=true;
+    goal_controller_.UpdateBallState(carrying);
+  }
+  for (const auto& block : line_plan_.TakeCompletedBlocks()) {
+    if (automatic_approach && block.owner && block.owner==continuous_.epoch) {
+      if (block.object_qualified) {
+        ++continuous_.blocks;
+        continuous_.locked=continuous_.blocks>=config_.object_approach.lock_blocks;
+      } else continuous_.loss_pending=true;
+    }
     if (!post_pickup_goal_line_gate_active_) continue;
     ++post_pickup_line_actions_completed_;
-    if (cruise == MissionAction::kStepForwardFour) post_pickup_five_step_completed_ = true;
+    if (block.cruise == MissionAction::kStepForwardFour) post_pickup_five_step_completed_ = true;
   }
   FeatureConfig features = config_.line_features;
   if (image_center && std::isfinite(*image_center) && *image_center >= 0 &&
@@ -72,22 +85,12 @@ MissionFrameResult MissionController::StepPlannedLine(
   output.line_features = ComputeLineFeatures(input.line_centers, input.image_width,
                                             input.image_height, features);
   output.line_computed = true;
-  const auto raw = output.line_features.guide;
+  auto raw = output.line_features.guide;
   LineGuide decision = input.line_decision_guide_override.value_or(raw);
   output.line_decision_guide = decision;
   last_line_image_width_ = input.image_width;
   last_line_image_center_u_ = features.image_center_u >= 0
       ? features.image_center_u : 0.5 * input.image_width;
-  if (input.advance_line_fsm) {
-    line_stability_history_.push_back(line_state_ == LineState::kNormal && raw.valid);
-    while (line_stability_history_.size() > static_cast<std::size_t>(config_.line.line_stable_window))
-      line_stability_history_.pop_front();
-    if (raw.valid) line_invalid_frames_ = 0; else ++line_invalid_frames_;
-    line_plan_.Observe(input.now_sec, raw);
-  }
-  const bool line_valid = line_state_ == LineState::kNormal && raw.valid &&
-      std::count(line_stability_history_.begin(), line_stability_history_.end(), true) >=
-          config_.line.line_stable_min_hits;
   const bool may_advance = input.allow_new_mission_entry;
   const bool commands_allowed = input.allow_new_commands && input.allow_new_body_actions &&
       !command_coordinator_.ActionAckTimedOut();
@@ -98,17 +101,44 @@ MissionFrameResult MissionController::StepPlannedLine(
       !command_coordinator_.HasQueuedAction();
   const bool idle = (!command_coordinator_.HasPendingAction() || completing_current) &&
       !line_plan_.Outstanding();
+  RouteDecision route;
+  if (automatic_approach) {
+    route=PrepareContinuousApproach(input,output.line_features,idle);
+    if (route.entered) return StepWithLineImageCenter(input,image_center);
+    if (route.guide) {
+      raw=*route.guide;decision=raw;
+      output.line_decision_guide=decision;
+    }
+  }
+  if (input.advance_line_fsm) {
+    line_stability_history_.push_back(line_state_ == LineState::kNormal && raw.valid &&
+                                      std::isfinite(raw.offset) && std::isfinite(raw.heading_rad));
+    while (line_stability_history_.size() > static_cast<std::size_t>(config_.line.line_stable_window))
+      line_stability_history_.pop_front();
+    line_plan_.Observe(input.now_sec, raw);
+    if (automatic_approach && continuous_.mission!=MissionType::kNone) {
+      const int minimum=continuous_.mission==MissionType::kBall ? config_.ball.entry_min_hits :
+          continuous_.mission==MissionType::kGoal ? config_.goal.stable_min_hits : config_.hurdle.stable_min_hits;
+      const int window=continuous_.mission==MissionType::kBall ? config_.ball.stable_window :
+          continuous_.mission==MissionType::kGoal ? config_.goal.stable_window : config_.hurdle.stable_window;
+      line_plan_.ObserveObject(input.now_sec,continuous_.epoch,route.object_visible,window,minimum);
+    }
+  }
+  const bool line_valid = line_state_ == LineState::kNormal &&
+      line_stability_history_.size()==static_cast<std::size_t>(config_.line.line_stable_window) &&
+      std::count(line_stability_history_.begin(), line_stability_history_.end(), true) >=
+          config_.line.line_stable_min_hits;
   ActionRequest request;
-  CameraRequest camera = CameraRequest::kNone;
+  CameraRequest camera = route.camera;
   bool manual_line_hold = false;
   if (input.manual_observation_control && input.begin_manual_observation &&
       candidate_.phase == CandidatePhase::kNone && !line_plan_.Active() &&
       line_state_ == LineState::kNormal)
     BeginDecisionObservation(input.now_sec, MissionType::kLine, false, {});
 
-  // Observe entry evidence BEFORE considering READY. A six-hit BALL candidate
+  // Observe entry evidence BEFORE considering READY. A qualified BALL candidate
   // wins the same sensory cycle even when A's READY is also delivered now.
-  if (may_advance && !has_ball_ && line_state_ != LineState::kFinalHold &&
+  if (!automatic_approach && may_advance && !has_ball_ && line_state_ != LineState::kFinalHold &&
       input.camera_feedback.settled && input.camera_feedback.actual_mode == CameraMode::kForward &&
       (candidate_.phase == CandidatePhase::kNone || candidate_.phase == CandidatePhase::kDrain)) {
     if (config_.enable_hurdle && (candidate_.mission == MissionType::kNone ||
@@ -178,7 +208,7 @@ MissionFrameResult MissionController::StepPlannedLine(
         output.post_motion_valid = std::count(decision_object_hits_.begin(), decision_object_hits_.end(), true);
         output.post_motion_elapsed_sec = std::max(0.0, input.now_sec - decision_observation_start_sec_);
         if (DecisionObservationReady(input.now_sec) && input.allow_new_commands) {
-          const bool verified = decision_object_hits_.size() == 10 && output.post_motion_valid >= 7 &&
+          const bool verified = decision_object_qualified_ &&
               decision_last_target_ && decision_object_weight_ > 0;
           decision_observation_active_ = false;
           output.post_motion_observing = false;
@@ -191,16 +221,15 @@ MissionFrameResult MissionController::StepPlannedLine(
                                          decision_rect_v_sum_ / decision_object_weight_};
             const auto mission = candidate_.mission;
             if (mission == MissionType::kBall)
-              ball_controller_.EnterVerified(mean, decision_object_hits_, input.image_width,
+              ball_controller_.EnterVerified(mean, decision_qualified_object_hits_, input.image_width,
                                               input.image_height, input.now_sec);
             else
-              hurdle_controller_.EnterVerified(mean, decision_object_hits_, input.image_width,
+              hurdle_controller_.EnterVerified(mean, decision_qualified_object_hits_, input.image_width,
                                                 input.image_height, input.now_sec);
             candidate_ = {};
             line_plan_.Reset();
             line_auxiliary_id_ = line_ready_handled_id_ = 0;
             line_auxiliary_done_ = line_auxiliary_observing_ = false;
-            line_invalid_frames_ = 0;
             EnterMission(mission);
             if (mission == MissionType::kBall) {
               ball_result_.mode = BallMode::kApproachBall; ball_result_.active = true;
@@ -234,20 +263,16 @@ MissionFrameResult MissionController::StepPlannedLine(
         else ReleaseCandidate();
       }
     }
-  } else if (input.advance_line_fsm && !manual_line_hold) {
-    // A full window of consecutive missing guides stops unfinished repeats.
-    // A single invalid frame or insufficient NEW per-unit samples does not.
-    if (line_plan_.Active() && line_invalid_frames_ >= config_.line.line_stable_window) {
-      line_plan_.Abort();
-      line_failure_pending_done_ = true;
-    }
+  } else if (input.advance_line_fsm && !manual_line_hold && !route.hold) {
+    // A block remains valid if any rolling 10-frame window qualifies before
+    // its final READY; a single missed frame never cancels the next unit.
     if (line_failure_pending_done_ && idle) {
       line_failure_pending_done_ = false;
       BeginObservation(LineState::kFailureObserve, input.now_sec);
     }
     // GOAL admission is evaluated only after physically completed full blocks,
     // with the same carrying/armed/LINE validity gates as the old coordinator.
-    if (has_ball_ && config_.enable_goal && may_advance) {
+    if (!automatic_approach && has_ball_ && config_.enable_goal && may_advance) {
       BallResult carrying; carrying.has_ball = true;
       goal_controller_.UpdateBallState(carrying);
       ActionExecutionFeedback execution;
@@ -277,6 +302,8 @@ MissionFrameResult MissionController::StepPlannedLine(
       // The previous block may not have reached sensory DONE yet; count the
       // qualifying block prospectively ONLY to suppress its final READY queue.
       const bool goal_will_enter = has_ball_ && config_.enable_goal &&
+          (!automatic_approach || (input.camera_feedback.actual_mode==CameraMode::kForward &&
+            post_pickup_line_actions_completed_+(line_plan_.Done(id)?0:1)>=approach_goal_retry_after_)) &&
           goal_controller_.CanEnterFromLine() &&
           post_pickup_goal_line_gate_active_ && line_valid && final_edge &&
           (post_pickup_five_step_completed_ ||
@@ -284,6 +311,8 @@ MissionFrameResult MissionController::StepPlannedLine(
                goal_controller_.RequiredLineWalkActions());
       // Straight-block completion also satisfies GOAL regardless of fallback.
       const bool straight_goal = has_ball_ && config_.enable_goal &&
+          (!automatic_approach || (input.camera_feedback.actual_mode==CameraMode::kForward &&
+            post_pickup_line_actions_completed_+(line_plan_.Done(id)?0:1)>=approach_goal_retry_after_)) &&
           goal_controller_.CanEnterFromLine() &&
           post_pickup_goal_line_gate_active_ && line_valid && final_edge &&
           line_plan_.CruiseFor(id) == MissionAction::kStepForwardFour;
@@ -295,6 +324,13 @@ MissionFrameResult MissionController::StepPlannedLine(
         decision = mean.value_or(LineGuide{});
         output.line_decision_guide = decision;
         if (!decision.valid && !idle) line_failure_pending_done_ = true;
+        if (automatic_approach && continuous_.mission!=MissionType::kNone &&
+            line_plan_.ObjectOwned(id,continuous_.epoch) &&
+            !line_plan_.ObjectQualified(id)) {
+          continuous_.loss_pending=true;
+          line_plan_.Abort();
+          route.hold=true;
+        }
       }
       if (line_auxiliary_id_ && line_auxiliary_done_ && idle) {
         const bool pose = line_auxiliary_action_ == MissionAction::kWalkMode ||
@@ -307,7 +343,11 @@ MissionFrameResult MissionController::StepPlannedLine(
       }
       bool observation_wait = false;
       if (line_auxiliary_observing_) {
-        AddDecisionObservation(input);
+        if (automatic_approach && route.guide) {
+          auto observation=input;
+          observation.line_decision_guide_override=raw;
+          AddDecisionObservation(observation);
+        } else AddDecisionObservation(input);
         observation_wait = !DecisionObservationReady(input.now_sec);
         output.post_motion_observing = observation_wait;
         if (!observation_wait) {
@@ -318,7 +358,11 @@ MissionFrameResult MissionController::StepPlannedLine(
         }
       }
       if (!observation_wait && !line_failure_pending_done_ && line_state_ != LineState::kFinalHold) {
-        if (ready && !final_edge && line_ready_handled_id_ != id) {
+        if (automatic_approach && ready && !line_plan_.Active() && !route.hold &&
+            decision.valid && !goal_will_enter && !straight_goal && line_ready_handled_id_!=id) {
+          bool reference=false;
+          request=ComputeLineAction(decision,input,false,false,&reference,false);
+        } else if (ready && !final_edge && line_ready_handled_id_ != id) {
           request = line_plan_.Continue(id);
         } else if ((ready && final_edge && line_ready_handled_id_ != id &&
                     !goal_will_enter && !straight_goal) || idle) {
@@ -334,14 +378,14 @@ MissionFrameResult MissionController::StepPlannedLine(
             // Final READY deliberately evaluates the next block while its
             // current last unit is still running, exactly like legacy READY.
             request = ComputeLineAction(decision, input, false,
-                                         execution.action_done, &reference);
+                                         execution.action_done, &reference, false);
             line_auxiliary_done_ = false;
             if (line_state_ != LineState::kScoreRecovery) line_auxiliary_id_ = 0;
           } else if (ready && final_edge && request.action == MissionAction::kNone &&
                      !goal_will_enter && !straight_goal && input.allow_new_line_plan) {
             // A new block is chosen once at the LAST READY, not at every step.
             bool reference = false;
-            request = ComputeLineAction(decision, input, false, false, &reference);
+            request = ComputeLineAction(decision, input, false, false, &reference, false);
           }
         }
       }
@@ -351,10 +395,13 @@ MissionFrameResult MissionController::StepPlannedLine(
     }
   }
 
-  if (!commands_allowed || manual_line_hold || input.now_sec + 1e-9 < settle_until_sec_ || (active_mission_ == MissionType::kLine &&
-      (!input.advance_line_fsm || !input.allow_new_line_action))) request = {};
+  if (route.action.action!=MissionAction::kNone) request=route.action;
+  if (!commands_allowed || manual_line_hold || (route.hold && route.action.action==MissionAction::kNone) || input.now_sec + 1e-9 < settle_until_sec_ || (active_mission_ == MissionType::kLine &&
+      (!input.advance_line_fsm || (!input.allow_new_line_action && !route.near_final_action)))) request = {};
   const bool wants_fine = request.action == MissionAction::kTurnLeft || request.action == MissionAction::kTurnRight;
   const bool wants_walk = LinePlan::IsCruise(request.action) || LinePlan::IsUnit(request.action) ||
+      request.action==MissionAction::kStepForwardOne ||
+      request.action==MissionAction::kStepForwardTwo ||
       request.action == MissionAction::kTurnLeftInPlace || request.action == MissionAction::kStepForwardRightOneHurdle;
   bool pose_transition = false;
   if ((wants_fine && foot_pose_ != FootPose::kFine) || (wants_walk && foot_pose_ != FootPose::kWalk)) {
@@ -368,7 +415,8 @@ MissionFrameResult MissionController::StepPlannedLine(
     pose_transition = true;
   }
   if (LinePlan::IsCruise(request.action)) {
-    if (input.allow_new_line_plan) request = line_plan_.Begin(request.action);
+    if (input.allow_new_line_plan) request = line_plan_.Begin(request.action,
+        automatic_approach ? continuous_.epoch : 0);
     else request = {};
   }
   if (!input.allow_new_commands) camera = CameraRequest::kNone;
@@ -380,12 +428,17 @@ MissionFrameResult MissionController::StepPlannedLine(
   const auto& command = output.command;
   if (LinePlan::IsUnit(command.action)) line_plan_.Issued(command,
       command.control_phase == ControlPhase::kWaitingQueuedActionAck ? parent_id : 0);
+  if (route.near_final_action && command.command_type==CommandType::kAction &&
+      command.action_id && command.action==route.action.action)
+    continuous_.near_motion_id=command.action_id;
   if (command.command_type == CommandType::kAction && command.action_id &&
       request.action != MissionAction::kNone && command.action == request.action &&
       !LinePlan::IsUnit(command.action)) {
     if (!pose_transition && (candidate_.phase == CandidatePhase::kSearch || candidate_.phase == CandidatePhase::kRestore)) {
       candidate_.turn_id = command.action_id;
       candidate_.turn_is_restore = candidate_.phase == CandidatePhase::kRestore;
+    } else if (route.depth_recovery_step) {
+      approach_goal_depth_action_id_=command.action_id;
     } else if (line_auxiliary_id_ != command.action_id) {
       line_auxiliary_id_ = command.action_id;
       line_auxiliary_action_ = command.action;
@@ -404,6 +457,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   output.candidate_search_turns = candidate_.searches;
   output.candidate_restore_turns = candidate_.restores;
   output.line_plan_active = line_plan_.Active();
+  PopulateApproachDiagnostics(output);
   PopulateDiagnostics(output, input.now_sec);
   return output;
 }

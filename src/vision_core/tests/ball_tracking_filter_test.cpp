@@ -166,6 +166,7 @@ struct Pipeline {
     input.image_width=640; input.image_height=480;
     input.camera_feedback={CameraMode::kForward,true};
     input.now_sec=3; input.advance_line_fsm=false;
+    input.manual_observation_control=true;
     input.allow_new_body_actions=false;
     input.command_transport_enabled=true;
   }
@@ -310,6 +311,7 @@ void HurdleIdentityEntryAndCameraReset() {
   MissionController controller(c);
   PerceptionFrameInput in;in.image_width=640;in.image_height=480;
   in.camera_feedback={CameraMode::kForward,true};in.command_transport_enabled=true;
+  in.manual_observation_control=true;
   in.advance_line_fsm=false;in.allow_new_body_actions=false;
   PerceptionMissionFrameResult out;
   auto tick=[&](std::vector<PerceptionDetection> detections) {
@@ -345,6 +347,7 @@ void HurdleObservationRestartsAfterCamera() {
   MissionController controller(c);
   PerceptionFrameInput in;in.image_width=640;in.image_height=480;
   in.camera_feedback={CameraMode::kForward,true};in.command_transport_enabled=true;
+  in.manual_observation_control=true;
   in.advance_line_fsm=false;in.allow_new_body_actions=false;
   in.detections={DetectionAt(120,4,200,60)};
   PerceptionMissionFrameResult out;
@@ -366,12 +369,13 @@ void HurdleObservationRestartsAfterCamera() {
 }
 void BackboardIdentityAndCameraReset() {
   auto c=LoadDefaultAlgorithmConfig();c.enable_ball=c.enable_hurdle=false;c.enable_goal=true;
-  c.goal_trial_start_goal=true;c.transition_settle_sec=0;
+  c.goal_trial_start_goal=true;c.initial_has_ball=true;c.transition_settle_sec=0;
   c.goal.stable_window=10;c.goal.stable_min_hits=7;
   MissionController controller(c);
   PerceptionFrameInput in;in.image_width=640;in.image_height=480;
   in.intrinsics={600,600,320,240};in.camera_feedback={CameraMode::kGoal,true};
   in.command_transport_enabled=true;in.allow_new_body_actions=false;
+  in.manual_observation_control=true;
   PerceptionMissionFrameResult out;
   auto tick=[&](std::vector<PerceptionDetection> detections) {
     in.now_sec+=.1;in.detections=std::move(detections);out=controller.StepPerception(in);
@@ -405,6 +409,7 @@ void CandidateWinsReadyAndUsesFreshDoneWindow() {
   MissionController controller(c);
   PerceptionFrameInput in;
   in.image_width=640; in.image_height=480; in.command_transport_enabled=true;
+  in.manual_observation_control=true;
   in.camera_feedback={CameraMode::kForward,true};
   const auto image=[&](bool ball,double u=120) {
     in.detections.clear();
