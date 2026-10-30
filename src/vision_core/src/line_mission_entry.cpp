@@ -110,6 +110,16 @@ MissionFrameResult MissionController::StepPlannedLine(
     if (route.guide) {
       raw=*route.guide;decision=raw;
       output.line_decision_guide=decision;
+      if (route.object_visible && raw.valid && !continuous_.near &&
+          (continuous_.mission == MissionType::kBall ||
+           continuous_.mission == MissionType::kGoal)) {
+        output.approach_path_guide = raw;
+        output.approach_path_reference_px = {
+            last_line_image_center_u_,
+            output.line_features.guide.valid
+                ? output.line_features.guide_reference_v_px
+                : config_.object_approach.reference_v_ratio * input.image_height};
+      }
     }
   }
   if (input.advance_line_fsm) {

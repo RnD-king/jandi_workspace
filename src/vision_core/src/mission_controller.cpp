@@ -20,7 +20,9 @@ ActionRequest LineLocomotion(MissionAction action, bool queue_eligible) {
   return {action, ActionCategory::kLocomotion, 0, queue_eligible};
 }
 ActionRequest RecoveryTurn(bool left) {
-  return {left ? MissionAction::kTurnLeftInPlace : MissionAction::kStepForwardRightOneHurdle,
+  // BALL/GOAL return to LINE in FINE stance; switch to WALK only after
+  // the stationary LINE verification succeeds.
+  return {left ? MissionAction::kTurnLeft : MissionAction::kTurnRight,
           ActionCategory::kLocomotion,0,false};
 }
 MissionControllerConfig ValidatedConfig(const MissionControllerConfig &config) {

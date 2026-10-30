@@ -293,6 +293,29 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
       }
     }
   }
+  // Draw the exact BALL/GOAL O/H guide used by the shared LINE selector.
+  // The core supplies its reference pixel so a valid guide also works when
+  // the real floor LINE is absent (notably in the GOAL camera view).
+  if (mission_result.approach_path_guide && vis.cols > 1 && vis.rows > 1) {
+    const auto& guide = *mission_result.approach_path_guide;
+    const auto ref = mission_result.approach_path_reference_px;
+    if (guide.valid && std::isfinite(guide.offset) &&
+        std::isfinite(guide.heading_rad) && std::isfinite(ref.u) &&
+        std::isfinite(ref.v)) {
+      const double slope = -std::tan(guide.heading_rad);
+      const double u_ref = ref.u + 0.5 * vis.cols * guide.offset;
+      const double top = u_ref - slope * ref.v;
+      const double bottom = u_ref + slope * (vis.rows - 1 - ref.v);
+      if (std::isfinite(top) && std::isfinite(bottom)) {
+        const auto pixel_x = [](double u) {
+          return static_cast<int>(std::lround(std::clamp(u, -1000000.0, 1000000.0)));
+        };
+        cv::Point start(pixel_x(top), 0), end(pixel_x(bottom), vis.rows - 1);
+        if (cv::clipLine(cv::Rect(0, 0, vis.cols, vis.rows), start, end))
+          cv::line(vis, start, end, cv::Scalar(255, 0, 0), 2, cv::LINE_AA);
+      }
+    }
+  }
 
   if (selected_goal) {
     const auto &fine = goal_cmd.fine_decision_pose;
@@ -324,10 +347,15 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     const int x=std::clamp(static_cast<int>(std::lround(u)),0,vis.cols-1);
     cv::line(vis,{x,0},{x,vis.rows-1},color,1,cv::LINE_AA);
   };
-  if (selected_ball) {
+  const bool stopped_ball_grid =
+      mission_result.active_mission == vision_core::MissionType::kLine &&
+      mission_result.approach_mission == vision_core::MissionType::kBall &&
+      mission_result.approach_near_observing;
+  if (selected_ball || stopped_ball_grid) {
     const auto& c=config.ball;
     if (camera.actual_mode==vision_core::CameraMode::kForward &&
-        (ball_cmd.mode==vision_core::BallMode::kApproachBall ||
+        (stopped_ball_grid ||
+         ball_cmd.mode==vision_core::BallMode::kApproachBall ||
          ball_cmd.mode==vision_core::BallMode::kApproachTwoBeforeDown ||
          ball_cmd.mode==vision_core::BallMode::kWaitCameraDown ||
          ball_cmd.mode==vision_core::BallMode::kBallRecoveryForward ||

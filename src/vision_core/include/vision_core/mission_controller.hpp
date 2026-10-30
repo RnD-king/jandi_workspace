@@ -148,6 +148,10 @@ struct MissionFrameResult {
   bool approach_goal_depth_failed{false};
   // The guide supplied to LINE selector (raw, READY-cache, or post-DONE mean).
   std::optional<LineGuide> line_decision_guide;
+  // The current BALL/GOAL approach guide and its image-space anchor, before
+  // a LINE block's READY/DONE mean can replace line_decision_guide.
+  std::optional<LineGuide> approach_path_guide;
+  Point2 approach_path_reference_px;
   std::optional<LineWindowStats> line_window_stats;
   bool line_in_recovery{true};
   bool line_score_recovery{false};
@@ -161,6 +165,7 @@ struct MissionFrameResult {
   bool line_plan_active{false};
   bool object_ready_mean_used{false}; // True only on the real object-action DONE.
   bool approach_locked{false}, approach_near{false};
+  bool approach_near_observing{false};
   MissionType approach_mission{MissionType::kNone};
   std::uint64_t approach_track_id{};
   int approach_completed_blocks{}, approach_missing_frames{};

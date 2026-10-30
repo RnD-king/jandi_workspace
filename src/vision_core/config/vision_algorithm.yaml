@@ -241,8 +241,8 @@ vision_algorithm:
 
       # 투척 위치·방향
       hoop_radius_m: 0.10 # 림 위치 보정에 사용하는 반지름
-      throw_landing_x_m: -0.12 # 카메라 기준 허리 0도 공 낙하 X (m)
-      throw_landing_z_m: 0.45 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
+      throw_landing_x_m: -0.1 # 카메라 기준 허리 0도 공 낙하 X (m)
+      throw_landing_z_m: 0.65 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
       position_tolerance_m: 0.06 # 목표 거리의 허용 오차
       shoot_yaw_limit_deg: 20.0 # ±이 값: FINE 투척 허리각 및 좌우 미세 이동 판단 기준
 

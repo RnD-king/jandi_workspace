@@ -516,6 +516,8 @@ void MissionController::PopulateApproachDiagnostics(MissionFrameResult& output) 
   output.approach_missing_frames=state.missing;
   output.approach_locked=state.locked;
   output.approach_near=state.near;
+  output.approach_near_observing=state.near && state.near_observing &&
+      state.near_motion.action==MissionAction::kNone && state.near_motion_id==0;
   if (const auto evidence=line_plan_.CurrentObjectEvidence(state.epoch)) {
     output.approach_sequence_hits=evidence->hits;
     output.approach_sequence_frames=evidence->frames;
