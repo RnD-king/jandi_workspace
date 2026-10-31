@@ -83,13 +83,6 @@ struct BallConfig {
   int pickup_verify_min_hits{}; // Residual ball votes after PICK DONE; independent of stability.
   // Inclusive pickup rectangle edges, in input-image pixels.
   double pickup_u1_px{}, pickup_u2_px{}, pickup_v1_px{}, pickup_v2_px{};
-  double pickup_top_u1_px{}, pickup_top_u2_px{}; // Upper edge; legacy u1/u2 are bottom edge.
-  std::pair<double,double> PickupBoundsAt(double v) const {
-    const double span=pickup_v2_px-pickup_v1_px;
-    const double t=std::clamp(span>0 ? (v-pickup_v1_px)/span : 0.0,0.0,1.0);
-    return {pickup_top_u1_px+t*(pickup_u1_px-pickup_top_u1_px),
-            pickup_top_u2_px+t*(pickup_u2_px-pickup_top_u2_px)};
-  }
   double pickup_top_inset_px{0.0}; // Top-only taper; preserve the current outer bounding box.
   double PickupLeftAt(double v) const {
     const double t=std::clamp((v-pickup_v1_px)/(pickup_v2_px-pickup_v1_px),0.0,1.0);
