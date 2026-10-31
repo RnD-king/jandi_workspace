@@ -455,7 +455,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         {static_cast<int>(std::lround(c.pickup_u1_px)),
          static_cast<int>(std::lround(c.pickup_v2_px))}};
     if (!image_bounds.empty())
-      cv::polylines(vis,corners,true,cv::Scalar(0,255,255),2,cv::LINE_AA);
+      cv::polylines(vis,std::vector<std::vector<cv::Point>>{corners},true,
+                    cv::Scalar(0,255,255),2,cv::LINE_AA);
   }
   // Raw depth-edge points are estimator inputs, not the GOAL
   // fine-control decision coordinate; suppress them here.
