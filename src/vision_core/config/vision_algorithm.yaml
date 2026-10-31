@@ -85,6 +85,7 @@ vision_algorithm:
       test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
       stable_window: 10
       stable_min_hits: 7 # 안정 검출 최소 횟수
+      near_v_min_hits: 3 # 근거리 진입: 최근 10프레임 유효 검출 7회, v>=240 3회
       entry_min_hits: 4 # LINE → BALL 진입
       lost_frames: 15 # 유실 복구 진입 기준 프레임 수
       upper_acquire_v_px: 470.0 # 공이 있을 조건 (중심 v가 이 값 이하인 프레임을 진입 횟수로 계산)
@@ -160,6 +161,7 @@ vision_algorithm:
       # LINE에서 허들 진입
       stable_window: 10
       stable_min_hits: 7 # 안정 검출 최소 횟수
+      near_v_min_hits: 3 # 근거리 진입: 최근 10프레임 유효 검출 7회, v>=240 3회
       lost_frames: 15 # 유실 복구 진입 기준 프레임 수
       upper_acquire_v_px: 470.0 # 허들이 있을 조건
 
