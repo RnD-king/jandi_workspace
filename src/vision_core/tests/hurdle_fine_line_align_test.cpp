@@ -81,8 +81,11 @@ void ThreePointGate() {
   cfg.ransac_enabled = false;
   cfg.image_center_u = 380;
   assert(ComputeLineFeatures(three, 640, 480, cfg, 3).guide.valid);
-  assert(!ComputeLineFeatures({{380, 400}, {380, 300}},
-                              640, 480, cfg, 3).guide.valid);
+  const std::vector<Point2> two{{380,400},{380,300}};
+  assert(!ComputeLineFeatures(two,640,480,cfg,3).guide.valid);
+  cfg.guide_min_points=2;
+  assert(ComputeLineFeatures(two,640,480,cfg,2).guide.valid);
+  assert(!ComputeLineFeatures({{380,400}},640,480,cfg,2).guide.valid);
 }
 void HeadingThenOffset() {
   Trial t;
