@@ -43,7 +43,7 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
       !std::isfinite(center.v) || !std::isfinite(u1) || !std::isfinite(u2) ||
       !std::isfinite(v1) || !std::isfinite(v2) || u1>=u2 || v1>=v2 ||
       !std::isfinite(top_inset_px) || top_inset_px<0 ||
-      top_inset_px*2>=u2-u1 && top_inset_px>0 ||
+      (top_inset_px*2>=u2-u1 && top_inset_px>0) ||
       center.u<0 || center.u>=image_width || center.v<0 || center.v>=image_height)
     return best;
   const std::array<MissionAction,4> actions{MissionAction::kStepForwardHalf,
