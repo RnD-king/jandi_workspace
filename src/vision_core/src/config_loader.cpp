@@ -269,6 +269,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.ball.approach_left_top_u_px>=c.ball.approach_right_top_u_px)
     throw std::runtime_error("ball approach top endpoints must be ordered left < right");
   Nonnegative(c.ball.upper_acquire_v_px, "ball.upper_acquire_v_px");
+  Nonnegative(c.ball.approach_extreme_turn_margin_px, "ball.approach_extreme_turn_margin_px");
   Nonnegative(c.ball.fine_side_two_step_margin_px, "ball.fine_side_two_step_margin_px");
   if (c.ball.fine_motion.max_repetitions<1 || c.ball.fine_motion.max_repetitions>3)
     throw std::runtime_error("ball.fine_motion.max_repetitions must be in [1,3]");
@@ -536,6 +537,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "approach_left_top_u_px", c.ball.approach_left_top_u_px);
   Assign(b, "approach_right_top_u_px", c.ball.approach_right_top_u_px);
   Assign(b, "upper_acquire_v_px", c.ball.upper_acquire_v_px);
+  if (b["approach_extreme_turn_margin_px"])
+    Assign(b, "approach_extreme_turn_margin_px", c.ball.approach_extreme_turn_margin_px);
   Assign(b, "fine_side_two_step_margin_px", c.ball.fine_side_two_step_margin_px);
   const auto fine_motion=b["fine_motion"];
   Assign(fine_motion,"max_repetitions",c.ball.fine_motion.max_repetitions);
