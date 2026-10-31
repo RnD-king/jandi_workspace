@@ -7,6 +7,8 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
+#include <string>
 #include <set>
 using namespace vision_core;
 
@@ -615,7 +617,15 @@ void CurveSearchOneShot() {
   assert(walking && LinePlan::IsUnit(d.out.command.action));
   // Enough valid frames must NOT issue the turn while A is still outstanding.
   for(int i=0;i<14;++i) d.Tick(.09);
-  assert(d.out.curve_search_spent);
+  if (!d.out.curve_search_spent)
+    throw std::runtime_error("curve trigger missing: guide="+
+        std::to_string(d.out.line_features.guide.valid)+
+        " recovery="+std::to_string(d.out.line_in_recovery)+
+        " direction="+std::to_string(d.out.curve_search_direction)+
+        " hits="+std::to_string(d.out.curve_search_hits)+
+        " angle="+std::to_string(d.out.curve_search_angle_deg)+
+        " candidate="+std::to_string(d.out.candidate_phase)+
+        " line_action="+std::to_string(static_cast<int>(d.out.command.action)));
   assert(d.out.candidate_mission==MissionType::kBall && d.out.candidate_phase==1);
   assert(d.out.command.action!=MissionAction::kTurnLeftInPlace);
   // The existing issued LINE action must finish before a curve-search turn.
