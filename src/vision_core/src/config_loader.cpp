@@ -43,7 +43,7 @@ YAML::Node AlgorithmSections(const YAML::Node &a) {
   sections["line_features"] = map(line, "features");
   sections["line"] = map(line, "stability");
   sections["line_p2p"] = map(line, "walk");
-  sections["curve_search"] = map(line, "curve_search");
+  if (line["curve_search"]) sections["curve_search"] = line["curve_search"];
   const auto common = map(a, "common");
   sections["command"] = map(common, "command");
   sections["object_association"] = map(common, "object_association");
