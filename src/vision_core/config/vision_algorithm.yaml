@@ -34,10 +34,10 @@ vision_algorithm:
       line_stable_min_hits: 5
 
     walk:
-      # 한 LINE 묶음의 모션 반복 횟수 (좌회전 / 직진 / 우회전)
+      # 한 LINE 묶음의 32/33/34번 액션 반복 횟수 (좌회전 / 직진 / 우회전)
       left_repetitions: 1
       straight_repetitions: 1
-      right_repetitions: 2
+      right_repetitions: 1 # 34번은 직진 1걸음 + 우회전전진 1걸음
 
       # 보행 방향·제자리 회전 판단
       offset_gain: 0.3 # 위치 오차 가중치

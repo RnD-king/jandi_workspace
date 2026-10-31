@@ -934,8 +934,10 @@ private:
     case vision_core::MissionAction::kLineStraightUnit:
       return 2.0 * simulate_step_forward_one_duration_sec_;
     case vision_core::MissionAction::kLineLeftUnit:
-    case vision_core::MissionAction::kLineRightUnit:
       return simulate_curve_step_duration_sec_ / 3.0;
+    case vision_core::MissionAction::kLineRightUnit:
+      return simulate_step_forward_one_duration_sec_ +
+          simulate_curve_step_duration_sec_ / 3.0;
     case vision_core::MissionAction::kStepForwardFour:
       return 4.0 * std::max(0.0, simulate_step_forward_one_duration_sec_);
     case vision_core::MissionAction::kStepForwardFive:

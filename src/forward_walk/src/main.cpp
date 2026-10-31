@@ -331,7 +331,7 @@ private:
             return "missions/2걸음_1차찐.json";
 
         case vision::msg::ActionCommand::LINE_RIGHT_UNIT:
-            return "motions/보행_우회전전진_20도_최종_초기X_찐.json";
+            return "missions/직진후우회전_2걸음.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_LEFT_THREE:
             return "missions/좌회전전진_3회.json";

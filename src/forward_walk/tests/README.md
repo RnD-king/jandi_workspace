@@ -57,6 +57,12 @@ ID와 각각의 ACK/DONE을 갖는다. READY, 모션 JSON, 실행기의 기존
 비전의 모의 피드백은 33번 시간을 `simulate_step_forward_one_duration_sec`의
 2배로 계산한다. 실기에서는 JSON 재생에 따른 실제 실행기 피드백을 기다린다.
 
+34번 `LINE_RIGHT_UNIT`은 `missions/직진후우회전_2걸음.json`을 사용한다.
+새 직진 1걸음 뒤 기존 우회전전진 1걸음을 한 action ID로 실행한다.
+`line.walk.right_repetitions` 기본값은 1이므로 한 LINE/원거리 객체 접근
+묶음의 총 보행은 2걸음, 우회전은 1회다. 모의 피드백 시간은 직진 1걸음과
+우회전전진 1걸음의 합으로 계산한다.
+
 2번 FINE 기본자세는 `미세보행_초기자세가기_수정2.json`, 16번 허들 넘기는
 `허들넘기_real.json`을 사용한다. 허들은 새 왼발 모션을 적용하고 오른발은
 기존 `허들_오른발만_수정_2.json`을 유지한다.

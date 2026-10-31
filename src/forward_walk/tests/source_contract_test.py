@@ -42,7 +42,7 @@ for action, filename in {
     'STEP_FORWARD_ONE_ALTERNATE': 'motions/보행_1걸음_초기X_수정3.json',
     'LINE_LEFT_UNIT': 'motions/보행_좌회전전진_20도_최종_초기X_수정.json',
     'LINE_STRAIGHT_UNIT': 'missions/2걸음_1차찐.json',
-    'LINE_RIGHT_UNIT': 'motions/보행_우회전전진_20도_최종_초기X_찐.json',
+    'LINE_RIGHT_UNIT': 'missions/직진후우회전_2걸음.json',
     'STEP_FORWARD_LEFT_THREE': 'missions/좌회전전진_3회.json',
     'STEP_FORWARD_RIGHT_THREE': 'missions/우회전전진_3회.json',
     'STEP_FORWARD_TWO': 'missions/2걸음_1차찐.json',
@@ -73,6 +73,10 @@ two_step = json.loads((root / 'missions/2걸음_1차찐.json').read_text())
 checks['two-step repeats the new one-step'] = [
     motion['filename'] for motion in two_step['motions']
 ] == [one_step, one_step]
+right_step = json.loads((root / 'missions/직진후우회전_2걸음.json').read_text())
+checks['right-line unit walks straight then turns right'] = [
+    motion['filename'] for motion in right_step['motions']
+] == [one_step, '보행_우회전전진_20도_최종_초기X_찐.json']
 checks['active straight missions use the new one-step'] = all(
     all(motion['filename'] == one_step for motion in
         json.loads((root / 'missions' / mission).read_text())['motions'])
