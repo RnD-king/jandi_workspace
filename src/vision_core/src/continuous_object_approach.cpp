@@ -449,21 +449,30 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   if (lost && !continuous_.locked && !continuous_.near) {
     line_plan_.Abort();result.hold=true;
     if (!idle) return result;
+    const bool have_hurdle_guide=continuous_.hurdle_last_mean_guide.valid ||
+        continuous_.hurdle_last_guide.valid;
     const bool probe_available=!continuous_.probe_used &&
         cfg.prelock_loss_extra_blocks>0 &&
-        continuous_.last_ready_center.has_value() && continuous_.last.has_value();
+        (i==2 ? have_hurdle_guide :
+            continuous_.last_ready_center.has_value() && continuous_.last.has_value());
     if (probe_available) {
       if (!input.allow_new_commands || !input.allow_new_body_actions ||
           !input.allow_new_line_action || !input.allow_new_line_plan ||
           command_coordinator_.ActionAckTimedOut() ||
           input.now_sec+1e-9<settle_until_sec_) return result;
-      auto averaged_target=*continuous_.last;
-      averaged_target.center_px=*continuous_.last_ready_center;
-      const auto probe_guide=ObjectApproachGuide(averaged_target,false,0,
-          input.intrinsics,ApproachCameraPose{},input.image_width,input.image_height,
-          last_line_image_center_u_,line.guide.valid ?
-              line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
-          input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
+      LineGuide probe_guide;
+      if (i==2) {
+        probe_guide=continuous_.hurdle_last_mean_guide.valid ?
+            continuous_.hurdle_last_mean_guide : continuous_.hurdle_last_guide;
+      } else {
+        auto averaged_target=*continuous_.last;
+        averaged_target.center_px=*continuous_.last_ready_center;
+        probe_guide=ObjectApproachGuide(averaged_target,false,0,
+            input.intrinsics,ApproachCameraPose{},input.image_width,input.image_height,
+            last_line_image_center_u_,line.guide.valid ?
+                line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
+            input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
+      }
       const auto direction=SteeringDecision(probe_guide).direction;
       const auto cruise=direction==CruiseDirection::kLeft ? MissionAction::kStepForwardLeft :
           direction==CruiseDirection::kStraight ? MissionAction::kStepForwardFour :
@@ -615,7 +624,9 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
               line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
           input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
     }
-    result.guide=saved_guide.valid ? saved_guide : (i==2 ? line.guide : LineGuide{});
+    const LineGuide hurdle_fallback=continuous_.hurdle_last_guide.valid ?
+        continuous_.hurdle_last_guide : line.guide;
+    result.guide=saved_guide.valid ? saved_guide : (i==2 ? hurdle_fallback : LineGuide{});
     // The already-issued LINE block may still queue its next unit at READY;
     // absence of a READY pixel mean must not truncate that physical block.
     // Final READY cannot start a new block without a valid guide.
@@ -638,6 +649,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   }
   result.guide=guide;
   result.guide_observed=guide.valid;
+  if (i==2 && guide.valid) continuous_.hurdle_last_guide=guide;
   // HURDLE follows the actual LINE, including its bounded loss recovery.
   // Holding the router on an invalid floor guide would bypass that FSM forever.
   result.hold=(i!=2 && !guide.valid) || probe_final_edge;
