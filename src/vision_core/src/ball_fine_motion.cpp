@@ -61,8 +61,8 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
       if (!std::isfinite(predicted.u) || !std::isfinite(predicted.v) ||
           predicted.u<0 || predicted.u>=image_width || predicted.v<0 || predicted.v>=image_height ||
           PassesOppositeEdge(center.u,predicted.u,
-              LeftAt(center.v,u1,v1,v2,top_inset_px),
-              RightAt(center.v,u2,v1,v2,top_inset_px)) ||
+              LeftAt(predicted.v,u1,v1,v2,top_inset_px),
+              RightAt(predicted.v,u2,v1,v2,top_inset_px)) ||
           PassesOppositeEdge(center.v,predicted.v,v1,v2)) break;
       const double error=Error(predicted,u1,u2,v1,v2,top_inset_px);
       if (!std::isfinite(error) || error>=previous_error-1e-9) break;
