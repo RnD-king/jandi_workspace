@@ -405,7 +405,10 @@ void EmptyGoalRetryLimit() {
 }
 void NearAndIdentity() {
   Driver d(Config());d.Warm();d.Block();d.Block();
-  d.in.ball_target=Target(320,260);d.Tick();
+  d.in.ball_target=Target(320,260);
+  d.Tick();Check(!d.out.approach_near,"BALL near entered on one vote");
+  d.Tick();Check(!d.out.approach_near,"BALL near entered on two votes");
+  d.Tick();
   Check(d.out.approach_near && !d.out.approach_locked,"near approach unnecessarily waited for three blocks");
   d.Tick({d.current,true,false,true});
   Check(d.out.command.action_id==d.current && d.out.command.camera_request==CameraRequest::kNone,
@@ -443,7 +446,10 @@ void HurdleAndGoal() {
   h.Warm();h.Block();h.Block();
   Check(h.out.approach_mission==MissionType::kHurdle && h.out.approach_completed_blocks==1,
         "HURDLE did not use the common LINE block planner");
-  h.in.hurdle_target=Target(320,260);h.Tick();
+  h.in.hurdle_target=Target(320,260);
+  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on one vote");
+  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on two votes");
+  h.Tick();
   h.Tick({h.current,true,false,true});
   Check(h.out.command.action_id==h.current,"HURDLE boundary booked another shared unit");
   h.Tick({h.current,true,true,false});
@@ -622,6 +628,11 @@ void NearLossBeforeLock(MissionType mission) {
   else if(mission==MissionType::kHurdle)d.in.hurdle_target=Target(320,260);
   else { d.in.backboard_center_depth_m=.5;d.in.goal_pose.z_m=.5; }
   d.Tick();
+  if(mission!=MissionType::kGoal) {
+    Check(!d.out.approach_near,"one BALL/HURDLE near vote latched early");
+    d.Tick();Check(!d.out.approach_near,"two BALL/HURDLE near votes latched early");
+    d.Tick();
+  }
   if(mission==MissionType::kGoal) {
     Check(!d.out.approach_near,"one near GOAL depth sample entered FINE early");
     d.Tick();
