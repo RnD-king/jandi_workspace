@@ -151,7 +151,7 @@ enum class MissionAction {
   kLineLeftUnit = 32,
   kLineStraightUnit = 33,
   kLineRightUnit = 34,
-  // Alternate WALK one-step motion; normal STEP_FORWARD_ONE remains the default.
+  // Legacy one-step action ID; executor maps it to the same motion as action 10.
   kStepForwardOneAlternate = 35,
 };
 

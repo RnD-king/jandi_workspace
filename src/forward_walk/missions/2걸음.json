@@ -2,18 +2,18 @@
   "name": "2걸음",
   "motions": [
     {
-      "filename": "보행_1걸음_초기X_수정_수저중.json",
+      "filename": "보행_1걸음_초기X_수정3.json",
       "keyframe_count": 4,
-      "name": "보행_1걸음_초기X_수정_수저중",
-      "nominal_sec": 0.54,
-      "saved_at": "2026-10-30T01:30:04"
+      "name": "보행_1걸음_초기X_수정3",
+      "nominal_sec": 0.5900000000000001,
+      "saved_at": "2026-10-31T21:07:40"
     },
     {
-      "filename": "보행_1걸음_초기X_수정_수정중.json",
+      "filename": "보행_1걸음_초기X_수정3.json",
       "keyframe_count": 4,
-      "name": "보행_1걸음_초기X_수정_수정중",
-      "nominal_sec": 0.54,
-      "saved_at": "2026-10-30T01:32:59"
+      "name": "보행_1걸음_초기X_수정3",
+      "nominal_sec": 0.5900000000000001,
+      "saved_at": "2026-10-31T21:07:40"
     }
   ],
   "saved_at": "2026-10-30T01:43:27"

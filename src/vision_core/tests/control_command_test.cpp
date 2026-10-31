@@ -125,8 +125,7 @@ int main() {
   p=preserved.Compute(MissionType::kLine,0,first,CameraRequest::kNone,{},.2);
   assert(p.action_id==100);
 
-  // The previous completed body action determines the next one-step motion.
-  // Observation and camera gaps do not consume or reset the alternation.
+  // Consecutive one-step requests keep action 10 across observation and camera gaps.
   ControlCommandCoordinator steps({600,10});
   const ActionRequest one{MissionAction::kStepForwardOne,
                           ActionCategory::kLocomotion,0,false};
@@ -140,9 +139,9 @@ int main() {
   assert(step.action_id==0);
   step=steps.Compute(MissionType::kBall,0,{},CameraRequest::kNone,{},.3);
   step=steps.Compute(MissionType::kBall,0,one,CameraRequest::kNone,{},.4);
-  assert(step.action_id==601 && step.action==MissionAction::kStepForwardOneAlternate);
+  assert(step.action_id==601 && step.action==MissionAction::kStepForwardOne);
   step=steps.Compute(MissionType::kBall,0,one,CameraRequest::kNone,{},.5);
-  assert(step.action_id==601 && step.action==MissionAction::kStepForwardOneAlternate);
+  assert(step.action_id==601 && step.action==MissionAction::kStepForwardOne);
   step=steps.Compute(MissionType::kBall,0,one,CameraRequest::kNone,
                      {601,true,true,false},.6);
   assert(step.action_id==602 && step.action==MissionAction::kStepForwardOne);
@@ -158,22 +157,22 @@ int main() {
   step=steps.Compute(MissionType::kBall,0,one,CameraRequest::kNone,{},.9);
   assert(step.action_id==605 && step.action==MissionAction::kStepForwardOne);
 
-  // A READY successor is selected from A, even before A's physical DONE.
+  // A READY successor retains the requested action even before A's physical DONE.
   ControlCommandCoordinator queued_steps({700,10});
   ActionRequest queue_one=one;queue_one.line_queue_eligible=true;
   step=queued_steps.Compute(MissionType::kBall,0,queue_one,CameraRequest::kNone,{},0);
   assert(step.action==MissionAction::kStepForwardOne);
   step=queued_steps.Compute(MissionType::kBall,0,one,CameraRequest::kNone,
                             {700,true,false,true},.1);
-  assert(step.action_id==701 && step.action==MissionAction::kStepForwardOneAlternate);
+  assert(step.action_id==701 && step.action==MissionAction::kStepForwardOne);
   step=queued_steps.Compute(MissionType::kBall,0,{},CameraRequest::kNone,
                             {700,true,true,false},.2);
-  assert(step.action_id==701 && step.action==MissionAction::kStepForwardOneAlternate);
+  assert(step.action_id==701 && step.action==MissionAction::kStepForwardOne);
   step=queued_steps.Compute(MissionType::kBall,0,one,CameraRequest::kNone,
                             {701,true,true,false},.3);
   assert(step.action_id==702 && step.action==MissionAction::kStepForwardOne);
 
-  // A queued one-step follows the active two-step, not an older completed step.
+  // A queued one-step after a two-step retains its requested action.
   ControlCommandCoordinator after_two({800,10});
   step=after_two.Compute(MissionType::kHurdle,0,one,CameraRequest::kNone,{},0);
   const ActionRequest two{MissionAction::kStepForwardTwo,
@@ -184,6 +183,13 @@ int main() {
   step=after_two.Compute(MissionType::kHurdle,0,one,CameraRequest::kNone,
                          {801,true,false,true},.2);
   assert(step.action_id==802 && step.action==MissionAction::kStepForwardOne);
+
+  // The legacy action ID remains available without automatic rewriting.
+  ControlCommandCoordinator legacy({900,10});
+  const ActionRequest one_legacy{MissionAction::kStepForwardOneAlternate,
+                                 ActionCategory::kLocomotion,0,false};
+  step=legacy.Compute(MissionType::kHurdle,0,one_legacy,CameraRequest::kNone,{},0);
+  assert(step.action_id==900 && step.action==MissionAction::kStepForwardOneAlternate);
 
   return 0;
 }

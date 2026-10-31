@@ -289,7 +289,7 @@ private:
             return "motions/초기자세_다소곳_.json";
 
         case vision::msg::ActionCommand::DEFAULT_POSE_MODE:
-            return "motions/미세보행_초기자세가기_수정1.json";
+            return "motions/미세보행_초기자세가기_수정2.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_HALF:
             return "motions/미세보행_미세전진_수정.json";
@@ -319,16 +319,16 @@ private:
             return "motions/보행_왼발만앞에.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_ONE:
-            return "motions/보행_1걸음_초기X_수정_수정중.json";
+            return "motions/보행_1걸음_초기X_수정3.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_ONE_ALTERNATE:
-            return "motions/보행_1걸음_초기X_수정_수저중.json";
+            return "motions/보행_1걸음_초기X_수정3.json";
 
         case vision::msg::ActionCommand::LINE_LEFT_UNIT:
             return "motions/보행_좌회전전진_20도_최종_초기X_수정.json";
 
         case vision::msg::ActionCommand::LINE_STRAIGHT_UNIT:
-            return "missions/2걸음.json";
+            return "missions/2걸음_1차찐.json";
 
         case vision::msg::ActionCommand::LINE_RIGHT_UNIT:
             return "motions/보행_우회전전진_20도_최종_초기X_찐.json";
@@ -363,7 +363,7 @@ private:
             return "missions/연속걷기.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_TWO:
-            return "missions/직진_2걸음_수정.json";
+            return "missions/2걸음_1차찐.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_THREE:
             return "missions/직진_3걸음_수정.json";
@@ -384,7 +384,7 @@ private:
             return "motions/공_재그립.json";
 
         case vision::msg::ActionCommand::HUDDLE:
-            return "missions/허들넘기_최종.json";
+            return "missions/허들넘기_real.json";
             
         case vision::msg::ActionCommand::SHOOT:
             return "motions/공_던지기_초기X.json";

@@ -92,7 +92,7 @@ int main() {
     WriteMotion(startup,true);WriteMotion(left);WriteMotion(right);
     WriteMotion(directory/"motions/우회전_최종.json");
     WriteMotion(directory/"motions/공_재그립.json",false,1968);
-    WriteMotion(directory/"motions/미세보행_초기자세가기_수정1.json");
+    WriteMotion(directory/"motions/미세보행_초기자세가기_수정2.json");
     for(int count=1;count<=3;++count) {
         WriteTripleMission(directory/("missions/좌회전전진_"+std::to_string(count)+"회.json"),
             left.filename().string(),count);

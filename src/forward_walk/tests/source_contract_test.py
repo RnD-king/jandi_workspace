@@ -1,5 +1,6 @@
 """Check preserved source contracts; runtime behavior is tested in C++."""
 from pathlib import Path
+import json
 import re
 import xml.etree.ElementTree as ET
 
@@ -37,14 +38,14 @@ checks = {
     "failure IDs logged before reset": main.index('action_id=%llu queued_id=%llu camera_id=%llu') < main.index('action_transactions_.Abort();'),
 }
 for action, filename in {
-    'STEP_FORWARD_ONE': 'motions/보행_1걸음_초기X_수정_수정중.json',
-    'STEP_FORWARD_ONE_ALTERNATE': 'motions/보행_1걸음_초기X_수정_수저중.json',
+    'STEP_FORWARD_ONE': 'motions/보행_1걸음_초기X_수정3.json',
+    'STEP_FORWARD_ONE_ALTERNATE': 'motions/보행_1걸음_초기X_수정3.json',
     'LINE_LEFT_UNIT': 'motions/보행_좌회전전진_20도_최종_초기X_수정.json',
-    'LINE_STRAIGHT_UNIT': 'missions/2걸음.json',
+    'LINE_STRAIGHT_UNIT': 'missions/2걸음_1차찐.json',
     'LINE_RIGHT_UNIT': 'motions/보행_우회전전진_20도_최종_초기X_찐.json',
     'STEP_FORWARD_LEFT_THREE': 'missions/좌회전전진_3회.json',
     'STEP_FORWARD_RIGHT_THREE': 'missions/우회전전진_3회.json',
-    'STEP_FORWARD_TWO': 'missions/직진_2걸음_수정.json',
+    'STEP_FORWARD_TWO': 'missions/2걸음_1차찐.json',
     'STEP_FORWARD_THREE': 'missions/직진_3걸음_수정.json',
     'STEP_FORWARD_FOUR': 'missions/직진_4걸음_수정.json',
     'STEP_FORWARD_LEFT_TWO': 'missions/좌회전전진_2회.json',
@@ -57,6 +58,8 @@ for action, filename in {
     'PICK_BALL_RE': 'motions/공_줍고일어나기_최종_재그립제외.json',
     'PICK_BALL_RE_STAND': 'motions/공_줍고일어나기_최종_재그립제외_일어나기.json',
     'STEP_FORWARD_FIVE': 'missions/연속걷기.json',
+    'DEFAULT_POSE_MODE': 'motions/미세보행_초기자세가기_수정2.json',
+    'HUDDLE': 'missions/허들넘기_real.json',
     'DEFAULT_POSITION': 'motions/초기자세_다소곳_.json',
 }.items():
     match = re.search(r'case vision::msg::ActionCommand::'+action+r':\s*return "([^"]+)";', main)
@@ -65,7 +68,26 @@ checks['TURN_LEFT_IN_PLACE action number'] = 'uint16 TURN_LEFT_IN_PLACE=31' in (
     root.parent / 'vision/msg/ActionCommand.msg').read_text()
 checks['STEP_FORWARD_ONE_ALTERNATE action number'] = 'uint16 STEP_FORWARD_ONE_ALTERNATE=35' in (
     root.parent / 'vision/msg/ActionCommand.msg').read_text()
-# Live JSON contents/references are validated by motion_assets_check.
+one_step = '보행_1걸음_초기X_수정3.json'
+two_step = json.loads((root / 'missions/2걸음_1차찐.json').read_text())
+checks['two-step repeats the new one-step'] = [
+    motion['filename'] for motion in two_step['motions']
+] == [one_step, one_step]
+checks['active straight missions use the new one-step'] = all(
+    all(motion['filename'] == one_step for motion in
+        json.loads((root / 'missions' / mission).read_text())['motions'])
+    for mission in ('직진_3걸음_수정.json', '직진_4걸음_수정.json', '연속걷기.json')
+)
+hurdle = json.loads((root / 'missions/허들넘기_real.json').read_text())
+checks['hurdle replaces only left-foot motion'] = [
+    motion['filename'] for motion in hurdle['motions']
+] == ['허들_왼발만_수정1.json', '허들_오른발만_수정_2.json']
+checks['new motion assets exist'] = all(
+    (root / 'motions' / name).is_file() for name in (
+        one_step, '허들_왼발만_수정1.json',
+        '미세보행_초기자세가기_수정2.json', '허들_오른발만_수정_2.json')
+)
+# Installed JSON contents/references are also validated by motion_assets_check.
 gripper_switch = main.split('static bool UsesFixedGripperPose', 1)[1].split('default:', 1)[0]
 checks['re-pick actions keep JSON gripper'] = all(
     'case Command::' + action + ':' in gripper_switch

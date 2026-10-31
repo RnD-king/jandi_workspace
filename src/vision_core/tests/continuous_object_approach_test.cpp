@@ -577,8 +577,7 @@ void FarGoalDepthRecovery(bool found,bool acquired=false) {
   for(int n=1;n<=3;++n) {
     for(int i=0;i<40 && (d.out.command.action_id==0 || d.out.command.action_id==completed);++i)d.Tick();
     const auto id=d.out.command.action_id;
-    const auto expected=n%2 ? MissionAction::kStepForwardOne :
-        MissionAction::kStepForwardOneAlternate;
+    const auto expected=MissionAction::kStepForwardOne;
     Check(id && id!=completed && d.out.command.action==expected,
           "far GOAL with visible image/invalid Depth did not request one bounded WALK step");
     d.Tick({id,true,false,false});

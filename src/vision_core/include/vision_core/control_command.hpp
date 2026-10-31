@@ -54,8 +54,6 @@ private:
   std::uint64_t queued_action_id_{0};
   ActionRequest queued_request_;
   MissionType queued_mission_{MissionType::kLine};
-  // Only a matching action DONE updates this; camera and observation gaps do not.
-  MissionAction last_completed_action_{MissionAction::kNone};
   double queued_issued_sec_{0.0};
   bool queued_acknowledged_{false};
   bool action_ack_timed_out_{false};

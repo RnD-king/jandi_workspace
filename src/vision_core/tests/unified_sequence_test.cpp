@@ -93,9 +93,9 @@ void TestDownSearchHoldTuning() {
   c.ball.down_search_inter_action_hold_sec=.5;
   assert(t.core.UpdateTuning(c));t.Tick();
   assert(t.out.command.action_id!=0 && t.out.command.action_id!=old_id);
-  // The preceding DOWN search action was one step, so the next one alternates.
+  // Repeated DOWN search steps use the same one-step action.
   assert(t.permit==scope);
-  assert(t.out.command.action==MissionAction::kStepForwardOneAlternate);
+  assert(t.out.command.action==MissionAction::kStepForwardOne);
 }
 void TestAcquiredDownCannotRestartWalk(bool manual) {
   auto t=BallSearch();t.Commit();

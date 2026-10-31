@@ -1,0 +1,20 @@
+{
+  "name": "2걸음_1차찐",
+  "motions": [
+    {
+      "filename": "보행_1걸음_초기X_수정3.json",
+      "keyframe_count": 4,
+      "name": "보행_1걸음_초기X_수정3",
+      "nominal_sec": 0.5900000000000001,
+      "saved_at": "2026-10-31T21:07:40"
+    },
+    {
+      "filename": "보행_1걸음_초기X_수정3.json",
+      "keyframe_count": 4,
+      "name": "보행_1걸음_초기X_수정3",
+      "nominal_sec": 0.5900000000000001,
+      "saved_at": "2026-10-31T21:07:40"
+    }
+  ],
+  "saved_at": "2026-10-31T21:16:07"
+}
