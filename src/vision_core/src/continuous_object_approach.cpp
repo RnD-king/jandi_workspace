@@ -616,7 +616,11 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
           input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
     }
     result.guide=saved_guide.valid ? saved_guide : (i==2 ? line.guide : LineGuide{});
-    result.hold=!result.guide->valid || probe_final_edge;
+    // The already-issued LINE block may still queue its next unit at READY;
+    // absence of a READY pixel mean must not truncate that physical block.
+    // Final READY cannot start a new block without a valid guide.
+    const bool may_finish_block=line_plan_.Active() && !probe_final_edge;
+    result.hold=(!result.guide->valid && !may_finish_block) || probe_final_edge;
     return result;
   }
   LineGuide guide=line.guide;
