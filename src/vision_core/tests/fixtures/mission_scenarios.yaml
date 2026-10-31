@@ -264,6 +264,7 @@ vision_algorithm:
 
     # 미션 전후 라인 복구
     mission_recovery_max_turns: 10
+    mission_recovery_turn_yaw_deg: 15
 
     # 카메라 전환 완료 제한
     camera_motion_timeout_sec: 3.0

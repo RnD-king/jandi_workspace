@@ -208,12 +208,11 @@ Trial PickAndReturn() {
 void TestAlternatingBoundedRecovery() {
   auto right=PickAndReturn(); auto left=right;
   assert(left.core.SetTestMissionIndices(2,1));
-  left.Commit(); assert(left.out.command.action==MissionAction::kWalkMode);
-  right.Commit(); assert(right.out.command.action==MissionAction::kWalkMode);
-  left.Tick(true);right.Tick(true);
-  for(int i=0;i<11;++i) {left.Tick();right.Tick();}
-  left.Commit(); assert(left.out.command.action==MissionAction::kTurnLeftInPlace);
-  right.Commit(); assert(right.out.command.action==MissionAction::kStepForwardRightOneHurdle);
+  assert(left.out.foot_pose==FootPose::kFine && right.out.foot_pose==FootPose::kFine);
+  left.Commit(); assert(left.out.command.action==MissionAction::kTurnLeft &&
+                        left.out.command.target_yaw_deg==15);
+  right.Commit(); assert(right.out.command.action==MissionAction::kTurnRight &&
+                         right.out.command.target_yaw_deg==15);
   auto found_on_last=right;
   for(int i=0;i<10;++i)right.Tick(true);
   assert(right.out.recovery_turns_completed==10 && right.out.recovery_verifying);
@@ -239,8 +238,14 @@ void TestAlternatingBoundedRecovery() {
   assert(lost_after_rotation.out.recovery_turns_completed==10);
   assert(lost_after_rotation.out.command.action_id==0);
   for (int i=0;i<11;++i) found_on_last.Tick();
+  assert(found_on_last.out.active_mission==MissionType::kBall &&
+         found_on_last.out.foot_pose==FootPose::kFine);
+  if (found_on_last.out.command.action_id==0) {
+    assert(found_on_last.Preview().command.action==MissionAction::kWalkMode);
+    found_on_last.Commit();
+  } else assert(found_on_last.out.command.action==MissionAction::kWalkMode);
+  found_on_last.Tick(true);
   assert(found_on_last.out.active_mission==MissionType::kLine);
-  assert(found_on_last.out.command.action_id==0 && found_on_last.permit==0);
   assert(!found_on_last.out.remembered_line_score); // New normal LINE episode discards mission-era memory.
   assert(found_on_last.out.foot_pose==FootPose::kWalk);
   assert(found_on_last.out.command.action_id==0 && found_on_last.permit==0);
@@ -275,13 +280,21 @@ void TestGoalForwardTrial() {
   assert(t.out.command.camera_request==CameraRequest::kForward);
   assert(t.out.command.action==MissionAction::kNone);
   t.in.camera_feedback={CameraMode::kForward,true}; t.Tick();
-  t.Commit(); assert(t.out.command.action==MissionAction::kWalkMode);
-  t.Tick(true);for(int i=0;i<11;++i)t.Tick();
-  t.Commit(); assert(t.out.command.action==MissionAction::kTurnLeftInPlace);
+  assert(t.out.foot_pose==FootPose::kFine);
+  t.Commit(); assert(t.out.command.action==MissionAction::kTurnLeft &&
+                     t.out.command.target_yaw_deg==15);
   t.in.line_centers={{420,450},{420,350},{420,250},{420,150}};
   for(int i=0;i<10;++i)t.Tick(); t.Tick(true);
-  assert(t.out.recovery_verifying && !t.out.trial_complete);
+  assert(t.out.recovery_verifying && !t.out.trial_complete &&
+         t.out.foot_pose==FootPose::kFine);
   for(int i=0;i<11;++i)t.Tick();
+  assert(!t.out.trial_complete && t.out.foot_pose==FootPose::kFine);
+  if (t.out.command.action_id==0) {
+    assert(t.Preview().command.action==MissionAction::kWalkMode);
+    t.Commit();
+  }
+  assert(t.out.command.action==MissionAction::kWalkMode);
+  t.Tick(true);
   assert(t.out.trial_complete && t.out.command.action_id==0);
   t.Tick(); assert(t.out.trial_complete && t.out.command.action_id==0);
   assert(t.core.SetTestMissionIndices(1,3));

@@ -307,6 +307,7 @@ vision_algorithm:
       # 후보·라인 유실 복구
       candidate_search_max_turns: 2
       mission_recovery_max_turns: 30 # 미션 전후 라인 복구 최대 회전 횟수
+      mission_recovery_turn_yaw_deg: 15 # 공 줍기/슛 후 FINE 제자리 회전 1회 요청각 (도)
 
       # 카메라 전환·동작 후 안정 대기
       camera_motion_timeout_sec: 30.0 # 카메라 전환 완료를 기다리는 제한 시간 (초)

@@ -19,11 +19,11 @@ ActionRequest LineLocomotion(MissionAction action, bool queue_eligible) {
     return {};
   return {action, ActionCategory::kLocomotion, 0, queue_eligible};
 }
-ActionRequest RecoveryTurn(bool left) {
+ActionRequest RecoveryTurn(bool left, int yaw_deg) {
   // BALL/GOAL return to LINE in FINE stance; switch to WALK only after
   // the stationary LINE verification succeeds.
   return {left ? MissionAction::kTurnLeft : MissionAction::kTurnRight,
-          ActionCategory::kLocomotion,0,false};
+          ActionCategory::kLocomotion,static_cast<std::int16_t>(yaw_deg),false};
 }
 MissionControllerConfig ValidatedConfig(const MissionControllerConfig &config) {
   ValidateAlgorithmConfig(config);
@@ -1782,6 +1782,21 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   output.command = command_coordinator_.Compute(
       command_mission, phase, request, camera_request, input.delivery_feedback,
       input.now_sec);
+  // A recovery turn is pending only after the coordinator actually issues it.
+  // A stance transition, observation hold, or command gate must not consume
+  // a turn before the executor's matching DONE arrives.
+  const bool mission_line_recovery =
+      (active_mission_ == MissionType::kBall &&
+       ball_result_.mode == BallMode::kPostPickupLineRecovery) ||
+      (active_mission_ == MissionType::kGoal &&
+       goal_result_.mode == GoalMode::kHeadingRecovery);
+  if (mission_line_recovery &&
+      (request.action == MissionAction::kTurnLeft ||
+       request.action == MissionAction::kTurnRight) &&
+      output.command.command_type == CommandType::kAction &&
+      output.command.action_id != 0 &&
+      output.command.action == request.action)
+    mission_recovery_issued_ = true;
   if (active_mission_ == MissionType::kLine &&
       post_pickup_goal_line_gate_active_ &&
       output.command.command_type == CommandType::kAction &&
@@ -2605,7 +2620,9 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
                               mission_recovery_hits_.end(), true);
   mission_recovery_found_ =
       mission_recovery_found_ || hits >= config_.line.line_stable_min_hits;
-  if (feedback.action_done && mission_recovery_issued_) {
+  if (feedback.action_done && mission_recovery_issued_ &&
+      (last_command_.action == MissionAction::kTurnLeft ||
+       last_command_.action == MissionAction::kTurnRight)) {
     ++mission_recovery_turns_;
     mission_recovery_issued_ = false;
   }
@@ -2626,11 +2643,9 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
   }
   if (mission_recovery_failed_)
     return {};
-  if (input.allow_new_body_actions && input.allow_new_commands)
-    mission_recovery_issued_ = true;
   const int index = active_mission_ == MissionType::kBall ? ball_mission_index_
                                                           : goal_mission_index_;
-  return RecoveryTurn(index % 2 == 0);
+  return RecoveryTurn(index % 2 == 0, config_.mission_recovery_turn_yaw_deg);
 }
 
 double MissionController::ManualPreviewDurationSec() const {

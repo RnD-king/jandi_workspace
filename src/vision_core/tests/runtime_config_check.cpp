@@ -263,6 +263,7 @@ void CheckConfiguration(const std::string& path) {
   CheckAlgorithmField(a, "goal", "test_mission_index", c.test_goal_mission_index);
   MISSION(candidate_search_max_turns);
   MISSION(mission_recovery_max_turns);
+  MISSION(mission_recovery_turn_yaw_deg);
   MISSION(camera_motion_timeout_sec);
   MISSION(transition_settle_sec);
   MISSION(walk_inter_action_hold_sec);

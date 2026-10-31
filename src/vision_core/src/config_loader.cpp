@@ -178,6 +178,9 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.test_ball_mission_index,"ball.test_mission_index");
   PositiveInt(c.test_goal_mission_index,"goal.test_mission_index");
   PositiveInt(c.mission_recovery_max_turns,"mission.mission_recovery_max_turns");
+  PositiveInt(c.mission_recovery_turn_yaw_deg,"mission.mission_recovery_turn_yaw_deg");
+  if (c.mission_recovery_turn_yaw_deg > 32767)
+    throw std::runtime_error("mission.mission_recovery_turn_yaw_deg exceeds action protocol range");
   // An invalid ID would never receive READY from forward_walk. Reject such
   // YAML errors at startup rather than silently doing a post-DONE fallback.
   const std::array<int, 8> ready_capable_actions = {
@@ -684,6 +687,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(m,"test_mission",test_mission); c.test_mission=static_cast<MissionType>(test_mission);
   Assign(m,"test_stage",c.test_stage);
   Assign(m, "mission_recovery_max_turns", c.mission_recovery_max_turns);
+  Assign(m, "mission_recovery_turn_yaw_deg", c.mission_recovery_turn_yaw_deg);
 
   Assign(m, "camera_motion_timeout_sec", c.camera_motion_timeout_sec);
   Assign(m, "transition_settle_sec", c.transition_settle_sec);

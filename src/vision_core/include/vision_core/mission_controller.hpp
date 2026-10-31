@@ -70,6 +70,7 @@ struct MissionControllerConfig {
   int test_ball_mission_index{};
   int test_goal_mission_index{};
   int mission_recovery_max_turns{};
+  int mission_recovery_turn_yaw_deg{};
   MissionType test_mission{MissionType::kNone};
   int test_stage{}; // 0 full, 1 far approach, 2 near alignment, 3 mission execution/recovery
   int backboard_depth_strip_width_px{};
