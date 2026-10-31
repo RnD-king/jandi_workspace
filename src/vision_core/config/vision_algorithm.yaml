@@ -120,7 +120,9 @@ vision_algorithm:
 
       # 픽업
       pickup_u1_px: 315 # 픽업 영역 왼쪽 경계 (px)
-      pickup_u2_px: 385 # 픽업 영역 오른쪽 경계 (px)
+      pickup_u2_px: 385 # 픽업 사다리꼴 하단 오른쪽 경계 (px)
+       pickup_top_u1_px: 320 # 기존 영역 안에서 상단만 5px 좁힘
+       pickup_top_u2_px: 380 # 기존 영역 안에서 상단만 5px 좁힘
       pickup_top_inset_px: 5 # 기존 좌우/상하 전체 범위 유지, 상단만 양쪽 5px 좁힌 사다리꼴
       pickup_v1_px: 95 # 픽업 영역 위쪽 경계 (px)
       pickup_v2_px: 130 # 픽업 영역 아래쪽 경계 (px)
