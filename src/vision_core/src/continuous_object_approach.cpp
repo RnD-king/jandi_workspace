@@ -62,7 +62,7 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
   auto recovery_target=route.last.value_or(ObjectTarget{});
   if (route.last_ready_center) {
     recovery_target.center_px=*route.last_ready_center;
-  } else if (!route.near) {
+  } else if (!route.near && route.mission!=MissionType::kHurdle) {
     // No qualified READY mean: do not steer from a single last sighting.
     recovery_target.center_px.u=route.mission==MissionType::kBall
         ? config_.ball.far_u_des_px : config_.goal.target_u_px;
