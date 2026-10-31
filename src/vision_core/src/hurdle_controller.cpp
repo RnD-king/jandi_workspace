@@ -485,20 +485,21 @@ HurdleResult HurdleController::Compute(
     MissionAction correction = MissionAction::kNone;
     if (line && (fresh || fine_line_stale_corrections_ <
                                   config_.fine_line_max_stale_corrections)) {
-      if (std::abs(line->heading_deg) > config_.fine_line_heading_tolerance_deg) {
-        if (fine_line_turns_ >= config_.fine_line_max_turns) {
-          FinishFineLineAlign(result);
-          return result;
-        }
+      const bool heading_outside =
+          std::abs(line->heading_deg) > config_.fine_line_heading_tolerance_deg;
+      const bool offset_outside =
+          std::abs(line->offset_px) > config_.fine_line_offset_tolerance_px;
+      if (heading_outside && fine_line_turns_ < config_.fine_line_max_turns) {
         correction = line->heading_deg < 0.0 ? MissionAction::kTurnLeft
                                              : MissionAction::kTurnRight;
-      } else if (std::abs(line->offset_px) > config_.fine_line_offset_tolerance_px) {
-        if (fine_line_side_steps_ >= config_.fine_line_max_side_steps) {
-          FinishFineLineAlign(result);
-          return result;
-        }
+      } else if (offset_outside &&
+                 fine_line_side_steps_ < config_.fine_line_max_side_steps) {
         correction = line->offset_px < 0.0 ? MissionAction::kLeftSideStep
                                             : MissionAction::kRightSideStep;
+      } else if (heading_outside || offset_outside) {
+        // Every remaining error has exhausted its own correction budget.
+        FinishFineLineAlign(result);
+        return result;
       }
     }
     if (correction == MissionAction::kNone) {

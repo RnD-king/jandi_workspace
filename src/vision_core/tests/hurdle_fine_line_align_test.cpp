@@ -143,7 +143,25 @@ void IndependentCorrectionLimits() {
     assert(out.action.action == MissionAction::kTurnRight);
     turns.Done(MissionAction::kTurnRight);
   }
+  for (int i = 0; i < 4; ++i) {
+    const auto out = turns.Observe(Guide(30, 10));
+    assert(out.mode == HurdleMode::kFineLineAlign &&
+           out.fine_line_turns == 4 && out.fine_line_side_steps == i &&
+           out.action.action == MissionAction::kRightSideStep);
+    turns.Done(MissionAction::kRightSideStep);
+  }
   auto out = turns.Observe(Guide(30, 10));
+  assert(out.mode == HurdleMode::kFineAdjust && out.fine_line_turns == 4 &&
+         out.fine_line_side_steps == 4);
+
+  Trial turns_only;
+  turns_only.PoseDone();
+  for (int i = 0; i < 4; ++i) {
+    out = turns_only.Observe(Guide(0, 10));
+    assert(out.action.action == MissionAction::kTurnRight);
+    turns_only.Done(MissionAction::kTurnRight);
+  }
+  out = turns_only.Observe(Guide(0, 10));
   assert(out.mode == HurdleMode::kFineAdjust && out.fine_line_turns == 4 &&
          out.fine_line_side_steps == 0);
 
@@ -154,9 +172,14 @@ void IndependentCorrectionLimits() {
     assert(out.action.action == MissionAction::kRightSideStep);
     sides.Done(MissionAction::kRightSideStep);
   }
+  out = sides.Observe(Guide(30, 10));
+  assert(out.mode == HurdleMode::kFineLineAlign &&
+         out.fine_line_side_steps == 4 && out.fine_line_turns == 0 &&
+         out.action.action == MissionAction::kTurnRight);
+  sides.Done(MissionAction::kTurnRight);
   out = sides.Observe(Guide(30, 0));
   assert(out.mode == HurdleMode::kFineAdjust && out.fine_line_side_steps == 4 &&
-         out.fine_line_turns == 0);
+         out.fine_line_turns == 1);
 }
 void StaleAlignedIsNotSuccess() {
   Trial t;
