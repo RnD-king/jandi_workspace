@@ -134,9 +134,10 @@ void VirtualHeadingOnly() {
         opposite.out.approach_path_guide->heading_rad<0,
         "first BALL approach unit inherited the previous real LINE mean");
   ball.MissingBlock();
-  Check(ball.out.approach_mission==MissionType::kBall &&
-        ball.out.command.action==MissionAction::kLineRightUnit,
-        "pre-lock BALL probe reused O/H steering instead of the saved H direction");
+  // The first object block lost its target before producing a valid READY mean.
+  // Recovery must not use an instantaneous frame's H as a surrogate direction.
+  Check(ball.out.approach_mission==MissionType::kNone,
+        "pre-lock BALL loss invented a probe from a missing READY coordinate mean");
 
   c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
   c.goal_trial_start_goal=true;
