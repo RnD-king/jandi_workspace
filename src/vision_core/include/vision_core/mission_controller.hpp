@@ -168,6 +168,7 @@ struct MissionFrameResult {
   bool object_ready_mean_used{false}; // True only on the real object-action DONE.
   bool approach_locked{false}, approach_near{false};
   bool approach_near_observing{false};
+  bool approach_near_final_motion{false};
   MissionType approach_mission{MissionType::kNone};
   std::uint64_t approach_track_id{};
   int approach_completed_blocks{}, approach_missing_frames{};
@@ -394,6 +395,7 @@ private:
     std::deque<bool> near_observation_hits;
     ActionRequest near_motion;
     std::uint64_t near_motion_id{0};
+    std::deque<MissionAction> near_actions; // Remaining final actions, issued only after prior DONE.
     std::deque<bool> hits, good_hits, pose_hits, near_hits;
   } continuous_;
   std::optional<ContinuousApproach> recovering_approach_;
