@@ -387,8 +387,7 @@ private:
     std::optional<ObjectTarget> last;
     GoalPoseObservation pose;
     std::optional<double> depth;
-    LineGuide last_guide;
-    LineGuide last_mean_guide;
+    std::optional<Point2> last_ready_center; // Only successful READY pixel mean guides recovery.
     bool near_observing{false}, near_qualified{false};
     double near_observation_started_sec{0.0}, near_sum_u{0.0}, near_sum_v{0.0};
     int near_valid_count{0}, near_attempts{0};
