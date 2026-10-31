@@ -143,8 +143,13 @@ MissionFrameResult MissionController::StepPlannedLine(
       object_observation=actual_line_guide;
     else if (route.guide_observed && route.guide)
       object_observation=*route.guide;
+    const bool pixel_owner=automatic_approach &&
+        (continuous_.mission==MissionType::kBall || continuous_.mission==MissionType::kGoal);
+    const std::optional<Point2> object_center =
+        pixel_owner && route.object_visible && continuous_.last
+        ? std::optional<Point2>(continuous_.last->center_px) : std::nullopt;
     line_plan_.Observe(input.now_sec,automatic_approach ? actual_line_guide : raw,
-                       object_observation,continuous_.epoch);
+                       object_observation,continuous_.epoch,object_center,pixel_owner);
     if (automatic_approach && continuous_.mission!=MissionType::kNone) {
       const int minimum=continuous_.mission==MissionType::kBall ? config_.ball.entry_min_hits :
           continuous_.mission==MissionType::kGoal ? config_.goal.stable_min_hits : config_.hurdle.stable_min_hits;
@@ -361,19 +366,47 @@ MissionFrameResult MissionController::StepPlannedLine(
           post_pickup_goal_line_gate_active_ && line_valid && final_edge &&
           StraightGoalGateReached(completing_straight);
       if (final_edge) {
-        const auto mean = line_plan_.Finish(id, input.now_sec,
-            input.delivery_feedback.ready && !input.delivery_feedback.done ? config_.line_p2p.ready_lead_sec : 0.0);
-        last_ready_line_guide_ = mean;
-        output.line_window_stats = line_plan_.Stats(id);
-        decision = mean.value_or(LineGuide{});
+        const double ready_remaining =
+            input.delivery_feedback.ready && !input.delivery_feedback.done
+                ? config_.line_p2p.ready_lead_sec : 0.0;
+        const bool pixel_owner=automatic_approach &&
+            (continuous_.mission==MissionType::kBall ||
+             continuous_.mission==MissionType::kGoal) &&
+            line_plan_.ObjectOwned(id,continuous_.epoch);
+        std::optional<Point2> averaged_center;
+        std::optional<LineGuide> mean;
+        if (pixel_owner) {
+          averaged_center=line_plan_.FinishObjectCenter(id,input.now_sec,ready_remaining);
+          if (averaged_center && continuous_.last) {
+            auto averaged_target=*continuous_.last;
+            averaged_target.center_px=*averaged_center;
+            const double ref_v=output.line_features.guide.valid
+                ? output.line_features.guide_reference_v_px
+                : config_.object_approach.reference_v_ratio*input.image_height;
+            auto guide=ObjectApproachGuide(averaged_target,false,0,input.intrinsics,
+                ApproachCameraPose{},input.image_width,input.image_height,
+                last_line_image_center_u_,ref_v,input.rectify_approach,
+                input.approach_roll_rad,input.approach_pitch_rad);
+            if (guide.valid) mean=guide;
+          }
+        } else {
+          mean=line_plan_.Finish(id,input.now_sec,ready_remaining);
+        }
+        last_ready_line_guide_=mean;
+        output.line_window_stats=line_plan_.Stats(id);
+        decision=mean.value_or(LineGuide{});
         if (automatic_approach && continuous_.mission!=MissionType::kNone) {
           if (line_plan_.ObjectOwned(id,continuous_.epoch)) {
             if (!line_plan_.IsProbe(id) && line_plan_.ObjectQualified(id) &&
-                mean && mean->valid)
-              continuous_.last_mean_guide=*mean;
+                mean && mean->valid) {
+              if (pixel_owner)
+                continuous_.last_ready_center=averaged_center;
+              else if (continuous_.mission==MissionType::kHurdle)
+                continuous_.hurdle_last_mean_guide=*mean;
+            }
           } else if (continuous_.mission==MissionType::kBall ||
                      continuous_.mission==MissionType::kGoal) {
-            // The previous LINE block's mean cannot steer a virtual path.
+            // The preceding floor LINE mean must not steer the virtual path.
             decision=route.guide_observed && route.guide ? *route.guide : LineGuide{};
           }
         }

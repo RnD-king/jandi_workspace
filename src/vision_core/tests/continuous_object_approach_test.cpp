@@ -134,9 +134,10 @@ void VirtualHeadingOnly() {
         opposite.out.approach_path_guide->heading_rad<0,
         "first BALL approach unit inherited the previous real LINE mean");
   ball.MissingBlock();
-  Check(ball.out.approach_mission==MissionType::kBall &&
-        ball.out.command.action==MissionAction::kLineRightUnit,
-        "pre-lock BALL probe reused O/H steering instead of the saved H direction");
+  // The first object block lost its target before producing a valid READY mean.
+  // Recovery must not use an instantaneous frame's H as a surrogate direction.
+  Check(ball.out.approach_mission==MissionType::kNone,
+        "pre-lock BALL loss invented a probe from a missing READY coordinate mean");
 
   c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
   c.goal_trial_start_goal=true;
@@ -174,9 +175,12 @@ void WeightedProbeDirection() {
   d.in.ball_target=Target(460,100);
   d.Tick(); // Last valid frame now points right; this block remains unqualified.
   d.MissingBlock();             // Current object block never qualifies.
-  Check(d.out.command.action==MissionAction::kLineLeftUnit &&
-        d.out.approach_completed_blocks==1,
-        "pre-lock probe ignored the last qualified object mean");
+  if (d.out.command.action!=MissionAction::kLineLeftUnit ||
+      d.out.approach_completed_blocks!=1)
+    throw std::runtime_error("pre-lock probe mean wrong: action="+
+        std::to_string(static_cast<int>(d.out.command.action))+
+        " blocks="+std::to_string(d.out.approach_completed_blocks)+
+        " mission="+std::to_string(static_cast<int>(d.out.approach_mission)));
 }
 void FinishProbe(Driver& d) {
   d.current=d.out.command.action_id;
@@ -209,12 +213,18 @@ void SoftLoss(int blocks) {
   d.Tick({d.last_done,true,true,false});
   Check(d.out.approach_completed_blocks==before,"duplicate DONE counted a second block");
   d.MissingBlock();
-  Check(d.out.active_mission==MissionType::kLine && d.out.approach_mission==MissionType::kBall &&
-        d.out.approach_completed_blocks==blocks && LinePlan::IsUnit(d.out.command.action),
-        "pre-lock loss did not start one ordinary approach probe block");
-  FinishProbe(d);
-  Check(d.out.approach_mission==MissionType::kNone && !d.out.candidate_phase,
-        "failed probe did not return to LINE without another probe");
+  if (blocks==0) {
+    Check(d.out.approach_mission==MissionType::kNone,
+          "probe used a raw pixel before the first qualified READY mean");
+  } else {
+    Check(d.out.active_mission==MissionType::kLine &&
+          d.out.approach_mission==MissionType::kBall &&
+          d.out.approach_completed_blocks==blocks && LinePlan::IsUnit(d.out.command.action),
+          "pre-lock loss did not start one ordinary approach probe from READY mean");
+    FinishProbe(d);
+    Check(d.out.approach_mission==MissionType::kNone && !d.out.candidate_phase,
+          "failed probe did not return to LINE without another probe");
+  }
   d.in.ball_target=Target();
   for(int i=0;i<12;++i)d.Tick();
   Check(LinePlan::IsUnit(d.out.command.action) && d.out.approach_completed_blocks==0,
@@ -245,7 +255,8 @@ void ProbeRediscoveryAndLineMemory() {
         std::abs(*d.out.remembered_line_score-remembered)<1e-9,
         "invalid actual LINE erased the far-approach directional memory");
 
-  Driver recovered(Config());recovered.Warm();recovered.Block();
+  Driver recovered(Config());recovered.Warm();recovered.Block();recovered.Block();
+  // A successful object block establishes the READY mean needed for probing.
   recovered.MissingBlock();
   const int completed=recovered.out.approach_completed_blocks;
   recovered.current=recovered.out.command.action_id;
@@ -403,9 +414,92 @@ void EmptyGoalRetryLimit() {
   Check(!d.out.approach_goal_search_failed && !d.out.goal.entry_line_retries,
         "RESET retained empty GOAL failure or retry count");
 }
+void NearPixelVotesWithGaps(MissionType mission) {
+  auto c=Config();
+  c.enable_ball=mission==MissionType::kBall;
+  c.enable_hurdle=mission==MissionType::kHurdle;
+  Driver d(c);
+  if (mission==MissionType::kHurdle) {
+    d.in.ball_target.reset();
+    d.in.hurdle_target=Target();
+    d.in.hurdle_track_id=5;
+  }
+  d.Warm();
+  Check(d.out.approach_mission==mission,"near-v test did not acquire object");
+  const auto sample=[&](std::optional<double> v) {
+    if (mission==MissionType::kBall) d.in.ball_target=v ? std::optional<ObjectTarget>{Target(320,*v)} : std::nullopt;
+    else d.in.hurdle_target=v ? std::optional<ObjectTarget>{Target(320,*v)} : std::nullopt;
+    d.Tick();
+  };
+  sample(260);Check(!d.out.approach_near,"first near-v vote entered near");
+  sample(std::nullopt);Check(!d.out.approach_near,"missing frame counted as near");
+  sample(260);Check(!d.out.approach_near,"two near-v votes entered near");
+  sample(std::nullopt);Check(!d.out.approach_near,"missing frame completed near vote");
+  sample(260);Check(d.out.approach_near,"three nonconsecutive near-v votes did not latch");
+}
+void NearFinalActionSequence(double u,bool left,bool extreme) {
+  auto c=Config();c.ball.approach_extreme_turn_margin_px=90.0;
+  Driver d(c);d.in.ball_target=Target(u,100);
+  d.Warm();d.Block();d.Block();
+  d.in.ball_target=Target(u,260);
+  for(int n=0;n<3;++n)d.Tick();
+  Check(d.out.approach_near,"near sequence failed to latch three v votes");
+  d.Tick({d.current,true,false,true});
+  d.Tick({d.current,true,true,false});
+  for(int n=0;n<35 && d.out.command.action_id==0;++n)d.Tick();
+  const MissionAction turn=left ? MissionAction::kTurnLeftInPlace :
+      MissionAction::kStepForwardRightOneHurdle;
+  if (d.out.command.action!=turn || !d.out.approach_near_final_motion)
+    throw std::runtime_error("near final first: action="+
+        std::to_string(static_cast<int>(d.out.command.action))+
+        " expected="+std::to_string(static_cast<int>(turn))+
+        " near_motion="+std::to_string(d.out.approach_near_final_motion)+
+        " near_observing="+std::to_string(d.out.approach_near_observing)+
+        " mission="+std::to_string(static_cast<int>(d.out.active_mission))+
+        " id="+std::to_string(d.out.command.action_id));
+  std::uint64_t id=d.out.command.action_id;
+  d.Tick({id,true,false,false});
+  d.Tick({id,true,true,false});
+  if (extreme) {
+    Check(d.out.command.action==turn && d.out.command.action_id!=id,
+          "extreme zone did not request second turn after first DONE");
+    id=d.out.command.action_id;
+    d.Tick({id,true,false,false});
+    d.Tick({id,true,true,false});
+  }
+  Check(d.out.command.action==MissionAction::kStepForwardOne &&
+        d.out.command.action_id!=id && d.out.approach_near_final_motion,
+        "near rotation was not followed by a distinct one-step forward action");
+  id=d.out.command.action_id;
+  d.Tick({id,true,false,false});
+  Check(d.out.active_mission==MissionType::kLine,
+        "camera switched to DOWN before last forward DONE");
+  d.Tick({id,true,true,false});
+  Check(d.out.active_mission==MissionType::kBall &&
+        d.out.command.camera_request==CameraRequest::kDown,
+        "last forward DONE did not hand off to BALL DOWN");
+}
+void ReadyCenterAccumulator() {
+  LineGuideAccumulator acc(5,0.0,10,5);
+  acc.Begin(42,0.0);
+  for(int n=1;n<=10;++n)
+    acc.AddCenter(42,n*0.1,Point2{n<=5?200.0:500.0,160.0});
+  const auto mean=acc.FinishCenter(42,1.0,0.0);
+  Check(mean && mean->u>350 && mean->u<500 && std::abs(mean->v-160)<1e-9,
+        "READY coordinate mean did not weight late detections 1-to-3");
+  Check(!acc.FinishCenter(42,1.0,0.0),"consumed READY mean reused old pixels");
+  acc.Begin(43,0.0);
+  for(int n=1;n<=10;++n)
+    acc.AddCenter(43,n*0.1,n<=4 ? std::optional<Point2>{Point2{320,120}} : std::nullopt);
+  Check(!acc.FinishCenter(43,1.0,0.0),
+        "READY averaged insufficient valid coordinate samples");
+}
 void NearAndIdentity() {
   Driver d(Config());d.Warm();d.Block();d.Block();
-  d.in.ball_target=Target(320,260);d.Tick();
+  d.in.ball_target=Target(320,260);
+  d.Tick();Check(!d.out.approach_near,"BALL near entered on one vote");
+  d.Tick();Check(!d.out.approach_near,"BALL near entered on two votes");
+  d.Tick();
   Check(d.out.approach_near && !d.out.approach_locked,"near approach unnecessarily waited for three blocks");
   d.Tick({d.current,true,false,true});
   Check(d.out.command.action_id==d.current && d.out.command.camera_request==CameraRequest::kNone,
@@ -443,7 +537,10 @@ void HurdleAndGoal() {
   h.Warm();h.Block();h.Block();
   Check(h.out.approach_mission==MissionType::kHurdle && h.out.approach_completed_blocks==1,
         "HURDLE did not use the common LINE block planner");
-  h.in.hurdle_target=Target(320,260);h.Tick();
+  h.in.hurdle_target=Target(320,260);
+  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on one vote");
+  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on two votes");
+  h.Tick();
   h.Tick({h.current,true,false,true});
   Check(h.out.command.action_id==h.current,"HURDLE boundary booked another shared unit");
   h.Tick({h.current,true,true,false});
@@ -528,13 +625,11 @@ void CameraDrainAndProbe() {
   d.Tick({d.current,true,false,true});
   Check(d.out.command.action_id==d.current,"unqualified GOAL block booked another walk");
   d.Tick({d.current,true,true,false});
-  Check(d.out.command.camera_request==CameraRequest::kNone &&
-        d.out.approach_mission==MissionType::kGoal &&
-        LinePlan::IsUnit(d.out.command.action),
-        "soft GOAL loss skipped the one pre-lock approach probe");
-  FinishProbe(d);
-  Check(d.out.command.camera_request==CameraRequest::kForward && d.out.command.command_type!=CommandType::kAction,
-        "soft GOAL loss did not restore FORWARD after the probe's actual DONE");
+  // No qualified GOAL READY mean was observed before the loss. The controller
+  // must not infer a search direction from an instantaneous last detection.
+  Check(d.out.approach_mission==MissionType::kNone &&
+        d.out.command.camera_request==CameraRequest::kForward,
+        "soft GOAL loss without READY mean should release to FORWARD without a blind probe");
 }
 void GoalTurnObservationUsesSelectedPath() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
@@ -622,6 +717,11 @@ void NearLossBeforeLock(MissionType mission) {
   else if(mission==MissionType::kHurdle)d.in.hurdle_target=Target(320,260);
   else { d.in.backboard_center_depth_m=.5;d.in.goal_pose.z_m=.5; }
   d.Tick();
+  if(mission!=MissionType::kGoal) {
+    Check(!d.out.approach_near,"one BALL/HURDLE near vote latched early");
+    d.Tick();Check(!d.out.approach_near,"two BALL/HURDLE near votes latched early");
+    d.Tick();
+  }
   if(mission==MissionType::kGoal) {
     Check(!d.out.approach_near,"one near GOAL depth sample entered FINE early");
     d.Tick();
@@ -810,6 +910,10 @@ void FarReacquisitionReturnsToSharedPath(MissionType mission) {
 }
 int main() {
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
+  NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
+  ReadyCenterAccumulator();
+  NearFinalActionSequence(150,true,true); NearFinalActionSequence(250,true,false);
+  NearFinalActionSequence(575,false,true); NearFinalActionSequence(500,false,false);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
   FarGoalDepthRecovery(false,true);FarGoalDepthRecovery(true,true);
   for(auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {

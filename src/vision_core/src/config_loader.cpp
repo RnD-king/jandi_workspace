@@ -257,6 +257,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "ball.entry_min_hits", "ball.stable_window");
   HitsWithinWindow(c.ball.down_search_min_hits,c.ball.stable_window,
                    "ball.down_search_min_hits","ball.stable_window");
+  PositiveInt(c.ball.near_v_min_hits, "ball.near_v_min_hits");
   HitsWithinWindow(c.ball.stable_min_hits, c.ball.stable_window,
                    "ball.stable_min_hits", "ball.stable_window");
   PositiveInt(c.ball.lost_frames, "ball.lost_frames");
@@ -267,6 +268,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.ball.approach_left_top_u_px>=c.ball.approach_right_top_u_px)
     throw std::runtime_error("ball approach top endpoints must be ordered left < right");
   Nonnegative(c.ball.upper_acquire_v_px, "ball.upper_acquire_v_px");
+  Nonnegative(c.ball.approach_extreme_turn_margin_px, "ball.approach_extreme_turn_margin_px");
   Nonnegative(c.ball.fine_side_two_step_margin_px, "ball.fine_side_two_step_margin_px");
   if (c.ball.fine_motion.max_repetitions<1 || c.ball.fine_motion.max_repetitions>3)
     throw std::runtime_error("ball.fine_motion.max_repetitions must be in [1,3]");
@@ -287,8 +289,12 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "ball.pickup_verify_min_hits", "ball.stable_window");
   Nonnegative(c.ball.pickup_u1_px, "ball.pickup_u1_px");
   Nonnegative(c.ball.pickup_u2_px, "ball.pickup_u2_px");
+  Nonnegative(c.ball.pickup_top_inset_px, "ball.pickup_top_inset_px");
   Nonnegative(c.ball.pickup_v1_px, "ball.pickup_v1_px");
   Nonnegative(c.ball.pickup_v2_px, "ball.pickup_v2_px");
+  if (c.ball.pickup_top_inset_px * 2 >= c.ball.pickup_u2_px - c.ball.pickup_u1_px &&
+      c.ball.pickup_top_inset_px > 0.0)
+    throw std::runtime_error("ball pickup top inset must leave positive top width");
   if (c.ball.pickup_u1_px >= c.ball.pickup_u2_px ||
       c.ball.pickup_v1_px >= c.ball.pickup_v2_px)
     throw std::runtime_error("ball pickup edges require u1 < u2 and v1 < v2");
@@ -297,6 +303,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
 
   HitsWithinWindow(c.hurdle.down_search_min_hits,c.hurdle.stable_window,
                    "hurdle.down_search_min_hits","hurdle.stable_window");
+  PositiveInt(c.hurdle.near_v_min_hits, "hurdle.near_v_min_hits");
   HitsWithinWindow(c.hurdle.stable_min_hits, c.hurdle.stable_window,
                    "hurdle.stable_min_hits", "hurdle.stable_window");
   PositiveInt(c.hurdle.lost_frames, "hurdle.lost_frames");
@@ -519,6 +526,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   Assign(b, "stable_window", c.ball.stable_window);
   Assign(b, "stable_min_hits", c.ball.stable_min_hits);
+  if (b["near_v_min_hits"]) Assign(b, "near_v_min_hits", c.ball.near_v_min_hits);
   Assign(b,"down_search_min_hits",c.ball.down_search_min_hits);
   Assign(b, "entry_min_hits", c.ball.entry_min_hits);
   Assign(b, "lost_frames", c.ball.lost_frames);
@@ -527,6 +535,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "approach_left_top_u_px", c.ball.approach_left_top_u_px);
   Assign(b, "approach_right_top_u_px", c.ball.approach_right_top_u_px);
   Assign(b, "upper_acquire_v_px", c.ball.upper_acquire_v_px);
+  if (b["approach_extreme_turn_margin_px"])
+    Assign(b, "approach_extreme_turn_margin_px", c.ball.approach_extreme_turn_margin_px);
   Assign(b, "fine_side_two_step_margin_px", c.ball.fine_side_two_step_margin_px);
   const auto fine_motion=b["fine_motion"];
   Assign(fine_motion,"max_repetitions",c.ball.fine_motion.max_repetitions);
@@ -544,6 +554,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "pickup_verify_min_hits", c.ball.pickup_verify_min_hits);
   Assign(b, "pickup_u1_px", c.ball.pickup_u1_px);
   Assign(b, "pickup_u2_px", c.ball.pickup_u2_px);
+  if (b["pickup_top_inset_px"]) Assign(b, "pickup_top_inset_px", c.ball.pickup_top_inset_px);
   Assign(b, "pickup_v1_px", c.ball.pickup_v1_px);
   Assign(b, "pickup_v2_px", c.ball.pickup_v2_px);
   Assign(b, "recovery_center_tolerance_px", c.ball.recovery_center_tolerance_px);
@@ -565,6 +576,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   Assign(h, "stable_window", c.hurdle.stable_window);
   Assign(h, "stable_min_hits", c.hurdle.stable_min_hits);
+  if (h["near_v_min_hits"]) Assign(h, "near_v_min_hits", c.hurdle.near_v_min_hits);
   Assign(h,"down_search_min_hits",c.hurdle.down_search_min_hits);
   Assign(h, "lost_frames", c.hurdle.lost_frames);
   Assign(h, "upper_acquire_v_px", c.hurdle.upper_acquire_v_px);

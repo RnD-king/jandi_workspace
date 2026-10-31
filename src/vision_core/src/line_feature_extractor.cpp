@@ -158,7 +158,7 @@ double WrapAngle(double angle) {
 LineGuide ComputeLineGuide(const std::vector<Point2> &points, double cx,
                            double denom, const FeatureConfig &cfg, double* reference_v) {
   LineGuide guide;
-  if (cfg.guide_min_points < 3 ||
+  if (cfg.guide_min_points < 2 ||
       points.size() < static_cast<std::size_t>(cfg.guide_min_points))
     return guide;
 
@@ -224,7 +224,7 @@ Features ComputeLineFeatures(const std::vector<Point2> &input, int image_width,
                              int minimum_input_points) {
   Features f{};
   if (image_width <= 1 || image_height <= 1 ||
-      minimum_input_points < 3 || minimum_input_points > 4) return f;
+      minimum_input_points < 2 || minimum_input_points > 4) return f;
 
   std::vector<std::pair<Point2,std::size_t>> indexed;
   indexed.reserve(input.size());
@@ -250,7 +250,7 @@ Features ComputeLineFeatures(const std::vector<Point2> &input, int image_width,
 
   f.n_visible = static_cast<double>(points.size());
   // Normal LINE keeps its four-point input gate. The DOWN-view HURDLE caller
-  // explicitly permits three points without changing normal LINE behavior.
+  // explicitly permits two points without changing normal LINE behavior.
   if (points.size() < static_cast<std::size_t>(minimum_input_points) ||
       points.front().v - points.back().v <= kMinVSpanPx)
     return f;

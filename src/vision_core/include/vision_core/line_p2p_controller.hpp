@@ -61,6 +61,9 @@ public:
                        int window, int required_hits);
   void Begin(std::uint64_t action_id, double now_sec);
   void Add(std::uint64_t action_id, double now_sec, const LineGuide &guide);
+  void AddCenter(std::uint64_t action_id, double now_sec, std::optional<Point2> center);
+  std::optional<Point2> FinishCenter(std::uint64_t action_id, double now_sec,
+                                     double estimated_remaining_sec = 0.0);
   std::optional<LineGuide> Finish(std::uint64_t action_id, double now_sec,
                                   double estimated_remaining_sec = 0.0);
   std::optional<LineWindowStats> LastStats() const { return last_stats_; }
@@ -79,6 +82,8 @@ private:
   std::uint64_t action_id_{0};
   double begin_sec_{0.0};
   std::vector<Sample> samples_;
+  struct CenterSample { double now_sec; Point2 center; };
+  std::vector<CenterSample> center_samples_;
   std::vector<double> frame_times_;
   std::vector<bool> frame_valid_;
   std::optional<LineWindowStats> last_stats_;

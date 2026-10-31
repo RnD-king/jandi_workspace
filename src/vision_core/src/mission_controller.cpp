@@ -1192,11 +1192,11 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       input.now_sec + 1e-9 >= settle_until_sec_) {
     FeatureConfig hurdle_line_config = config_.line_features;
     hurdle_line_config.image_center_u = config_.hurdle.fine_line_reference_u_px;
-    hurdle_line_config.guide_min_points = 3;
+    hurdle_line_config.guide_min_points = 2;
     hurdle_line_config.ransac_enabled = false;
     const auto guide = ComputeLineFeatures(
         input.line_centers, input.image_width, input.image_height,
-        hurdle_line_config, 3).guide;
+        hurdle_line_config, 2).guide;
     hurdle_controller_.ObserveFineLine(guide, input.image_width, input.now_sec);
   }
   if (fresh_after_search_) {
