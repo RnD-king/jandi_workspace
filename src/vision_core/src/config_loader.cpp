@@ -43,6 +43,7 @@ YAML::Node AlgorithmSections(const YAML::Node &a) {
   sections["line_features"] = map(line, "features");
   sections["line"] = map(line, "stability");
   sections["line_p2p"] = map(line, "walk");
+  if (line["curve_search"]) sections["curve_search"] = line["curve_search"];
   const auto common = map(a, "common");
   sections["command"] = map(common, "command");
   sections["object_association"] = map(common, "object_association");
@@ -199,6 +200,20 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
         c.object_ready_mean_actions.begin() + i)
       throw std::runtime_error("mission.object_ready_mean_actions has duplicate action IDs");
   }
+
+  const auto &curve=c.curve_search;
+  if (curve.stable_window<1 || curve.stable_min_hits<1 ||
+      curve.stable_min_hits>curve.stable_window)
+    throw std::runtime_error("curve_search.stable_min_hits must be within its window");
+  Positive(curve.min_abs_angle_deg, "curve_search.min_abs_angle_deg");
+  if (curve.min_abs_angle_deg>=90.0)
+    throw std::runtime_error("curve_search.min_abs_angle_deg must be below 90");
+  Positive(curve.residual_threshold_px, "curve_search.residual_threshold_px");
+  Positive(curve.max_fit_rmse_px, "curve_search.max_fit_rmse_px");
+  Positive(curve.min_pair_v_gap_px, "curve_search.min_pair_v_gap_px");
+  Positive(curve.min_segment_v_span_px, "curve_search.min_segment_v_span_px");
+  Positive(curve.min_total_v_span_px, "curve_search.min_total_v_span_px");
+  Nonnegative(curve.max_join_gap_px, "curve_search.max_join_gap_px");
 
   PositiveInt(c.line_features.max_centers, "line_features.max_centers");
   if (c.line_features.guide_min_points < 3 ||
@@ -489,6 +504,20 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(f, "ransac_residual_threshold_px", c.line_features.ransac_residual_threshold_px);
   Assign(f, "ransac_min_sample_v_gap_px", c.line_features.ransac_min_sample_v_gap_px);
   Assign(f, "ransac_max_outliers", c.line_features.ransac_max_outliers);
+
+  const auto cs=a["curve_search"];
+  if (cs) {
+    Assign(cs,"enabled",c.curve_search.enabled);
+    Assign(cs,"stable_window",c.curve_search.stable_window);
+    Assign(cs,"stable_min_hits",c.curve_search.stable_min_hits);
+    Assign(cs,"min_abs_angle_deg",c.curve_search.min_abs_angle_deg);
+    Assign(cs,"residual_threshold_px",c.curve_search.residual_threshold_px);
+    Assign(cs,"max_fit_rmse_px",c.curve_search.max_fit_rmse_px);
+    Assign(cs,"min_pair_v_gap_px",c.curve_search.min_pair_v_gap_px);
+    Assign(cs,"min_segment_v_span_px",c.curve_search.min_segment_v_span_px);
+    Assign(cs,"min_total_v_span_px",c.curve_search.min_total_v_span_px);
+    Assign(cs,"max_join_gap_px",c.curve_search.max_join_gap_px);
+  }
 
   const auto line = a["line"];
   Assign(line, "line_stable_window", c.line.line_stable_window);

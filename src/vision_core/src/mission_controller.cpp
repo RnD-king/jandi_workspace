@@ -339,6 +339,10 @@ void MissionController::EnterMission(MissionType mission) {
     goal_result_ = {};
     has_ball_ = false;
   } else if (mission == MissionType::kGoal) {
+    // A later GOAL/SHOOT must never re-arm the one-shot curve-triggered
+    // ball search on the GOAL-side curved LINE.
+    curve_search_spent_=true;
+    curve_search_history_.clear();
     // Do not carry post-pickup booking limits into LINE after the later shot.
     post_pickup_goal_line_gate_active_ = false;
     post_pickup_line_actions_.clear();
@@ -1618,6 +1622,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     if (goal_result_.mode == GoalMode::kHeadingRecovery)
       goal_result_.action = line_action;
     has_ball_ = goal_controller_.HasBall();
+    if (before==GoalMode::kShoot && action_feedback.action_done)
+      curve_search_spent_=true;
     ball_controller_.SetHasBall(has_ball_);
     if (before != GoalMode::kHeadingRecovery &&
         goal_result_.mode == GoalMode::kHeadingRecovery)
@@ -2859,6 +2865,8 @@ void MissionController::ClearObservationEvidence() {
   moving_object_ready_mean_.reset();
   line_stability_history_.clear();
   actual_line_stability_history_.clear();
+  curve_search_history_.clear(); // A PAUSE/RESUME cannot reuse old curve votes.
+  curve_search_hits_=0;
   if(!ball_target_locked_ && !ball_reacquiring_) {
     ball_association_tracker_.Reset(); ball_candidate_tracker_.Reset(); ball_target_id_=0;
   }
@@ -2884,6 +2892,10 @@ void MissionController::Reset(bool preserve_action_ids) {
   approach_camera_started_=-1;
   line_plan_.Reset();
   candidate_ = {};
+  curve_search_spent_=false;
+  curve_search_history_.clear();
+  curve_search_direction_=curve_search_hits_=0;
+  curve_search_angle_deg_=0.0;
   line_ready_handled_id_ = line_auxiliary_id_ = 0;
   line_auxiliary_done_ = line_auxiliary_observing_ = false;
   line_auxiliary_action_ = MissionAction::kNone;

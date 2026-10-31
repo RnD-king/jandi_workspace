@@ -117,7 +117,8 @@ MissionFrameResult MissionController::StepPlannedLine(
   const bool idle = (!command_coordinator_.HasPendingAction() || completing_current) &&
       !line_plan_.Outstanding();
   RouteDecision route;
-  if (automatic_approach) {
+  if (automatic_approach && !(candidate_.curve_search &&
+                               candidate_.phase!=CandidatePhase::kNone)) {
     route=PrepareContinuousApproach(input,output.line_features,idle);
     if (route.entered) return StepWithLineImageCenter(input,image_center);
     if (route.guide) {
@@ -174,6 +175,52 @@ MissionFrameResult MissionController::StepPlannedLine(
       std::isfinite(actual_line_guide.heading_rad)) {
     const auto real=line_p2p_controller_.Compute(actual_line_guide);
     if (real.direction!=CruiseDirection::kNone) last_line_score_=real.error;
+  }
+  // Curve detection observes the same rectified original points, NOT the
+  // existing full-LINE RANSAC's outlier-filtered near-four fit.
+  // Object acquisition has priority over a curve if both qualify this frame.
+  const bool curve_eligible=config_.curve_search.enabled && automatic_approach &&
+      config_.enable_ball && !curve_search_spent_ && !has_ball_ &&
+      may_advance && commands_allowed && input.advance_line_fsm &&
+      input.camera_feedback.settled &&
+      input.camera_feedback.actual_mode==CameraMode::kForward &&
+      line_state_==LineState::kNormal && actual_line_valid &&
+      continuous_.mission==MissionType::kNone &&
+      candidate_.phase==CandidatePhase::kNone && !route.hold;
+  if (curve_eligible) {
+    const auto evidence=ComputeCurveEvidence(input.line_centers,
+        input.image_width,input.image_height,config_.curve_search);
+    curve_search_angle_deg_=evidence.valid ?
+        evidence.angle_rad*180.0/3.14159265358979323846 : 0.0;
+    curve_search_direction_=evidence.valid ? evidence.direction : 0;
+    curve_search_history_.push_back(curve_search_direction_);
+    while (curve_search_history_.size()>
+           static_cast<std::size_t>(config_.curve_search.stable_window))
+      curve_search_history_.pop_front();
+    curve_search_hits_=static_cast<int>(std::count(curve_search_history_.begin(),
+                                      curve_search_history_.end(),curve_search_direction_));
+    if (curve_search_direction_!=0 &&
+        curve_search_history_.size()==
+            static_cast<std::size_t>(config_.curve_search.stable_window) &&
+        curve_search_hits_>=config_.curve_search.stable_min_hits) {
+      // Consume the only curve opportunity for this START. Even after a
+      // failed observation or SHOOT, never rearm at the GOAL-side curve.
+      curve_search_spent_=true;
+      candidate_={};
+      candidate_.mission=MissionType::kBall;
+      candidate_.phase=CandidatePhase::kDrain;
+      candidate_.curve_search=true;
+      candidate_.search_left=curve_search_direction_>0; // Right bend -> LEFT.
+      line_plan_.Abort(); // Only unissued LINE units are cancelled.
+      line_failure_pending_done_=false;
+      line_auxiliary_observing_=false;
+      decision_observation_active_=false;
+    }
+  } else {
+    curve_search_history_.clear();
+    curve_search_hits_=0;
+    curve_search_direction_=0;
+    curve_search_angle_deg_=0.0;
   }
   ActionRequest request;
   CameraRequest camera = route.camera;
@@ -242,7 +289,10 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   if (candidate_.phase != CandidatePhase::kNone) {
     if (may_advance) {
-      if (candidate_.phase == CandidatePhase::kDrain && idle) BeginCandidateObservation(input.now_sec);
+      if (candidate_.phase == CandidatePhase::kDrain && idle) {
+        if (candidate_.curve_search) candidate_.phase=CandidatePhase::kSearch;
+        else BeginCandidateObservation(input.now_sec);
+      }
       if (candidate_.phase == CandidatePhase::kSearch && candidate_.turn_id == 0 && idle) {
         if (candidate_.observe_after_turn) BeginCandidateObservation(input.now_sec);
         else if (candidate_.search_left) request = WalkTurn(*candidate_.search_left);
@@ -295,7 +345,7 @@ MissionFrameResult MissionController::StepPlannedLine(
               const double offset = *candidate_.direction_u - center;
               if (std::abs(offset) > tolerance) candidate_.search_left = offset < 0;
             }
-            if (candidate_.search_left && candidate_.searches < config_.candidate_search_max_turns) {
+            if (!candidate_.curve_search && candidate_.search_left && candidate_.searches < config_.candidate_search_max_turns) {
               request = WalkTurn(*candidate_.search_left);
               candidate_.phase = CandidatePhase::kSearch;
             } else {
@@ -574,6 +624,10 @@ MissionFrameResult MissionController::StepPlannedLine(
   output.candidate_phase = static_cast<int>(candidate_.phase);
   output.candidate_search_turns = candidate_.searches;
   output.candidate_restore_turns = candidate_.restores;
+  output.curve_search_spent=curve_search_spent_;
+  output.curve_search_direction=curve_search_direction_;
+  output.curve_search_hits=curve_search_hits_;
+  output.curve_search_angle_deg=curve_search_angle_deg_;
   output.line_plan_active = line_plan_.Active();
   PopulateApproachDiagnostics(output);
   PopulateDiagnostics(output, input.now_sec);

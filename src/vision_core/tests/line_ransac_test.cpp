@@ -124,4 +124,41 @@ int main() {
   assert(compute(two).ransac_outlier_indices.empty());
   assert(!compute(Straight(3)).guide.valid); // Initial-count gate is independent.
   assert(!compute({{320,450},{320,449},{320,448},{320,445}}).guide.valid);
+
+  // Curve search uses the ORIGINAL points, independently of the untouched
+  // normal LINE RANSAC (whose removed_indices may differ on the same frame).
+  const CurveSearchConfig curve_cfg;
+  for (int count : {6,7,8}) {
+    std::vector<Point2> bend;
+    const int near_count=count>=7 ? 4 : 3;
+    for (int i=0;i<count;++i) {
+      const double v=450.0-50.0*i;
+      const double u=i<near_count ? 320.0 :
+          320.0+40.0*(i-near_count+0.5);
+      bend.push_back({u,v});
+    }
+    const auto right=ComputeCurveEvidence(bend,640,480,curve_cfg);
+    assert(right.valid && right.direction==1 && right.points==count);
+    assert(right.near_inliers>=3 && right.far_inliers>=3);
+    auto mirrored=bend;
+    for (auto& p:mirrored) p.u=640.0-p.u;
+    const auto left=ComputeCurveEvidence(mirrored,640,480,curve_cfg);
+    assert(left.valid && left.direction==-1);
+    std::reverse(bend.begin(),bend.end());
+    assert(ComputeCurveEvidence(bend,640,480,curve_cfg).direction==1);
+  }
+  assert(!ComputeCurveEvidence(Straight(5),640,480,curve_cfg).valid);
+  const auto straight=ComputeCurveEvidence(Straight(),640,480,curve_cfg);
+  assert(straight.valid && straight.direction==0);
+  auto curved_with_one_bad=Straight();
+  for (int i=4;i<8;++i) curved_with_one_bad[i].u=320+40*(i-3);
+  curved_with_one_bad[6].u+=120;
+  assert(ComputeCurveEvidence(curved_with_one_bad,640,480,curve_cfg).direction==1);
+  auto six_with_one_bad=Straight(6);
+  for (int i=3;i<6;++i) six_with_one_bad[i].u=320+40*(i-2);
+  six_with_one_bad[4].u+=120; // Three-point group cannot discard an outlier.
+  assert(!ComputeCurveEvidence(six_with_one_bad,640,480,curve_cfg).valid);
+  auto discontinuous=Straight();
+  for (int i=4;i<8;++i) discontinuous[i].u=450+40*(i-4);
+  assert(!ComputeCurveEvidence(discontinuous,640,480,curve_cfg).valid);
 }

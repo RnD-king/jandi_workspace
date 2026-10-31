@@ -29,6 +29,7 @@ struct MissionControllerConfig {
   FeatureConfig line_features;
   LineTrackingConfig line;
   LineP2pConfig line_p2p;
+  CurveSearchConfig curve_search;
   BallConfig ball;
   HurdleConfig hurdle;
   GoalConfig goal;
@@ -164,6 +165,9 @@ struct MissionFrameResult {
   // Candidate is pre-entry: active_mission remains LINE until fresh 10/7.
   MissionType candidate_mission{MissionType::kNone};
   int candidate_phase{0}, candidate_search_turns{0}, candidate_restore_turns{0};
+  bool curve_search_spent{false};
+  int curve_search_direction{0}, curve_search_hits{0};
+  double curve_search_angle_deg{0.0};
   bool line_plan_active{false};
   bool object_ready_mean_used{false}; // True only on the real object-action DONE.
   bool approach_locked{false}, approach_near{false};
@@ -485,7 +489,13 @@ private:
     std::uint64_t turn_id{0};
     bool turn_is_restore{false};
     bool observe_after_turn{false};
+    bool curve_search{false}; // AUTO-only one-shot curve-triggered BALL candidate.
   } candidate_;
+  std::deque<int> curve_search_history_; // -1=left, 0=invalid/straight, +1=right.
+  bool curve_search_spent_{false}; // No rearm until explicit Reset, even after SHOOT.
+  int curve_search_direction_{0};
+  int curve_search_hits_{0};
+  double curve_search_angle_deg_{0.0};
   std::uint64_t line_ready_handled_id_{0};
   std::uint64_t line_auxiliary_id_{0};
   bool line_auxiliary_done_{false};
