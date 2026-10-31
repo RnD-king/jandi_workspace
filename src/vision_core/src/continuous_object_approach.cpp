@@ -481,11 +481,21 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     actual_line_stability_history_.clear();
     if (!idle) return result;
     if (continuous_.near_motion_id) {
-      if (input.delivery_feedback.done &&
-          input.delivery_feedback.action_id==continuous_.near_motion_id &&
-          input.allow_new_commands && input.allow_new_body_actions) {
+      if (!input.delivery_feedback.done ||
+          input.delivery_feedback.action_id!=continuous_.near_motion_id ||
+          !input.allow_new_commands || !input.allow_new_body_actions)
+        return result;
+      // Never issue the next step/turn until this exact command's real DONE.
+      continuous_.near_motion_id=0;
+      continuous_.near_motion={};
+      if (continuous_.near_actions.empty()) {
         EnterContinuousMission(input,false);result.entered=true;
+        return result;
       }
+      const auto next=continuous_.near_actions.front();
+      continuous_.near_actions.pop_front();
+      continuous_.near_motion={next,ActionCategory::kLocomotion,0,false};
+      result.action=continuous_.near_motion;result.near_final_action=true;
       return result;
     }
     if (continuous_.near_motion.action!=MissionAction::kNone) {
@@ -545,16 +555,27 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     const double v=continuous_.last->center_px.v;
     if (i==0) {
       const auto bounds=config_.ball.ApproachBounds(v,input.image_height);
-      if (continuous_.last->center_px.u<bounds.first)
-        continuous_.near_motion={MissionAction::kTurnLeftInPlace,ActionCategory::kLocomotion,0,false};
-      else if (continuous_.last->center_px.u>bounds.second)
-        continuous_.near_motion={MissionAction::kStepForwardRightOneHurdle,ActionCategory::kLocomotion,0,false};
-      else continuous_.near_motion={v<config_.ball.approach_direct_down_v_px ?
-          MissionAction::kStepForwardTwo : MissionAction::kStepForwardOne,
-          ActionCategory::kLocomotion,0,false};
+      const double u=continuous_.last->center_px.u;
+      const bool left=u<bounds.first, right=u>bounds.second;
+      if (left || right) {
+        const auto turn=left ? MissionAction::kTurnLeftInPlace :
+                               MissionAction::kStepForwardRightOneHurdle;
+        const double excess=left ? bounds.first-u : u-bounds.second;
+        continuous_.near_actions.push_back(turn);
+        if (excess>=config_.ball.approach_extreme_turn_margin_px)
+          continuous_.near_actions.push_back(turn);
+        continuous_.near_actions.push_back(MissionAction::kStepForwardOne);
+      } else {
+        continuous_.near_actions.push_back(
+            v<config_.ball.approach_direct_down_v_px ?
+                MissionAction::kStepForwardTwo : MissionAction::kStepForwardOne);
+      }
     } else {
-      continuous_.near_motion={MissionAction::kStepForwardTwo,ActionCategory::kLocomotion,0,false};
+      continuous_.near_actions.push_back(MissionAction::kStepForwardTwo);
     }
+    const auto first=continuous_.near_actions.front();
+    continuous_.near_actions.pop_front();
+    continuous_.near_motion={first,ActionCategory::kLocomotion,0,false};
     result.action=continuous_.near_motion;result.near_final_action=true;
     return result;
   }
@@ -607,6 +628,8 @@ void MissionController::PopulateApproachDiagnostics(MissionFrameResult& output) 
   output.approach_near=state.near;
   output.approach_near_observing=state.near && state.near_observing &&
       state.near_motion.action==MissionAction::kNone && state.near_motion_id==0;
+  output.approach_near_final_motion=state.near && state.near_observing &&
+      (state.near_motion.action!=MissionAction::kNone || state.near_motion_id!=0);
   if (const auto evidence=line_plan_.CurrentObjectEvidence(state.epoch)) {
     output.approach_sequence_hits=evidence->hits;
     output.approach_sequence_frames=evidence->frames;
