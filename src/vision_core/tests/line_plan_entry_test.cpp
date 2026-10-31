@@ -595,9 +595,55 @@ void PauseDuringSearch() {
   d.core.Reset(true); d.Tick();
   assert(d.out.candidate_mission==MissionType::kNone && d.out.command.action_id>turn);
 }
+void CurveSearchOneShot() {
+  auto c=Configuration();
+  c.enable_ball=true;
+  c.curve_search.enabled=true;
+  c.curve_search.stable_window=10;
+  c.curve_search.stable_min_hits=7;
+  c.line_p2p.left_repetitions=c.line_p2p.right_repetitions=1;
+  c.line_p2p.straight_repetitions=1;
+  Driver d(c);
+  d.frame.manual_observation_control=false;
+  d.frame.line_centers.clear();
+  // Right bend: near straight, far shifted to image right.
+  for(int i=0;i<8;++i)
+    d.frame.line_centers.push_back({i<4 ? 320.0 : 320.0+40.0*(i-3.5),
+                                    450.0-50.0*i});
+  d.Tick();
+  const auto walking=d.out.command.action_id;
+  assert(walking && LinePlan::IsUnit(d.out.command.action));
+  // Enough valid frames must NOT issue the turn while A is still outstanding.
+  for(int i=0;i<14;++i) d.Tick(.09);
+  assert(d.out.curve_search_spent);
+  assert(d.out.candidate_mission==MissionType::kBall && d.out.candidate_phase==1);
+  assert(d.out.command.action!=MissionAction::kTurnLeftInPlace);
+  // The existing issued LINE action must finish before a curve-search turn.
+  d.Tick(.01,{walking,true,true,false});
+  assert(d.out.command.action==MissionAction::kTurnLeftInPlace);
+  const auto turn=d.out.command.action_id;
+  assert(turn && turn!=walking);
+  d.Tick(.02,{turn,true,true,false});
+  assert(d.out.candidate_search_turns==1);
+  // No BALL in the post-turn 1s observation -> exactly one inverse turn.
+  for(int i=0;i<13;++i) d.Tick(.10);
+  assert(d.out.candidate_phase==4);
+  assert(d.out.command.action==MissionAction::kStepForwardRightOneHurdle);
+  const auto restore=d.out.command.action_id;
+  assert(restore && restore!=turn);
+  d.Tick(.01,{restore,true,true,false});
+  d.Tick(.02);
+  assert(d.out.candidate_phase==0);
+  assert(d.out.curve_search_spent); // No N-block rearm, including GOAL-side curve.
+  for(int i=0;i<30;++i) d.Tick(.1);
+  assert(d.out.candidate_mission==MissionType::kNone);
+  assert(d.out.curve_search_spent);
+}
+
 }
 
 int main() {
+  CurveSearchOneShot();
   NormalBlocks(false, .40); NormalBlocks(true, .40); NormalBlocks(true, .20);
   StartEstimatesAndReset(); SparseUnitsAndFreshVerification();
   CandidateWinsReady(false,false); CandidateWinsReady(true,false); CandidateWinsReady(true,true);
