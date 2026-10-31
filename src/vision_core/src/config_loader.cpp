@@ -257,8 +257,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "ball.entry_min_hits", "ball.stable_window");
   HitsWithinWindow(c.ball.down_search_min_hits,c.ball.stable_window,
                    "ball.down_search_min_hits","ball.stable_window");
-  HitsWithinWindow(c.ball.near_v_min_hits, c.ball.stable_window,
-                   "ball.near_v_min_hits", "ball.stable_window");
+  PositiveInt(c.ball.near_v_min_hits, "ball.near_v_min_hits");
   HitsWithinWindow(c.ball.stable_min_hits, c.ball.stable_window,
                    "ball.stable_min_hits", "ball.stable_window");
   PositiveInt(c.ball.lost_frames, "ball.lost_frames");
@@ -304,8 +303,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
 
   HitsWithinWindow(c.hurdle.down_search_min_hits,c.hurdle.stable_window,
                    "hurdle.down_search_min_hits","hurdle.stable_window");
-  HitsWithinWindow(c.hurdle.near_v_min_hits, c.hurdle.stable_window,
-                   "hurdle.near_v_min_hits", "hurdle.stable_window");
+  PositiveInt(c.hurdle.near_v_min_hits, "hurdle.near_v_min_hits");
   HitsWithinWindow(c.hurdle.stable_min_hits, c.hurdle.stable_window,
                    "hurdle.stable_min_hits", "hurdle.stable_window");
   PositiveInt(c.hurdle.lost_frames, "hurdle.lost_frames");
