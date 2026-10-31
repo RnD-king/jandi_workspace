@@ -289,12 +289,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "ball.pickup_verify_min_hits", "ball.stable_window");
   Nonnegative(c.ball.pickup_u1_px, "ball.pickup_u1_px");
   Nonnegative(c.ball.pickup_u2_px, "ball.pickup_u2_px");
-  Nonnegative(c.ball.pickup_top_u1_px, "ball.pickup_top_u1_px");
-  Nonnegative(c.ball.pickup_top_u2_px, "ball.pickup_top_u2_px");
-  if (c.ball.pickup_top_u1_px >= c.ball.pickup_top_u2_px ||
-      c.ball.pickup_top_u1_px < c.ball.pickup_u1_px ||
-      c.ball.pickup_top_u2_px > c.ball.pickup_u2_px)
-    throw std::runtime_error("ball pickup trapezoid top must lie inside the original rectangle");
   Nonnegative(c.ball.pickup_top_inset_px, "ball.pickup_top_inset_px");
   Nonnegative(c.ball.pickup_v1_px, "ball.pickup_v1_px");
   Nonnegative(c.ball.pickup_v2_px, "ball.pickup_v2_px");
@@ -560,8 +554,6 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "pickup_verify_min_hits", c.ball.pickup_verify_min_hits);
   Assign(b, "pickup_u1_px", c.ball.pickup_u1_px);
   Assign(b, "pickup_u2_px", c.ball.pickup_u2_px);
-  Assign(b, "pickup_top_u1_px", c.ball.pickup_top_u1_px);
-  Assign(b, "pickup_top_u2_px", c.ball.pickup_top_u2_px);
   if (b["pickup_top_inset_px"]) Assign(b, "pickup_top_inset_px", c.ball.pickup_top_inset_px);
   Assign(b, "pickup_v1_px", c.ball.pickup_v1_px);
   Assign(b, "pickup_v2_px", c.ball.pickup_v2_px);
