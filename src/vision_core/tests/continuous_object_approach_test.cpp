@@ -403,6 +403,29 @@ void EmptyGoalRetryLimit() {
   Check(!d.out.approach_goal_search_failed && !d.out.goal.entry_line_retries,
         "RESET retained empty GOAL failure or retry count");
 }
+void NearPixelVotesWithGaps(MissionType mission) {
+  auto c=Config();
+  c.enable_ball=mission==MissionType::kBall;
+  c.enable_hurdle=mission==MissionType::kHurdle;
+  Driver d(c);
+  if (mission==MissionType::kHurdle) {
+    d.in.ball_target.reset();
+    d.in.hurdle_target=Target();
+    d.in.hurdle_track_id=5;
+  }
+  d.Warm();
+  Check(d.out.approach_mission==mission,"near-v test did not acquire object");
+  const auto sample=[&](std::optional<double> v) {
+    if (mission==MissionType::kBall) d.in.ball_target=v ? std::optional<ObjectTarget>{Target(320,*v)} : std::nullopt;
+    else d.in.hurdle_target=v ? std::optional<ObjectTarget>{Target(320,*v)} : std::nullopt;
+    d.Tick();
+  };
+  sample(260);Check(!d.out.approach_near,"first near-v vote entered near");
+  sample(std::nullopt);Check(!d.out.approach_near,"missing frame counted as near");
+  sample(260);Check(!d.out.approach_near,"two near-v votes entered near");
+  sample(std::nullopt);Check(!d.out.approach_near,"missing frame completed near vote");
+  sample(260);Check(d.out.approach_near,"three nonconsecutive near-v votes did not latch");
+}
 void NearAndIdentity() {
   Driver d(Config());d.Warm();d.Block();d.Block();
   d.in.ball_target=Target(320,260);
@@ -821,6 +844,7 @@ void FarReacquisitionReturnsToSharedPath(MissionType mission) {
 }
 int main() {
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
+  NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
   FarGoalDepthRecovery(false,true);FarGoalDepthRecovery(true,true);
   for(auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {
