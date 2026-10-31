@@ -213,12 +213,18 @@ void SoftLoss(int blocks) {
   d.Tick({d.last_done,true,true,false});
   Check(d.out.approach_completed_blocks==before,"duplicate DONE counted a second block");
   d.MissingBlock();
-  Check(d.out.active_mission==MissionType::kLine && d.out.approach_mission==MissionType::kBall &&
-        d.out.approach_completed_blocks==blocks && LinePlan::IsUnit(d.out.command.action),
-        "pre-lock loss did not start one ordinary approach probe block");
-  FinishProbe(d);
-  Check(d.out.approach_mission==MissionType::kNone && !d.out.candidate_phase,
-        "failed probe did not return to LINE without another probe");
+  if (blocks==0) {
+    Check(d.out.approach_mission==MissionType::kNone,
+          "probe used a raw pixel before the first qualified READY mean");
+  } else {
+    Check(d.out.active_mission==MissionType::kLine &&
+          d.out.approach_mission==MissionType::kBall &&
+          d.out.approach_completed_blocks==blocks && LinePlan::IsUnit(d.out.command.action),
+          "pre-lock loss did not start one ordinary approach probe from READY mean");
+    FinishProbe(d);
+    Check(d.out.approach_mission==MissionType::kNone && !d.out.candidate_phase,
+          "failed probe did not return to LINE without another probe");
+  }
   d.in.ball_target=Target();
   for(int i=0;i<12;++i)d.Tick();
   Check(LinePlan::IsUnit(d.out.command.action) && d.out.approach_completed_blocks==0,
@@ -249,7 +255,8 @@ void ProbeRediscoveryAndLineMemory() {
         std::abs(*d.out.remembered_line_score-remembered)<1e-9,
         "invalid actual LINE erased the far-approach directional memory");
 
-  Driver recovered(Config());recovered.Warm();recovered.Block();
+  Driver recovered(Config());recovered.Warm();recovered.Block();recovered.Block();
+  // A successful object block establishes the READY mean needed for probing.
   recovered.MissingBlock();
   const int completed=recovered.out.approach_completed_blocks;
   recovered.current=recovered.out.command.action_id;
