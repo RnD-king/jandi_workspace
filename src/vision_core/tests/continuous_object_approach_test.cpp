@@ -439,7 +439,8 @@ void NearPixelVotesWithGaps(MissionType mission) {
 }
 void NearFinalActionSequence(double u,bool left,bool extreme) {
   auto c=Config();c.ball.approach_extreme_turn_margin_px=90.0;
-  Driver d(c);d.Warm();d.Block();d.Block();
+  Driver d(c);d.in.ball_target=Target(u,100);
+  d.Warm();d.Block();d.Block();
   d.in.ball_target=Target(u,260);
   for(int n=0;n<3;++n)d.Tick();
   Check(d.out.approach_near,"near sequence failed to latch three v votes");
