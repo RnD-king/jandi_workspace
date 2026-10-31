@@ -267,4 +267,107 @@ Features ComputeLineFeatures(const std::vector<Point2> &input, int image_width,
   return f;
 }
 
+namespace {
+struct CurveSegment {
+  LineFit line;
+  int inliers{0};
+};
+CurveSegment FitCurveSegment(const std::vector<Point2>& points,
+                            std::size_t begin, std::size_t end,
+                            const CurveSearchConfig& cfg) {
+  const std::size_t n=end-begin;
+  if (n<3 || n>4 || points[begin].v-points[end-1].v<cfg.min_segment_v_span_px)
+    return {};
+  if (n==3) {
+    const auto line=FitLine(points,begin,end);
+    if (!line.valid) return {};
+    double squared=0.0;
+    for(std::size_t i=begin;i<end;++i) {
+      const double residual=std::abs(points[i].u-(line.a*points[i].v+line.b));
+      if (residual>cfg.residual_threshold_px) return {};
+      squared+=residual*residual;
+    }
+    return std::sqrt(squared/n)<=cfg.max_fit_rmse_px ? CurveSegment{line,3} : CurveSegment{};
+  }
+  int best_hits=0;
+  double best_error=std::numeric_limits<double>::infinity();
+  std::vector<std::size_t> best_inliers;
+  for (std::size_t first=begin;first<end;++first) {
+    for (std::size_t second=first+1;second<end;++second) {
+      const double dv=points[first].v-points[second].v;
+      if (dv<cfg.min_pair_v_gap_px || dv<=kMinVSpanPx) continue;
+      const double a=(points[first].u-points[second].u)/dv;
+      const double b=points[first].u-a*points[first].v;
+      if (!std::isfinite(a) || !std::isfinite(b)) continue;
+      std::vector<std::size_t> inliers;
+      double squared=0;
+      for (std::size_t i=begin;i<end;++i) {
+        const double residual=std::abs(points[i].u-(a*points[i].v+b));
+        if (residual<=cfg.residual_threshold_px) {
+          inliers.push_back(i);
+          squared+=residual*residual;
+        }
+      }
+      if (static_cast<int>(inliers.size())>best_hits ||
+          (static_cast<int>(inliers.size())==best_hits && squared<best_error)) {
+        best_hits=static_cast<int>(inliers.size());
+        best_error=squared;
+        best_inliers=std::move(inliers);
+      }
+    }
+  }
+  if (best_hits<3) return {};
+  std::vector<Point2> retained;
+  for(const auto i:best_inliers) retained.push_back(points[i]);
+  const auto refit=FitLine(retained,0,retained.size());
+  if (!refit.valid) return {};
+  double squared=0;
+  for(const auto &p:retained) {
+    const double residual=std::abs(p.u-(refit.a*p.v+refit.b));
+    if (residual>cfg.residual_threshold_px) return {};
+    squared+=residual*residual;
+  }
+  return std::sqrt(squared/retained.size())<=cfg.max_fit_rmse_px
+      ? CurveSegment{refit,best_hits} : CurveSegment{};
+}
+} // namespace
+
+CurveEvidence ComputeCurveEvidence(const std::vector<Point2>& original_centers,
+    int image_width, int image_height, const CurveSearchConfig& cfg) {
+  CurveEvidence evidence;
+  if (!cfg.enabled || image_width<=1 || image_height<=1) return evidence;
+  std::vector<Point2> points;
+  for(const auto& p:original_centers) {
+    if (std::isfinite(p.u) && std::isfinite(p.v))
+      points.push_back({Clamp(p.u,0.0,image_width-1.0),
+                        Clamp(p.v,0.0,image_height-1.0)});
+  }
+  std::sort(points.begin(),points.end(),[](const Point2& a,const Point2& b){
+    return a.v==b.v ? a.u<b.u : a.v>b.v;
+  });
+  if (points.size()>8) points.resize(8);
+  evidence.points=static_cast<int>(points.size());
+  if (points.size()<6 ||
+      points.front().v-points.back().v<cfg.min_total_v_span_px) return evidence;
+  // 8: 4+4, 7: 4+3, 6: 3+3. Never overlap near and far groups.
+  const std::size_t near_count=points.size()>=7 ? 4 : 3;
+  const auto near=FitCurveSegment(points,0,near_count,cfg);
+  const auto far=FitCurveSegment(points,near_count,points.size(),cfg);
+  if (!near.line.valid || !far.line.valid) return evidence;
+  const double join_v=0.5*(points[near_count-1].v+points[near_count].v);
+  const double join_gap=std::abs((near.line.a*join_v+near.line.b)-
+                                 (far.line.a*join_v+far.line.b));
+  if (!std::isfinite(join_gap) || join_gap>cfg.max_join_gap_px) return evidence;
+  const double angle=-std::atan(far.line.a)+std::atan(near.line.a);
+  if (!std::isfinite(angle)) return evidence;
+  evidence.valid=true;
+  evidence.angle_rad=angle;
+  evidence.near_inliers=near.inliers;
+  evidence.far_inliers=far.inliers;
+  constexpr double kToDeg=180.0/3.14159265358979323846;
+  if (std::abs(angle)*kToDeg>=cfg.min_abs_angle_deg)
+    evidence.direction=angle>0.0 ? 1 : -1;
+  return evidence;
+}
+
 } // namespace vision_core
