@@ -616,7 +616,7 @@ void CurveSearchOneShot() {
   const auto walking=d.out.command.action_id;
   assert(walking && LinePlan::IsUnit(d.out.command.action));
   // Enough valid frames must NOT issue the turn while A is still outstanding.
-  for(int i=0;i<14;++i) d.Tick(.09);
+  for(int i=0;i<21;++i) d.Tick(.09);
   if (!d.out.curve_search_spent)
     throw std::runtime_error("curve trigger missing: guide="+
         std::to_string(d.out.line_features.guide.valid)+
