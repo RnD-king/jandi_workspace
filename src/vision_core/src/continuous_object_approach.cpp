@@ -441,14 +441,19 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     if (!idle) return result;
     const bool probe_available=!continuous_.probe_used &&
         cfg.prelock_loss_extra_blocks>0 &&
-        (continuous_.last_mean_guide.valid || continuous_.last_guide.valid);
+        continuous_.last_ready_center.has_value() && continuous_.last.has_value();
     if (probe_available) {
       if (!input.allow_new_commands || !input.allow_new_body_actions ||
           !input.allow_new_line_action || !input.allow_new_line_plan ||
           command_coordinator_.ActionAckTimedOut() ||
           input.now_sec+1e-9<settle_until_sec_) return result;
-      const auto& probe_guide=continuous_.last_mean_guide.valid
-          ? continuous_.last_mean_guide : continuous_.last_guide;
+      auto averaged_target=*continuous_.last;
+      averaged_target.center_px=*continuous_.last_ready_center;
+      const auto probe_guide=ObjectApproachGuide(averaged_target,false,0,
+          input.intrinsics,ApproachCameraPose{},input.image_width,input.image_height,
+          last_line_image_center_u_,line.guide.valid ?
+              line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
+          input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
       const auto direction=SteeringDecision(probe_guide).direction;
       const auto cruise=direction==CruiseDirection::kLeft ? MissionAction::kStepForwardLeft :
           direction==CruiseDirection::kStraight ? MissionAction::kStepForwardFour :
@@ -590,7 +595,17 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   if (!target) {
     // Missing frames inside a walking block retain the last path. Only that
     // block's READY evidence may declare loss and stop its successor.
-    result.guide=continuous_.last_guide.valid ? continuous_.last_guide : line.guide;
+    LineGuide saved_guide;
+    if (i!=2 && continuous_.last_ready_center && continuous_.last) {
+      auto averaged_target=*continuous_.last;
+      averaged_target.center_px=*continuous_.last_ready_center;
+      saved_guide=ObjectApproachGuide(averaged_target,false,0,input.intrinsics,
+          ApproachCameraPose{},input.image_width,input.image_height,
+          last_line_image_center_u_,line.guide.valid ?
+              line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
+          input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
+    }
+    result.guide=saved_guide.valid ? saved_guide : (i==2 ? line.guide : LineGuide{});
     result.hold=!result.guide->valid || probe_final_edge;
     return result;
   }
@@ -609,7 +624,6 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   }
   result.guide=guide;
   result.guide_observed=guide.valid;
-  if (guide.valid) continuous_.last_guide=guide;
   // HURDLE follows the actual LINE, including its bounded loss recovery.
   // Holding the router on an invalid floor guide would bypass that FSM forever.
   result.hold=(i!=2 && !guide.valid) || probe_final_edge;
