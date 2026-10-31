@@ -18,5 +18,6 @@ struct BallFineMotionPlan {
 // error, keep the center visible and avoid crossing the opposite target edge.
 BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
     Point2 center,double u1,double u2,double v1,double v2,
-    int image_width,int image_height,int repetition_limit=3);
+    int image_width,int image_height,int repetition_limit=3,
+    double top_inset_px=0.0);
 } // namespace vision_core
