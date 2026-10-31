@@ -93,7 +93,9 @@ void TestDownSearchHoldTuning() {
   c.ball.down_search_inter_action_hold_sec=.5;
   assert(t.core.UpdateTuning(c));t.Tick();
   assert(t.out.command.action_id!=0 && t.out.command.action_id!=old_id);
-  assert(t.out.command.action==MissionAction::kStepForwardOne && t.permit==scope);
+  // The preceding DOWN search action was one step, so the next one alternates.
+  assert(t.permit==scope);
+  assert(t.out.command.action==MissionAction::kStepForwardOneAlternate);
 }
 void TestAcquiredDownCannotRestartWalk(bool manual) {
   auto t=BallSearch();t.Commit();
@@ -117,7 +119,8 @@ void TestAcquiredDownCannotRestartWalk(bool manual) {
   for(int i=0;i<45;++i) {
     t.Tick();
     assert(t.out.ball.mode!=BallMode::kDownSearch);
-    assert(t.out.command.action!=MissionAction::kStepForwardOne);
+    assert(t.out.command.action!=MissionAction::kStepForwardOne &&
+           t.out.command.action!=MissionAction::kStepForwardOneAlternate);
   }
   assert(t.out.foot_pose==FootPose::kFine && t.out.ball.mode==BallMode::kBallRecoveryDown);
   const auto recovery=t.Preview();

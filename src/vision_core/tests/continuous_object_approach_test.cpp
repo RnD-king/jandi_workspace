@@ -441,8 +441,13 @@ void CameraDrainAndProbe() {
   d.Tick({d.current,true,false,true});
   Check(d.out.command.action_id==d.current,"unqualified GOAL block booked another walk");
   d.Tick({d.current,true,true,false});
+  Check(d.out.command.camera_request==CameraRequest::kNone &&
+        d.out.approach_mission==MissionType::kGoal &&
+        LinePlan::IsUnit(d.out.command.action),
+        "soft GOAL loss skipped the one pre-lock approach probe");
+  FinishProbe(d);
   Check(d.out.command.camera_request==CameraRequest::kForward && d.out.command.command_type!=CommandType::kAction,
-        "soft GOAL loss did not restore FORWARD after actual DONE");
+        "soft GOAL loss did not restore FORWARD after the probe's actual DONE");
 }
 void GoalTurnObservationUsesSelectedPath() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;

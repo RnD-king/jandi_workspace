@@ -1,5 +1,20 @@
 # Shared Vision Core Agent Guide
 
+## Source of truth
+
+This directory, `/home/noh/vision_core`, is the canonical `vision_core` source
+for the user's `/home/noh/my_cv` PC workspace. The copy at
+`/home/noh/jandi_workspace/src/vision_core` is only GitHub upload staging.
+Implement future changes here, then reconcile and sync to staging when the
+user requests an upload. Protect any staging-only changes before syncing; do
+not overwrite them blindly. The other canonical sources are
+`/home/noh/my_cv/src/vision` and `/home/noh/my_cv/src/forward_walk`.
+
+Unless the user explicitly requests a code change, explain without editing
+code. Keep simple conceptual answers within three lines, ground code answers
+in source, and provide commands or source instead of running a program when
+the user asks for its result.
+
 ## Project role and boundary
 
 `vision_core` is the ROS-independent C++ perception, mission-control, and
