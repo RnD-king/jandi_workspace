@@ -181,7 +181,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   // Object acquisition has priority over a curve if both qualify this frame.
   const bool curve_eligible=config_.curve_search.enabled && automatic_approach &&
       config_.enable_ball && !curve_search_spent_ && !has_ball_ &&
-      may_advance && input.advance_line_fsm &&
+      may_advance && commands_allowed && input.advance_line_fsm &&
       input.camera_feedback.settled &&
       input.camera_feedback.actual_mode==CameraMode::kForward &&
       line_state_==LineState::kNormal && actual_line_valid &&
