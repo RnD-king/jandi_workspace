@@ -448,8 +448,14 @@ void NearFinalActionSequence(double u,bool left,bool extreme) {
   for(int n=0;n<35 && d.out.command.action_id==0;++n)d.Tick();
   const MissionAction turn=left ? MissionAction::kTurnLeftInPlace :
       MissionAction::kStepForwardRightOneHurdle;
-  Check(d.out.command.action==turn && d.out.approach_near_final_motion,
-        "near final sequence omitted first turn or debug phase");
+  if (d.out.command.action!=turn || !d.out.approach_near_final_motion)
+    throw std::runtime_error("near final first: action="+
+        std::to_string(static_cast<int>(d.out.command.action))+
+        " expected="+std::to_string(static_cast<int>(turn))+
+        " near_motion="+std::to_string(d.out.approach_near_final_motion)+
+        " near_observing="+std::to_string(d.out.approach_near_observing)+
+        " mission="+std::to_string(static_cast<int>(d.out.active_mission))+
+        " id="+std::to_string(d.out.command.action_id));
   std::uint64_t id=d.out.command.action_id;
   d.Tick({id,true,false,false});
   d.Tick({id,true,true,false});
