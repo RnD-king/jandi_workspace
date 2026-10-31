@@ -57,6 +57,16 @@ void MissionController::ReleaseContinuousApproach() {
 
 void MissionController::EnterContinuousMission(const MissionFrameInput& input,bool lost) {
   const auto route=continuous_;
+  // Retain the raw last target only for identity/metadata; recovery direction
+  // must use the most recent qualified final-READY coordinate mean.
+  auto recovery_target=route.last.value_or(ObjectTarget{});
+  if (route.last_ready_center) {
+    recovery_target.center_px=*route.last_ready_center;
+  } else if (!route.near) {
+    // No qualified READY mean: do not steer from a single last sighting.
+    recovery_target.center_px.u=route.mission==MissionType::kBall
+        ? config_.ball.far_u_des_px : config_.goal.target_u_px;
+  }
   // All IDs have physically completed. Consume that real feedback before the
   // mission controller starts; never give a LINE DONE to a pickup/shoot FSM.
   command_coordinator_.Compute(MissionType::kLine,0,{},CameraRequest::kNone,
@@ -72,7 +82,7 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
     goal_mission_index_=goal_index;
   if (route.mission==MissionType::kBall) {
     if (route.near) ball_controller_.EnterContinuousNear(input.now_sec);
-    else ball_controller_.EnterContinuousRecovery(*route.last,route.good_hits,input.image_width,input.image_height,input.now_sec);
+    else ball_controller_.EnterContinuousRecovery(recovery_target,route.good_hits,input.image_width,input.image_height,input.now_sec);
     ball_result_.mode=route.near ? BallMode::kWaitCameraDown : BallMode::kForwardRecoveryTurn;
     ball_result_.active=true;
     if (route.id) {
@@ -81,16 +91,16 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
     }
   } else if (route.mission==MissionType::kHurdle) {
     if (route.near) hurdle_controller_.EnterContinuousNear(input.now_sec);
-    else hurdle_controller_.EnterContinuousRecovery(*route.last,route.good_hits,input.image_width,input.image_height,input.now_sec);
+    else hurdle_controller_.EnterContinuousRecovery(recovery_target,route.good_hits,input.image_width,input.image_height,input.now_sec);
     hurdle_result_.mode=route.near ? HurdleMode::kWaitCameraDown : HurdleMode::kRecoveryStep;
     hurdle_result_.active=true;
     hurdle_target_tracker_.Lock();
   } else {
     if (route.near)
-      goal_controller_.EnterContinuousNear(*route.last,route.pose,
+      goal_controller_.EnterContinuousNear(recovery_target,route.pose,
           lost ? route.good_hits : route.hits,route.pose_hits,route.near_hits,
           input.image_width,input.image_height,input.now_sec,lost);
-    else goal_controller_.EnterContinuousApproach(*route.last,route.pose,
+    else goal_controller_.EnterContinuousApproach(recovery_target,route.pose,
           route.good_hits,route.pose_hits,route.near_hits,
           input.image_width,input.image_height,input.now_sec,true);
     goal_result_.mode=route.near ? GoalMode::kWaitFinePose : GoalMode::kApproach;
