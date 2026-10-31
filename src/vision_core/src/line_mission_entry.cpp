@@ -397,9 +397,13 @@ MissionFrameResult MissionController::StepPlannedLine(
         decision=mean.value_or(LineGuide{});
         if (automatic_approach && continuous_.mission!=MissionType::kNone) {
           if (line_plan_.ObjectOwned(id,continuous_.epoch)) {
-            if (pixel_owner && !line_plan_.IsProbe(id) &&
-                line_plan_.ObjectQualified(id) && mean && mean->valid)
-              continuous_.last_ready_center=averaged_center;
+            if (!line_plan_.IsProbe(id) && line_plan_.ObjectQualified(id) &&
+                mean && mean->valid) {
+              if (pixel_owner)
+                continuous_.last_ready_center=averaged_center;
+              else if (continuous_.mission==MissionType::kHurdle)
+                continuous_.hurdle_last_mean_guide=*mean;
+            }
           } else if (continuous_.mission==MissionType::kBall ||
                      continuous_.mission==MissionType::kGoal) {
             // The preceding floor LINE mean must not steer the virtual path.
