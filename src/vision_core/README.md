@@ -131,7 +131,7 @@ curvature는 진단값이며 steering, mission 전환, recovery 결정에 사용
 ## Mission 요약
 
 실전 AUTO에서 LINE과 원거리 BALL/GOAL/HURDLE은 같은 32/33/34 보행 계획기를 쓴다.
-기본 반복은 좌/직/우 2/2/2다. 공/골대는 가상 접근 직선, 허들은 실제 LINE으로 조향한다.
+기본 반복은 좌/직/우 2/2/2다. 공/골대는 가상 접근의 H만, 허들은 실제 LINE의 O/H로 조향한다.
 `object_approach_continous` 선택 항목은 제거했다. 수동 승인/단계별 시험은 자신의
 단발 계약을 유지하며, 아래와 다른 과거 격자 접근은 이 시험 경로에서만 사용한다.
 

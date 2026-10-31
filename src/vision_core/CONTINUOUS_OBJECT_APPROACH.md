@@ -10,15 +10,18 @@
 ## 원거리 경로와 보행
 
 - 실제 LINE은 기존 점선의 가까운 직선 fit에서 O/H를 구한다.
-- BALL은 bbox 아래 중앙의 지면 접점을 카메라 장착 위치/각도로 몸통 기준 지면에
-  투영하고, 몸통에서 목표까지의 직선을 카메라 영상에 다시 투영한다.
+- BALL은 영상 아래쪽 로봇 기준점과 공 중심을 잇는 가상 직선을 사용한다.
+  깊이나 카메라 위치/각도로 지면에 투영하지 않는다.
 - GOAL은 백보드 중앙의 optical Z와 카메라 내/외부 파라미터로 몸통 기준 위치를
   구해 그 지면 투영 위치까지의 직선을 사용한다. GOAL 뷰에서도 바닥 LINE은 필요 없다.
 - HURDLE의 방향은 기존과 같이 실제 LINE을 사용한다. bbox의 횡 위치로 조향하지 않는다.
   LINE이 유실되면 일반 LINE 관측/복구 FSM을 사용하며 무기한 router HOLD에 머무르지 않는다.
 
-실제/가상 직선 모두 `ImageLineGuide`의 동일한 영상 반폭 정규화와 `-atan(du/dv)`를
-거쳐 기존 `LineP2pController`의 offset/heading gain 및 deadband를 사용한다.
+실제 LINE과 HURDLE은 기존 O/H 합산 점수로 판단한다. BALL은 가상선의
+`-atan(du/dv)`만, GOAL은 백보드의 몸통 기준 `(x,z)`에서 구한
+`atan2(x,z)`만으로 조향한다. 가상선의 O는 디버그 표시에 남기되 보행 점수에는
+넣지 않는다. `object_approach.heading_gain`, `steering_deadband`,
+`in_place_turn_score`는 실제 LINE과 독립적으로 조절한다.
 실제 LINE의 가까운 fit 기준 높이가 있으면 공유하고, 없으면 `reference_v_ratio`를 쓴다.
 IMU 보정 사용 시 가상 경로에도 기존 픽셀 rectifier를 적용한다. 가상 선분은 기하 계산용이며
 추가 검출이나 관측 성공 프레임으로 세지 않는다. LINE→객체 최초 전환에는 `blend_frames`를 쓴다.
@@ -128,13 +131,14 @@ DONE까지 유지한다. 영상만 남고 Depth가 실패한 프레임은 객체
 
 ## 카메라 보정값
 
-`object_approach.forward_camera` / `goal_camera`는 **사용자 요청에 따른 임시값**이다.
-현재 right=0, forward=0, height=0.45 m이며 pitch는 FORWARD=20°, GOAL=0°, yaw=0°다.
-모터 tick을 도 단위로 추측한 값이 아니다. 실측 전의 초기 설정으로만 두었으므로 교체해야 한다.
+`object_approach.goal_camera`의 right=-0.017 m는 사용자가 알려준 대략적인
+좌측 17 mm 오프셋이다. forward=0, height=0.45 m, pitch=0°, yaw=0°는
+임시값이며 정밀 실측 후 교체해야 한다. BALL은 카메라 자세 설정을 사용하지 않는다.
 
 몸통 원점 기준 광학 중심의 right/height/forward는 오른쪽/위/전방이 +m,
 pitch는 아래를 볼 때 +°, yaw는 오른쪽을 볼 때 +°다. Intrinsics는 실제 CameraInfo를 쓴다.
-지면이 평평하다는 가정이며, 지면과 교차하지 않는 BALL ray, 유효하지 않은 깊이/투영은 HOLD다.
+GOAL의 유효하지 않은 깊이/투영은 HOLD다. BALL의 영상 H에는 카메라 좌우
+이격에 따른 시차가 남을 수 있으며, LINE의 `image_center_u: 380`은 유지한다.
 추론 엔진이나 YOLO 횟수를 추가하지 않는다.
 
 ## 표시와 검증

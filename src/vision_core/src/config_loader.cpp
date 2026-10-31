@@ -124,13 +124,17 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.object_approach.reference_v_ratio,"object_approach.reference_v_ratio");
   if (c.object_approach.reference_v_ratio>=1)
     throw std::runtime_error("object_approach.reference_v_ratio must be below 1");
-  for (const auto& camera:{c.object_approach.forward_camera,c.object_approach.goal_camera}) {
-    if (!std::isfinite(camera.right_m) || !std::isfinite(camera.forward_m) ||
-        !std::isfinite(camera.pitch_deg) || !std::isfinite(camera.yaw_deg) ||
-        std::abs(camera.pitch_deg)>=89 || std::abs(camera.yaw_deg)>=89)
-      throw std::runtime_error("invalid object approach camera pose");
-    Positive(camera.height_m,"object_approach.camera.height_m");
-  }
+  Nonnegative(c.object_approach.heading_gain,"object_approach.heading_gain");
+  Nonnegative(c.object_approach.steering_deadband,"object_approach.steering_deadband");
+  Positive(c.object_approach.in_place_turn_score,"object_approach.in_place_turn_score");
+  if (c.object_approach.in_place_turn_score<=c.object_approach.steering_deadband)
+    throw std::runtime_error("object_approach.in_place_turn_score must exceed steering_deadband");
+  const auto& camera=c.object_approach.goal_camera;
+  if (!std::isfinite(camera.right_m) || !std::isfinite(camera.forward_m) ||
+      !std::isfinite(camera.pitch_deg) || !std::isfinite(camera.yaw_deg) ||
+      std::abs(camera.pitch_deg)>=89 || std::abs(camera.yaw_deg)>=89)
+    throw std::runtime_error("invalid object approach camera pose");
+  Positive(camera.height_m,"object_approach.goal_camera.height_m");
   Nonnegative(c.ball.approach_short_v_px, "ball.approach_short_v_px");
   PositiveInt(c.ball.down_search_max_steps, "ball.down_search_max_steps");
   Nonnegative(c.ball.down_search_inter_action_hold_sec, "ball.down_search_inter_action_hold_sec");
@@ -698,17 +702,21 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   if (m["object_approach_continous"])
     throw std::runtime_error("mission.object_approach_continous was removed; AUTO always uses shared object approach. Remove the obsolete key.");
   const auto approach=m["object_approach"];
+  if (approach["forward_camera"])
+    throw std::runtime_error("mission.object_approach.forward_camera was removed; BALL RGB approach does not use a camera pose.");
   Assign(approach,"lock_blocks",c.object_approach.lock_blocks);
   Assign(approach,"prelock_loss_extra_blocks",c.object_approach.prelock_loss_extra_blocks);
   Assign(approach,"blend_frames",c.object_approach.blend_frames);
   Assign(approach,"goal_empty_max_retries",c.object_approach.goal_empty_max_retries);
   Assign(approach,"reference_v_ratio",c.object_approach.reference_v_ratio);
+  Assign(approach,"heading_gain",c.object_approach.heading_gain);
+  Assign(approach,"steering_deadband",c.object_approach.steering_deadband);
+  Assign(approach,"in_place_turn_score",c.object_approach.in_place_turn_score);
   const auto read_camera=[](const YAML::Node& node,ApproachCameraPose& camera) {
     Assign(node,"right_m",camera.right_m); Assign(node,"height_m",camera.height_m);
     Assign(node,"forward_m",camera.forward_m); Assign(node,"pitch_deg",camera.pitch_deg);
     Assign(node,"yaw_deg",camera.yaw_deg);
   };
-  read_camera(approach["forward_camera"],c.object_approach.forward_camera);
   read_camera(approach["goal_camera"],c.object_approach.goal_camera);
   Assign(m, "enable_ball", c.enable_ball);
   Assign(m, "enable_hurdle", c.enable_hurdle);

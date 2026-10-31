@@ -68,7 +68,8 @@ MissionFrameResult MissionController::StepPlannedLine(
   MissionFrameResult output;
   ObserveLineFeedback(input.delivery_feedback, input.now_sec);
   // Full AUTO has one approach policy. Manual approval and isolated stages
-  // retain their stationary, one-command-at-a-time execution contract.
+  // retain their stationary, one-command-at-a-time execution contract. The
+  // candidate direction search below is unnecessary in ordinary AUTO.
   const bool automatic_approach = !input.manual_observation_control &&
                                   config_.test_mission == MissionType::kNone;
   if (automatic_approach && has_ball_ && config_.enable_goal) {
@@ -125,7 +126,7 @@ MissionFrameResult MissionController::StepPlannedLine(
       if (route.object_visible && raw.valid && !continuous_.near &&
           (continuous_.mission == MissionType::kBall ||
            continuous_.mission == MissionType::kGoal)) {
-        output.approach_path_guide = raw;
+        output.approach_path_guide = route.display_guide.value_or(raw);
         output.approach_path_reference_px = {
             last_line_image_center_u_,
             output.line_features.guide.valid

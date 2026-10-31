@@ -33,7 +33,8 @@ LineGuide ImageLineGuide(double slope,double u,double reference_u,int width,doub
 }
 LineGuide ObjectApproachGuide(const ObjectTarget& t,bool board,double depth,
     const Intrinsics& k,const ApproachCameraPose& c,int width,int height,
-    double reference_u,double reference_v,bool rectify,double roll,double pitch) {
+    double reference_u,double reference_v,bool rectify,double roll,double pitch,
+    double* body_bearing_rad) {
   if (!board) {
     if (width<=1 || height<=1 || !std::isfinite(reference_u) ||
         !std::isfinite(reference_v)) return {};
@@ -60,6 +61,7 @@ LineGuide ObjectApproachGuide(const ObjectTarget& t,bool board,double depth,
   if (!std::isfinite(scale) || scale<=0) return {};
   const double x=c.right_m+scale*ray.x,z=c.forward_m+scale*ray.z;
   if (!std::isfinite(x) || !std::isfinite(z) || z<=0.05) return {};
+  if (body_bearing_rad) *body_bearing_rad=std::atan2(x,z);
   // Two points describe the chosen ground path, not extra sensor evidence.
   // Extend the line for projection even when the target itself is above ground.
   auto a=Project({x/z*0.5,0,0.5},c,k);

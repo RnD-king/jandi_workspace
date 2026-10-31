@@ -41,7 +41,7 @@ struct LineGuide {
   // 모든 signed 값은 image-right가 양수다.
   // 가까운 점군 fitting의 대표 위치를 영상 중심으로 정규화한 값.
   double offset{0.0};
-  // 가까운 점군에서 화면 위(진행 방향)로 향하는 방향각.
+  // 일반 LINE/BALL은 화면 위(진행 방향) 각도, GOAL 접근은 몸통 기준 목표 방향각.
   double heading_rad{0.0};
   // 먼 점군 방향각 - 가까운 점군 방향각. 오른쪽 커브가 양수다.
   double curvature_rad{0.0};

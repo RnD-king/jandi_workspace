@@ -93,9 +93,12 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.object_approach.prelock_loss_extra_blocks==1);
   assert(c.object_approach.goal_empty_max_retries==3);
   assert(c.mission_recovery_turn_yaw_deg==baseline.mission_recovery_turn_yaw_deg);
-  root["vision_algorithm"]["common"]["mission"]["object_approach"]["forward_camera"]["right_m"]=-.07;
+  root["vision_algorithm"]["common"]["mission"]["object_approach"]["goal_camera"]["right_m"]=-.07;
   const auto continuous=LoadText(YAML::Dump(root));
-  assert(continuous.object_approach.forward_camera.right_m==-.07);
+  assert(continuous.object_approach.goal_camera.right_m==-.07);
+  assert(continuous.object_approach.heading_gain==c.object_approach.heading_gain);
+  root["vision_algorithm"]["common"]["mission"]["object_approach"]["heading_gain"]=.8;
+  assert(LoadText(YAML::Dump(root)).object_approach.heading_gain==.8);
   auto a=root["vision_algorithm"];
   // Distinct values detect accidental cross-object filter/tracker wiring.
   a["ball"]["detection"]["class_id"]=11;
@@ -144,6 +147,21 @@ static void CheckGroupedConfiguration(const std::string &text) {
   }
   bad=YAML::Clone(root);
   bad["vision_algorithm"]["common"].remove("depth_roi_size_px");reject(bad);
+  bad=YAML::Clone(root);
+  bad["vision_algorithm"]["common"]["mission"]["object_approach"]["forward_camera"] =
+      bad["vision_algorithm"]["common"]["mission"]["object_approach"]["goal_camera"];
+  reject(bad);
+  for (const auto *key : {"heading_gain", "steering_deadband", "in_place_turn_score"}) {
+    bad=YAML::Clone(root);
+    bad["vision_algorithm"]["common"]["mission"]["object_approach"].remove(key);
+    reject(bad);
+  }
+  bad=YAML::Clone(root);
+  bad["vision_algorithm"]["common"]["mission"]["object_approach"]["heading_gain"]=-.1;
+  reject(bad);
+  bad=YAML::Clone(root);
+  bad["vision_algorithm"]["common"]["mission"]["object_approach"]["in_place_turn_score"]=.01;
+  reject(bad);
 }
 
 int main(int argc, char **argv) {
@@ -158,6 +176,8 @@ int main(int argc, char **argv) {
   }
   assert(c.ball.fine_motion.max_repetitions==3 && !c.ball.fine_motion.HasCalibration());
   assert(defaults.command.first_action_id != 0);
+  // CTest redirects LoadDefaultAlgorithmConfig() to the fixture; production
+  // calibration values belong to the runtime YAML check, not this test.
   assert(c.line_p2p.failure_min_valid_samples == 5);
   assert(c.line_p2p.observation_start_ratio == 0.0);
   assert(c.line_p2p.recovery_max_turns == 5);

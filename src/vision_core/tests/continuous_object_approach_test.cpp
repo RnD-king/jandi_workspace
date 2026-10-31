@@ -23,7 +23,6 @@ MissionControllerConfig Config() {
   c.hurdle.approach_short_v_px=100;c.hurdle.approach_two_step_v_px=240;
   c.object_association.max_center_distance_norm=.5;
   c.object_approach.lock_blocks=3;
-  c.object_approach.forward_camera={0,.45,0,20,0};
   c.object_approach.goal_camera={0,.45,0,0,0};
   return c;
 }
@@ -101,6 +100,47 @@ void Geometry() {
         "BALL RGB path unexpectedly required depth intrinsics");
   const auto goal=ObjectApproachGuide(Target(),true,2,k,{0,.45,0,0,0},640,480,320,400,false,0,0);
   Check(goal.valid && std::abs(goal.offset)<1e-9,"GOAL view could not project an elevated target onto the floor");
+  double bearing=0;
+  const auto shifted_goal=ObjectApproachGuide(Target(),true,2,k,{-.017,.45,0,0,0},
+      640,480,320,400,false,0,0,&bearing);
+  Check(shifted_goal.valid && std::abs(bearing-std::atan2(-.017,2.0))<1e-9,
+        "GOAL body bearing ignored the measured camera lateral offset");
+}
+void VirtualHeadingOnly() {
+  auto c=Config();
+  Driver ball(c);ball.in.ball_target=Target(500,100);
+  ball.Warm();ball.Block();
+  Check(ball.out.approach_mission==MissionType::kBall &&
+        ball.out.approach_path_guide && ball.out.approach_path_guide->offset>0 &&
+        ball.out.command.action==MissionAction::kLineStraightUnit,
+        "BALL virtual offset still changed the H-only approach direction");
+  ball.MissingBlock();
+  Check(ball.out.approach_mission==MissionType::kBall &&
+        ball.out.command.action==MissionAction::kLineStraightUnit,
+        "pre-lock BALL probe reused O/H steering instead of the saved H direction");
+
+  c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
+  c.goal_trial_start_goal=true;
+  Driver goal(c);goal.in.ball_target.reset();goal.in.line_centers.clear();
+  goal.in.camera_feedback={CameraMode::kGoal,true};
+  goal.in.backboard_target=Target(500,100);goal.in.backboard_track_id=7;
+  goal.in.backboard_center_depth_m=2;goal.in.goal_pose={true,.6,2,0,1};
+  for(int i=0;i<12;++i)goal.Tick();
+  Check(goal.out.approach_mission==MissionType::kGoal &&
+        goal.out.approach_path_guide && goal.out.line_decision_guide &&
+        std::abs(goal.out.approach_path_guide->heading_rad)<1e-9 &&
+        goal.out.line_decision_guide->heading_rad>0.25 &&
+        goal.out.command.action==MissionAction::kLineStraightUnit,
+        "GOAL used projected image slope/offset instead of body bearing H");
+
+  c.object_approach.heading_gain=1.0;
+  Driver tuned(c);tuned.in.ball_target.reset();tuned.in.line_centers.clear();
+  tuned.in.camera_feedback={CameraMode::kGoal,true};
+  tuned.in.backboard_target=Target(500,100);tuned.in.backboard_track_id=7;
+  tuned.in.backboard_center_depth_m=2;tuned.in.goal_pose={true,.6,2,0,1};
+  for(int i=0;i<12;++i)tuned.Tick();
+  Check(tuned.out.command.action==MissionAction::kLineRightUnit,
+        "GOAL virtual heading gain did not tune its direction independently");
 }
 void FinishProbe(Driver& d) {
   d.current=d.out.command.action_id;
@@ -451,8 +491,8 @@ void CameraDrainAndProbe() {
 }
 void GoalTurnObservationUsesSelectedPath() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
-  c.line_p2p.offset_gain=c.line_p2p.heading_gain=1;
-  c.line_p2p.steering_deadband=.05;c.line_p2p.in_place_turn_score=.1;
+  c.object_approach.heading_gain=1;
+  c.object_approach.steering_deadband=.05;c.object_approach.in_place_turn_score=.1;
   Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
   d.in.camera_feedback={CameraMode::kGoal,true};d.in.backboard_target=Target(500,100);
   d.in.backboard_track_id=7;d.in.backboard_center_depth_m=2;d.in.goal_pose={true,.6,2,0,1};
@@ -716,7 +756,7 @@ void FarReacquisitionReturnsToSharedPath(MissionType mission) {
 }
 }
 int main() {
-  Geometry();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
+  Geometry();VirtualHeadingOnly();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
   FarGoalDepthRecovery(false,true);FarGoalDepthRecovery(true,true);
   for(auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {

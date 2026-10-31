@@ -284,12 +284,14 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     result.hold=true;return result;
   }
   LineGuide goal_guide;
+  double goal_bearing_rad=0.0;
   if (goal_view && input.backboard_target) {
     const double z=input.backboard_center_depth_m.value_or(input.goal_pose.valid ? input.goal_pose.z_m : 0);
     goal_guide=ObjectApproachGuide(*input.backboard_target,true,z,input.intrinsics,cfg.goal_camera,
         input.image_width,input.image_height,last_line_image_center_u_,
         line.guide.valid ? line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
-        input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
+        input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad,
+        &goal_bearing_rad);
   }
   const std::array<MissionType,3> missions{MissionType::kBall,MissionType::kGoal,MissionType::kHurdle};
   const std::array<std::optional<ObjectTarget>,3> targets{input.ball_target,input.backboard_target,input.hurdle_target};
@@ -405,7 +407,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
           !input.allow_new_line_action || !input.allow_new_line_plan ||
           command_coordinator_.ActionAckTimedOut() ||
           input.now_sec+1e-9<settle_until_sec_) return result;
-      const auto direction=line_p2p_controller_.Compute(continuous_.last_guide).direction;
+      const auto direction=SteeringDecision(continuous_.last_guide).direction;
       const auto cruise=direction==CruiseDirection::kLeft ? MissionAction::kStepForwardLeft :
           direction==CruiseDirection::kStraight ? MissionAction::kStepForwardFour :
           direction==CruiseDirection::kRight ? MissionAction::kStepForwardRight : MissionAction::kNone;
@@ -529,14 +531,16 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     return result;
   }
   LineGuide guide=line.guide;
-  if (i==1) guide=goal_guide;
-  else if (i==0) {
+  if (i==1) {
+    result.display_guide=goal_guide;
+    guide=goal_guide;
+    if (guide.valid) guide.heading_rad=goal_bearing_rad;
+  } else if (i==0) {
     const double reference_u=last_line_image_center_u_;
     const double reference_v=line.guide.valid ? line.guide_reference_v_px :
         cfg.reference_v_ratio*input.image_height;
-    guide=ObjectApproachGuide(*target,i==1,input.backboard_center_depth_m.value_or(
-        input.goal_pose.valid ? input.goal_pose.z_m : 0),
-        input.intrinsics,goal_view ? cfg.goal_camera : cfg.forward_camera,
+    guide=ObjectApproachGuide(*target,false,0,
+        input.intrinsics,ApproachCameraPose{},
         input.image_width,input.image_height,reference_u,reference_v,
         input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
   }
@@ -544,6 +548,12 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     const double weight=static_cast<double>(++continuous_.blend)/cfg.blend_frames;
     guide.offset=weight*guide.offset+(1-weight)*line.guide.offset;
     guide.heading_rad=weight*guide.heading_rad+(1-weight)*line.guide.heading_rad;
+    if (result.display_guide) {
+      result.display_guide->offset=weight*result.display_guide->offset+
+          (1-weight)*line.guide.offset;
+      result.display_guide->heading_rad=weight*result.display_guide->heading_rad+
+          (1-weight)*line.guide.heading_rad;
+    }
   }
   result.guide=guide;
   if (guide.valid) continuous_.last_guide=guide;

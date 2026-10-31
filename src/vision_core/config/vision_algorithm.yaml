@@ -179,8 +179,8 @@ vision_algorithm:
 
       # DOWN 완료부터 LINE O/H 기억; 2번 자세 DONE 후 FINE 정렬에만 사용
       fine_line_reference_u_px: 380.0 # 허들 DOWN 화면의 로봇 기준선
-      fine_line_offset_tolerance_px: 20.0 # |O| 허용 범위 (px)
-      fine_line_heading_tolerance_deg: 5.0 # |H| 허용 범위 (도)
+      fine_line_offset_tolerance_px: 60.0 # |O| 허용 범위 (px)
+      fine_line_heading_tolerance_deg: 10.0 # |H| 허용 범위 (도)
       fine_line_observation_sec: 1.0 # 각 실제 DONE 이후 정지 관측 (초)
       fine_line_stable_window: 10
       fine_line_stable_min_hits: 5
@@ -292,20 +292,22 @@ vision_algorithm:
       test_mission: 0 # 0 전체 미션, 2 공, 3 골대, 4 허들
       test_stage: 0 # 0 전체 과정, 1 접근, 2 정렬, 3 실행
 
-      # AUTO 객체 접근: LINE과 공통 O/H·32/33/34 보행
+      # AUTO 객체 접근: LINE과 공통 32/33/34 보행, 공·골대 가상 경로는 H만 판단
       object_approach:
         lock_blocks: 3 # 같은 ID의 보행 묶음 전체가 실제 DONE된 횟수 (전송/ACK/READY 아님)
         prelock_loss_extra_blocks: 1 # 락 전 유실 시 마지막 접근 방향으로 추가 탐색할 묶음 수 (0 또는 1)
         blend_frames: 5 # LINE→가상 경로의 전환 프레임 수
         reference_v_ratio: 0.80 # 실제 LINE 기준 높이를 못 구하는 GOAL 뷰의 기준
-        # 임시값: 사용자 요청으로 우선 사용. 광학 중심의 몸통 기준 위치/자세를 실측 후 교체!
+        heading_gain: 0.3 # 공·골대 가상 경로 H(rad) 전용 점수 계수
+        steering_deadband: 0.14 # |H 점수|가 이 값 이하이면 직진
+        in_place_turn_score: 0.5 # |H 점수|가 이 값보다 크면 WALK 제자리 회전
+        # 임시값: 좌우 -17mm는 대략 실측, 나머지는 정밀 실측 후 교체!
         # 위치: 오른쪽/위/전방 +m. 각도: 아래로 pitch+, 오른쪽으로 yaw+ (모터 tick 아님).
-        forward_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 20.0, yaw_deg: 0.0}
-        goal_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 0.0, yaw_deg: 0.0}
+        goal_camera: {right_m: -0.017, height_m: 0.45, forward_m: 0.0, pitch_deg: 0.0, yaw_deg: 0.0}
         goal_empty_max_retries: 3 # 최초 GOAL 확인 후 FORWARD→LINE 1묶음→GOAL 재확인 한도; 소진 시 FINAL HOLD
 
       # 후보·라인 유실 복구
-      candidate_search_max_turns: 2
+      candidate_search_max_turns: 2 # 수동·단독 시험의 후보 재탐색용; 일반 AUTO 객체 접근에는 불필요
       mission_recovery_max_turns: 30 # 미션 전후 라인 복구 최대 회전 횟수
       mission_recovery_turn_yaw_deg: 15 # 공 줍기/슛 후 FINE 제자리 회전 1회 요청각 (도)
 

@@ -398,6 +398,7 @@ private:
     ActionRequest action;
     bool depth_recovery_step{false};
     std::optional<LineGuide> guide;
+    std::optional<LineGuide> display_guide;
     CameraRequest camera{CameraRequest::kNone};
     bool hold{false}, entered{false}, object_visible{false}, near_final_action{false};
     bool probe_start{false};
@@ -438,6 +439,7 @@ private:
                                   bool *reference_valid,
                                   bool append_stability = true);
   ActionRequest CruiseAction(const LineGuide &guide, bool queue_eligible);
+  CruiseDecision SteeringDecision(const LineGuide &guide) const;
   void BeginObservation(LineState state, double now_sec);
   void AddObservation(const LineGuide &guide);
   std::optional<LineGuide> FinishObservation() const;

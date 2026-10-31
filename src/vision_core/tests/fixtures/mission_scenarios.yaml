@@ -256,7 +256,9 @@ vision_algorithm:
       blend_frames: 5
       goal_empty_max_retries: 3
       reference_v_ratio: 0.80
-      forward_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 20.0, yaw_deg: 0.0}
+      heading_gain: 0.3
+      steering_deadband: 0.14
+      in_place_turn_score: 0.5
       goal_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 0.0, yaw_deg: 0.0}
     candidate_search_max_turns: 2
     test_mission: 0

@@ -69,7 +69,7 @@ bool MissionController::StraightGoalGateReached(int additional_straight_blocks) 
 
 ActionRequest MissionController::CruiseAction(const LineGuide &guide,
                                               bool queue_eligible) {
-  const CruiseDecision decision = line_p2p_controller_.Compute(guide);
+  const CruiseDecision decision = SteeringDecision(guide);
   // Remember the signed decision, including straight/deadband and exact zero.
   // Never replace it with an invalid frame or the sparse-center recovery hint.
   // Virtual object paths must not replace the last actual LINE direction:
@@ -77,8 +77,12 @@ ActionRequest MissionController::CruiseAction(const LineGuide &guide,
   if (decision.direction != CruiseDirection::kNone && continuous_.mission==MissionType::kNone)
     last_line_score_ = decision.error;
   MissionAction action = MissionAction::kNone;
+  const bool virtual_approach = continuous_.mission == MissionType::kBall ||
+      continuous_.mission == MissionType::kGoal;
+  const double turn_threshold = virtual_approach
+      ? config_.object_approach.in_place_turn_score : config_.line_p2p.in_place_turn_score;
   if (decision.direction != CruiseDirection::kNone &&
-      std::abs(decision.error) > config_.line_p2p.in_place_turn_score) {
+      std::abs(decision.error) > turn_threshold) {
     if (line_guard_turns_completed_ >= config_.line_p2p.recovery_max_turns) {
       line_state_ = LineState::kFinalHold;
       return {};
@@ -103,6 +107,17 @@ ActionRequest MissionController::CruiseAction(const LineGuide &guide,
     action = MissionAction::kStepForwardRight;
   return decision.applicable ? LineLocomotion(action, queue_eligible)
                              : ActionRequest{};
+}
+
+CruiseDecision MissionController::SteeringDecision(const LineGuide &guide) const {
+  if (continuous_.mission != MissionType::kBall &&
+      continuous_.mission != MissionType::kGoal)
+    return line_p2p_controller_.Compute(guide);
+  const bool valid = guide.valid && std::isfinite(guide.offset) &&
+      std::isfinite(guide.heading_rad);
+  return SelectCruiseDecision(true, valid,
+      config_.object_approach.heading_gain * guide.heading_rad,
+      config_.object_approach.steering_deadband);
 }
 
 void MissionController::BeginObservation(LineState state, double now_sec) {

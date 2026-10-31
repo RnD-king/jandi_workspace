@@ -14,17 +14,20 @@ struct ObjectApproachConfig {
   int prelock_loss_extra_blocks{};
   int goal_empty_max_retries{};
   double reference_v_ratio{};
-  ApproachCameraPose forward_camera, goal_camera;
+  double heading_gain{}, steering_deadband{}, in_place_turn_score{};
+  ApproachCameraPose goal_camera;
 };
 
-// The same image-line-to-O/H conversion is used by actual and virtual lines.
+// Image geometry for the debug path. BALL steering uses its image H; GOAL
+// steering uses the optional body bearing, not the projected image-line H.
 LineGuide ImageLineGuide(double du_dv, double u_at_reference, double reference_u,
                          int image_width, double confidence);
 // The backboard uses measured optical Z. A ball connects its RGB center to the
 // robot image reference; no ball depth or floor-plane calibration is needed.
+// body_bearing_rad is written only for a valid backboard body-frame (x,z).
 LineGuide ObjectApproachGuide(const ObjectTarget& target, bool backboard,
     double optical_depth_m, const Intrinsics& intrinsics,
     const ApproachCameraPose& camera, int image_width, int image_height,
     double reference_u, double reference_v, bool rectify,
-    double roll_rad, double pitch_rad);
+    double roll_rad, double pitch_rad, double* body_bearing_rad = nullptr);
 }
