@@ -426,6 +426,56 @@ void NearPixelVotesWithGaps(MissionType mission) {
   sample(std::nullopt);Check(!d.out.approach_near,"missing frame completed near vote");
   sample(260);Check(d.out.approach_near,"three nonconsecutive near-v votes did not latch");
 }
+void NearFinalActionSequence(double u,bool left,bool extreme) {
+  auto c=Config();c.ball.approach_extreme_turn_margin_px=90.0;
+  Driver d(c);d.Warm();d.Block();d.Block();
+  d.in.ball_target=Target(u,260);
+  for(int n=0;n<3;++n)d.Tick();
+  Check(d.out.approach_near,"near sequence failed to latch three v votes");
+  d.Tick({d.current,true,false,true});
+  d.Tick({d.current,true,true,false});
+  for(int n=0;n<35 && d.out.command.action_id==0;++n)d.Tick();
+  const MissionAction turn=left ? MissionAction::kTurnLeftInPlace :
+      MissionAction::kStepForwardRightOneHurdle;
+  Check(d.out.command.action==turn && d.out.approach_near_final_motion,
+        "near final sequence omitted first turn or debug phase");
+  std::uint64_t id=d.out.command.action_id;
+  d.Tick({id,true,false,false});
+  d.Tick({id,true,true,false});
+  if (extreme) {
+    Check(d.out.command.action==turn && d.out.command.action_id!=id,
+          "extreme zone did not request second turn after first DONE");
+    id=d.out.command.action_id;
+    d.Tick({id,true,false,false});
+    d.Tick({id,true,true,false});
+  }
+  Check(d.out.command.action==MissionAction::kStepForwardOne &&
+        d.out.command.action_id!=id && d.out.approach_near_final_motion,
+        "near rotation was not followed by a distinct one-step forward action");
+  id=d.out.command.action_id;
+  d.Tick({id,true,false,false});
+  Check(d.out.active_mission==MissionType::kLine,
+        "camera switched to DOWN before last forward DONE");
+  d.Tick({id,true,true,false});
+  Check(d.out.active_mission==MissionType::kBall &&
+        d.out.command.camera_request==CameraRequest::kDown,
+        "last forward DONE did not hand off to BALL DOWN");
+}
+void ReadyCenterAccumulator() {
+  LineGuideAccumulator acc(5,0.0,10,5);
+  acc.Begin(42,0.0);
+  for(int n=1;n<=10;++n)
+    acc.AddCenter(42,n*0.1,Point2{n<=5?200.0:500.0,160.0});
+  const auto mean=acc.FinishCenter(42,1.0,0.0);
+  Check(mean && mean->u>350 && mean->u<500 && std::abs(mean->v-160)<1e-9,
+        "READY coordinate mean did not weight late detections 1-to-3");
+  Check(!acc.FinishCenter(42,1.0,0.0),"consumed READY mean reused old pixels");
+  acc.Begin(43,0.0);
+  for(int n=1;n<=10;++n)
+    acc.AddCenter(43,n*0.1,n<=4 ? std::optional<Point2>{Point2{320,120}} : std::nullopt);
+  Check(!acc.FinishCenter(43,1.0,0.0),
+        "READY averaged insufficient valid coordinate samples");
+}
 void NearAndIdentity() {
   Driver d(Config());d.Warm();d.Block();d.Block();
   d.in.ball_target=Target(320,260);
@@ -845,6 +895,9 @@ void FarReacquisitionReturnsToSharedPath(MissionType mission) {
 int main() {
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
+  ReadyCenterAccumulator();
+  NearFinalActionSequence(150,true,true); NearFinalActionSequence(250,true,false);
+  NearFinalActionSequence(575,false,true); NearFinalActionSequence(500,false,false);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
   FarGoalDepthRecovery(false,true);FarGoalDepthRecovery(true,true);
   for(auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {
