@@ -175,6 +175,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, recovery_max_observations);
   FIELD(goal, stable_window);
   FIELD(goal, stable_min_hits);
+  FIELD(goal, near_distance_min_hits);
   FIELD(goal, lost_frames);
   FIELD(goal, smooth_alpha);
   FIELD(goal, post_pickup_straight_blocks_required);
@@ -183,7 +184,6 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, target_u_px);
   FIELD(goal, approach_u_deadband_px);
   FIELD(goal, approach_short_z_m);
-  FIELD(goal, fine_adjust_start_z_m);
   FIELD(goal, camera_goal_start_z_m);
   FIELD(goal, hoop_radius_m);
   FIELD(goal, throw_landing_x_m);

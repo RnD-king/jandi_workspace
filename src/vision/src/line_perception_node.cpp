@@ -199,7 +199,7 @@ public:
     declare_parameter<double>("max_depth_age_sec", 0.20);
     declare_parameter<double>("backboard_min_depth_m", algorithm_defaults.backboard_min_depth_m);
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
-    declare_parameter<double>("goal_fine_adjust_start_z_m", algorithm_defaults.goal.fine_adjust_start_z_m);
+    declare_parameter<double>("goal_approach_short_z_m", algorithm_defaults.goal.approach_short_z_m);
     declare_parameter<double>("goal_hoop_radius_m", algorithm_defaults.goal.hoop_radius_m);
     declare_parameter<double>("goal_throw_landing_x_m", algorithm_defaults.goal.throw_landing_x_m);
     declare_parameter<double>("goal_throw_landing_z_m", algorithm_defaults.goal.throw_landing_z_m);
@@ -276,8 +276,8 @@ public:
 
     vision_core::HurdleConfig hurdle_cmd_cfg = algorithm_defaults.hurdle;
     vision_core::GoalConfig goal_cmd_cfg = algorithm_defaults.goal;
-    goal_cmd_cfg.fine_adjust_start_z_m =
-        get_parameter("goal_fine_adjust_start_z_m").as_double();
+    goal_cmd_cfg.approach_short_z_m =
+        get_parameter("goal_approach_short_z_m").as_double();
     goal_cmd_cfg.hoop_radius_m =
         get_parameter("goal_hoop_radius_m").as_double();
     goal_cmd_cfg.throw_landing_x_m =

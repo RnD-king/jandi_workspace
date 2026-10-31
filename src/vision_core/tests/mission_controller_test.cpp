@@ -509,7 +509,7 @@ int main() {
   camera_config.initial_has_ball=true;
   camera_config.goal.post_pickup_walk_fallback_actions=0;
   camera_config.line.line_stable_window=camera_config.line.line_stable_min_hits=1;
-  camera_config.goal.stable_window=camera_config.goal.stable_min_hits=1;
+  camera_config.goal.stable_window=camera_config.goal.stable_min_hits=camera_config.goal.near_distance_min_hits=1;
   MissionController goal_timeout(camera_config);
   in=Frame(0); in.backboard_target=Ball(.5,.3); in.backboard_center_depth_m=.7;
   r=StepStationaryGoalAdmission(goal_timeout,in);
@@ -1184,7 +1184,7 @@ int main() {
   auto goal_ready_cfg=ready_cfg;
   goal_ready_cfg.enable_ball=false;goal_ready_cfg.enable_goal=true;
   goal_ready_cfg.goal_trial_start_goal=true;
-  goal_ready_cfg.goal.stable_window=goal_ready_cfg.goal.stable_min_hits=1;
+  goal_ready_cfg.goal.stable_window=goal_ready_cfg.goal.stable_min_hits=goal_ready_cfg.goal.near_distance_min_hits=1;
   MissionController goal_ready(goal_ready_cfg);
   for(int i=0;i<40;++i) {
     auto startup=Frame(.05*i);startup.camera_feedback={CameraMode::kGoal,true};

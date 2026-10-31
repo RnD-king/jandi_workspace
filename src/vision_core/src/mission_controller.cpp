@@ -485,9 +485,9 @@ void MissionController::TrackMovingObjectReadyWindow(
         sample.target && sample.pose.valid && std::isfinite(sample.pose.x_m) &&
         std::isfinite(sample.pose.z_m) && sample.pose.z_m > 0 &&
         std::isfinite(sample.pose.yaw_rad));
-    mean.near_hits.push_back(mean.pose_hits.back() &&
-                             sample.pose.z_m <=
-                                 config_.goal.fine_adjust_start_z_m);
+    mean.near_hits.push_back(sample.target &&
+        GoalNearDistanceSample(sample.center_depth_m,sample.pose,
+                               config_.goal.approach_short_z_m));
   }
   double sum_u = 0.0, sum_v = 0.0, sum_ru = 0.0, sum_rv = 0.0;
   double sum_x = 0.0, sum_y = 0.0, sum_w = 0.0, sum_h = 0.0;
@@ -697,8 +697,8 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
                               std::isfinite(input.goal_pose.yaw_rad);
       decision_goal_pose_hits_.push_back(pose_valid);
       decision_goal_near_hits_.push_back(
-          pose_valid &&
-          input.goal_pose.z_m <= config_.goal.fine_adjust_start_z_m);
+          detected && GoalNearDistanceSample(input.backboard_center_depth_m,
+              input.goal_pose,config_.goal.approach_short_z_m));
       while (decision_goal_near_hits_.size()>static_cast<std::size_t>(config_.goal.stable_window))
         decision_goal_near_hits_.pop_front();
       while (decision_goal_pose_hits_.size()>static_cast<std::size_t>(config_.goal.stable_window))
@@ -1320,7 +1320,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                                      input.image_height);
     else if (collecting && active_mission_ == MissionType::kGoal)
       goal_controller_.ObserveOnly(input.backboard_target, input.goal_pose,
-                                   input.image_width, input.image_height);
+                                   input.image_width, input.image_height,
+                                   input.backboard_center_depth_m);
     output.command = command_coordinator_.Compute(
         active_mission_, 0, {}, CameraRequest::kNone, input.delivery_feedback,
         input.now_sec);
@@ -2325,7 +2326,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
                         foot_pose_ == FootPose::kFine));
     const bool near =
         depth.center_depth_m &&
-        *depth.center_depth_m <= config_.goal.fine_adjust_start_z_m;
+        *depth.center_depth_m <= config_.goal.approach_short_z_m;
     if (backboard && depth.center_depth_m && depth.left_depth_m &&
         depth.right_depth_m && (near || fine)) {
       const double center =

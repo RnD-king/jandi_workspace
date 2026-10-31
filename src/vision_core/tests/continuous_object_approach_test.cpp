@@ -465,7 +465,13 @@ void HurdleAndGoal() {
         g.out.line_decision_guide && g.out.line_decision_guide->valid && !g.out.line_features.guide.valid,
         "GOAL approach required floor-line detections or failed to generate a common O/H guide");
   g.current=g.out.command.action_id;g.Block();
-  g.in.backboard_center_depth_m=.5;g.in.goal_pose.z_m=.5;g.Tick();
+  g.in.backboard_center_depth_m=.5;g.in.goal_pose.z_m=.5;
+  for(int n=0;n<2;++n) {
+    g.Tick();
+    Check(!g.out.approach_near,"GOAL entered near approach before three depth samples");
+  }
+  g.Tick();
+  Check(g.out.approach_near,"GOAL did not enter near approach after three depth samples");
   g.Tick({g.current,true,false,true});
   Check(g.out.command.action_id==g.current,"near GOAL reserved another shared unit");
   g.Tick({g.current,true,true,false});
@@ -616,7 +622,14 @@ void NearLossBeforeLock(MissionType mission) {
   if(mission==MissionType::kBall)d.in.ball_target=Target(320,260);
   else if(mission==MissionType::kHurdle)d.in.hurdle_target=Target(320,260);
   else { d.in.backboard_center_depth_m=.5;d.in.goal_pose.z_m=.5; }
-  d.Tick();Check(d.out.approach_near && !d.out.approach_locked,"pre-lock near boundary was not latched");
+  d.Tick();
+  if(mission==MissionType::kGoal) {
+    Check(!d.out.approach_near,"one near GOAL depth sample entered FINE early");
+    d.Tick();
+    Check(!d.out.approach_near,"two near GOAL depth samples entered FINE early");
+    d.Tick();
+  }
+  Check(d.out.approach_near && !d.out.approach_locked,"pre-lock near boundary was not latched");
   Check(!d.out.remembered_line_score,"near boundary retained pre-entry LINE steering memory");
   // Even a visible next frame outside the boundary cannot undo near commitment.
   if(mission==MissionType::kBall)d.in.ball_target=Target();

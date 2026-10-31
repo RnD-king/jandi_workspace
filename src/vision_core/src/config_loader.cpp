@@ -329,6 +329,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
 
   HitsWithinWindow(c.goal.stable_min_hits, c.goal.stable_window,
                    "goal.stable_min_hits", "goal.stable_window");
+  HitsWithinWindow(c.goal.near_distance_min_hits, c.goal.stable_window,
+                   "goal.near_distance_min_hits", "goal.stable_window");
   PositiveInt(c.goal.lost_frames, "goal.lost_frames");
   Unit(c.goal.smooth_alpha, "goal.smooth_alpha");
   NonnegativeInt(c.goal.post_pickup_straight_blocks_required, "goal.post_pickup_straight_blocks_required");
@@ -336,7 +338,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   NonnegativeInt(c.goal.entry_line_retry_max_attempts, "goal.entry_line_retry_max_attempts");
   Nonnegative(c.goal.target_u_px, "goal.target_u_px");
   Nonnegative(c.goal.approach_u_deadband_px, "goal.approach_u_deadband_px");
-  Nonnegative(c.goal.fine_adjust_start_z_m, "goal.fine_adjust_start_z_m");
   Nonnegative(c.goal.hoop_radius_m, "goal.hoop_radius_m");
   Finite(c.goal.throw_landing_x_m, "goal.throw_landing_x_m");
   Positive(c.goal.throw_landing_z_m, "goal.throw_landing_z_m");
@@ -599,6 +600,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   Assign(g, "stable_window", c.goal.stable_window);
   Assign(g, "stable_min_hits", c.goal.stable_min_hits);
+  Assign(g, "near_distance_min_hits", c.goal.near_distance_min_hits);
   Assign(g, "lost_frames", c.goal.lost_frames);
   Assign(g, "smooth_alpha", c.goal.smooth_alpha);
   Assign(g, "post_pickup_straight_blocks_required", c.goal.post_pickup_straight_blocks_required);
@@ -606,7 +608,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "entry_line_retry_max_attempts", c.goal.entry_line_retry_max_attempts);
   Assign(g, "target_u_px", c.goal.target_u_px);
   Assign(g, "approach_u_deadband_px", c.goal.approach_u_deadband_px);
-  Assign(g, "fine_adjust_start_z_m", c.goal.fine_adjust_start_z_m);
+  if (g["fine_adjust_start_z_m"])
+    throw std::runtime_error("goal.fine_adjust_start_z_m was removed; configure approach_short_z_m instead.");
   Assign(g, "hoop_radius_m", c.goal.hoop_radius_m);
   Assign(g, "throw_landing_x_m", c.goal.throw_landing_x_m);
   Assign(g, "throw_landing_z_m", c.goal.throw_landing_z_m);

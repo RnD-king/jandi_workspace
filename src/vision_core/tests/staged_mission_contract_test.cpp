@@ -327,7 +327,9 @@ void NearGoalWithoutPoseCannotStride() {
   GoalController goal(c,3);goal.StartTestNear();CameraFeedback camera{CameraMode::kGoal,true};
   goal.Compute({}, {}, {},640,480,0,true,camera,{});
   GoalResult result;
-  for(int i=0;i<8;++i) result=goal.Compute({},Target(),{},640,480,.12*(i+1),true,camera,{},true,.5);
+  for(int i=0;i<9;++i) result=goal.Compute({},Target(),{},640,480,.12*(i+1),true,camera,{},false,.5);
+  assert(result.mode!=GoalMode::kWaitFinePose);
+  result=goal.Compute({},Target(),{},640,480,1.2,true,camera,{},true,.5);
   assert(result.mode==GoalMode::kWaitFinePose);
   assert(result.action.action==MissionAction::kDefaultPoseMode); // Pose first, never a WALK stride.
 }

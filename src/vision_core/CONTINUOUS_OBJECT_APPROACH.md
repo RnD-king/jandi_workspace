@@ -73,7 +73,7 @@ RESET은 후보/완료 횟수/락을 지운다. PAUSE/RESUME의 관측 초기화
 | 객체 | 경계 | 이후 |
 | --- | --- | --- |
 | BALL | `approach_two_step_v_px` 아래쪽, 즉 7/8/9 | 접수된 보행 DONE 후 DOWN·근거리 탐색/미세 접근 |
-| GOAL | depth/유효 pose의 Z가 `fine_adjust_start_z_m` 이하 | 기존 근거리 자세·정렬·슛 |
+| GOAL | depth/유효 pose의 Z가 `approach_short_z_m` 이하 | 기존 근거리 자세·정렬·슛 |
 | HURDLE | `approach_two_step_v_px` 아래쪽 | 접수된 보행 DONE 후 DOWN·근거리 탐색/정렬 |
 
 경계를 확인하면 새 보행 예약을 막고 아직 보내지 않은 반복을 버린다. 이미 접수된 단위는

@@ -169,7 +169,7 @@ ros2 service call /goal_tuning_node/commit std_srvs/srv/Trigger '{}'
 
 GOAL 단독 시험의 test_stage=1은 GOAL 카메라가 이미 settled여도 START할 수 있다.
 GOAL 시야에서 백보드 깊이와 가로 위치를 사용해 접근하며,
-`fine_adjust_start_z_m` 조건으로 GOAL_CLOSE_WALK에 진입할 때 종료한다.
+`approach_short_z_m` 조건으로 GOAL_CLOSE_WALK에 진입할 때 종료한다.
 test_stage=0은 이전과 같이 FORWARD 접근부터 시작한다.
 
 기존 rqt 튜닝 항목을 유지하며 `goal_hoop_radius_m`,

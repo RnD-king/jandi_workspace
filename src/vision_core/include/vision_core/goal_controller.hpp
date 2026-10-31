@@ -43,6 +43,7 @@ struct GoalConfig {
   int post_shoot_back_steps{};
   int stable_window{};
   int stable_min_hits{};
+  int near_distance_min_hits{}; // Near-depth samples within the stable detection window.
   int lost_frames{};
   double smooth_alpha{};
   int post_pickup_straight_blocks_required{}; // 0 disables the straight-block shortcut.
@@ -50,7 +51,6 @@ struct GoalConfig {
   int entry_line_retry_max_attempts{}; // Extra LINE blocks after an entirely empty first GOAL view; 0 disables.
   double target_u_px{};
   double approach_u_deadband_px{};
-  double fine_adjust_start_z_m{};
   double hoop_radius_m{};
   double throw_landing_x_m{};
   double throw_landing_z_m{};
@@ -66,6 +66,11 @@ struct GoalPoseObservation {
   double yaw_rad{0.0};
   double confidence{0.0};
 };
+
+bool GoalNearDistanceSample(std::optional<double> center_depth_m,
+                            const GoalPoseObservation& pose, double threshold_m);
+bool GoalNearWindowReady(const std::deque<bool>& detection_hits,
+                         const std::deque<bool>& near_hits, const GoalConfig& config);
 
 GoalPoseObservation EstimateGoalPoseFromBackboardDepths(
     double center_u_px, double center_depth_m, double left_u_px,
@@ -202,7 +207,8 @@ public:
     fine_trigger_latched_ = false;
   }
   void ObserveOnly(const std::optional<ObjectTarget> &target,
-                   const GoalPoseObservation &pose, int width, int height);
+                   const GoalPoseObservation &pose, int width, int height,
+                   std::optional<double> center_depth_m = std::nullopt);
   void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
       const GoalPoseObservation& pose, const std::deque<bool>& hits,
       const std::deque<bool>& pose_hits, int width, int height,
@@ -233,7 +239,8 @@ private:
   void UpdateGoalTracker(const std::optional<ObjectTarget> &target,
                          int image_width, int image_height);
   void UpdatePoseTracker(const std::optional<ObjectTarget> &backboard_target,
-                         const GoalPoseObservation &goal_pose);
+                         const GoalPoseObservation &goal_pose,
+                         std::optional<double> center_depth_m);
   bool PoseReadyForFineAdjust() const;
   std::optional<GoalPoseObservation> FinePoseMean() const;
   ActionRequest FineAction(const GoalPoseObservation &pose) const;

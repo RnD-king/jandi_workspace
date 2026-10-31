@@ -375,6 +375,7 @@ private:
     std::uint64_t id{};
     std::optional<ObjectTarget> last;
     std::deque<bool> hits;
+    std::deque<bool> near_hits; // GOAL distance votes for the same detection window.
   };
   struct ContinuousApproach {
     MissionType mission{MissionType::kNone};

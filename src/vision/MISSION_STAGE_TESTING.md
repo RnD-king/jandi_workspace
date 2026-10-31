@@ -150,7 +150,7 @@ rqt에서 폭을 바꾸면 이전 깊이를 재사용하지 않고 새 PREVIEW�
 유효 깊이 범위(backboard_min/max_depth_m), 림 반지름, 투척 yaw 한계도 rqt에서 변경 가능하다.
 유효 깊이 범위나 depth sampling 폭을 바꾸면 이전 PREVIEW는 폐기하고 새 관측을 받는다.
 GOAL 1단계는 camera_goal_start_z_m을 사용하지 않고, GOAL 카메라에서
-fine_adjust_start_z_m 근접 조건이 성립하여 GOAL_CLOSE_WALK에 진입하면 종료한다.
+approach_short_z_m 근접 조건이 성립하여 GOAL_CLOSE_WALK에 진입하면 종료한다.
 
 실제 피드백은 20ms 제어 타이머에서 코어 코디네이터에 반영한다. 이미지가 없어도
 정상 DONE 수신과 실행기 대기를 로그로 구분하며, 이미 발행한 미수락 ID만 재전송한다.

@@ -22,14 +22,14 @@ void Run(bool goal) {
   c.ball.approach_direct_down_v_px=480;c.ball.down_search_min_hits=1;
   c.ball.fine_motion={};c.ball.fine_side_two_step_margin_px=1e6;
   c.ball.pickup_u1_px=300;c.ball.pickup_u2_px=340;c.ball.pickup_v1_px=100;c.ball.pickup_v2_px=150;
-  c.goal.fine_adjust_start_z_m=.8;c.goal.throw_landing_x_m=0;c.goal.throw_landing_z_m=.4;
+  c.goal.approach_short_z_m=1.2;c.goal.throw_landing_x_m=0;c.goal.throw_landing_z_m=.4;
   MissionController core(c);MissionFrameInput in;MissionFrameResult out;
   in.image_width=640;in.image_height=480;in.command_transport_enabled=true;
   in.allow_new_line_action=false;in.line_centers={{320,450},{320,350},{320,250},{320,150}};
   in.camera_feedback={goal ? CameraMode::kGoal : CameraMode::kForward,true};
   if(goal) {
     in.backboard_target=Target(150);in.backboard_track_id=9;
-    in.backboard_center_depth_m=.8;in.goal_pose={true,0,.8,0,1};
+    in.backboard_center_depth_m=1.0;in.goal_pose={true,0,1.0,0,1};
   } else {in.ball_target=Target(300);in.ball_track_id=41;}
   std::uint64_t last_done=0;bool fine_requested=false,fine_done=false,down=false,finished=false;
   for(int frame=0;frame<300;++frame) {

@@ -137,8 +137,7 @@ bool MissionController::ResumeContinuousApproach(const MissionFrameInput& input)
     saved.near_hits=goal_controller_.NearObservationHits();
     if (target) {
       saved.depth=input.backboard_center_depth_m;saved.pose=input.goal_pose;
-      saved.near=saved.near || (saved.depth && *saved.depth>0 && *saved.depth<=config_.goal.fine_adjust_start_z_m) ||
-          (saved.pose.valid && saved.pose.z_m>0 && saved.pose.z_m<=config_.goal.fine_adjust_start_z_m);
+      saved.near=saved.near || GoalNearWindowReady(saved.hits,saved.near_hits,config_.goal);
       if (input.backboard_track_id) saved.id=input.backboard_track_id;
     }
     if (found || saved.near) goal_result_.action={};
@@ -312,6 +311,9 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         !SamePosition(*evidence.last,*targets[i],config_.object_association.max_center_distance_norm*
             std::hypot(input.image_width,input.image_height),config_.object_association.max_size_log_ratio))) evidence={};
     Push(evidence.hits,visible,windows[i]);
+    if (i==1) Push(evidence.near_hits,visible &&
+        GoalNearDistanceSample(input.backboard_center_depth_m,input.goal_pose,
+                               config_.goal.approach_short_z_m),windows[i]);
     if (visible) { evidence.id=ids[i];evidence.last=targets[i]; }
   }
   bool acquired=false;
@@ -327,6 +329,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       continuous_.mission=missions[i];continuous_.id=ids[i];
       continuous_.epoch=next_approach_epoch_++;
       continuous_.last=targets[i];continuous_.hits=evidence.hits;
+      if (i==1) continuous_.near_hits=evidence.near_hits;
       acquired=true;
       if (i==1) approach_goal_empty_retries_=0;
       break;
@@ -370,9 +373,6 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     else {
       continuous_.depth=input.backboard_center_depth_m;
       continuous_.pose=input.goal_pose;
-      continuous_.near=continuous_.near || (input.backboard_center_depth_m && *input.backboard_center_depth_m>0 &&
-          *input.backboard_center_depth_m<=config_.goal.fine_adjust_start_z_m) ||
-          (input.goal_pose.valid && input.goal_pose.z_m>0 && input.goal_pose.z_m<=config_.goal.fine_adjust_start_z_m);
     }
   } else if (i==1 && input.backboard_image_without_depth && !continuous_.near) {
     // The image is still present: rejected Depth is coordinate loss, not an
@@ -386,8 +386,11 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     // physical approach blocks remain part of the same target's lock.
     continuous_.hits.clear();continuous_.good_hits.clear();
     continuous_.pose_hits.clear();continuous_.near_hits.clear();
-    approach_evidence_[i].hits.clear();
+    approach_evidence_[i].hits.clear();approach_evidence_[i].near_hits.clear();
     Push(approach_evidence_[i].hits,true,windows[i]);
+    if (i==1) Push(approach_evidence_[i].near_hits,
+        GoalNearDistanceSample(input.backboard_center_depth_m,input.goal_pose,
+                               config_.goal.approach_short_z_m),windows[i]);
     if (continuous_.probe_active)
       line_plan_.Abort(); // Issued IDs drain; only unissued probe repeats stop.
     continuous_.missing=0;continuous_.loss_pending=false;
@@ -395,7 +398,13 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   }
   if (!acquired) Push(continuous_.hits,target.has_value(),windows[i]);
   Push(continuous_.pose_hits,target && input.goal_pose.valid,windows[i]);
-  Push(continuous_.near_hits,target && continuous_.near,windows[i]);
+  if (i==1) {
+    if (!acquired) Push(continuous_.near_hits,target &&
+        GoalNearDistanceSample(input.backboard_center_depth_m,input.goal_pose,
+                               config_.goal.approach_short_z_m),windows[i]);
+    continuous_.near=continuous_.near || (target &&
+        GoalNearWindowReady(continuous_.hits,continuous_.near_hits,config_.goal));
+  } else Push(continuous_.near_hits,target && continuous_.near,windows[i]);
   if (target) continuous_.good_hits=continuous_.hits;
   const bool lost=continuous_.loss_pending;
   if (lost && !continuous_.locked && !continuous_.near) {

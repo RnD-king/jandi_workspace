@@ -9,6 +9,26 @@
 #include <limits>
 
 namespace vision_core {
+bool GoalNearDistanceSample(std::optional<double> center_depth_m,
+                            const GoalPoseObservation& pose, double threshold_m) {
+  const bool center_near=center_depth_m && std::isfinite(*center_depth_m) &&
+      *center_depth_m>0 && *center_depth_m<=threshold_m;
+  const bool pose_near=pose.valid && std::isfinite(pose.z_m) &&
+      pose.z_m>0 && pose.z_m<=threshold_m;
+  return center_near || pose_near;
+}
+
+bool GoalNearWindowReady(const std::deque<bool>& detection_hits,
+                         const std::deque<bool>& near_hits, const GoalConfig& config) {
+  const auto window=static_cast<std::size_t>(config.stable_window);
+  if (detection_hits.size()!=window || near_hits.size()!=window ||
+      std::count(detection_hits.begin(),detection_hits.end(),true)<config.stable_min_hits)
+    return false;
+  int valid_near=0;
+  for (std::size_t i=0;i<window;++i)
+    if (detection_hits[i] && near_hits[i]) ++valid_near;
+  return valid_near>=config.near_distance_min_hits;
+}
 namespace {
 constexpr double kEpsilon = 1e-9;
 constexpr double kPi = 3.14159265358979323846;
@@ -259,7 +279,7 @@ void GoalController::UpdateGoalTracker(
 
 void GoalController::UpdatePoseTracker(
     const std::optional<ObjectTarget> &backboard,
-    const GoalPoseObservation &pose) {
+    const GoalPoseObservation &pose, std::optional<double> center_depth_m) {
   const bool detected = backboard && pose.valid && std::isfinite(pose.x_m) &&
                         std::isfinite(pose.z_m) && pose.z_m > 0.0 &&
                         std::isfinite(pose.yaw_rad);
@@ -281,8 +301,8 @@ void GoalController::UpdatePoseTracker(
   while (static_cast<int>(pose_hit_history_.size()) >
          std::max(1, config_.stable_window))
     pose_hit_history_.pop_front();
-  fine_enter_history_.push_back(detected &&
-                                pose.z_m <= config_.fine_adjust_start_z_m);
+  fine_enter_history_.push_back(backboard &&
+      GoalNearDistanceSample(center_depth_m,pose,config_.approach_short_z_m));
   while (static_cast<int>(fine_enter_history_.size()) >
          std::max(1, config_.stable_window))
     fine_enter_history_.pop_front();
@@ -313,10 +333,7 @@ void GoalController::UpdatePoseTracker(
 }
 
 bool GoalController::PoseReadyForFineAdjust() const {
-  const int hits = static_cast<int>(
-      std::count(fine_enter_history_.begin(), fine_enter_history_.end(), true));
-  return tracked_pose_.stable && tracked_pose_.visible &&
-         hits >= std::max(1, config_.stable_min_hits);
+  return tracked_.visible && GoalNearWindowReady(hit_history_,fine_enter_history_,config_);
 }
 
 std::optional<GoalPoseObservation> GoalController::FinePoseMean() const {
@@ -484,7 +501,7 @@ GoalResult GoalController::Compute(
       !(mode_ == GoalMode::kFineAdjust &&
         (feedback.action_active || feedback.action_done))) {
     UpdateGoalTracker(backboard, image_width, image_height);
-    UpdatePoseTracker(backboard, pose);
+    UpdatePoseTracker(backboard, pose, center_depth_m);
   }
 
   if (allow_mission_entry && mode_ == GoalMode::kLineFollow && has_ball_ && goal_entry_armed_ &&
@@ -516,11 +533,8 @@ GoalResult GoalController::Compute(
         mode_ == GoalMode::kRecoveryExtraTurn) && turn_resume_mode_ != GoalMode::kFineAdjust);
   const bool approaching = mode_ == GoalMode::kSearch ||
                            mode_ == GoalMode::kApproach || far_recovery;
-  const bool center_near=center_depth_m && std::isfinite(*center_depth_m) &&
-      *center_depth_m>0 && *center_depth_m<=config_.fine_adjust_start_z_m;
   if (approaching && camera.actual_mode==CameraMode::kGoal && camera.settled) {
-    fine_trigger_latched_=fine_trigger_latched_ || PoseReadyForFineAdjust() ||
-        (tracked_.visible && tracked_.stable && center_near);
+    fine_trigger_latched_=fine_trigger_latched_ || PoseReadyForFineAdjust();
     if (fine_trigger_latched_) {
       if (!feedback.action_active || feedback.action_done) {
         turn_pending_ = turn_done_ = false;
@@ -965,13 +979,13 @@ GoalResult GoalController::Compute(
 
 void GoalController::ObserveOnly(const std::optional<ObjectTarget> &target,
                                  const GoalPoseObservation &pose, int width,
-                                 int height) {
+                                 int height, std::optional<double> center_depth_m) {
   ObserveEntryBackboard(target.has_value());
   if (mode_ != GoalMode::kWaitCameraGoal &&
       mode_ != GoalMode::kEntryRetryCameraForward &&
       mode_ != GoalMode::kReturnCameraToLine) {
     UpdateGoalTracker(target, width, height);
-    UpdatePoseTracker(target, pose);
+    UpdatePoseTracker(target, pose, center_depth_m);
   }
 }
 
@@ -983,7 +997,7 @@ void GoalController::UseVerifiedObservation(
       std::find(hits.begin(), hits.end(), true) != hits.end());
   ClearTracking();
   UpdateGoalTracker(mean, width, height);
-  UpdatePoseTracker(mean, pose);
+  UpdatePoseTracker(mean, pose, std::nullopt);
   hit_history_ = hits;
   pose_hit_history_ = pose_hits;
   fine_enter_history_ = near_hits;

@@ -236,6 +236,7 @@ vision_algorithm:
       test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
       stable_window: 10
       stable_min_hits: 7 # 안정 검출 최소 횟수
+      near_distance_min_hits: 3 # 같은 관측창에서 근거리 Depth/pose가 유효한 백보드 최소 프레임 수
       lost_frames: 15 # 유실 복구 진입 기준 프레임 수
       smooth_alpha: 0.45
 
@@ -248,9 +249,8 @@ vision_algorithm:
       target_u_px: 360.0 # 중앙 세로 구역의 중심
       approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
       edge_margin_px: 50.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
-      approach_short_z_m: 0.80 # 4걸음 → 3걸음 경계
-      fine_adjust_start_z_m: 0.80 # GOAL 카메라에서 근거리 접근 진입 기준
-      camera_goal_start_z_m: 0.80 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
+      approach_short_z_m: 0.85 # GOAL 근거리 진입·FINE 자세 전환 기준; FORWARD 뷰에서는 짧은 보행 선택 기준
+      camera_goal_start_z_m: 0.85 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
 
       # 투척 위치·방향
       hoop_radius_m: 0.10 # 림 위치 보정에 사용하는 반지름

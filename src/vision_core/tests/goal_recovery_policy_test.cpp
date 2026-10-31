@@ -47,8 +47,11 @@ struct Driver {
     if(phase==2)core.StartTestExecute();
     else {core.StartGoalTrial();Tick({}, {},{},false);}
     const GoalPoseObservation pose{true,0,phase==1?.6:1.5,0,1};
+    std::deque<bool> near_hits(10,false);
+    if(phase==1)
+      for(int i=0;i<config.near_distance_min_hits;++i) near_hits[i]=true;
     core.UseVerifiedObservation(Board(u),pose,std::deque<bool>(10,true),
-        std::deque<bool>(10,true),640,480);
+        std::deque<bool>(10,true),640,480,near_hits);
     Tick(Board(u),pose,{false,false,true},false);
     if(phase==1) {
       assert(out.mode==GoalMode::kWaitFinePose);
@@ -137,8 +140,11 @@ void UnknownAndImageOnly() {
     if(phase==2)visible.core.StartTestExecute();
     else {visible.core.StartGoalTrial();visible.Tick();}
     const GoalPoseObservation pose{true,0,phase==0?1.5:.6,0,1};
+    std::deque<bool> near_hits(10,false);
+    if(phase==1)
+      for(int i=0;i<c.near_distance_min_hits;++i) near_hits[i]=true;
     visible.core.UseVerifiedObservation(Board(320),pose,std::deque<bool>(10,true),
-        std::deque<bool>(10,true),640,480);
+        std::deque<bool>(10,true),640,480,near_hits);
     visible.Tick(Board(320),pose,{false,false,true},false);
     if(phase==1) {
       visible.Tick(Board(320),pose);

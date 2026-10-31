@@ -15,6 +15,37 @@ static ObjectTarget Board(double u=.5) {
 static GoalPoseObservation Pose(double x,double z,double yaw=0) {
   return {true,x,z,yaw,1};
 }
+static void NearDistanceNeedsThreeValidFrames() {
+  auto c=LoadDefaultAlgorithmConfig().goal;
+  assert(c.stable_window==10 && c.stable_min_hits==7 && c.near_distance_min_hits==3);
+  const std::deque<bool> detected{true,true,true,true,true,true,true,false,false,false};
+  const std::deque<bool> two_near{true,true,false,false,false,false,false,false,false,false};
+  auto three_near=two_near;three_near[2]=true;
+  assert(!GoalNearWindowReady(detected,two_near,c));
+  assert(GoalNearWindowReady(detected,three_near,c));
+  auto six_detected=detected;six_detected[6]=false;
+  assert(!GoalNearWindowReady(six_detected,three_near,c));
+  auto invalid_near=three_near;invalid_near[2]=false;invalid_near[7]=true;
+  assert(!GoalNearWindowReady(detected,invalid_near,c));
+  auto short_window=detected;short_window.pop_back();
+  assert(!GoalNearWindowReady(short_window,three_near,c));
+  assert(GoalNearDistanceSample(.5,{},c.approach_short_z_m));
+  assert(!GoalNearDistanceSample(0.0,{},c.approach_short_z_m));
+  assert(GoalNearDistanceSample(std::nullopt,Pose(0,.5),c.approach_short_z_m));
+}
+static void GoalNearTransitionUsesWindow() {
+  auto c=LoadDefaultAlgorithmConfig().goal;
+  const CameraFeedback camera{CameraMode::kGoal,true};
+  GoalController goal(c,3);goal.StartTestNear();
+  goal.Compute({},{},{},640,480,0,true,camera,{});
+  for(int i=0;i<7;++i) goal.ObserveOnly(Board(),Pose(0,2),640,480,2);
+  for(int i=0;i<2;++i) goal.ObserveOnly(Board(),Pose(0,.5),640,480,.5);
+  auto r=goal.Compute({},Board(),Pose(0,2),640,480,1,true,camera,{},true,2);
+  assert(r.mode!=GoalMode::kWaitFinePose);
+  r=goal.Compute({},Board(),Pose(0,.5),640,480,1.1,true,camera,{},true,.5);
+  assert(r.mode==GoalMode::kWaitFinePose &&
+         r.action.action==MissionAction::kDefaultPoseMode);
+}
 static void EmptyEntryViewRetriesLine() {
   auto c=LoadDefaultAlgorithmConfig().goal;
   c.stable_window=10;c.stable_min_hits=7;
@@ -71,10 +102,11 @@ static void EmptyEntryViewRetriesLine() {
 }
 static void NearAlwaysUsesFine(double yaw_limit_deg) {
   auto c=LoadDefaultAlgorithmConfig().goal;
-  c.stable_window=c.stable_min_hits=1;c.smooth_alpha=0;
+  c.stable_window=c.stable_min_hits=c.near_distance_min_hits=1;c.smooth_alpha=0;
+  c.approach_short_z_m=1.1;
   c.throw_landing_x_m=0;c.throw_landing_z_m=.4;c.shoot_yaw_limit_deg=yaw_limit_deg;
   const CameraFeedback camera{CameraMode::kGoal,true};
-  for(double x:{-.4,0.,.4})for(double z:{.5,.7,.8}) {
+  for(double x:{-.4,0.,.4})for(double z:{.5,.7,.8,1.0}) {
     GoalController goal(c,3);goal.StartTestNear();
     goal.Compute({},{},{},640,480,0,true,camera,{});
     const auto pose=Pose(x,z);
@@ -105,10 +137,10 @@ static GoalPoseObservation BoardPoseFromPhysicalRim(double rim_z,double phi) {
 }
 static void TiltedBackboardNormal() {
   auto c=LoadDefaultAlgorithmConfig().goal;
-  c.stable_window=c.stable_min_hits=1;c.smooth_alpha=0;
+  c.stable_window=c.stable_min_hits=c.near_distance_min_hits=1;c.smooth_alpha=0;
   c.hoop_radius_m=.1;c.throw_landing_x_m=0;c.throw_landing_z_m=.4;
   c.position_tolerance_m=.01;c.shoot_yaw_limit_deg=20;
-  c.fine_adjust_start_z_m=.8;
+  c.approach_short_z_m=.8;
   const CameraFeedback camera{CameraMode::kGoal,true};
   for (double degrees : {-30.0,0.0,30.0}) {
     const double phi=degrees*std::acos(-1.0)/180;
@@ -133,7 +165,7 @@ static void TiltedBackboardNormal() {
 }
 static void RotationBeforeTranslation() {
   auto c=LoadDefaultAlgorithmConfig().goal;
-  c.stable_window=c.stable_min_hits=1;c.smooth_alpha=0;
+  c.stable_window=c.stable_min_hits=c.near_distance_min_hits=1;c.smooth_alpha=0;
   c.hoop_radius_m=.1;c.throw_landing_x_m=-.08;c.throw_landing_z_m=.4;
   c.shoot_yaw_limit_deg=20;c.position_tolerance_m=.06;
   const double pi=std::acos(-1.0);
@@ -185,7 +217,7 @@ static void RotationBeforeTranslation() {
     assert(r.action.action==(scale>1 ? MissionAction::kStepForwardHalf : MissionAction::kStepBack));
   }
   // A missing stationary window must not be bypassed by the new selector.
-  c.stable_window=c.stable_min_hits=2;
+  c.stable_window=c.stable_min_hits=c.near_distance_min_hits=2;
   GoalController stable(c,3);stable.StartTestExecute();
   r=stable.Compute({},Board(),rim_at(22),640,480,0,true,camera,{});
   assert(r.action.action==MissionAction::kNone);
@@ -208,6 +240,8 @@ static void StatelessShotBench() {
   assert(controller.PlanFineAction(Pose(0,1.2)).action==MissionAction::kShoot);
 }
 int main() {
+  NearDistanceNeedsThreeValidFrames();
+  GoalNearTransitionUsesWindow();
   StatelessShotBench();
   EmptyEntryViewRetriesLine();
   TiltedBackboardNormal();
@@ -217,10 +251,10 @@ int main() {
   Intrinsics k{640,480,50,50};
   const auto p = EstimateGoalPoseFromBackboardDepths(50,1,40,1.1,60,.9,k);
   assert(p.valid && std::abs(p.x_m) < 1e-12);
-  GoalConfig c=LoadDefaultAlgorithmConfig().goal; c.stable_window=c.stable_min_hits=1; c.lost_frames=2;
+  GoalConfig c=LoadDefaultAlgorithmConfig().goal; c.stable_window=c.stable_min_hits=c.near_distance_min_hits=1; c.lost_frames=2;
   c.recovery_turn_max=0; // Isolate the pre-existing stationary recovery FSM.
   c.smooth_alpha=0; c.post_pickup_walk_fallback_actions=0;
-  c.target_u_px=320; c.approach_u_deadband_px=32; c.fine_adjust_start_z_m=.8;
+  c.target_u_px=320; c.approach_u_deadband_px=32; c.approach_short_z_m=.8;
   c.hoop_radius_m=.1; c.throw_landing_x_m=0; c.throw_landing_z_m=.5; c.position_tolerance_m=.05;
    c.shoot_yaw_limit_deg=30;
   c.recovery_center_tolerance_px=76.8;
@@ -277,7 +311,8 @@ int main() {
       640,480,1.0,true,{CameraMode::kGoal,true},{});
   assert(off_axis_result.action.action != MissionAction::kShoot);
 
-  // All six approach cells use the same mapping in FORWARD and GOAL views.
+  // FORWARD uses the existing approach-cell mapping. In the GOAL view, a
+  // qualified near board enters FINE stance before choosing another walk.
   c.approach_short_z_m=1.2;
   for (double depth : {1.8,1.2,1.0}) {
     const bool near=depth<=c.approach_short_z_m;
@@ -292,14 +327,19 @@ int main() {
       assert(approach.action.action==scenario.second);
       assert(approach.action.category==ActionCategory::kLocomotion);
       assert(approach.camera_request==CameraRequest::kNone);
-      GoalController goal_view(c,3.0);
+      auto goal_view_config=c;
+      goal_view_config.lost_frames=15; // Isolate steering from missing-pose Depth recovery.
+      GoalController goal_view(goal_view_config,3.0);
       goal_view.StartAfterPickup(0);
       goal_view.UpdateBallState(carrying);
       goal_view.Compute({},Board(),{},640,480,0,true,{},{});
       goal_view.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
       const auto goal_approach=goal_view.Compute({},Board(scenario.first),{},640,480,
           .2,true,{CameraMode::kGoal,true},{},true,depth);
-      assert(goal_approach.action.action==scenario.second);
+      if(near) {
+        assert(goal_approach.mode==GoalMode::kWaitFinePose);
+        assert(goal_approach.action.action==MissionAction::kDefaultPoseMode);
+      } else assert(goal_approach.action.action==scenario.second);
     }
   }
   GoalController mid(c,3.0);
@@ -334,7 +374,7 @@ int main() {
   centered.StartAfterPickup(0); centered.UpdateBallState(carrying);
   centered.Compute({}, Board(), Pose(0,.7),640,480,0,true,{},{});
   centered.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
-  r=centered.Compute({},Board(.52),Pose(0,1.2),640,480,.2,true,
+  r=centered.Compute({},Board(.52),Pose(0,1.5),640,480,.2,true,
                      {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kApproach);
   centered.Compute({}, {}, {},640,480,.3,true,{CameraMode::kGoal,true},{});
@@ -351,7 +391,7 @@ int main() {
   left.StartAfterPickup(0); left.UpdateBallState(carrying);
   left.Compute({}, Board(), Pose(0,.7),640,480,0,true,{},{});
   left.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
-  r=left.Compute({},Board(.2),Pose(0,1.2),640,480,.2,true,
+  r=left.Compute({},Board(.2),Pose(0,1.5),640,480,.2,true,
                  {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kApproach);
   left.Compute({}, {}, {},640,480,.3,true,{CameraMode::kGoal,true},{});
@@ -367,16 +407,16 @@ int main() {
   assert(r.action.action==MissionAction::kNone);
   r=left.Compute({}, {}, {},640,480,.8,true,{CameraMode::kGoal,true},{});
   assert(r.action.action==MissionAction::kNone);
-  r=left.Compute({},Board(.25),Pose(0,1.2),640,480,1.3,true,
+  r=left.Compute({},Board(.25),Pose(0,1.5),640,480,1.3,true,
                  {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kRecoverySearch && r.action.action==MissionAction::kNone);
-  r=left.Compute({},Board(.25),Pose(0,1.2),640,480,1.4,true,
+  r=left.Compute({},Board(.25),Pose(0,1.5),640,480,1.4,true,
                {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kSearch && r.action.action==MissionAction::kNone);
-  r=left.Compute({},Board(.25),Pose(0,1.2),640,480,1.5,true,
+  r=left.Compute({},Board(.25),Pose(0,1.5),640,480,1.5,true,
                  {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kApproach);
-  r=left.Compute({},Board(.25),Pose(0,1.2),640,480,1.6,true,
+  r=left.Compute({},Board(.25),Pose(0,1.5),640,480,1.6,true,
                  {CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kApproach);
 
@@ -384,7 +424,7 @@ int main() {
   right.StartAfterPickup(0); right.UpdateBallState(carrying);
   right.Compute({}, Board(), Pose(0,.7),640,480,0,true,{},{});
   right.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
-  right.Compute({},Board(.8),Pose(0,1.2),640,480,.2,true,
+  right.Compute({},Board(.8),Pose(0,1.5),640,480,.2,true,
                 {CameraMode::kGoal,true},{});
   right.Compute({}, {}, {},640,480,.3,true,{CameraMode::kGoal,true},{});
   r=right.Compute({}, {}, {},640,480,.4,true,{CameraMode::kGoal,true},{});

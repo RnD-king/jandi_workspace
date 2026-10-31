@@ -687,7 +687,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   std::snprintf(buf,sizeof(buf),"GOAL #%d %s",goal_index,goal_index%2 ? "RIGHT" : "LEFT");
   add_row(goal_rows,buf,goal_color);
   std::snprintf(buf, sizeof(buf), "far target u=%.1fpx  deadband=%.1fpx  fine z<=%.3fm",
-      gc.target_u_px, gc.approach_u_deadband_px, gc.fine_adjust_start_z_m);
+      gc.target_u_px, gc.approach_u_deadband_px, gc.approach_short_z_m);
   add_row(goal_approach_rows,buf,goal_color);
   if (selected_goal && (goal_cmd.mode == vision_core::GoalMode::kApproach ||
       goal_cmd.mode == vision_core::GoalMode::kForwardApproach) &&
@@ -714,7 +714,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   } else if (selected_goal && prepared.backboard_center_depth_m &&
       std::isfinite(*prepared.backboard_center_depth_m)) {
     std::snprintf(buf,sizeof(buf),"backboard center depth=%.4fm | fine z<=%.3fm",
-        *prepared.backboard_center_depth_m,gc.fine_adjust_start_z_m);
+        *prepared.backboard_center_depth_m,gc.approach_short_z_m);
     add_row(goal_fine_rows,buf,goal_color);
   } else {
     add_row(goal_fine_rows,"fine input x/z/yaw: --",goal_color);

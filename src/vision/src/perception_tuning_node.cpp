@@ -247,7 +247,6 @@ public:
     declare_parameter<double>("max_depth_age_sec", 0.20);
     declare_parameter<double>("backboard_min_depth_m", algorithm_defaults.backboard_min_depth_m);
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
-    declare_parameter<double>("goal_fine_adjust_start_z_m", algorithm_defaults.goal.fine_adjust_start_z_m);
     declare_parameter<double>("goal_hoop_radius_m", algorithm_defaults.goal.hoop_radius_m);
     declare_parameter<double>("goal_throw_landing_x_m", algorithm_defaults.goal.throw_landing_x_m);
     declare_parameter<double>("goal_throw_landing_z_m", algorithm_defaults.goal.throw_landing_z_m);
@@ -334,8 +333,8 @@ public:
 
     vision_core::HurdleConfig hurdle_cmd_cfg = algorithm_defaults.hurdle;
     vision_core::GoalConfig goal_cmd_cfg = algorithm_defaults.goal;
-    goal_cmd_cfg.fine_adjust_start_z_m =
-        get_parameter("goal_fine_adjust_start_z_m").as_double();
+    goal_cmd_cfg.approach_short_z_m =
+        get_parameter("goal_approach_short_z_m").as_double();
     goal_cmd_cfg.hoop_radius_m =
         get_parameter("goal_hoop_radius_m").as_double();
     goal_cmd_cfg.throw_landing_x_m =
@@ -415,7 +414,6 @@ public:
     mission_config.hurdle.approach_short_v_px=get_parameter("hurdle_approach_short_v_px").as_double();
     mission_config.hurdle.target_u_px=get_parameter("hurdle_target_u_px").as_double();
     mission_config.hurdle.contact_v_px=get_parameter("hurdle_contact_v_px").as_double();
-    mission_config.goal.approach_short_z_m=get_parameter("goal_approach_short_z_m").as_double();
     mission_config.goal.camera_goal_start_z_m=get_parameter("goal_camera_goal_start_z_m").as_double();
 
     // ROS override가 shared YAML validation을 우회하지 못하게 하고, 무거운
@@ -920,7 +918,6 @@ private:
       else if (name == "ball_pickup_v2_px") target = &candidate.ball.pickup_v2_px;
       else if (name == "goal_target_u_px") target = &candidate.goal.target_u_px;
       else if (name == "goal_approach_u_deadband_px") target = &candidate.goal.approach_u_deadband_px;
-      else if (name == "goal_fine_adjust_start_z_m") target = &candidate.goal.fine_adjust_start_z_m;
       else if (name == "goal_throw_landing_x_m") target = &candidate.goal.throw_landing_x_m;
       else if (name == "goal_throw_landing_z_m") target = &candidate.goal.throw_landing_z_m;
       else if (name == "goal_position_tolerance_m") target = &candidate.goal.position_tolerance_m;
@@ -1172,7 +1169,10 @@ private:
       result.manual_pose_hits.push_back(valid_target(*window[j]) && pose.valid &&
           std::isfinite(pose.x_m) && std::isfinite(pose.z_m) && pose.z_m>0 &&
           std::isfinite(pose.yaw_rad));
-      result.manual_near_hits.push_back(result.manual_pose_hits.back() && pose.z_m<=tuning_config_.goal.fine_adjust_start_z_m);
+      result.manual_near_hits.push_back(valid_target(*window[j]) &&
+          vision_core::GoalNearDistanceSample(
+              window[j]->prepared.backboard_center_depth_m, pose,
+              tuning_config_.goal.approach_short_z_m));
     }
 
     double sx=0, sy=0, sw=0, sh=0, confidence=0;

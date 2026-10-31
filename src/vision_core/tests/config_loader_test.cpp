@@ -157,6 +157,9 @@ static void CheckGroupedConfiguration(const std::string &text) {
   bad=YAML::Clone(root);
   bad["vision_algorithm"]["common"]["mission"]["object_approach"]["blend_frames"]=5;
   reject(bad);
+  bad=YAML::Clone(root);
+  bad["vision_algorithm"]["goal"]["control"]["fine_adjust_start_z_m"]=0.8;
+  reject(bad);
   for (const auto *key : {"steering_deadband_deg", "in_place_turn_deg"}) {
     bad=YAML::Clone(root);
     bad["vision_algorithm"]["common"]["mission"]["object_approach"].remove(key);
@@ -249,6 +252,10 @@ int main(int argc, char **argv) {
   Reject(text.str(),"goal_empty_max_retries: 3","goal_empty_max_retries: -1");
   Reject(text.str(),"down_recovery_max_actions: 3","down_recovery_max_actions: 0");
   Reject(text.str(),"depth_recovery_max_steps: 3","depth_recovery_max_steps: 0");
+  assert(vision_core::LoadDefaultAlgorithmConfig().goal.near_distance_min_hits==3);
+  Reject(text.str(),"near_distance_min_hits: 3","near_distance_min_hits: 0");
+  Reject(text.str(),"near_distance_min_hits: 3","near_distance_min_hits: 11");
+  Reject(text.str(),"near_distance_min_hits: 3","");
   Reject(text.str(),"reference_v_ratio: 0.80","reference_v_ratio: .nan");
   for (const auto* value : {"-0.1", "1.0", "1.1", ".nan", ".inf"})
     Reject(text.str(), "observation_start_ratio: 0.0",

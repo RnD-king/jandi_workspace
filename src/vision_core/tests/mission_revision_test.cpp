@@ -104,7 +104,7 @@ void GoalRecovery(bool fine, bool left) {
   }
 }
 void GoalEdges() {
-  auto c=LoadDefaultAlgorithmConfig().goal;c.stable_window=c.stable_min_hits=1;
+  auto c=LoadDefaultAlgorithmConfig().goal;c.stable_window=c.stable_min_hits=c.near_distance_min_hits=1;
   c.lost_frames=100; // Isolate edge-turn behavior from Depth-loss recovery.
   const CameraFeedback camera{CameraMode::kGoal,true};
   for(double margin:{0.0,35.0,50.0,80.0}) for(bool left:{false,true}) {
@@ -403,11 +403,13 @@ void GoalPairHasOneObservation(bool left) {
   c.test_mission=MissionType::kGoal;c.test_stage=1;
   c.enable_ball=c.enable_hurdle=false;c.initial_has_ball=true;
   c.transition_settle_sec=0;
-  c.goal.stable_window=c.goal.stable_min_hits=1;
+  c.goal.stable_window=c.goal.stable_min_hits=c.goal.near_distance_min_hits=1;
   MissionController core(c);
   auto f=Frame(0);f.camera_feedback={CameraMode::kGoal,true};
-  f.backboard_target=Target(left?60:580);f.goal_pose={true,0,1.2,0,1};
-  f.backboard_center_depth_m=1.2;
+  // The CTest fixture's near threshold is 1.20 m; keep this edge-turn
+  // scenario in the far approach instead of entering FINE on equality.
+  f.backboard_target=Target(left?60:580);f.goal_pose={true,0,1.5,0,1};
+  f.backboard_center_depth_m=1.5;
   const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
   MissionFrameResult r;
   for(int i=0;i<100;++i) {
@@ -885,11 +887,13 @@ void GoalEntryFallbackAndDepth() {
   g=brief.Compute({},{},{},640,480,1.55,true,camera,{});
   assert(g.action.action==MissionAction::kStepForwardRightOneHurdle);
 
-  // A detected board with failed pose estimation keeps the existing COARSE
-  // pose recovery, never an entry search turn.
+  // Three verified near center-Depth samples enter FINE even when pose
+  // estimation fails; an entry search turn must not preempt that decision.
   GoalController pose(c,3);pose.StartGoalTrial();
   pose.Compute({},{},{},640,480,0,true,camera,{});
-  pose.UseVerifiedObservation(Target(c.target_u_px),{},hits,misses,640,480);
+  auto near_hits=misses;
+  for(int i=0;i<c.near_distance_min_hits;++i) near_hits[i]=true;
+  pose.UseVerifiedObservation(Target(c.target_u_px),{},hits,misses,640,480,near_hits);
   g=pose.Compute({},Target(c.target_u_px),{},640,480,1.5,true,camera,
       {false,false,true},true,.5);
   assert(g.mode==GoalMode::kWaitFinePose);

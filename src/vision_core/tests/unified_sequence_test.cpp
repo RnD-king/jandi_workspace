@@ -146,7 +146,7 @@ void TestCameraLatchSurvivesLoss() {
   hurdle.Compute(Target(.5,.85),640,480,.1,{},busy,StraightLine());
   auto h=hurdle.Compute({},640,480,.2,{},busy,StraightLine()); assert(h.mode==HurdleMode::kApproachTwoBeforeDown);
   h=hurdle.Compute({},640,480,.3,{},done,StraightLine()); assert(h.camera_request==CameraRequest::kDown);
-  c.goal.stable_window=c.goal.stable_min_hits=1;
+  c.goal.stable_window=c.goal.stable_min_hits=c.goal.near_distance_min_hits=1;
   GoalController goal(c.goal,3); goal.StartForwardTrial();
   goal.Compute({},Target(),{},640,480,.1,true,{},busy,true,.7);
   auto g=goal.Compute({}, {}, {},640,480,.2,true,{},busy);
@@ -271,7 +271,7 @@ void TestGoalForwardTrial() {
   assert(t.out.command.camera_request==CameraRequest::kGoal);
   t.in.camera_feedback={CameraMode::kGoal,true}; t.Tick();
   t.in.goal_pose={true,0,.6,0,1};
-  for(int i=0;i<8;++i)t.Tick();
+  for(int i=0;i<10;++i)t.Tick();
   assert(t.out.goal.mode==GoalMode::kWaitFinePose);
   assert(t.Preview().command.action==MissionAction::kDefaultPoseMode);
   t.Commit(); t.Tick(true);
@@ -354,7 +354,7 @@ void TestHurdleSearchAndContact() {
 void TestGoalEdgeSingleCommit(bool left) {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;
   c.goal_trial_start_goal=c.initial_has_ball=true;
-  c.goal.stable_window=c.goal.stable_min_hits=1;
+  c.goal.stable_window=c.goal.stable_min_hits=c.goal.near_distance_min_hits=1;
   Trial t(c);
   t.in.camera_feedback={CameraMode::kGoal,true};
   t.in.backboard_target=Target(left?.05:.95,.3);
@@ -397,7 +397,7 @@ int main(int argc, char **argv) {
   }
   // Near GOAL commits to FINE feet before considering another WALK primitive.
   auto gc=LoadDefaultAlgorithmConfig().goal;
-  gc.stable_window=gc.stable_min_hits=1;
+  gc.stable_window=gc.stable_min_hits=gc.near_distance_min_hits=1;
   GoalController goal(gc,3); goal.StartForwardTrial();
   goal.Compute({},Target(),{true,0,.7,0,1},640,480,0,true,{}, {},true,.7);
   goal.Compute({}, {}, {},640,480,.1,true,{CameraMode::kGoal,true},{});
