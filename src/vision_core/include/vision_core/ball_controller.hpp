@@ -55,6 +55,7 @@ struct BallConfig {
 
   int stable_window{};
   int stable_min_hits{};
+  int near_v_min_hits{}; // v threshold votes in stable FORWARD window.
   int down_search_min_hits{}; // DOWN search only, within stable_window.
   int entry_min_hits{}; // LINE entry only; independent of FINE stability.
   int lost_frames{};
