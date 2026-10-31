@@ -11,6 +11,20 @@ void Push(std::deque<bool>& history,bool hit,int window) {
 int Hits(const std::deque<bool>& history) {
   return std::count(history.begin(),history.end(),true);
 }
+// Apply GOAL-style near voting to valid BALL/HURDLE detections.
+bool NearPixelWindowReady(const std::deque<bool>& detection_hits,
+                          const std::deque<bool>& near_hits, int window,
+                          int stable_min_hits, int near_min_hits) {
+  const auto size=static_cast<std::size_t>(window);
+  if (detection_hits.size()!=size || near_hits.size()!=size) return false;
+  int valid=0, near=0;
+  for (std::size_t j=0;j<size;++j) {
+    if (!detection_hits[j]) continue;
+    ++valid;
+    if (near_hits[j]) ++near;
+  }
+  return valid>=stable_min_hits && near>=near_min_hits;
+}
 bool SamePosition(const ObjectTarget& a,const ObjectTarget& b,double max_distance,double max_size) {
   if (std::hypot(a.center_px.u-b.center_px.u,a.center_px.v-b.center_px.v)>max_distance) return false;
   if (a.area_px>0 && b.area_px>0 && std::abs(std::log(a.area_px/b.area_px))>2*max_size) return false;
@@ -115,7 +129,6 @@ bool MissionController::ResumeContinuousApproach(const MissionFrameInput& input)
     target=input.ball_target;found=ball_result_.mode==BallMode::kApproachBall;
     saved.hits=ball_controller_.ObservationHits();
     if (target) {
-      saved.near=saved.near || target->center_px.v>=config_.ball.approach_two_step_v_px;
       if (input.ball_track_id) saved.id=input.ball_track_id;
     }
     if (found || saved.near) ball_result_.action={};
@@ -123,7 +136,6 @@ bool MissionController::ResumeContinuousApproach(const MissionFrameInput& input)
     target=input.hurdle_target;found=hurdle_result_.mode==HurdleMode::kApproach;
     saved.hits=hurdle_controller_.ObservationHits();
     if (target) {
-      saved.near=saved.near || target->center_px.v>=config_.hurdle.approach_two_step_v_px;
       if (input.hurdle_track_id) saved.id=input.hurdle_track_id;
     }
     if (found || saved.near) hurdle_result_.action={};
@@ -156,6 +168,11 @@ bool MissionController::ResumeContinuousApproach(const MissionFrameInput& input)
   auto resumed=saved;
   command_coordinator_.Compute(active_mission_,0,{},CameraRequest::kNone,input.delivery_feedback,input.now_sec);
   recovering_approach_.reset();continuous_=std::move(resumed);
+  // Require fresh near votes after a successful far-object recovery.
+  if (!continuous_.near && (continuous_.mission==MissionType::kBall ||
+                            continuous_.mission==MissionType::kHurdle)) {
+    continuous_.hits.clear();continuous_.near_hits.clear();
+  }
   continuous_.missing=0;continuous_.good_hits=continuous_.hits;
   continuous_.loss_pending=false;
   line_plan_.Reset();line_state_=LineState::kNormal;
@@ -314,6 +331,9 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     if (i==1) Push(evidence.near_hits,visible &&
         GoalNearDistanceSample(input.backboard_center_depth_m,input.goal_pose,
                                config_.goal.approach_short_z_m),windows[i]);
+    else Push(evidence.near_hits,visible &&
+        targets[i]->center_px.v >= (i==0 ? config_.ball.approach_two_step_v_px
+                                        : config_.hurdle.approach_two_step_v_px),windows[i]);
     if (visible) { evidence.id=ids[i];evidence.last=targets[i]; }
   }
   bool acquired=false;
@@ -329,7 +349,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       continuous_.mission=missions[i];continuous_.id=ids[i];
       continuous_.epoch=next_approach_epoch_++;
       continuous_.last=targets[i];continuous_.hits=evidence.hits;
-      if (i==1) continuous_.near_hits=evidence.near_hits;
+      continuous_.near_hits=evidence.near_hits;
       acquired=true;
       if (i==1) approach_goal_empty_retries_=0;
       break;
@@ -368,9 +388,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   if (target) {
     continuous_.last=target;continuous_.missing=0;
     if (ids[i]) continuous_.id=ids[i];
-    if (i==0) continuous_.near=continuous_.near || target->center_px.v>=config_.ball.approach_two_step_v_px;
-    else if (i==2) continuous_.near=continuous_.near || target->center_px.v>=config_.hurdle.approach_two_step_v_px;
-    else {
+    if (i==1) {
       continuous_.depth=input.backboard_center_depth_m;
       continuous_.pose=input.goal_pose;
     }
@@ -404,7 +422,18 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
                                config_.goal.approach_short_z_m),windows[i]);
     continuous_.near=continuous_.near || (target &&
         GoalNearWindowReady(continuous_.hits,continuous_.near_hits,config_.goal));
-  } else Push(continuous_.near_hits,target && continuous_.near,windows[i]);
+  } else {
+    const double near_v=i==0 ? config_.ball.approach_two_step_v_px
+                              : config_.hurdle.approach_two_step_v_px;
+    const int stable_hits=i==0 ? config_.ball.stable_min_hits
+                               : config_.hurdle.stable_min_hits;
+    const int near_hits=i==0 ? config_.ball.near_v_min_hits
+                             : config_.hurdle.near_v_min_hits;
+    if (!acquired) Push(continuous_.near_hits,target && target->center_px.v>=near_v,windows[i]);
+    continuous_.near=continuous_.near || (target &&
+        NearPixelWindowReady(continuous_.hits,continuous_.near_hits,windows[i],
+                             stable_hits,near_hits));
+  }
   if (target) continuous_.good_hits=continuous_.hits;
   const bool lost=continuous_.loss_pending;
   if (lost && !continuous_.locked && !continuous_.near) {
