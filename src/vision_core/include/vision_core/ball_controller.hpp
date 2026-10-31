@@ -76,6 +76,7 @@ struct BallConfig {
   double upper_acquire_v_px{};
   double approach_two_step_v_px{};
   double approach_direct_down_v_px{}; // Zone 8 only: one step instead of two before DOWN.
+  double approach_extreme_turn_margin_px{90.0}; // Extra distance beyond left/right band for 2 turns.
   double fine_side_two_step_margin_px{};
   BallFineMotionConfig fine_motion;
   int pickup_max_attempts{};
