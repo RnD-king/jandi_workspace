@@ -45,7 +45,7 @@ struct HurdleConfig {
 
   int stable_window{};
   int stable_min_hits{};
-  int near_v_min_hits{}; // v threshold votes in stable FORWARD window.
+  int near_v_min_hits{3}; // v threshold votes in stable FORWARD window.
   int down_search_min_hits{}; // DOWN search only, within stable_window.
   int lost_frames{};
   double upper_acquire_v_px{};
