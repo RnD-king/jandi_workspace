@@ -31,7 +31,9 @@ public:
   void Issued(const ControlCommand& command, std::uint64_t parent_id);
   void Feedback(const CommandDeliveryFeedback& feedback, double now, double hold);
   void Observe(double now, const LineGuide& actual_line,
-               const LineGuide& object_guide, std::uint64_t object_owner);
+               const LineGuide& object_guide, std::uint64_t object_owner,
+               std::optional<Point2> object_center = std::nullopt,
+               bool object_uses_center = false);
   void ObserveObject(double now, std::uint64_t owner, bool visible,
                      int window, int minimum_hits);
   bool ObjectQualified(std::uint64_t action_id) const;
@@ -47,6 +49,7 @@ public:
   bool Outstanding() const;
   bool WindowFinished(std::uint64_t id) const;
   std::optional<LineGuide> Finish(std::uint64_t id, double now, double remaining);
+  std::optional<Point2> FinishObjectCenter(std::uint64_t id,double now,double remaining);
   std::optional<LineWindowStats> Stats(std::uint64_t id) const;
   std::vector<MissionAction> TakeCompleted();
   struct CompletedBlock { MissionAction cruise; std::uint64_t owner; bool object_qualified; bool probe; };
@@ -68,6 +71,7 @@ private:
     std::optional<double> start;
     LineGuideAccumulator observations;
     std::optional<LineGuide> mean;
+    std::optional<Point2> mean_center;
     std::deque<bool> object_hits;
     bool object_qualified{false};
     Block(std::uint64_t key, MissionAction old, MissionAction basic, int repeat,
