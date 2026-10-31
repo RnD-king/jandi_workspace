@@ -432,7 +432,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     if (!acquired) Push(continuous_.near_hits,target && target->center_px.v>=near_v,windows[i]);
     continuous_.near=continuous_.near || (target &&
         NearPixelWindowReady(continuous_.hits,continuous_.near_hits,windows[i],
-                             stable_hits,near_hits));
+                             stable_hits,std::min(near_hits,windows[i])));
   }
   if (target) continuous_.good_hits=continuous_.hits;
   const bool lost=continuous_.loss_pending;
