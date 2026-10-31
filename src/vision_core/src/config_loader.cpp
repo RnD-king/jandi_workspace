@@ -119,22 +119,14 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   NonnegativeInt(c.object_approach.prelock_loss_extra_blocks,"object_approach.prelock_loss_extra_blocks");
   if (c.object_approach.prelock_loss_extra_blocks>1)
     throw std::runtime_error("object_approach.prelock_loss_extra_blocks must be 0 or 1");
-  PositiveInt(c.object_approach.blend_frames,"object_approach.blend_frames");
   NonnegativeInt(c.object_approach.goal_empty_max_retries,"object_approach.goal_empty_max_retries");
   Positive(c.object_approach.reference_v_ratio,"object_approach.reference_v_ratio");
   if (c.object_approach.reference_v_ratio>=1)
     throw std::runtime_error("object_approach.reference_v_ratio must be below 1");
-  Nonnegative(c.object_approach.heading_gain,"object_approach.heading_gain");
-  Nonnegative(c.object_approach.steering_deadband,"object_approach.steering_deadband");
-  Positive(c.object_approach.in_place_turn_score,"object_approach.in_place_turn_score");
-  if (c.object_approach.in_place_turn_score<=c.object_approach.steering_deadband)
-    throw std::runtime_error("object_approach.in_place_turn_score must exceed steering_deadband");
-  const auto& camera=c.object_approach.goal_camera;
-  if (!std::isfinite(camera.right_m) || !std::isfinite(camera.forward_m) ||
-      !std::isfinite(camera.pitch_deg) || !std::isfinite(camera.yaw_deg) ||
-      std::abs(camera.pitch_deg)>=89 || std::abs(camera.yaw_deg)>=89)
-    throw std::runtime_error("invalid object approach camera pose");
-  Positive(camera.height_m,"object_approach.goal_camera.height_m");
+  Nonnegative(c.object_approach.steering_deadband_deg,"object_approach.steering_deadband_deg");
+  Positive(c.object_approach.in_place_turn_deg,"object_approach.in_place_turn_deg");
+  if (c.object_approach.in_place_turn_deg<=c.object_approach.steering_deadband_deg)
+    throw std::runtime_error("object_approach.in_place_turn_deg must exceed steering_deadband_deg");
   Nonnegative(c.ball.approach_short_v_px, "ball.approach_short_v_px");
   PositiveInt(c.ball.down_search_max_steps, "ball.down_search_max_steps");
   Nonnegative(c.ball.down_search_inter_action_hold_sec, "ball.down_search_inter_action_hold_sec");
@@ -704,20 +696,20 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   const auto approach=m["object_approach"];
   if (approach["forward_camera"])
     throw std::runtime_error("mission.object_approach.forward_camera was removed; BALL RGB approach does not use a camera pose.");
+  if (approach["blend_frames"])
+    throw std::runtime_error("mission.object_approach.blend_frames was removed; object paths no longer blend with LINE.");
+  if (approach["goal_camera"])
+    throw std::runtime_error("mission.object_approach.goal_camera was removed; GOAL far approach uses a 2D image path.");
+  for (const auto *old_key : {"heading_gain", "steering_deadband", "in_place_turn_score"})
+    if (approach[old_key])
+      throw std::runtime_error(std::string("mission.object_approach.") + old_key +
+          " was removed; configure steering_deadband_deg and in_place_turn_deg instead.");
   Assign(approach,"lock_blocks",c.object_approach.lock_blocks);
   Assign(approach,"prelock_loss_extra_blocks",c.object_approach.prelock_loss_extra_blocks);
-  Assign(approach,"blend_frames",c.object_approach.blend_frames);
   Assign(approach,"goal_empty_max_retries",c.object_approach.goal_empty_max_retries);
   Assign(approach,"reference_v_ratio",c.object_approach.reference_v_ratio);
-  Assign(approach,"heading_gain",c.object_approach.heading_gain);
-  Assign(approach,"steering_deadband",c.object_approach.steering_deadband);
-  Assign(approach,"in_place_turn_score",c.object_approach.in_place_turn_score);
-  const auto read_camera=[](const YAML::Node& node,ApproachCameraPose& camera) {
-    Assign(node,"right_m",camera.right_m); Assign(node,"height_m",camera.height_m);
-    Assign(node,"forward_m",camera.forward_m); Assign(node,"pitch_deg",camera.pitch_deg);
-    Assign(node,"yaw_deg",camera.yaw_deg);
-  };
-  read_camera(approach["goal_camera"],c.object_approach.goal_camera);
+  Assign(approach,"steering_deadband_deg",c.object_approach.steering_deadband_deg);
+  Assign(approach,"in_place_turn_deg",c.object_approach.in_place_turn_deg);
   Assign(m, "enable_ball", c.enable_ball);
   Assign(m, "enable_hurdle", c.enable_hurdle);
   Assign(m, "enable_goal", c.enable_goal);

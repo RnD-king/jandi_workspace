@@ -87,11 +87,16 @@ void LinePlan::Feedback(const CommandDeliveryFeedback& feedback, double now, dou
       next->start = successor.second.parent_start_estimate;
   }
 }
-void LinePlan::Observe(double now, const LineGuide& guide) {
+void LinePlan::Observe(double now, const LineGuide& actual_line,
+                       const LineGuide& object_guide, std::uint64_t object_owner) {
   for (auto& block : blocks_) {
     if (block.aborted || block.window_finished || !block.start || now < *block.start ||
         block.completed == block.count) continue;
     if (!block.observations.ActiveFor(block.id)) block.observations.Begin(block.id, *block.start);
+    // A LINE block can still be running when an object is admitted. Its
+    // observation window must retain real LINE samples, never virtual ones.
+    const LineGuide& guide=block.owner==0 ? actual_line :
+        block.owner==object_owner ? object_guide : LineGuide{};
     block.observations.Add(block.id, now, guide);
   }
 }

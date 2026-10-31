@@ -38,8 +38,8 @@ LineGuide ObjectApproachGuide(const ObjectTarget& t,bool board,double depth,
   if (!board) {
     if (width<=1 || height<=1 || !std::isfinite(reference_u) ||
         !std::isfinite(reference_v)) return {};
-    // BALL is a point on the camera image's floor path. Use the same image
-    // slope/offset calculation as the detected LINE, without a 3-D ray.
+    // BALL and far GOAL use the same image path slope calculation as LINE,
+    // without a 3-D ray or a floor-plane projection.
     Point2 robot{reference_u,static_cast<double>(height-1)};
     Point2 ball=t.center_px;
     if (rectify) {

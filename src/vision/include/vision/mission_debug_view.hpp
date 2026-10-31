@@ -115,9 +115,9 @@ inline const char *DebugActionName(vision_core::MissionAction action) {
   case MissionAction::kStepForwardLeftOne: return "STEP_FORWARD_LEFT_ONE";
   case MissionAction::kStepForwardRightOneHurdle: return "TURN_RIGHT_IN_PLACE";
   case MissionAction::kTurnLeftInPlace: return "TURN_LEFT_IN_PLACE";
-  case MissionAction::kLineLeftUnit: return "LINE_LEFT_UNIT";
-  case MissionAction::kLineStraightUnit: return "LINE_STRAIGHT_UNIT";
-  case MissionAction::kLineRightUnit: return "LINE_RIGHT_UNIT";
+  case MissionAction::kLineLeftUnit: return "LEFT";
+  case MissionAction::kLineStraightUnit: return "STRAIGHT";
+  case MissionAction::kLineRightUnit: return "RIGHT";
   case MissionAction::kPickBall: return "PICK_BALL";
   case MissionAction::kRecatch: return "RECATCH";
   case MissionAction::kHurdle: return "HUDDLE";
@@ -136,6 +136,47 @@ inline const char *DebugMissionName(vision_core::MissionType mission) {
     case vision_core::MissionType::kHurdle: return "HURDLE";
     default: return "NONE";
   }
+}
+inline const char *DebugCameraActionStatus(const vision_core::MissionFrameResult& result) {
+  using namespace vision_core;
+  if (result.terminal_hold || result.recovery_failed ||
+      result.approach_goal_search_failed || result.approach_goal_depth_failed ||
+      (result.active_mission==MissionType::kBall && result.ball.mode==BallMode::kFailed) ||
+      (result.active_mission==MissionType::kGoal && result.goal.mode==GoalMode::kFailed) ||
+      (result.active_mission==MissionType::kHurdle && result.hurdle.mode==HurdleMode::kFailed))
+    return "FAILED";
+  const bool ball_search=result.active_mission==MissionType::kBall && (
+      result.ball.mode==BallMode::kDownSearch ||
+      result.ball.mode==BallMode::kBallRecoveryForward ||
+      result.ball.mode==BallMode::kBallRecoveryDown ||
+      result.ball.mode==BallMode::kBallRecoveryWalkTurn ||
+      result.ball.mode==BallMode::kMidTurnBeforeRecovery ||
+      result.ball.mode==BallMode::kNearTurnBeforeDown ||
+      result.ball.mode==BallMode::kForwardRecoveryTurn ||
+      result.ball.mode==BallMode::kForwardRecoveryStep ||
+      result.ball.mode==BallMode::kForwardRecoveryObserve ||
+      result.ball.mode==BallMode::kPostPickupLineRecovery);
+  const bool goal_search=result.active_mission==MissionType::kGoal && (
+      result.goal.mode==GoalMode::kSearch ||
+      result.goal.mode==GoalMode::kRecoverySearch ||
+      result.goal.mode==GoalMode::kHeadingRecovery ||
+      result.goal.mode==GoalMode::kFineRecovery ||
+      result.goal.mode==GoalMode::kCoarseRecovery ||
+      result.goal.mode==GoalMode::kRecoveryTurn ||
+      result.goal.mode==GoalMode::kRecoveryForwardStep ||
+      result.goal.mode==GoalMode::kRecoveryExtraTurn ||
+      result.goal.mode==GoalMode::kEntryRetryCameraForward ||
+      result.goal.depth_recovery_active);
+  const bool hurdle_search=result.active_mission==MissionType::kHurdle && (
+      result.hurdle.mode==HurdleMode::kDownSearch ||
+      result.hurdle.mode==HurdleMode::kRecoveryForward ||
+      result.hurdle.mode==HurdleMode::kRecoveryDown ||
+      result.hurdle.mode==HurdleMode::kRecoveryStep ||
+      result.hurdle.mode==HurdleMode::kRecoveryStepObserve);
+  if ((result.active_mission==MissionType::kLine && result.line_in_recovery) ||
+      result.candidate_phase==3 ||
+      ball_search || goal_search || hurdle_search) return "SEARCHING";
+  return DebugActionName(result.command.action);
 }
 inline std::string DebugRepeatLabel(int scope, const vision_core::MissionControllerConfig& config,
     const vision_core::BallResult* ball=nullptr) {
@@ -294,7 +335,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
       }
     }
   }
-  // Draw the exact BALL/GOAL O/H guide used by the shared LINE selector.
+  // Draw the current BALL/GOAL image path. The next action can use the
+  // completed block's weighted mean instead of this frame's heading.
   // The core supplies its reference pixel so a valid guide also works when
   // the real floor LINE is absent (notably in the GOAL camera view).
   if (mission_result.approach_path_guide && vis.cols > 1 && vis.rows > 1) {
@@ -494,40 +536,72 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   add_row(header_rows,std::string("FEET: ")+(mission_result.foot_pose==vision_core::FootPose::kWalk ? "WALK" : "FINE")+
       (mission_result.foot_transition ? " | TRANSITION / WAIT_DONE" : ""),text_color);
   const auto &lc = config.line_p2p;
-  add_row(line_rows,"LINE",line_color);
-  std::snprintf(buf, sizeof(buf),
-      "reference=%.1fpx  Ko=%.3f  Kh=%.3f  deadband=%.4f  turn>%.3f",
-      config.line_features.image_center_u,
-      lc.offset_gain, lc.heading_gain, lc.steering_deadband, lc.in_place_turn_score);
+  const bool virtual_candidate=!mission_result.approach_near &&
+      (mission_result.approach_mission==vision_core::MissionType::kBall ||
+       mission_result.approach_mission==vision_core::MissionType::kGoal);
+  const bool object_heading=virtual_candidate && mission_result.approach_action_committed;
+  add_row(line_rows,object_heading ? "OBJECT PATH / CURRENT FRAME" : "LINE / CURRENT FRAME",line_color);
+  if (object_heading)
+    std::snprintf(buf,sizeof(buf),"reference=%.1fpx  straight<=%.1fdeg  turn>%.1fdeg",
+        config.line_features.image_center_u,
+        config.object_approach.steering_deadband_deg,
+        config.object_approach.in_place_turn_deg);
+  else
+    std::snprintf(buf,sizeof(buf),
+        "reference=%.1fpx  Ko=%.3f  Kh=%.3f  deadband=%.4f  turn>%.3f",
+        config.line_features.image_center_u,lc.offset_gain,lc.heading_gain,
+        lc.steering_deadband,lc.in_place_turn_score);
   add_row(line_rows,buf,line_color);
-  const auto &decision_line = mission_result.line_decision_guide
-      ? *mission_result.line_decision_guide : feats.guide;
-  if (mission_result.line_computed && decision_line.valid &&
-      std::isfinite(decision_line.offset) &&
-      std::isfinite(decision_line.heading_rad)) {
-    const double offset_term = lc.offset_gain * decision_line.offset;
-    const double heading_term = lc.heading_gain * decision_line.heading_rad;
-    const double score = offset_term + heading_term;
-    std::snprintf(buf, sizeof(buf), "O=%+.4f  x  Ko=%.3f  =  %+.4f",
-        decision_line.offset, lc.offset_gain, offset_term);
-    add_row(line_rows,buf,line_color);
-    std::snprintf(buf, sizeof(buf), "H=%+.4frad  x  Kh=%.3f  =  %+.4f",
-        decision_line.heading_rad, lc.heading_gain, heading_term);
-    add_row(line_rows,buf,line_color);
-    // Recovery is selected by the FSM, not by this steering score.
-    const char *direction = mission_result.line_in_recovery && !mission_result.line_score_recovery
-        ? "RECOVERY_FSM" : (score < -lc.in_place_turn_score ? "TURN_LEFT_IN_PLACE" :
-            score > lc.in_place_turn_score ? "TURN_RIGHT_IN_PLACE" :
-            score < -lc.steering_deadband ? "LEFT" :
-            score > lc.steering_deadband ? "RIGHT" : "STRAIGHT");
-    std::snprintf(buf, sizeof(buf),
-        "SCORE=%+.4f  |  band=[%+.4f,%+.4f]  |  %s",
-        score, -lc.steering_deadband, lc.steering_deadband, direction);
-    add_row(line_rows,buf,line_color);
+  // This panel describes the current image. At READY the command decision
+  // may use a completed block's weighted mean, which is shown separately by
+  // the issued action and must not be labeled as a current-frame score.
+  const auto &decision_line = object_heading && mission_result.approach_path_guide
+      ? *mission_result.approach_path_guide : feats.guide;
+  if (mission_result.line_computed &&
+      (!object_heading || mission_result.approach_path_guide.has_value()) &&
+      decision_line.valid && std::isfinite(decision_line.heading_rad) &&
+      (object_heading || std::isfinite(decision_line.offset))) {
+    if (object_heading) {
+      const double heading_deg=decision_line.heading_rad *
+          (180.0 / 3.14159265358979323846);
+      const double deadband=config.object_approach.steering_deadband_deg;
+      const double turn=config.object_approach.in_place_turn_deg;
+      add_row(line_rows,"O: ignored for object path",line_color);
+      std::snprintf(buf,sizeof(buf),"H=%+.2fdeg  (no gain)",heading_deg);
+      add_row(line_rows,buf,line_color);
+      const char* direction=heading_deg < -turn ? "TURN_LEFT_IN_PLACE" :
+          heading_deg > turn ? "TURN_RIGHT_IN_PLACE" :
+          heading_deg < -deadband ? "LEFT" :
+          heading_deg > deadband ? "RIGHT" : "STRAIGHT";
+      std::snprintf(buf,sizeof(buf),"FRAME H=%+.2fdeg  |  band=[%+.1f,%+.1f]deg  |  %s",
+          heading_deg,-deadband,deadband,direction);
+      add_row(line_rows,buf,line_color);
+    } else {
+      const double offset_term=lc.offset_gain * decision_line.offset;
+      const double heading_term=lc.heading_gain * decision_line.heading_rad;
+      const double score=offset_term+heading_term;
+      std::snprintf(buf,sizeof(buf),"O=%+.4f  x  Ko=%.3f  =  %+.4f",
+          decision_line.offset,lc.offset_gain,offset_term);
+      add_row(line_rows,buf,line_color);
+      std::snprintf(buf,sizeof(buf),"H=%+.4frad  x  Kh=%.3f  =  %+.4f",
+          decision_line.heading_rad,lc.heading_gain,heading_term);
+      add_row(line_rows,buf,line_color);
+      // Recovery is selected by the FSM, not by this steering score.
+      const char* direction=mission_result.line_in_recovery && !mission_result.line_score_recovery
+          ? "RECOVERY_FSM" : (score < -lc.in_place_turn_score ? "TURN_LEFT_IN_PLACE" :
+              score > lc.in_place_turn_score ? "TURN_RIGHT_IN_PLACE" :
+              score < -lc.steering_deadband ? "LEFT" :
+              score > lc.steering_deadband ? "RIGHT" : "STRAIGHT");
+      std::snprintf(buf,sizeof(buf),
+          "FRAME SCORE=%+.4f  |  band=[%+.4f,%+.4f]  |  %s",
+          score,-lc.steering_deadband,lc.steering_deadband,direction);
+      add_row(line_rows,buf,line_color);
+    }
   } else {
-    add_row(line_rows,"O x Ko = --",line_color);
-    add_row(line_rows,"H x Kh = --",line_color);
-    add_row(line_rows,"SCORE: -- (no valid LINE decision)",line_color);
+    add_row(line_rows,object_heading ? "O: ignored for object path" : "O x Ko = --",line_color);
+    add_row(line_rows,object_heading ? "H: --" : "H x Kh = --",line_color);
+    add_row(line_rows,object_heading ? "FRAME H: -- (no current object guide)" :
+        "SCORE: -- (no valid LINE decision)",line_color);
   }
 
   std::snprintf(buf,sizeof(buf),"LINE BBOX MIN: width=%.1fpx height=%.1fpx",
@@ -938,7 +1012,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     cv::putText(state_panel,item.row.text,item.position,cv::FONT_HERSHEY_SIMPLEX,
         panel_font_scale,item.row.color,1,cv::LINE_AA);
   cv::putText(vis,view.performance,{10,24},cv::FONT_HERSHEY_SIMPLEX,0.7,{0,255,0},2);
-  cv::putText(vis,std::string(DebugMissionName(mission_result.active_mission))+" | "+DebugActionName(mission_result.command.action),
+  cv::putText(vis,std::string(DebugMissionName(mission_result.active_mission))+": "+DebugCameraActionStatus(mission_result),
       {10,48},cv::FONT_HERSHEY_SIMPLEX,0.55,{0,200,255},2);
   if (selected_goal) {
     int y=72;

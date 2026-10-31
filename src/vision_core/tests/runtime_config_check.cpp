@@ -63,18 +63,10 @@ void CheckConfiguration(const std::string& path) {
   const auto approach=AlgorithmField(a,"mission","object_approach");
   CheckField(approach,"lock_blocks",c.object_approach.lock_blocks,"object_approach");
   CheckField(approach,"prelock_loss_extra_blocks",c.object_approach.prelock_loss_extra_blocks,"object_approach");
-  CheckField(approach,"blend_frames",c.object_approach.blend_frames,"object_approach");
   CheckField(approach,"goal_empty_max_retries",c.object_approach.goal_empty_max_retries,"object_approach");
   CheckField(approach,"reference_v_ratio",c.object_approach.reference_v_ratio,"object_approach");
-  CheckField(approach,"heading_gain",c.object_approach.heading_gain,"object_approach");
-  CheckField(approach,"steering_deadband",c.object_approach.steering_deadband,"object_approach");
-  CheckField(approach,"in_place_turn_score",c.object_approach.in_place_turn_score,"object_approach");
-  for (const auto& camera : {std::make_pair("goal_camera",c.object_approach.goal_camera)}) {
-    const auto node=approach[camera.first];const auto& pose=camera.second;
-    CheckField(node,"right_m",pose.right_m,camera.first);CheckField(node,"height_m",pose.height_m,camera.first);
-    CheckField(node,"forward_m",pose.forward_m,camera.first);CheckField(node,"pitch_deg",pose.pitch_deg,camera.first);
-    CheckField(node,"yaw_deg",pose.yaw_deg,camera.first);
-  }
+  CheckField(approach,"steering_deadband_deg",c.object_approach.steering_deadband_deg,"object_approach");
+  CheckField(approach,"in_place_turn_deg",c.object_approach.in_place_turn_deg,"object_approach");
   FIELD(line_features, max_centers);
   FIELD(line_features, guide_min_points);
   FIELD(line_features, image_center_u);

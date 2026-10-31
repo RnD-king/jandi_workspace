@@ -10,21 +10,21 @@ struct ApproachCameraPose {
   double right_m{}, height_m{}, forward_m{}, pitch_deg{}, yaw_deg{};
 };
 struct ObjectApproachConfig {
-  int lock_blocks{}, blend_frames{};
+  int lock_blocks{};
   int prelock_loss_extra_blocks{};
   int goal_empty_max_retries{};
   double reference_v_ratio{};
-  double heading_gain{}, steering_deadband{}, in_place_turn_score{};
-  ApproachCameraPose goal_camera;
+  double steering_deadband_deg{}, in_place_turn_deg{};
 };
 
-// Image geometry for the debug path. BALL steering uses its image H; GOAL
-// steering uses the optional body bearing, not the projected image-line H.
+// BALL and GOAL far-approach steering both use the image-path heading.
+// The optional 3D projection remains available for geometry diagnostics.
 LineGuide ImageLineGuide(double du_dv, double u_at_reference, double reference_u,
                          int image_width, double confidence);
-// The backboard uses measured optical Z. A ball connects its RGB center to the
-// robot image reference; no ball depth or floor-plane calibration is needed.
-// body_bearing_rad is written only for a valid backboard body-frame (x,z).
+// With backboard=false, BALL and GOAL far approach connect the image center
+// to the robot image reference; no depth or floor-plane calibration is used.
+// With backboard=true, the legacy 3D projection remains for diagnostics;
+// body_bearing_rad is written only for a valid body-frame (x,z).
 LineGuide ObjectApproachGuide(const ObjectTarget& target, bool backboard,
     double optical_depth_m, const Intrinsics& intrinsics,
     const ApproachCameraPose& camera, int image_width, int image_height,

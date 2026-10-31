@@ -93,12 +93,11 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.object_approach.prelock_loss_extra_blocks==1);
   assert(c.object_approach.goal_empty_max_retries==3);
   assert(c.mission_recovery_turn_yaw_deg==baseline.mission_recovery_turn_yaw_deg);
-  root["vision_algorithm"]["common"]["mission"]["object_approach"]["goal_camera"]["right_m"]=-.07;
   const auto continuous=LoadText(YAML::Dump(root));
-  assert(continuous.object_approach.goal_camera.right_m==-.07);
-  assert(continuous.object_approach.heading_gain==c.object_approach.heading_gain);
-  root["vision_algorithm"]["common"]["mission"]["object_approach"]["heading_gain"]=.8;
-  assert(LoadText(YAML::Dump(root)).object_approach.heading_gain==.8);
+  assert(continuous.object_approach.steering_deadband_deg==15.0);
+  assert(continuous.object_approach.in_place_turn_deg==100.0);
+  root["vision_algorithm"]["common"]["mission"]["object_approach"]["steering_deadband_deg"]=20.0;
+  assert(LoadText(YAML::Dump(root)).object_approach.steering_deadband_deg==20.0);
   auto a=root["vision_algorithm"];
   // Distinct values detect accidental cross-object filter/tracker wiring.
   a["ball"]["detection"]["class_id"]=11;
@@ -149,19 +148,31 @@ static void CheckGroupedConfiguration(const std::string &text) {
   bad["vision_algorithm"]["common"].remove("depth_roi_size_px");reject(bad);
   bad=YAML::Clone(root);
   bad["vision_algorithm"]["common"]["mission"]["object_approach"]["forward_camera"] =
-      bad["vision_algorithm"]["common"]["mission"]["object_approach"]["goal_camera"];
+      YAML::Load("{right_m: 0.0}");
   reject(bad);
-  for (const auto *key : {"heading_gain", "steering_deadband", "in_place_turn_score"}) {
+  bad=YAML::Clone(root);
+  bad["vision_algorithm"]["common"]["mission"]["object_approach"]["goal_camera"] =
+      YAML::Load("{right_m: 0.0}");
+  reject(bad);
+  bad=YAML::Clone(root);
+  bad["vision_algorithm"]["common"]["mission"]["object_approach"]["blend_frames"]=5;
+  reject(bad);
+  for (const auto *key : {"steering_deadband_deg", "in_place_turn_deg"}) {
     bad=YAML::Clone(root);
     bad["vision_algorithm"]["common"]["mission"]["object_approach"].remove(key);
     reject(bad);
   }
   bad=YAML::Clone(root);
-  bad["vision_algorithm"]["common"]["mission"]["object_approach"]["heading_gain"]=-.1;
+  bad["vision_algorithm"]["common"]["mission"]["object_approach"]["steering_deadband_deg"]=-.1;
   reject(bad);
   bad=YAML::Clone(root);
-  bad["vision_algorithm"]["common"]["mission"]["object_approach"]["in_place_turn_score"]=.01;
+  bad["vision_algorithm"]["common"]["mission"]["object_approach"]["in_place_turn_deg"]=10.0;
   reject(bad);
+  for (const auto *key : {"heading_gain", "steering_deadband", "in_place_turn_score"}) {
+    bad=YAML::Clone(root);
+    bad["vision_algorithm"]["common"]["mission"]["object_approach"][key]=.3;
+    reject(bad);
+  }
 }
 
 int main(int argc, char **argv) {

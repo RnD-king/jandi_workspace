@@ -153,6 +153,7 @@ struct MissionFrameResult {
   // a LINE block's READY/DONE mean can replace line_decision_guide.
   std::optional<LineGuide> approach_path_guide;
   Point2 approach_path_reference_px;
+  bool approach_action_committed{false}; // The displayed action ID belongs to this object's LINE block.
   std::optional<LineWindowStats> line_window_stats;
   bool line_in_recovery{true};
   bool line_score_recovery{false};
@@ -378,13 +379,14 @@ private:
   struct ContinuousApproach {
     MissionType mission{MissionType::kNone};
     std::uint64_t id{}, epoch{};
-    int blocks{}, missing{}, blend{};
+    int blocks{}, missing{};
     bool locked{false}, near{false}, mission_started{false}, loss_pending{false};
     bool probe_active{false}, probe_used{false};
     std::optional<ObjectTarget> last;
     GoalPoseObservation pose;
     std::optional<double> depth;
     LineGuide last_guide;
+    LineGuide last_mean_guide;
     bool near_observing{false}, near_qualified{false};
     double near_observation_started_sec{0.0}, near_sum_u{0.0}, near_sum_v{0.0};
     int near_valid_count{0}, near_attempts{0};
@@ -399,6 +401,7 @@ private:
     bool depth_recovery_step{false};
     std::optional<LineGuide> guide;
     std::optional<LineGuide> display_guide;
+    bool guide_observed{false};
     CameraRequest camera{CameraRequest::kNone};
     bool hold{false}, entered{false}, object_visible{false}, near_final_action{false};
     bool probe_start{false};

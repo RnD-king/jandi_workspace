@@ -345,14 +345,36 @@ void StartEstimatesAndReset() {
   LinePlan resumed(c);resumed.Begin(MissionAction::kStepForwardFour);resumed.Issued(a,0);
   resumed.Feedback({10,true,false,false},0,0);
   LineGuide old;old.valid=true;old.offset=-.4;
-  for(int i=0;i<10;++i)resumed.Observe(.5+.04*i,old);
+  for(int i=0;i<10;++i)resumed.Observe(.5+.04*i,old,{},0);
   assert(resumed.Finish(10,1,0) && resumed.WindowFinished(10));
   resumed.ClearEvidence();
   assert(!resumed.WindowFinished(10) && resumed.Contains(10) && !resumed.Done(10));
   auto fresh=old;fresh.offset=.4;
-  for(int i=0;i<10;++i)resumed.Observe(1.1+.04*i,fresh);
+  for(int i=0;i<10;++i)resumed.Observe(1.1+.04*i,fresh,{},0);
   const auto rebuilt=resumed.Finish(10,1.5,0);
   assert(rebuilt && rebuilt->offset>.39);
+
+  // Switching to an object during an existing LINE block must not change the
+  // block's source; missing virtual frames must not reuse a held guide.
+  LinePlan line_source(c,10,5);
+  line_source.Begin(MissionAction::kStepForwardFour);line_source.Issued(a,0);
+  line_source.Feedback({10,true,false,false},0,0);
+  auto virtual_guide=old;virtual_guide.offset=.6;
+  for(int i=0;i<10;++i)
+    line_source.Observe(.1*(i+1),old,virtual_guide,77);
+  const auto real_mean=line_source.Finish(10,1.1,0);
+  assert(real_mean && real_mean->offset<-.39);
+
+  LinePlan object_source(c,10,5);
+  object_source.Begin(MissionAction::kStepForwardFour,77);
+  object_source.Issued(a,0);
+  object_source.Feedback({10,true,false,false},0,0);
+  for(int i=0;i<10;++i)
+    object_source.Observe(.1*(i+1),old,i<5 ? virtual_guide : LineGuide{},77);
+  const auto object_mean=object_source.Finish(10,1.1,0);
+  assert(object_mean && object_mean->offset>.59);
+  const auto object_stats=object_source.Stats(10);
+  assert(object_stats && object_stats->valid_frames==5 && object_stats->used_frames==5);
 
   LinePlan object(c,10,5);
   object.Begin(MissionAction::kStepForwardFour,77);object.Issued(a,0);

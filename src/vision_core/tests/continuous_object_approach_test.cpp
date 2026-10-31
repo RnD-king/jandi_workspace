@@ -23,7 +23,6 @@ MissionControllerConfig Config() {
   c.hurdle.approach_short_v_px=100;c.hurdle.approach_two_step_v_px=240;
   c.object_association.max_center_distance_norm=.5;
   c.object_approach.lock_blocks=3;
-  c.object_approach.goal_camera={0,.45,0,0,0};
   return c;
 }
 struct Driver {
@@ -109,14 +108,34 @@ void Geometry() {
 void VirtualHeadingOnly() {
   auto c=Config();
   Driver ball(c);ball.in.ball_target=Target(500,100);
-  ball.Warm();ball.Block();
+  ball.Warm();
+  Check(!ball.out.approach_path_guide,
+        "virtual path appeared before an object-owned approach unit was issued");
+  Driver queued_line(c);queued_line.in.ball_target=Target(500,100);
+  queued_line.Warm();
+  queued_line.Tick({queued_line.current,true,false,true});
+  Check(queued_line.out.command.action_id!=queued_line.current &&
+        LinePlan::IsUnit(queued_line.out.command.action) &&
+        !queued_line.out.approach_path_guide,
+        "an already queued LINE unit appeared as an object approach path");
+  ball.Block();
   Check(ball.out.approach_mission==MissionType::kBall &&
         ball.out.approach_path_guide && ball.out.approach_path_guide->offset>0 &&
-        ball.out.command.action==MissionAction::kLineStraightUnit,
+        ball.out.command.action==MissionAction::kLineRightUnit,
         "BALL virtual offset still changed the H-only approach direction");
+  const double ball_heading=ball.out.approach_path_guide->heading_rad;
+  auto opposite_config=c;
+  Driver opposite(opposite_config);
+  opposite.in.line_centers={{400,450},{400,400},{400,350},{400,300},{400,250}};
+  opposite.in.ball_target=Target(180,100);
+  opposite.Warm();opposite.Block();
+  Check(opposite.out.command.action==MissionAction::kLineLeftUnit &&
+        opposite.out.approach_path_guide &&
+        opposite.out.approach_path_guide->heading_rad<0,
+        "first BALL approach unit inherited the previous real LINE mean");
   ball.MissingBlock();
   Check(ball.out.approach_mission==MissionType::kBall &&
-        ball.out.command.action==MissionAction::kLineStraightUnit,
+        ball.out.command.action==MissionAction::kLineRightUnit,
         "pre-lock BALL probe reused O/H steering instead of the saved H direction");
 
   c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
@@ -128,19 +147,36 @@ void VirtualHeadingOnly() {
   for(int i=0;i<12;++i)goal.Tick();
   Check(goal.out.approach_mission==MissionType::kGoal &&
         goal.out.approach_path_guide && goal.out.line_decision_guide &&
-        std::abs(goal.out.approach_path_guide->heading_rad)<1e-9 &&
+        std::abs(goal.out.approach_path_guide->heading_rad-
+                 goal.out.line_decision_guide->heading_rad)<1e-9 &&
+        std::abs(goal.out.approach_path_guide->heading_rad-
+                 ball_heading)<1e-9 &&
         goal.out.line_decision_guide->heading_rad>0.25 &&
-        goal.out.command.action==MissionAction::kLineStraightUnit,
-        "GOAL used projected image slope/offset instead of body bearing H");
+        goal.out.command.action==MissionAction::kLineRightUnit,
+        "GOAL did not steer from its 2D virtual image path");
 
-  c.object_approach.heading_gain=1.0;
+  c.object_approach.steering_deadband_deg=30.0;
   Driver tuned(c);tuned.in.ball_target.reset();tuned.in.line_centers.clear();
   tuned.in.camera_feedback={CameraMode::kGoal,true};
   tuned.in.backboard_target=Target(500,100);tuned.in.backboard_track_id=7;
   tuned.in.backboard_center_depth_m=2;tuned.in.goal_pose={true,.6,2,0,1};
   for(int i=0;i<12;++i)tuned.Tick();
-  Check(tuned.out.command.action==MissionAction::kLineRightUnit,
-        "GOAL virtual heading gain did not tune its direction independently");
+  Check(tuned.out.command.action==MissionAction::kLineStraightUnit,
+        "GOAL virtual heading angle threshold did not tune its direction independently");
+}
+void WeightedProbeDirection() {
+  auto c=Config();
+  c.object_approach.steering_deadband_deg=2.0;
+  c.object_approach.in_place_turn_deg=100.0;
+  Driver d(c);d.in.ball_target=Target(180,100);
+  d.Warm();d.Block(); // Drain the original LINE block.
+  d.Block();          // Finish a left-heading object block and cache its mean.
+  d.in.ball_target=Target(460,100);
+  d.Tick(); // Last valid frame now points right; this block remains unqualified.
+  d.MissingBlock();             // Current object block never qualifies.
+  Check(d.out.command.action==MissionAction::kLineLeftUnit &&
+        d.out.approach_completed_blocks==1,
+        "pre-lock probe ignored the last qualified object mean");
 }
 void FinishProbe(Driver& d) {
   d.current=d.out.command.action_id;
@@ -150,8 +186,10 @@ void FinishProbe(Driver& d) {
   for(int i=0;i<12;++i)d.Tick();
   d.Tick({d.current,true,false,true});
   const auto second=d.out.command.action_id;
-  Check(second && second!=d.current && LinePlan::IsUnit(d.out.command.action),
-        "probe did not retain the configured second unit");
+  if (!(second && second!=d.current && LinePlan::IsUnit(d.out.command.action)))
+    throw std::runtime_error("probe did not retain the configured second unit: action="+
+        std::to_string(static_cast<int>(d.out.command.action))+" id="+
+        std::to_string(second)+" current="+std::to_string(d.current));
   d.Tick({second,true,false,false});
   d.Tick({d.current,true,true,false});d.current=second;
   for(int i=0;i<12;++i)d.Tick();
@@ -197,9 +235,9 @@ void ProbeRediscoveryAndLineMemory() {
   for(int i=0;i<12;++i)d.Tick();
   const auto expected=LineP2pController(c.line_p2p).Compute(d.out.line_features.guide);
   Check(d.out.approach_mission==MissionType::kBall &&
-        d.out.approach_path_guide.has_value() && d.out.remembered_line_score &&
+        !d.out.approach_path_guide && d.out.remembered_line_score &&
         std::abs(*d.out.remembered_line_score-expected.error)<1e-9,
-        "far virtual BALL path replaced the remembered actual LINE score");
+        "pre-commit BALL candidate changed real LINE memory or drew its path");
   const auto remembered=*d.out.remembered_line_score;
   d.in.line_centers.clear();
   for(int i=0;i<12;++i)d.Tick();
@@ -223,8 +261,11 @@ void ProbeRediscoveryAndLineMemory() {
   for(int i=0;i<12;++i)recovered.Tick();
   recovered.Tick({recovered.current,true,false,true});
   const auto next=recovered.out.command.action_id;
-  Check(next && next!=recovered.current && LinePlan::IsUnit(recovered.out.command.action),
-        "rediscovery did not replace an unissued probe repeat with normal approach");
+  if (!(next && next!=recovered.current && LinePlan::IsUnit(recovered.out.command.action)))
+    throw std::runtime_error("rediscovery did not replace an unissued probe repeat with normal approach: action="+
+        std::to_string(static_cast<int>(recovered.out.command.action))+" id="+
+        std::to_string(next)+" current="+std::to_string(recovered.current)+
+        " line_recovery="+std::to_string(recovered.out.line_in_recovery));
   recovered.Tick({next,true,false,false});
   recovered.Tick({recovered.current,true,true,false});
   Check(recovered.out.approach_completed_blocks==completed &&
@@ -491,8 +532,8 @@ void CameraDrainAndProbe() {
 }
 void GoalTurnObservationUsesSelectedPath() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
-  c.object_approach.heading_gain=1;
-  c.object_approach.steering_deadband=.05;c.object_approach.in_place_turn_score=.1;
+  c.object_approach.steering_deadband_deg=2.0;
+  c.object_approach.in_place_turn_deg=10.0;
   Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
   d.in.camera_feedback={CameraMode::kGoal,true};d.in.backboard_target=Target(500,100);
   d.in.backboard_track_id=7;d.in.backboard_center_depth_m=2;d.in.goal_pose={true,.6,2,0,1};
@@ -756,7 +797,7 @@ void FarReacquisitionReturnsToSharedPath(MissionType mission) {
 }
 }
 int main() {
-  Geometry();VirtualHeadingOnly();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
+  Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
   FarGoalDepthRecovery(false,true);FarGoalDepthRecovery(true,true);
   for(auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {

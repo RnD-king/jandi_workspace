@@ -29,6 +29,25 @@ int main() {
   hurdle.width_px=hurdle.height_px=20;hurdle.confidence=1;
   p.targets.hurdle=hurdle;
   vision_core::MissionFrameResult m;
+  m.line_in_recovery=false;
+  for (const auto& entry:std::vector<std::pair<vision_core::MissionAction,const char*>>{
+      {vision_core::MissionAction::kLineLeftUnit,"LEFT"},
+      {vision_core::MissionAction::kLineStraightUnit,"STRAIGHT"},
+      {vision_core::MissionAction::kLineRightUnit,"RIGHT"}}) {
+    m.command.action=entry.first;
+    Check(std::string(vision::DebugCameraActionStatus(m))==entry.second,
+          "camera walk label did not use the short direction");
+  }
+  m.command.action=vision_core::MissionAction::kNone;
+  Check(std::string(vision::DebugCameraActionStatus(m))=="NONE",
+        "idle action did not display NONE");
+  m.line_in_recovery=true;
+  Check(std::string(vision::DebugCameraActionStatus(m))=="SEARCHING",
+        "LINE recovery did not display SEARCHING");
+  m.terminal_hold=true;
+  Check(std::string(vision::DebugCameraActionStatus(m))=="FAILED",
+        "terminal recovery did not display FAILED");
+  m.terminal_hold=false;m.line_in_recovery=false;
   m.active_mission=vision_core::MissionType::kHurdle;
   m.hurdle.tracked.visible=true;m.hurdle.tracked.center_px={300,200};
   m.foot_pose=vision_core::FootPose::kFine;
@@ -159,6 +178,17 @@ int main() {
   auto blue=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
   Check(blue.image.at<cv::Vec3b>(240,400)==cv::Vec3b(255,0,0),
         "BALL virtual approach path must be blue");
+  m.approach_action_committed=true;
+  m.line_computed=true;
+  m.line_decision_guide=virtual_path;
+  const auto frame_score=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  m.line_decision_guide->heading_rad=-.6; // Simulate a different READY weighted mean.
+  const auto ready_score=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  Check(cv::norm(frame_score.panel,ready_score.panel,cv::NORM_INF)==0,
+        "current-frame object heading changed with the queued action's weighted mean");
+  m.line_decision_guide.reset();
+  m.approach_action_committed=false;
+  m.line_computed=false;
   m.approach_mission=vision_core::MissionType::kGoal;
   const vision_core::CameraFeedback goal_camera{vision_core::CameraMode::kGoal,true};
   auto blue_goal=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);

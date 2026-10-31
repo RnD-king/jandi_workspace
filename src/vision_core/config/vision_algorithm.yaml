@@ -35,7 +35,7 @@ vision_algorithm:
 
     walk:
       # 한 LINE 묶음의 모션 반복 횟수 (좌회전 / 직진 / 우회전)
-      left_repetitions: 2
+      left_repetitions: 1
       straight_repetitions: 1
       right_repetitions: 2
 
@@ -117,9 +117,9 @@ vision_algorithm:
         right_delta_v_px: 0.0 # 방향별 (0,0)은 미측정. 모두 미측정이면 기존 단발/옆걸음 2회 유지.
 
       # 픽업
-      pickup_u1_px: 310 # 픽업 영역 왼쪽 경계 (px)
+      pickup_u1_px: 315 # 픽업 영역 왼쪽 경계 (px)
       pickup_u2_px: 385 # 픽업 영역 오른쪽 경계 (px)
-      pickup_v1_px: 90 # 픽업 영역 위쪽 경계 (px)
+      pickup_v1_px: 95 # 픽업 영역 위쪽 경계 (px)
       pickup_v2_px: 130 # 픽업 영역 아래쪽 경계 (px)
       pickup_max_attempts: 100
       pickup_verify_min_hits: 3 # 픽업 DONE 후 stable_window 중 잔존 공 검출 기준; 이상이면 재픽업
@@ -296,14 +296,9 @@ vision_algorithm:
       object_approach:
         lock_blocks: 3 # 같은 ID의 보행 묶음 전체가 실제 DONE된 횟수 (전송/ACK/READY 아님)
         prelock_loss_extra_blocks: 1 # 락 전 유실 시 마지막 접근 방향으로 추가 탐색할 묶음 수 (0 또는 1)
-        blend_frames: 5 # LINE→가상 경로의 전환 프레임 수
         reference_v_ratio: 0.80 # 실제 LINE 기준 높이를 못 구하는 GOAL 뷰의 기준
-        heading_gain: 0.3 # 공·골대 가상 경로 H(rad) 전용 점수 계수
-        steering_deadband: 0.14 # |H 점수|가 이 값 이하이면 직진
-        in_place_turn_score: 0.5 # |H 점수|가 이 값보다 크면 WALK 제자리 회전
-        # 임시값: 좌우 -17mm는 대략 실측, 나머지는 정밀 실측 후 교체!
-        # 위치: 오른쪽/위/전방 +m. 각도: 아래로 pitch+, 오른쪽으로 yaw+ (모터 tick 아님).
-        goal_camera: {right_m: -0.017, height_m: 0.45, forward_m: 0.0, pitch_deg: 0.0, yaw_deg: 0.0}
+        steering_deadband_deg: 15.0 # 공·골대 가상 경로 |H|가 이 각도 이하면 직진
+        in_place_turn_deg: 100.0 # |H|가 이 각도 초과 시 WALK 제자리 회전; 가상선 H는 ±90도 미만
         goal_empty_max_retries: 3 # 최초 GOAL 확인 후 FORWARD→LINE 1묶음→GOAL 재확인 한도; 소진 시 FINAL HOLD
 
       # 후보·라인 유실 복구

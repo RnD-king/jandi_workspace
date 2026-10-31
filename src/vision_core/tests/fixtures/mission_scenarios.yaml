@@ -253,13 +253,10 @@ vision_algorithm:
     object_approach:
       lock_blocks: 3
       prelock_loss_extra_blocks: 1
-      blend_frames: 5
       goal_empty_max_retries: 3
       reference_v_ratio: 0.80
-      heading_gain: 0.3
-      steering_deadband: 0.14
-      in_place_turn_score: 0.5
-      goal_camera: {right_m: 0.0, height_m: 0.45, forward_m: 0.0, pitch_deg: 0.0, yaw_deg: 0.0}
+      steering_deadband_deg: 15.0
+      in_place_turn_deg: 100.0
     candidate_search_max_turns: 2
     test_mission: 0
     test_stage: 0

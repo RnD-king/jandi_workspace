@@ -9,6 +9,7 @@
 
 namespace vision_core {
 namespace {
+constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
 bool IsLongLineAction(MissionAction action) {
   return action == MissionAction::kStepForwardLeft ||
          action == MissionAction::kStepForwardFour ||
@@ -80,7 +81,7 @@ ActionRequest MissionController::CruiseAction(const LineGuide &guide,
   const bool virtual_approach = continuous_.mission == MissionType::kBall ||
       continuous_.mission == MissionType::kGoal;
   const double turn_threshold = virtual_approach
-      ? config_.object_approach.in_place_turn_score : config_.line_p2p.in_place_turn_score;
+      ? config_.object_approach.in_place_turn_deg : config_.line_p2p.in_place_turn_score;
   if (decision.direction != CruiseDirection::kNone &&
       std::abs(decision.error) > turn_threshold) {
     if (line_guard_turns_completed_ >= config_.line_p2p.recovery_max_turns) {
@@ -116,8 +117,8 @@ CruiseDecision MissionController::SteeringDecision(const LineGuide &guide) const
   const bool valid = guide.valid && std::isfinite(guide.offset) &&
       std::isfinite(guide.heading_rad);
   return SelectCruiseDecision(true, valid,
-      config_.object_approach.heading_gain * guide.heading_rad,
-      config_.object_approach.steering_deadband);
+      guide.heading_rad * kRadToDeg,
+      config_.object_approach.steering_deadband_deg);
 }
 
 void MissionController::BeginObservation(LineState state, double now_sec) {
@@ -2847,7 +2848,7 @@ bool MissionController::UpdateLineP2pTuning(const LineP2pConfig &line_p2p) {
 void MissionController::ClearObservationEvidence() {
   approach_evidence_={};
   continuous_.hits.clear();continuous_.pose_hits.clear();continuous_.near_hits.clear();
-  continuous_.missing=continuous_.blend=0;
+  continuous_.missing=0;
   line_plan_.ClearEvidence();
   if (candidate_.phase == CandidatePhase::kObserve)
     decision_observation_restart_pending_ = true;

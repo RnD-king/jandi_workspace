@@ -30,7 +30,8 @@ public:
   ActionRequest Continue(std::uint64_t ready_id = 0) const;
   void Issued(const ControlCommand& command, std::uint64_t parent_id);
   void Feedback(const CommandDeliveryFeedback& feedback, double now, double hold);
-  void Observe(double now, const LineGuide& guide);
+  void Observe(double now, const LineGuide& actual_line,
+               const LineGuide& object_guide, std::uint64_t object_owner);
   void ObserveObject(double now, std::uint64_t owner, bool visible,
                      int window, int minimum_hits);
   bool ObjectQualified(std::uint64_t action_id) const;

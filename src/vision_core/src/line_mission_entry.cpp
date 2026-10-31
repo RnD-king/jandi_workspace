@@ -123,16 +123,6 @@ MissionFrameResult MissionController::StepPlannedLine(
     if (route.guide) {
       raw=*route.guide;decision=raw;
       output.line_decision_guide=decision;
-      if (route.object_visible && raw.valid && !continuous_.near &&
-          (continuous_.mission == MissionType::kBall ||
-           continuous_.mission == MissionType::kGoal)) {
-        output.approach_path_guide = route.display_guide.value_or(raw);
-        output.approach_path_reference_px = {
-            last_line_image_center_u_,
-            output.line_features.guide.valid
-                ? output.line_features.guide_reference_v_px
-                : config_.object_approach.reference_v_ratio * input.image_height};
-      }
     }
   }
   if (input.advance_line_fsm) {
@@ -142,11 +132,19 @@ MissionFrameResult MissionController::StepPlannedLine(
     while (actual_line_stability_history_.size() >
         static_cast<std::size_t>(config_.line.line_stable_window))
       actual_line_stability_history_.pop_front();
-    line_stability_history_.push_back(line_state_ == LineState::kNormal && raw.valid &&
+    line_stability_history_.push_back(line_state_ == LineState::kNormal &&
+                                      (!automatic_approach || continuous_.mission==MissionType::kNone ||
+                                       route.guide_observed) && raw.valid &&
                                       std::isfinite(raw.offset) && std::isfinite(raw.heading_rad));
     while (line_stability_history_.size() > static_cast<std::size_t>(config_.line.line_stable_window))
       line_stability_history_.pop_front();
-    line_plan_.Observe(input.now_sec, raw);
+    LineGuide object_observation;
+    if (continuous_.mission==MissionType::kHurdle)
+      object_observation=actual_line_guide;
+    else if (route.guide_observed && route.guide)
+      object_observation=*route.guide;
+    line_plan_.Observe(input.now_sec,automatic_approach ? actual_line_guide : raw,
+                       object_observation,continuous_.epoch);
     if (automatic_approach && continuous_.mission!=MissionType::kNone) {
       const int minimum=continuous_.mission==MissionType::kBall ? config_.ball.entry_min_hits :
           continuous_.mission==MissionType::kGoal ? config_.goal.stable_min_hits : config_.hurdle.stable_min_hits;
@@ -368,8 +366,24 @@ MissionFrameResult MissionController::StepPlannedLine(
         last_ready_line_guide_ = mean;
         output.line_window_stats = line_plan_.Stats(id);
         decision = mean.value_or(LineGuide{});
+        if (automatic_approach && continuous_.mission!=MissionType::kNone) {
+          if (line_plan_.ObjectOwned(id,continuous_.epoch)) {
+            if (!line_plan_.IsProbe(id) && line_plan_.ObjectQualified(id) &&
+                mean && mean->valid)
+              continuous_.last_mean_guide=*mean;
+          } else if (continuous_.mission==MissionType::kBall ||
+                     continuous_.mission==MissionType::kGoal) {
+            // The previous LINE block's mean cannot steer a virtual path.
+            decision=route.guide_observed && route.guide ? *route.guide : LineGuide{};
+          }
+        }
         output.line_decision_guide = decision;
-        if (!decision.valid && !idle) line_failure_pending_done_ = true;
+        const bool object_loss=automatic_approach &&
+            continuous_.mission!=MissionType::kNone &&
+            line_plan_.ObjectOwned(id,continuous_.epoch) &&
+            !line_plan_.IsProbe(id) && !line_plan_.ObjectQualified(id);
+        if (!decision.valid && !idle && !object_loss)
+          line_failure_pending_done_ = true;
         if (automatic_approach && continuous_.mission!=MissionType::kNone &&
             line_plan_.ObjectOwned(id,continuous_.epoch) &&
             !line_plan_.IsProbe(id) &&
@@ -404,7 +418,8 @@ MissionFrameResult MissionController::StepPlannedLine(
           line_auxiliary_id_ = 0;
         }
       }
-      if (!observation_wait && !line_failure_pending_done_ && line_state_ != LineState::kFinalHold) {
+      if (!observation_wait && !line_failure_pending_done_ &&
+          !route.hold && line_state_ != LineState::kFinalHold) {
         if (automatic_approach && ready && !line_plan_.Active() && !route.hold &&
             decision.valid && !goal_will_enter && !straight_goal && line_ready_handled_id_!=id) {
           bool reference=false;
@@ -476,6 +491,20 @@ MissionFrameResult MissionController::StepPlannedLine(
   const auto& command = output.command;
   if (LinePlan::IsUnit(command.action)) line_plan_.Issued(command,
       command.control_phase == ControlPhase::kWaitingQueuedActionAck ? parent_id : 0);
+  output.approach_action_committed=automatic_approach &&
+      continuous_.mission!=MissionType::kNone &&
+      line_plan_.ObjectOwned(command.action_id,continuous_.epoch);
+  if (automatic_approach && route.object_visible && route.guide_observed &&
+      route.guide && route.guide->valid && !continuous_.near &&
+      (continuous_.mission==MissionType::kBall || continuous_.mission==MissionType::kGoal) &&
+      output.approach_action_committed) {
+    output.approach_path_guide=route.display_guide.value_or(*route.guide);
+    output.approach_path_reference_px={
+        last_line_image_center_u_,
+        output.line_features.guide.valid
+            ? output.line_features.guide_reference_v_px
+            : config_.object_approach.reference_v_ratio * input.image_height};
+  }
   if (route.probe_start) {
     if (command.command_type==CommandType::kAction && command.action_id &&
         LinePlan::IsUnit(command.action)) {
