@@ -289,8 +289,12 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "ball.pickup_verify_min_hits", "ball.stable_window");
   Nonnegative(c.ball.pickup_u1_px, "ball.pickup_u1_px");
   Nonnegative(c.ball.pickup_u2_px, "ball.pickup_u2_px");
+  Nonnegative(c.ball.pickup_top_inset_px, "ball.pickup_top_inset_px");
   Nonnegative(c.ball.pickup_v1_px, "ball.pickup_v1_px");
   Nonnegative(c.ball.pickup_v2_px, "ball.pickup_v2_px");
+  if (c.ball.pickup_top_inset_px * 2 >= c.ball.pickup_u2_px - c.ball.pickup_u1_px &&
+      c.ball.pickup_top_inset_px > 0.0)
+    throw std::runtime_error("ball pickup top inset must leave positive top width");
   if (c.ball.pickup_u1_px >= c.ball.pickup_u2_px ||
       c.ball.pickup_v1_px >= c.ball.pickup_v2_px)
     throw std::runtime_error("ball pickup edges require u1 < u2 and v1 < v2");
@@ -523,7 +527,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   Assign(b, "stable_window", c.ball.stable_window);
   Assign(b, "stable_min_hits", c.ball.stable_min_hits);
-  Assign(b, "near_v_min_hits", c.ball.near_v_min_hits);
+  if (b["near_v_min_hits"]) Assign(b, "near_v_min_hits", c.ball.near_v_min_hits);
   Assign(b,"down_search_min_hits",c.ball.down_search_min_hits);
   Assign(b, "entry_min_hits", c.ball.entry_min_hits);
   Assign(b, "lost_frames", c.ball.lost_frames);
@@ -549,6 +553,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "pickup_verify_min_hits", c.ball.pickup_verify_min_hits);
   Assign(b, "pickup_u1_px", c.ball.pickup_u1_px);
   Assign(b, "pickup_u2_px", c.ball.pickup_u2_px);
+  if (b["pickup_top_inset_px"]) Assign(b, "pickup_top_inset_px", c.ball.pickup_top_inset_px);
   Assign(b, "pickup_v1_px", c.ball.pickup_v1_px);
   Assign(b, "pickup_v2_px", c.ball.pickup_v2_px);
   Assign(b, "recovery_center_tolerance_px", c.ball.recovery_center_tolerance_px);
@@ -570,7 +575,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   Assign(h, "stable_window", c.hurdle.stable_window);
   Assign(h, "stable_min_hits", c.hurdle.stable_min_hits);
-  Assign(h, "near_v_min_hits", c.hurdle.near_v_min_hits);
+  if (h["near_v_min_hits"]) Assign(h, "near_v_min_hits", c.hurdle.near_v_min_hits);
   Assign(h,"down_search_min_hits",c.hurdle.down_search_min_hits);
   Assign(h, "lost_frames", c.hurdle.lost_frames);
   Assign(h, "upper_acquire_v_px", c.hurdle.upper_acquire_v_px);
