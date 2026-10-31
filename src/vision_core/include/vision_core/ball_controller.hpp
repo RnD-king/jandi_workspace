@@ -55,7 +55,7 @@ struct BallConfig {
 
   int stable_window{};
   int stable_min_hits{};
-  int near_v_min_hits{}; // v threshold votes in stable FORWARD window.
+  int near_v_min_hits{3}; // v threshold votes in stable FORWARD window.
   int down_search_min_hits{}; // DOWN search only, within stable_window.
   int entry_min_hits{}; // LINE entry only; independent of FINE stability.
   int lost_frames{};
@@ -82,6 +82,19 @@ struct BallConfig {
   int pickup_verify_min_hits{}; // Residual ball votes after PICK DONE; independent of stability.
   // Inclusive pickup rectangle edges, in input-image pixels.
   double pickup_u1_px{}, pickup_u2_px{}, pickup_v1_px{}, pickup_v2_px{};
+  double pickup_top_inset_px{0.0}; // Top-only taper; preserve the current outer bounding box.
+  double PickupLeftAt(double v) const {
+    const double t=std::clamp((v-pickup_v1_px)/(pickup_v2_px-pickup_v1_px),0.0,1.0);
+    return pickup_u1_px+(1.0-t)*pickup_top_inset_px;
+  }
+  double PickupRightAt(double v) const {
+    const double t=std::clamp((v-pickup_v1_px)/(pickup_v2_px-pickup_v1_px),0.0,1.0);
+    return pickup_u2_px-(1.0-t)*pickup_top_inset_px;
+  }
+  bool PickupContains(Point2 p) const {
+    return p.v>=pickup_v1_px && p.v<=pickup_v2_px &&
+        p.u>=PickupLeftAt(p.v) && p.u<=PickupRightAt(p.v);
+  }
   double PickupCenterU() const { return (pickup_u1_px + pickup_u2_px) * 0.5; }
   double PickupCenterV() const { return (pickup_v1_px + pickup_v2_px) * 0.5; }
   double PickupHalfWidth() const { return (pickup_u2_px - pickup_u1_px) * 0.5; }
