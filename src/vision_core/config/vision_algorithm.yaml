@@ -29,6 +29,20 @@ vision_algorithm:
       curve_min_v_span_px: 80.0 # 곡률 계산에 세로 분포 폭
       curve_local_fit_points: 4 # 곡률 표시용 부분 직선 계산의 점 개수
 
+    # 공을 찾지 못한 커브에서 단 한 번 반대 방향으로 탐색.
+    # 일반 LINE RANSAC/O/H와는 완전히 독립적인 원본 6~8개 점 경로.
+    curve_search:
+      enabled: true
+      stable_window: 10
+      stable_min_hits: 7
+      min_abs_angle_deg: 15.0 # 실기 튜닝할 초기값
+      residual_threshold_px: 20.0 # 4개 구간 RANSAC / 3개 구간 잔차 허용
+      max_fit_rmse_px: 12.0
+      min_pair_v_gap_px: 20.0
+      min_segment_v_span_px: 30.0
+      min_total_v_span_px: 80.0
+      max_join_gap_px: 70.0 # 양쪽 피팅 직선 연결점의 최대 수평 차이
+
     stability:
       line_stable_window: 10
       line_stable_min_hits: 5
