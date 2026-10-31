@@ -174,9 +174,12 @@ void WeightedProbeDirection() {
   d.in.ball_target=Target(460,100);
   d.Tick(); // Last valid frame now points right; this block remains unqualified.
   d.MissingBlock();             // Current object block never qualifies.
-  Check(d.out.command.action==MissionAction::kLineLeftUnit &&
-        d.out.approach_completed_blocks==1,
-        "pre-lock probe ignored the last qualified object mean");
+  if (d.out.command.action!=MissionAction::kLineLeftUnit ||
+      d.out.approach_completed_blocks!=1)
+    throw std::runtime_error("pre-lock probe mean wrong: action="+
+        std::to_string(static_cast<int>(d.out.command.action))+
+        " blocks="+std::to_string(d.out.approach_completed_blocks)+
+        " mission="+std::to_string(static_cast<int>(d.out.approach_mission)));
 }
 void FinishProbe(Driver& d) {
   d.current=d.out.command.action_id;
