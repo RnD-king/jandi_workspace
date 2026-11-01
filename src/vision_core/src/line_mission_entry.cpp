@@ -174,6 +174,10 @@ MissionFrameResult MissionController::StepPlannedLine(
       line_plan_.Active() && input.advance_line_fsm &&
       (curve_.phase==CurveSearchState::Phase::kIdle ||
        curve_.phase==CurveSearchState::Phase::kConfirm);
+  if(input.line_centers.size()==5 && line_plan_.Active()) std::fprintf(stderr,
+    "CURVE_GATE auto=%d has=%d continuous=%d cam=%d settled=%d advance=%d phase=%d active=%d\\n",
+    int(automatic_approach),int(has_ball_),int(continuous_.mission),int(input.camera_feedback.actual_mode),
+    int(input.camera_feedback.settled),int(input.advance_line_fsm),int(curve_.phase),int(line_plan_.Active()));
   if(curve_frame_eligible) {
     curve_.frame_directions.push_back(curve_evidence.direction);
     if(curve_.frame_directions.size()==1)
