@@ -1,0 +1,18 @@
+name: Camera scan motion smoke test
+on:
+  push:
+    branches: [feature/curve-guided-ball-search]
+  pull_request:
+    paths:
+      - 'src/forward_walk/include/motion_executor_state.hpp'
+      - 'src/forward_walk/tests/scan_motion_test.cpp'
+      - '.github/workflows/camera-scan-test.yml'
+jobs:
+  camera-motion:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run header-only camera scan regression
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -I src/forward_walk/include src/forward_walk/tests/scan_motion_test.cpp -o /tmp/scan_motion_test
+          /tmp/scan_motion_test
