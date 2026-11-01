@@ -140,6 +140,7 @@ MissionFrameResult MissionController::StepPlannedLine(
         } else {curve_.phase=CurveSearchState::Phase::kIdle;curve_.confirmations=0;}
       }
     }
+    std::fprintf(stderr,"CURVE_AFTER_BLOCK phase=%d conf=%d\n",int(curve_.phase),curve_.confirmations);
     if (automatic_approach && block.owner && block.owner==continuous_.epoch) {
       if (block.probe) {
         continuous_.probe_active=false;
@@ -213,6 +214,8 @@ MissionFrameResult MissionController::StepPlannedLine(
       curve_.phase==CurveSearchState::Phase::kBodyObserve)) {
     route=PrepareContinuousApproach(input,output.line_features,idle);
     if (route.entered) {
+      std::fprintf(stderr,"CURVE_ROUTE_ENTERED mission=%d near=%d\n",
+          int(continuous_.mission),int(continuous_.near));
       // Far-object loss must not lock out the next legitimate curve.
       if(continuous_.mission==MissionType::kBall && continuous_.near) {
         curve_.phase=CurveSearchState::Phase::kLocked;
@@ -794,6 +797,8 @@ MissionFrameResult MissionController::StepPlannedLine(
   output.candidate_phase = static_cast<int>(candidate_.phase);
   output.candidate_search_turns = candidate_.searches;
   output.candidate_restore_turns = candidate_.restores;
+  std::fprintf(stderr,"CURVE_AT_RETURN phase=%d conf=%d\n",
+      int(curve_.phase),curve_.confirmations);
   output.line_plan_active = line_plan_.Active();
   PopulateApproachDiagnostics(output);
   PopulateDiagnostics(output, input.now_sec);
