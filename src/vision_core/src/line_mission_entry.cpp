@@ -76,7 +76,66 @@ MissionFrameResult MissionController::StepPlannedLine(
     BallResult carrying;carrying.has_ball=true;
     goal_controller_.UpdateBallState(carrying);
   }
-  for (const auto& block : line_plan_.TakeCompletedBlocks()) {
+  const auto completed_blocks=line_plan_.TakeCompletedBlocks();
+  for (const auto& block : completed_blocks) {
+    if (automatic_approach && block.owner==0 && !block.probe &&
+        config_.curve_search.enabled && config_.enable_ball) {
+      int left_hits=0,right_hits=0;
+      for(const int d:curve_.frame_directions) {
+        if(d<0) ++left_hits;
+        if(d>0) ++right_hits;
+      }
+      const int detected=curve_.frame_directions.size()==
+          static_cast<std::size_t>(config_.curve_search.stable_window) ?
+          (right_hits>=config_.curve_search.stable_min_hits ? 1 :
+           left_hits>=config_.curve_search.stable_min_hits ? -1 : 0) : 0;
+      curve_.frame_directions.clear();
+      if(curve_.phase==CurveSearchState::Phase::kLocked &&
+         curve_.unlock_blocks>0) {
+        if(--curve_.unlock_blocks==0)
+          curve_.phase=CurveSearchState::Phase::kIdle;
+      } else if(curve_.phase==CurveSearchState::Phase::kDelay) {
+        if(--curve_.delay_remaining<=0) {
+          curve_.phase=CurveSearchState::Phase::kDrain;
+          line_plan_.Abort(); // Never cancel already-issued motors.
+        }
+      } else if(curve_.phase==CurveSearchState::Phase::kProbeWalk) {
+        curve_.phase=CurveSearchState::Phase::kDrain;
+      } else if(curve_.phase==CurveSearchState::Phase::kBodyForward) {
+        curve_.phase=CurveSearchState::Phase::kBodyObserve;
+        curve_.observed_frames=0;
+      } else if((curve_.phase==CurveSearchState::Phase::kIdle ||
+                 curve_.phase==CurveSearchState::Phase::kConfirm) &&
+                !has_ball_ && continuous_.mission==MissionType::kNone &&
+                course_curve_index_<=3) {
+        if(detected!=0) {
+          if(curve_.phase!=CurveSearchState::Phase::kConfirm ||
+             detected!=curve_.direction) {
+            curve_.direction=detected;curve_.confirmations=0;
+            curve_.phase=CurveSearchState::Phase::kConfirm;
+          } else ++curve_.confirmations;
+          if(curve_.confirmations>=config_.curve_search.confirm_extra_sequences) {
+            bool eligible=true;
+            if(curve_.skip_pending) {
+              if(course_curve_index_==1 && detected==1) {
+                course_curve_index_=2;eligible=false;
+              } else if((course_curve_index_==1 || course_curve_index_==2) &&
+                        detected==-1) {
+                course_curve_index_=3;curve_.skip_pending=false;
+              } else eligible=false;
+            } else if(course_curve_index_!=1 && course_curve_index_!=3) {
+              eligible=false;
+            }
+            if(eligible) {
+              curve_.delay_remaining=config_.curve_search.scan_delay_walk_sequences;
+              curve_.phase=curve_.delay_remaining>0 ?
+                  CurveSearchState::Phase::kDelay : CurveSearchState::Phase::kDrain;
+              if(curve_.phase==CurveSearchState::Phase::kDrain) line_plan_.Abort();
+            } else {curve_.phase=CurveSearchState::Phase::kIdle;curve_.confirmations=0;}
+          }
+        } else {curve_.phase=CurveSearchState::Phase::kIdle;curve_.confirmations=0;}
+      }
+    }
     if (automatic_approach && block.owner && block.owner==continuous_.epoch) {
       if (block.probe) {
         continuous_.probe_active=false;
@@ -99,6 +158,23 @@ MissionFrameResult MissionController::StepPlannedLine(
   output.line_features = ComputeLineFeatures(input.line_centers, input.image_width,
                                             input.image_height, features);
   output.line_computed = true;
+  // The normal LINE guide is untouched; this only records independent curve
+  // votes during an executing logical LINE block.
+  const auto curve_evidence=ComputeCurveEvidence(input.line_centers,input.image_width,
+      input.image_height,features,config_.curve_search);
+  const bool curve_frame_eligible=automatic_approach && !has_ball_ &&
+      continuous_.mission==MissionType::kNone &&
+      input.camera_feedback.settled &&
+      input.camera_feedback.actual_mode==CameraMode::kForward &&
+      line_plan_.Active() && input.advance_line_fsm &&
+      (curve_.phase==CurveSearchState::Phase::kIdle ||
+       curve_.phase==CurveSearchState::Phase::kConfirm);
+  if(curve_frame_eligible) {
+    curve_.frame_directions.push_back(curve_evidence.direction);
+    while(curve_.frame_directions.size()>
+          static_cast<std::size_t>(config_.curve_search.stable_window))
+      curve_.frame_directions.pop_front();
+  }
   auto raw = output.line_features.guide;
   const auto actual_line_guide=raw;
   LineGuide decision = input.line_decision_guide_override.value_or(raw);
@@ -117,9 +193,21 @@ MissionFrameResult MissionController::StepPlannedLine(
   const bool idle = (!command_coordinator_.HasPendingAction() || completing_current) &&
       !line_plan_.Outstanding();
   RouteDecision route;
-  if (automatic_approach) {
+  const bool curve_special=curve_.phase==CurveSearchState::Phase::kDrain ||
+      curve_.phase==CurveSearchState::Phase::kScan ||
+      curve_.phase==CurveSearchState::Phase::kHold ||
+      curve_.phase==CurveSearchState::Phase::kReturnFound ||
+      curve_.phase==CurveSearchState::Phase::kReturnMiss ||
+      curve_.phase==CurveSearchState::Phase::kProbeWalk ||
+      curve_.phase==CurveSearchState::Phase::kBodyTurn ||
+      curve_.phase==CurveSearchState::Phase::kBodyForward;
+  if (automatic_approach && !curve_special) {
     route=PrepareContinuousApproach(input,output.line_features,idle);
-    if (route.entered) return StepWithLineImageCenter(input,image_center);
+    if (route.entered) {
+      curve_.phase=CurveSearchState::Phase::kLocked;
+      curve_.unlock_blocks=0;
+      return StepWithLineImageCenter(input,image_center);
+    }
     if (route.guide) {
       raw=*route.guide;decision=raw;
       output.line_decision_guide=decision;
