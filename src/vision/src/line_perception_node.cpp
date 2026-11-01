@@ -1598,6 +1598,8 @@ private:
     const auto t8 = std::chrono::steady_clock::now();
     const auto dt_feat_us = std::chrono::duration_cast<std::chrono::microseconds>(t8 - t7).count();
 
+    // A scan DONE is one sensory edge, not a permanent camera mode.
+    if(camera_scan_feedback_.finished) camera_scan_feedback_.finished=false;
     last_debug_result_=perception_result;
     // ---- 시각화 ----
     DisplayDebugFrame(msg->header, bgr, dets, aligned_depth, perception_result,
