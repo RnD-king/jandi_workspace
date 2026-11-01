@@ -1221,7 +1221,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       BeginDecisionObservation(input.now_sec, active_mission_, false, {});
   } else if (RepeatScope() == 0) {
     if (!decision_observation_active_ &&
-        config_.post_motion_observation_sec > 0.0 && camera_settle_edge)
+        config_.post_motion_observation_sec > 0.0 && camera_settle_edge &&
+        !input.camera_scan.finished)
       BeginDecisionObservation(input.now_sec, active_mission_, true, {});
     if (!decision_observation_active_ && !applied_object_ready_mean &&
         ShouldDeferDone(input.delivery_feedback))
@@ -1573,6 +1574,11 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       FinishMission();
     } else if (ball_result_.mode == BallMode::kLineFollow &&
                !ball_result_.active && !test_entry_pending_) {
+      if(config_.test_mission==MissionType::kNone && !has_ball_ &&
+         curve_.phase==CurveSearchState::Phase::kLocked) {
+        curve_.unlock_blocks=config_.curve_search.failure_lock_line_blocks;
+        curve_.skip_pending=true;
+      }
       BeginLineReacquisition();
       FinishMission();
     }
@@ -1657,6 +1663,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
           curve_={};
           curve_.phase=CurveSearchState::Phase::kLocked;
           curve_.unlock_blocks=config_.curve_search.post_goal_rearm_line_blocks;
+          if(curve_.unlock_blocks==0)
+            curve_.phase=CurveSearchState::Phase::kIdle;
         }
         FinishMission();
       }
