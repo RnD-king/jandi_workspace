@@ -178,8 +178,9 @@ public:
             "/jandi_vision/action_status", 10);
         // Camera status는 별도 ID 공간과 토픽을 사용하므로 publisher도 분리한다.
         camera_status_pub_ = create_publisher<vision::msg::CommandStatus>(
-        camera_scan_status_pub_=create_publisher<vision::msg::CameraScanStatus>("/jandi_vision/camera_scan_status",10);
             "/jandi_vision/camera_status", 10);
+        camera_scan_status_pub_ = create_publisher<vision::msg::CameraScanStatus>(
+            "/jandi_vision/camera_scan_status", 10);
 
         // 1 ms마다 상태를 확인하고, 실제 전송은 MotionLoop의 공통 마감 시각으로 50 Hz 제한한다.
         // polling과 전송 주기를 같게 두면 timer jitter로 한 주기를 더 쉴 수 있다.
