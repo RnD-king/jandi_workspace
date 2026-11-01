@@ -2899,6 +2899,7 @@ void MissionController::ClearObservationEvidence() {
   // PAUSE/RESUME preserves course stage and completed action counters, never
   // reuses visual evidence collected before the pause.
   curve_.frame_directions.clear();
+  curve_.block_curve_direction=0;
   curve_.center_hits.clear();
   curve_.object_hits.clear();
   approach_evidence_={};
