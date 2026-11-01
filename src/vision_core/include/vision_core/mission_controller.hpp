@@ -525,6 +525,8 @@ private:
       kBodyObserve, kLocked };
     Phase phase{Phase::kIdle};
     std::deque<int> frame_directions;
+    // Latch a qualified rolling window anywhere within the current block.
+    int block_curve_direction{0};
     std::deque<bool> center_hits, object_hits;
     int direction{0}, confirmations{0}, delay_remaining{0};
     int head_attempts{0}, body_attempts{0}, unlock_blocks{0};
