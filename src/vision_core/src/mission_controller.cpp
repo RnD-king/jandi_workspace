@@ -322,6 +322,8 @@ void MissionController::EnterMission(MissionType mission) {
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;
   if (mission == MissionType::kBall) {
+    if(curve_.phase!=CurveSearchState::Phase::kLocked)
+      curve_.phase=CurveSearchState::Phase::kIdle;
     // A new pickup starts a fresh GOAL walk gate only after line reacquisition.
     post_pickup_goal_line_gate_active_ = false;
     post_pickup_line_actions_issued_ = post_pickup_line_actions_completed_ = 0;
@@ -339,6 +341,7 @@ void MissionController::EnterMission(MissionType mission) {
     goal_result_ = {};
     has_ball_ = false;
   } else if (mission == MissionType::kGoal) {
+    goal_shot_done_=false;
     // Do not carry post-pickup booking limits into LINE after the later shot.
     post_pickup_goal_line_gate_active_ = false;
     post_pickup_line_actions_.clear();
@@ -1557,6 +1560,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       BeginLineReacquisition();
     if (ball_result_.mode == BallMode::kPostPickupLineRecovery &&
         line_reference_valid) {
+      if(config_.test_mission==MissionType::kNone && has_ball_ &&
+         (course_curve_index_==1 || course_curve_index_==3)) {
+        ++course_curve_index_;
+        curve_.phase=CurveSearchState::Phase::kLocked;
+        curve_.unlock_blocks=0; // wait until the subsequent GOAL
+        curve_.skip_pending=false;
+      }
       ball_controller_.CompleteLineRecovery();
       if (has_ball_ && config_.enable_goal)
         goal_controller_.UpdateBallState(ball_result_);
@@ -1617,6 +1627,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     }
     if (goal_result_.mode == GoalMode::kHeadingRecovery)
       goal_result_.action = line_action;
+    if(before==GoalMode::kShoot && action_feedback.action_done)
+      goal_shot_done_=true;
     has_ball_ = goal_controller_.HasBall();
     ball_controller_.SetHasBall(has_ball_);
     if (before != GoalMode::kHeadingRecovery &&
@@ -1639,6 +1651,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         post_pickup_five_step_completed_ = false;
         post_pickup_line_actions_.clear();
       } else {
+        if(config_.test_mission==MissionType::kNone && goal_shot_done_ &&
+           (course_curve_index_==2 || course_curve_index_==4)) {
+          ++course_curve_index_;
+          curve_={};
+          curve_.phase=CurveSearchState::Phase::kLocked;
+          curve_.unlock_blocks=config_.curve_search.post_goal_rearm_line_blocks;
+        }
         FinishMission();
       }
     }
@@ -1878,6 +1897,11 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   output.has_ball = has_ball_;
   output.line_in_recovery = line_state_ != LineState::kNormal;
   output.trial_complete = goal_trial_complete_;
+  output.course_curve_index=course_curve_index_;
+  output.curve_search_phase=static_cast<int>(curve_.phase);
+  output.curve_confirmations=curve_.confirmations;
+  output.curve_head_attempts=curve_.head_attempts;
+  output.curve_body_attempts=curve_.body_attempts;
   output.repeat_scope = RepeatScope();
   output.repeat_sequence = output.repeat_scope != 0;
   output.ball_mission_index = std::max(1, ball_mission_index_);
@@ -2668,7 +2692,9 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
     return {};
   const int index = active_mission_ == MissionType::kBall ? ball_mission_index_
                                                           : goal_mission_index_;
-  return RecoveryTurn(index % 2 == 0, config_.mission_recovery_turn_yaw_deg);
+  return RecoveryTurn(config_.test_mission==MissionType::kNone ?
+      course_curve_index_>=3 : index%2==0,
+      config_.mission_recovery_turn_yaw_deg);
 }
 
 double MissionController::ManualPreviewDurationSec() const {
@@ -2904,6 +2930,13 @@ void MissionController::Reset(bool preserve_action_ids) {
   fresh_after_search_ = test_setup_pending_ = test_entry_pending_ =
       test_execution_started_ = false;
   goal_trial_complete_ = false;
+  course_curve_index_=1;
+  goal_shot_done_=false;
+  curve_={};
+  if(config_.test_mission==MissionType::kBall)
+    course_curve_index_=config_.test_ball_mission_index==1?1:3;
+  else if(config_.test_mission==MissionType::kGoal || config_.goal_trial_start_goal)
+    course_curve_index_=config_.test_goal_mission_index==1?2:4;
   ball_mission_index_ = config_.test_ball_mission_index - 1;
   goal_mission_index_ = config_.test_goal_mission_index - 1;
   mission_recovery_turns_ = 0;
