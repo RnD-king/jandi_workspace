@@ -26,6 +26,11 @@ int main() {
   // Four lower RANSAC survivors and one upper original point: shared-anchor
   // upper fit has two points, and normal O/H remains approximately straight.
   in.line_centers={{380,450},{380,400},{380,350},{380,300},{410,250}};
+  const auto evidence=ComputeCurveEvidence(in.line_centers,640,480,
+      cfg.line_features,cfg.curve_search);
+  std::fprintf(stderr,"evidence=%d dir=%d angle=%.2f upper=%d\\n",
+      int(evidence.valid),evidence.direction,evidence.delta_deg,evidence.upper_points);
+  assert(evidence.valid && evidence.direction==1);
   MissionFrameResult out;
   const auto tick=[&](CommandDeliveryFeedback fb={}) {
     in.now_sec+=0.07;
@@ -37,7 +42,12 @@ int main() {
     const auto id=out.command.action_id;
     assert(id && out.command.action==MissionAction::kLineStraightUnit);
     tick({id,true,false,false});
-    for(int i=0;i<12;++i) tick();
+    for(int i=0;i<12;++i) {
+      tick();
+      if(i==10) std::fprintf(stderr,"beforeDONE active=%d phase=%d action=%d id=%llu\\n",
+          int(out.line_plan_active),out.curve_search_phase,int(out.command.action),
+          (unsigned long long)out.command.action_id);
+    }
     tick({id,true,true,false});
     std::fprintf(stderr,"SEQ=%d phase=%d confirm=%d action=%d id=%llu line=%d\\n",
         seq,out.curve_search_phase,out.curve_confirmations,int(out.command.action),
