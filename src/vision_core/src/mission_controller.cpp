@@ -2891,6 +2891,11 @@ bool MissionController::UpdateLineP2pTuning(const LineP2pConfig &line_p2p) {
 }
 
 void MissionController::ClearObservationEvidence() {
+  // PAUSE/RESUME preserves course stage and completed action counters, never
+  // reuses visual evidence collected before the pause.
+  curve_.frame_directions.clear();
+  curve_.center_hits.clear();
+  curve_.object_hits.clear();
   approach_evidence_={};
   continuous_.hits.clear();continuous_.pose_hits.clear();continuous_.near_hits.clear();
   continuous_.missing=0;
