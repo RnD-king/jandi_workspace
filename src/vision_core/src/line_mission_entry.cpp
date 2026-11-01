@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace vision_core {
 namespace {
@@ -89,6 +90,9 @@ MissionFrameResult MissionController::StepPlannedLine(
           static_cast<std::size_t>(config_.curve_search.stable_window) ?
           (right_hits>=config_.curve_search.stable_min_hits ? 1 :
            left_hits>=config_.curve_search.stable_min_hits ? -1 : 0) : 0;
+      std::fprintf(stderr,"CURVE_COMPLETED owner=%llu votes=%zu right=%d left=%d detected=%d phase=%d idx=%d\\n",
+          (unsigned long long)block.owner,curve_.frame_directions.size(),
+          right_hits,left_hits,detected,int(curve_.phase),course_curve_index_);
       curve_.frame_directions.clear();
       if(curve_.phase==CurveSearchState::Phase::kLocked &&
          curve_.unlock_blocks>0) {
@@ -171,6 +175,9 @@ MissionFrameResult MissionController::StepPlannedLine(
        curve_.phase==CurveSearchState::Phase::kConfirm);
   if(curve_frame_eligible) {
     curve_.frame_directions.push_back(curve_evidence.direction);
+    if(curve_.frame_directions.size()==1)
+      std::fprintf(stderr,"CURVE_FIRST_VOTE d=%d angle=%.2f lineActive=%d\\n",
+          curve_evidence.direction,curve_evidence.delta_deg,int(line_plan_.Active()));
     while(curve_.frame_directions.size()>
           static_cast<std::size_t>(config_.curve_search.stable_window))
       curve_.frame_directions.pop_front();
