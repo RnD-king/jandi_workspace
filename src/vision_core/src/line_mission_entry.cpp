@@ -223,8 +223,15 @@ MissionFrameResult MissionController::StepPlannedLine(
       } else curve_.phase=CurveSearchState::Phase::kIdle;
       return StepWithLineImageCenter(input,image_center);
     }
+    // Reaching BALL near is the actual lock condition, independently of
+    // whether the object was acquired before or during a curve scan.
+    if (continuous_.mission==MissionType::kBall && continuous_.near) {
+      curve_.phase=CurveSearchState::Phase::kLocked;
+      curve_.unlock_blocks=0;
+    }
     if (continuous_.mission==MissionType::kHurdle && continuous_.near &&
-        curve_.phase==CurveSearchState::Phase::kLocked)
+        curve_.phase==CurveSearchState::Phase::kLocked &&
+        curve_.unlock_blocks==config_.curve_search.failure_lock_line_blocks)
       curve_.phase=CurveSearchState::Phase::kIdle;
     if (route.guide) {
       raw=*route.guide;decision=raw;
