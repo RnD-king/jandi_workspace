@@ -2616,6 +2616,10 @@ bool MissionController::SetTestMissionIndices(int ball_index, int goal_index) {
       active_mission_ == MissionType::kBall ? ball_index : ball_index - 1;
   goal_mission_index_ =
       active_mission_ == MissionType::kGoal ? goal_index : goal_index - 1;
+  // The standalone/manual indexed recovery contract is still configurable.
+  // An explicit index override also synchronizes the AUTO course stage.
+  course_curve_index_=active_mission_==MissionType::kGoal ?
+      (goal_index<=1 ? 2 : 4) : (ball_index<=1 ? 1 : 3);
   return true;
 }
 
