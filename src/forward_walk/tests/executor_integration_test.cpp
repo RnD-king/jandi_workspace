@@ -368,6 +368,9 @@ int main() {
               node->action_transactions_.active_id==0 && !node->motion_in_progress_,
               "missing action 31 asset was accepted or started");
         WriteMotion(left_in_place);
+        // Action 10 is intentionally absent from the earlier scenarios and
+        // must be created in this private fixture before the single-turn loop.
+        WriteMotion(directory/node->ProgramFileForAction(10));
         // Single turns execute once and do not extend the READY action set.
         for(uint16_t code:{10,26,27,28,31}) {
             const uint64_t id=35000+code;
