@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 
 namespace vision_core {
 namespace {
@@ -86,14 +85,9 @@ MissionFrameResult MissionController::StepPlannedLine(
         if(d<0) ++left_hits;
         if(d>0) ++right_hits;
       }
-      const int detected=curve_.frame_directions.size()==
-          static_cast<std::size_t>(config_.curve_search.stable_window) ?
-          (right_hits>=config_.curve_search.stable_min_hits ? 1 :
-           left_hits>=config_.curve_search.stable_min_hits ? -1 : 0) : 0;
-      std::fprintf(stderr,"CURVE_COMPLETED owner=%llu votes=%zu right=%d left=%d detected=%d phase=%d idx=%d\\n",
-          (unsigned long long)block.owner,curve_.frame_directions.size(),
-          right_hits,left_hits,detected,int(curve_.phase),course_curve_index_);
+      const int detected=curve_.block_curve_direction;
       curve_.frame_directions.clear();
+      curve_.block_curve_direction=0;
       if(curve_.phase==CurveSearchState::Phase::kLocked &&
          curve_.unlock_blocks>0) {
         if(--curve_.unlock_blocks==0)
@@ -140,7 +134,6 @@ MissionFrameResult MissionController::StepPlannedLine(
         } else {curve_.phase=CurveSearchState::Phase::kIdle;curve_.confirmations=0;}
       }
     }
-    std::fprintf(stderr,"CURVE_AFTER_BLOCK phase=%d conf=%d\n",int(curve_.phase),curve_.confirmations);
     if (automatic_approach && block.owner && block.owner==continuous_.epoch) {
       if (block.probe) {
         continuous_.probe_active=false;
@@ -174,18 +167,23 @@ MissionFrameResult MissionController::StepPlannedLine(
       line_plan_.Active() && input.advance_line_fsm &&
       (curve_.phase==CurveSearchState::Phase::kIdle ||
        curve_.phase==CurveSearchState::Phase::kConfirm);
-  if(input.line_centers.size()==5 && line_plan_.Active()) std::fprintf(stderr,
-    "CURVE_GATE auto=%d has=%d continuous=%d cam=%d settled=%d advance=%d phase=%d active=%d\\n",
-    int(automatic_approach),int(has_ball_),int(continuous_.mission),int(input.camera_feedback.actual_mode),
-    int(input.camera_feedback.settled),int(input.advance_line_fsm),int(curve_.phase),int(line_plan_.Active()));
   if(curve_frame_eligible) {
     curve_.frame_directions.push_back(curve_evidence.direction);
-    if(curve_.frame_directions.size()==1)
-      std::fprintf(stderr,"CURVE_FIRST_VOTE d=%d angle=%.2f lineActive=%d\\n",
-          curve_evidence.direction,curve_evidence.delta_deg,int(line_plan_.Active()));
     while(curve_.frame_directions.size()>
           static_cast<std::size_t>(config_.curve_search.stable_window))
       curve_.frame_directions.pop_front();
+    if(curve_.block_curve_direction==0 &&
+       curve_.frame_directions.size()==
+          static_cast<std::size_t>(config_.curve_search.stable_window)) {
+      const int right=std::count(curve_.frame_directions.begin(),
+                                  curve_.frame_directions.end(),1);
+      const int left=std::count(curve_.frame_directions.begin(),
+                                 curve_.frame_directions.end(),-1);
+      if(right>=config_.curve_search.stable_min_hits)
+        curve_.block_curve_direction=1;
+      else if(left>=config_.curve_search.stable_min_hits)
+        curve_.block_curve_direction=-1;
+    }
   }
   auto raw = output.line_features.guide;
   const auto actual_line_guide=raw;
@@ -218,8 +216,6 @@ MissionFrameResult MissionController::StepPlannedLine(
       curve_.phase==CurveSearchState::Phase::kBodyObserve)) {
     route=PrepareContinuousApproach(input,output.line_features,idle);
     if (route.entered) {
-      std::fprintf(stderr,"CURVE_ROUTE_ENTERED mission=%d near=%d\n",
-          int(continuous_.mission),int(continuous_.near));
       // Far-object loss must not lock out the next legitimate curve.
       if(continuous_.mission==MissionType::kBall && continuous_.near) {
         curve_.phase=CurveSearchState::Phase::kLocked;
@@ -801,8 +797,6 @@ MissionFrameResult MissionController::StepPlannedLine(
   output.candidate_phase = static_cast<int>(candidate_.phase);
   output.candidate_search_turns = candidate_.searches;
   output.candidate_restore_turns = candidate_.restores;
-  std::fprintf(stderr,"CURVE_AT_RETURN phase=%d conf=%d\n",
-      int(curve_.phase),curve_.confirmations);
   output.line_plan_active = line_plan_.Active();
   PopulateApproachDiagnostics(output);
   PopulateDiagnostics(output, input.now_sec);
