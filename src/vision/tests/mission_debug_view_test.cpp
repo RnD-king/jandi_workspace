@@ -163,11 +163,14 @@ int main() {
   m.approach_mission=vision_core::MissionType::kBall;
   m.approach_near_observing=true;
   auto observing=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
-  Check(observing.image.at<cv::Vec3b>(200,290)!=cv::Vec3b(0,0,0),
-        "near BALL stopped observation must show the approach grid");
+  // The near guide is drawn from the two-step threshold (v=240) down,
+  // rather than through the upper portion of the image.
+  Check(observing.image.at<cv::Vec3b>(300,290)!=cv::Vec3b(0,0,0) &&
+        observing.image.at<cv::Vec3b>(200,290)==cv::Vec3b(0,0,0),
+        "near BALL stopped observation must show the lower approach grid only");
   m.approach_near_observing=false;
   auto moving=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
-  Check(moving.image.at<cv::Vec3b>(200,290)==cv::Vec3b(0,0,0),
+  Check(moving.image.at<cv::Vec3b>(300,290)==cv::Vec3b(0,0,0),
         "near BALL grid must end with the stopped observation");
   vision_core::LineGuide virtual_path;
   virtual_path.valid=true;
