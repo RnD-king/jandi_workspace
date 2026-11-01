@@ -912,7 +912,7 @@ int main() {
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
   ReadyCenterAccumulator();
-  NearFinalActionSequence(150,true,true); NearFinalActionSequence(250,true,false);
+  NearFinalActionSequence(150,true,true); NearFinalActionSequence(240,true,false);
   NearFinalActionSequence(575,false,true); NearFinalActionSequence(500,false,false);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
   FarGoalDepthRecovery(false,true);FarGoalDepthRecovery(true,true);
