@@ -390,49 +390,40 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     const int x=std::clamp(static_cast<int>(std::lround(u)),0,vis.cols-1);
     cv::line(vis,{x,0},{x,vis.rows-1},color,1,cv::LINE_AA);
   };
-  const bool stopped_ball_grid =
+  const bool near_ball_guide =
       mission_result.active_mission == vision_core::MissionType::kLine &&
       mission_result.approach_mission == vision_core::MissionType::kBall &&
-      mission_result.approach_near_observing;
-  if (selected_ball || stopped_ball_grid) {
+      (mission_result.approach_near_observing ||
+       mission_result.approach_near_final_motion);
+  const bool near_hurdle_guide =
+      mission_result.active_mission == vision_core::MissionType::kLine &&
+      mission_result.approach_mission == vision_core::MissionType::kHurdle &&
+      (mission_result.approach_near_observing ||
+       mission_result.approach_near_final_motion);
+  if (near_ball_guide && camera.actual_mode==vision_core::CameraMode::kForward) {
     const auto& c=config.ball;
-    if (camera.actual_mode==vision_core::CameraMode::kForward &&
-        (stopped_ball_grid ||
-         ball_cmd.mode==vision_core::BallMode::kApproachBall ||
-         ball_cmd.mode==vision_core::BallMode::kApproachTwoBeforeDown ||
-         ball_cmd.mode==vision_core::BallMode::kWaitCameraDown ||
-         ball_cmd.mode==vision_core::BallMode::kBallRecoveryForward ||
-         ball_cmd.mode==vision_core::BallMode::kForwardRecoveryTurn ||
-         ball_cmd.mode==vision_core::BallMode::kForwardRecoveryStep ||
-         ball_cmd.mode==vision_core::BallMode::kForwardRecoveryObserve)) {
-      const auto top=c.ApproachBounds(0,vis.rows);
-      const auto bottom=c.ApproachBounds(vis.rows-1,vis.rows);
-      const auto draw_edge=[&](double top_u,double bottom_u) {
-        if (!std::isfinite(top_u) || !std::isfinite(bottom_u)) return;
-        cv::line(vis,{static_cast<int>(std::lround(top_u)),0},
-            {static_cast<int>(std::lround(bottom_u)),vis.rows-1},
-            cv::Scalar(0,100,255),1,cv::LINE_AA);
-      };
-      draw_edge(top.first,bottom.first);
-      draw_edge(top.second,bottom.second);
-      draw_v_line(c.approach_short_v_px,cv::Scalar(0,200,255));
-      draw_v_line(c.approach_two_step_v_px,cv::Scalar(0,100,255));
-      // The extra boundary belongs only to the center column (zone 8).
-      if (std::isfinite(c.approach_direct_down_v_px) &&
-          c.approach_direct_down_v_px>=0 && c.approach_direct_down_v_px<vis.rows) {
-        const auto bounds=c.ApproachBounds(c.approach_direct_down_v_px,vis.rows);
-        const int left=std::max(0,static_cast<int>(std::ceil(bounds.first)));
-        const int right=std::min(vis.cols-1,static_cast<int>(std::floor(bounds.second)));
-        const int y=std::clamp(static_cast<int>(std::lround(c.approach_direct_down_v_px)),0,vis.rows-1);
-        if (left<=right) {
-          const cv::Scalar color(0,230,255);
-          cv::line(vis,{left,y},{right,y},color,2,cv::LINE_AA);
-          cv::putText(vis,"1 STEP -> DOWN",{left+4,std::max(14,y-6)},
-              cv::FONT_HERSHEY_SIMPLEX,0.45,color,1,cv::LINE_AA);
-        }
-      }
+    const int v=std::clamp(static_cast<int>(std::lround(c.approach_two_step_v_px)),0,vis.rows-1);
+    const auto bounds=c.ApproachBounds(c.approach_two_step_v_px,vis.rows);
+    draw_v_line(c.approach_two_step_v_px,cv::Scalar(0,100,255));
+    const auto vertical=[&](double u,cv::Scalar color) {
+      if (std::isfinite(u) && u>=0 && u<vis.cols)
+        cv::line(vis,{static_cast<int>(std::lround(u)),v},
+                 {static_cast<int>(std::lround(u)),vis.rows-1},color,1,cv::LINE_AA);
+    };
+    vertical(bounds.first-c.approach_extreme_turn_margin_px,cv::Scalar(0,165,255));
+    vertical(bounds.first,cv::Scalar(0,100,255));
+    vertical(bounds.second,cv::Scalar(0,100,255));
+    vertical(bounds.second+c.approach_extreme_turn_margin_px,cv::Scalar(0,165,255));
+    const int y=static_cast<int>(std::lround(c.approach_direct_down_v_px));
+    if (y>=v && y<vis.rows) {
+      cv::line(vis,
+          {std::clamp(static_cast<int>(std::lround(bounds.first)),0,vis.cols-1),y},
+          {std::clamp(static_cast<int>(std::lround(bounds.second)),0,vis.cols-1),y},
+          cv::Scalar(0,230,255),2,cv::LINE_AA);
     }
   }
+  if (near_hurdle_guide && camera.actual_mode==vision_core::CameraMode::kForward)
+    draw_v_line(config.hurdle.approach_two_step_v_px,cv::Scalar(200,0,200));
   if (selected_goal && (goal_cmd.mode == vision_core::GoalMode::kForwardApproach ||
       goal_cmd.mode == vision_core::GoalMode::kApproach ||
       goal_cmd.mode == vision_core::GoalMode::kSearch)) {
@@ -445,33 +436,27 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     draw_u_line(config.goal.edge_margin_px,cv::Scalar(60,60,255));
     draw_u_line(vis.cols-config.goal.edge_margin_px,cv::Scalar(60,60,255));
   }
-  if (selected_hurdle) {
-    const auto& c=config.hurdle;
-    if (camera.actual_mode==vision_core::CameraMode::kForward &&
-        (hurdle_cmd.mode==vision_core::HurdleMode::kApproach ||
-         hurdle_cmd.mode==vision_core::HurdleMode::kApproachTwoBeforeDown ||
-         hurdle_cmd.mode==vision_core::HurdleMode::kRecoveryForward)) {
-      draw_v_line(c.approach_short_v_px,cv::Scalar(255,120,255));
-      draw_v_line(c.approach_two_step_v_px,cv::Scalar(200,0,200));
-    } else if (camera.actual_mode==vision_core::CameraMode::kDown) {
-      vision::DrawHurdleDownGuides(vis,c,
-          mission_result.foot_pose==vision_core::FootPose::kFine);
-    }
-  }
+  if (selected_hurdle && camera.actual_mode==vision_core::CameraMode::kDown)
+    vision::DrawHurdleDownGuides(vis,config.hurdle,
+        mission_result.foot_pose==vision_core::FootPose::kFine);
 
   // The pickup region uses the same four pixel edges as FineAction.
   // Its single decision-center marker is above.
   if (selected_ball && camera.actual_mode==vision_core::CameraMode::kDown) {
     const auto &c = config.ball;
     const cv::Rect image_bounds(0, 0, vis.cols, vis.rows);
-    const int left = static_cast<int>(std::lround(c.pickup_u1_px));
-    const int top = static_cast<int>(std::lround(c.pickup_v1_px));
-    const int right = static_cast<int>(std::lround(c.pickup_u2_px));
-    const int bottom = static_cast<int>(std::lround(c.pickup_v2_px));
-    const cv::Rect box = cv::Rect(left, top,
-        std::max(1, right - left + 1), std::max(1, bottom - top + 1)) & image_bounds;
-    if (!box.empty())
-      cv::rectangle(vis, box, cv::Scalar(0,255,255), 2);
+    const std::vector<cv::Point> corners{
+        {static_cast<int>(std::lround(c.PickupLeftAt(c.pickup_v1_px))),
+         static_cast<int>(std::lround(c.pickup_v1_px))},
+        {static_cast<int>(std::lround(c.PickupRightAt(c.pickup_v1_px))),
+         static_cast<int>(std::lround(c.pickup_v1_px))},
+        {static_cast<int>(std::lround(c.pickup_u2_px)),
+         static_cast<int>(std::lround(c.pickup_v2_px))},
+        {static_cast<int>(std::lround(c.pickup_u1_px)),
+         static_cast<int>(std::lround(c.pickup_v2_px))}};
+    if (!image_bounds.empty())
+      cv::polylines(vis,std::vector<std::vector<cv::Point>>{corners},true,
+                    cv::Scalar(0,255,255),2,cv::LINE_AA);
   }
   // Raw depth-edge points are estimator inputs, not the GOAL
   // fine-control decision coordinate; suppress them here.

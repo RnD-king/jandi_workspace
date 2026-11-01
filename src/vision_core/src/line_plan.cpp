@@ -88,16 +88,21 @@ void LinePlan::Feedback(const CommandDeliveryFeedback& feedback, double now, dou
   }
 }
 void LinePlan::Observe(double now, const LineGuide& actual_line,
-                       const LineGuide& object_guide, std::uint64_t object_owner) {
+                        const LineGuide& object_guide, std::uint64_t object_owner,
+                        std::optional<Point2> object_center,bool object_uses_center) {
   for (auto& block : blocks_) {
     if (block.aborted || block.window_finished || !block.start || now < *block.start ||
         block.completed == block.count) continue;
     if (!block.observations.ActiveFor(block.id)) block.observations.Begin(block.id, *block.start);
     // A LINE block can still be running when an object is admitted. Its
     // observation window must retain real LINE samples, never virtual ones.
-    const LineGuide& guide=block.owner==0 ? actual_line :
-        block.owner==object_owner ? object_guide : LineGuide{};
-    block.observations.Add(block.id, now, guide);
+    if (block.owner && block.owner==object_owner && object_uses_center) {
+      block.observations.AddCenter(block.id,now,object_center);
+    } else {
+      const LineGuide& guide=block.owner==0 ? actual_line :
+          block.owner==object_owner ? object_guide : LineGuide{};
+      block.observations.Add(block.id,now,guide);
+    }
   }
 }
 void LinePlan::ObserveObject(double now, std::uint64_t owner, bool visible,
@@ -177,6 +182,17 @@ std::optional<LineGuide> LinePlan::Finish(std::uint64_t id, double now, double r
   }
   return block->mean;
 }
+std::optional<Point2> LinePlan::FinishObjectCenter(
+    std::uint64_t id,double now,double remaining) {
+  const auto it=units_.find(id);
+  auto* block=it==units_.end()?nullptr:Find(it->second.block);
+  if (!block || block->aborted) return std::nullopt;
+  if (!block->window_finished) {
+    block->mean_center=block->observations.FinishCenter(block->id,now,remaining);
+    block->window_finished=true;
+  }
+  return block->mean_center;
+}
 std::optional<LineWindowStats> LinePlan::Stats(std::uint64_t id) const {
   const auto it = units_.find(id);
   const auto* block = it == units_.end() ? nullptr : Find(it->second.block);
@@ -208,6 +224,7 @@ void LinePlan::ClearEvidence() {
   for (auto& block : blocks_) {
     block.observations.Reset();
     block.mean.reset();
+    block.mean_center.reset();
     block.window_finished = false;
     block.object_hits.clear();
     block.object_qualified = false;

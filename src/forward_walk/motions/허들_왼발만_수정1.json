@@ -61,7 +61,7 @@
       }
     },
     {
-      "duration_sec": 1,
+      "duration_sec": 2,
       "hold_sec": 0.2,
       "interpolation": "smoothstep",
       "max_speed_deg_s": 30,

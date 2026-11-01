@@ -188,31 +188,22 @@ ActionRequest BallController::FineAction() const {
 }
 
 ActionRequest BallController::FineActionAt(Point2 center) const {
-  const double u = center.u, v = center.v;
-  const double u_error = u - config_.PickupCenterU();
-  const double v_error = v - config_.PickupCenterV();
-
-  const double ru =
-      std::max(0.0, std::abs(u_error) - config_.PickupHalfWidth()) /
-      config_.PickupHalfWidth();
-  const double rv =
-      std::max(0.0, std::abs(v_error) - config_.PickupHalfHeight()) /
-      config_.PickupHalfHeight();
-  if (u >= config_.pickup_u1_px && u <= config_.pickup_u2_px &&
-      v >= config_.pickup_v1_px && v <= config_.pickup_v2_px)
+  const double u=center.u, v=center.v;
+  const double left=config_.PickupLeftAt(v);
+  const double right=config_.PickupRightAt(v);
+  const double half_width=(right-left)*0.5;
+  const double ru=std::max({left-u,0.0,u-right})/half_width;
+  const double rv=std::max({config_.pickup_v1_px-v,0.0,v-config_.pickup_v2_px})/
+                  config_.PickupHalfHeight();
+  if (config_.PickupContains(center))
     return Mission(MissionAction::kPickBall);
-  // Preserve the axis priority: relative excess beyond each rectangle edge.
-  if (ru >= rv) {
-    if (u < config_.pickup_u1_px)
-      return Locomotion(MissionAction::kLeftSideStep);
-    if (u > config_.pickup_u2_px)
-      return Locomotion(MissionAction::kRightSideStep);
+  // Preserve axis priority, using tapered left/right bounds at this v.
+  if (ru>=rv) {
+    if (u<left) return Locomotion(MissionAction::kLeftSideStep);
+    if (u>right) return Locomotion(MissionAction::kRightSideStep);
   }
-  if (v < config_.pickup_v1_px) {
-    return Locomotion(MissionAction::kStepForwardHalf);
-  }
-  if (v > config_.pickup_v2_px)
-    return Locomotion(MissionAction::kStepBack);
+  if (v<config_.pickup_v1_px) return Locomotion(MissionAction::kStepForwardHalf);
+  if (v>config_.pickup_v2_px) return Locomotion(MissionAction::kStepBack);
   return {};
 }
 
@@ -614,7 +605,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     if (result.action.category==ActionCategory::kLocomotion && config_.fine_motion.HasCalibration()) {
       const auto plan=PlanBallFineMotion(config_.fine_motion,tracked_.center_px,
           config_.pickup_u1_px,config_.pickup_u2_px,config_.pickup_v1_px,config_.pickup_v2_px,
-          image_width,image_height,allow_fine_pair ? config_.fine_motion.max_repetitions : 1);
+          image_width,image_height,allow_fine_pair ? config_.fine_motion.max_repetitions : 1,
+          config_.pickup_top_inset_px);
       if (plan.action!=MissionAction::kNone) {
         result.action=Locomotion(plan.action);
         if (plan.repetitions>1 && allow_new_body_actions && allow_fine_pair) {
@@ -631,8 +623,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     } else if (result.action.action == MissionAction::kLeftSideStep ||
                result.action.action == MissionAction::kRightSideStep) {
       const double excess = result.action.action == MissionAction::kLeftSideStep
-          ? config_.pickup_u1_px - tracked_.center_px.u
-          : tracked_.center_px.u - config_.pickup_u2_px;
+          ? config_.PickupLeftAt(tracked_.center_px.v) - tracked_.center_px.u
+          : tracked_.center_px.u - config_.PickupRightAt(tracked_.center_px.v);
       if (excess >= config_.fine_side_two_step_margin_px &&
           allow_new_body_actions && allow_fine_pair && config_.fine_motion.max_repetitions>=2) {
         fine_side_action_ = result.action.action;

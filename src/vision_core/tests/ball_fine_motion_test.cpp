@@ -20,6 +20,23 @@ BallConfig Config() {
   c.stable_window=10;c.stable_min_hits=7;c.down_search_min_hits=7;
   c.fine_motion={};return c;
 }
+void TaperedPickupBounds() {
+  auto c=Config();
+  c.pickup_top_inset_px=5.0;
+  // Preserve the original outer rectangle while narrowing only the top.
+  assert(c.PickupContains({310,130}));
+  assert(c.PickupContains({385,130}));
+  assert(c.PickupContains({315,80}));
+  assert(c.PickupContains({385-5,80}));
+  assert(!c.PickupContains({310,80}));
+  assert(!c.PickupContains({385,80}));
+  assert(c.PickupLeftAt(105)>310 && c.PickupRightAt(105)<385);
+  BallFineMotionConfig motion;
+  motion.right_delta_px={-5,0};
+  const auto plan=PlanBallFineMotion(motion,{386,80},
+      310,385,80,130,640,480,3,c.pickup_top_inset_px);
+  assert(plan.repetitions>0 && plan.action==MissionAction::kRightSideStep);
+}
 void CountsAndCrossAxis() {
   BallFineMotionConfig c;c.right_delta_px={-50,0};
   assert(Plan(c,{420,105}).repetitions==1);
@@ -163,7 +180,7 @@ void Transport(bool manual,bool pause) {
 }
 }
 int main() {
-  CountsAndCrossAxis();BoundsAndUncalibrated();LegacyFallback();
+  CountsAndCrossAxis();BoundsAndUncalibrated();TaperedPickupBounds();LegacyFallback();
   for (auto action : {MissionAction::kStepForwardHalf,MissionAction::kStepBack,
       MissionAction::kLeftSideStep,MissionAction::kRightSideStep}) DirectRepeat(action);
   Transport(false,false);Transport(true,false);Transport(false,true);

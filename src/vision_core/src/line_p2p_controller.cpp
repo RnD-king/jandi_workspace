@@ -59,6 +59,7 @@ void LineGuideAccumulator::Begin(std::uint64_t action_id, double now_sec) {
   action_id_ = action_id;
   begin_sec_ = std::isfinite(now_sec) ? now_sec : 0.0;
   samples_.clear();
+  center_samples_.clear();
   frame_times_.clear();
   frame_valid_.clear();
   last_stats_.reset();
@@ -140,6 +141,57 @@ LineGuideAccumulator::Finish(std::uint64_t action_id, double now_sec,
   return result.valid ? std::optional<LineGuide>(result) : std::nullopt;
 }
 
+void LineGuideAccumulator::AddCenter(std::uint64_t action_id, double now_sec,
+                                      std::optional<Point2> center) {
+  if (!ActiveFor(action_id) || !std::isfinite(now_sec)) return;
+  frame_times_.push_back(now_sec);
+  const bool valid=center && std::isfinite(center->u) && std::isfinite(center->v);
+  frame_valid_.push_back(valid);
+  if (valid) center_samples_.push_back({now_sec,*center});
+}
+
+std::optional<Point2> LineGuideAccumulator::FinishCenter(
+    std::uint64_t action_id,double now_sec,double estimated_remaining_sec) {
+  if (!ActiveFor(action_id)) { last_stats_.reset(); return std::nullopt; }
+  const double end_sec=std::isfinite(now_sec)?std::max(begin_sec_,now_sec):begin_sec_;
+  const double remaining=std::isfinite(estimated_remaining_sec)
+      ? std::max(0.0,estimated_remaining_sec):0.0;
+  const double estimated_motion_sec=end_sec-begin_sec_+remaining;
+  const double cutoff=begin_sec_+observation_start_ratio_*estimated_motion_sec;
+  const double span=std::max(0.0,end_sec-cutoff);
+  LineWindowStats stats;
+  stats.action_id=action_id;stats.total_frames=frame_times_.size();
+  stats.valid_frames=center_samples_.size();
+  stats.estimated_motion_sec=estimated_motion_sec;
+  stats.window_start_sec=cutoff;stats.window_end_sec=end_sec;
+  stats.remaining_sec=remaining;
+  std::deque<bool> recent;
+  bool qualified=false;
+  for (std::size_t i=0;i<frame_times_.size();++i) {
+    if (frame_times_[i]<cutoff || frame_times_[i]>end_sec) continue;
+    ++stats.window_frames;
+    recent.push_back(frame_valid_[i]);
+    while (recent.size()>static_cast<std::size_t>(window_)) recent.pop_front();
+    if (recent.size()==static_cast<std::size_t>(window_) &&
+        std::count(recent.begin(),recent.end(),true)>=required_hits_)
+      qualified=true;
+  }
+  Point2 sum{};double weight_sum=0.0;
+  for (const auto& sample:center_samples_) {
+    if (sample.now_sec<cutoff || sample.now_sec>end_sec) continue;
+    ++stats.used_frames;
+    const double phase=span>1e-9 ? Clamp((sample.now_sec-cutoff)/span,0.0,1.0):1.0;
+    const double weight=1.0+2.0*phase;
+    sum.u+=weight*sample.center.u;sum.v+=weight*sample.center.v;
+    weight_sum+=weight;
+  }
+  last_stats_=stats;
+  Reset();
+  if (!qualified || stats.used_frames<static_cast<std::size_t>(minimum_valid_samples_) ||
+      weight_sum<=0.0) return std::nullopt;
+  return Point2{sum.u/weight_sum,sum.v/weight_sum};
+}
+
 std::optional<LineGuide>
 LineGuideAccumulator::FinishAll(std::uint64_t action_id) {
   if (!ActiveFor(action_id)) {
@@ -196,6 +248,7 @@ void LineGuideAccumulator::Reset() {
   action_id_ = 0;
   begin_sec_ = 0.0;
   samples_.clear();
+  center_samples_.clear();
   frame_times_.clear();
   frame_valid_.clear();
 }

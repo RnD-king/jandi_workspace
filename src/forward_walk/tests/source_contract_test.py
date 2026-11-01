@@ -38,8 +38,8 @@ checks = {
     "failure IDs logged before reset": main.index('action_id=%llu queued_id=%llu camera_id=%llu') < main.index('action_transactions_.Abort();'),
 }
 for action, filename in {
-    'STEP_FORWARD_ONE': 'motions/보행_1걸음_초기X_수정3.json',
-    'STEP_FORWARD_ONE_ALTERNATE': 'motions/보행_1걸음_초기X_수정3.json',
+    'STEP_FORWARD_ONE': 'motions/보행_1걸음_초기X_수정5.json',
+    'STEP_FORWARD_ONE_ALTERNATE': 'motions/보행_1걸음_초기X_수정5.json',
     'LINE_LEFT_UNIT': 'motions/보행_좌회전전진_20도_최종_초기X_수정.json',
     'LINE_STRAIGHT_UNIT': 'missions/2걸음_1차찐.json',
     'LINE_RIGHT_UNIT': 'missions/직진후우회전_2걸음.json',
@@ -69,15 +69,20 @@ checks['TURN_LEFT_IN_PLACE action number'] = 'uint16 TURN_LEFT_IN_PLACE=31' in (
 checks['STEP_FORWARD_ONE_ALTERNATE action number'] = 'uint16 STEP_FORWARD_ONE_ALTERNATE=35' in (
     root.parent / 'vision/msg/ActionCommand.msg').read_text()
 one_step = '보행_1걸음_초기X_수정3.json'
+solo_step = '보행_1걸음_초기X_수정5.json'
 two_step = json.loads((root / 'missions/2걸음_1차찐.json').read_text())
-checks['two-step repeats the new one-step'] = [
+checks['two-step retains its original one-step motion'] = [
     motion['filename'] for motion in two_step['motions']
 ] == [one_step, one_step]
+solo_motion = json.loads((root / 'motions' / solo_step).read_text())
+checks['solo one-step keeps its own 0.5-second final hold'] = (
+    solo_motion['keyframes'][-1]['hold_sec'] == 0.5
+)
 right_step = json.loads((root / 'missions/직진후우회전_2걸음.json').read_text())
 checks['right-line unit walks straight then turns right'] = [
     motion['filename'] for motion in right_step['motions']
 ] == [one_step, '보행_우회전전진_20도_최종_초기X_찐.json']
-checks['active straight missions use the new one-step'] = all(
+checks['active multi-step missions retain the original one-step'] = all(
     all(motion['filename'] == one_step for motion in
         json.loads((root / 'missions' / mission).read_text())['motions'])
     for mission in ('직진_3걸음_수정.json', '직진_4걸음_수정.json', '연속걷기.json')
@@ -85,10 +90,10 @@ checks['active straight missions use the new one-step'] = all(
 hurdle = json.loads((root / 'missions/허들넘기_real.json').read_text())
 checks['hurdle replaces only left-foot motion'] = [
     motion['filename'] for motion in hurdle['motions']
-] == ['허들_왼발만_수정1.json', '허들_오른발만_수정_2.json']
+] == ['허들_왼발만_수정2.json', '허들_오른발만_수정_2.json']
 checks['new motion assets exist'] = all(
     (root / 'motions' / name).is_file() for name in (
-        one_step, '허들_왼발만_수정1.json',
+        one_step, solo_step, '허들_왼발만_수정2.json',
         '미세보행_초기자세가기_수정2.json', '허들_오른발만_수정_2.json')
 )
 # Installed JSON contents/references are also validated by motion_assets_check.
