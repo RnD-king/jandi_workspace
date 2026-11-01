@@ -208,15 +208,18 @@ public:
         scan_far_={std::clamp(config_.forward.yaw + static_cast<int>(
                       std::lround(sign*max_yaw_deg*4096.0/360.0)),0,4095),config_.forward.pitch};
         scan_move_sec_=move_sec;scan_hold_sec_=hold_sec;scan_return_sec_=return_sec;
+        paused_was_dwell_=paused_was_returning_=false;
         current_={base.at(config_.yaw_id),base.at(config_.pitch_id)};
         active_=override_enabled_=true;
         scan_phase_=ScanPhase::Outbound;
         BeginSegment(scan_far_,scan_move_sec_,now);
     }
     bool HoldScan() {
-        if(scan_phase_!=ScanPhase::Outbound && scan_phase_!=ScanPhase::Dwell)
+        if(scan_phase_!=ScanPhase::Outbound && scan_phase_!=ScanPhase::Dwell &&
+           scan_phase_!=ScanPhase::Returning)
             return scan_phase_==ScanPhase::Paused;
         paused_was_dwell_=scan_phase_==ScanPhase::Dwell;
+        paused_was_returning_=scan_phase_==ScanPhase::Returning;
         scan_phase_=ScanPhase::Paused;
         start_=target_=current_;
         return true;
@@ -227,6 +230,11 @@ public:
             scan_phase_=ScanPhase::Dwell;
             dwell_until_=now + std::chrono::duration_cast<Clock::duration>(
                 std::chrono::duration<double>(scan_hold_sec_));
+        } else if(paused_was_returning_) {
+            scan_phase_=ScanPhase::Returning;
+            const double full=std::max(1.0,std::abs(double(scan_far_.yaw-config_.forward.yaw)));
+            const double remaining=std::abs(double(current_.yaw-config_.forward.yaw))/full;
+            BeginSegment(config_.forward,std::max(0.02,scan_return_sec_*remaining),now);
         } else {
             scan_phase_=ScanPhase::Outbound;
             const double full=std::max(1.0,std::abs(double(scan_far_.yaw-config_.forward.yaw)));
@@ -338,7 +346,7 @@ private:
     ScanPhase scan_phase_{ScanPhase::None};
     CameraPose scan_far_{};
     double scan_move_sec_{0.5},scan_hold_sec_{0.5},scan_return_sec_{0.5};
-    bool paused_was_dwell_{false};
+    bool paused_was_dwell_{false},paused_was_returning_{false};
     Clock::time_point dwell_until_{};
     CameraConfig config_;
     CameraPose start_{0, 0}, target_{0, 0}, current_{0, 0};
