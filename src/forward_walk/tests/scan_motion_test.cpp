@@ -28,6 +28,46 @@ int main() {
   assert(verifying);
   assert(camera.ConfirmArrival(cfg.forward));
   assert(!camera.ScanActive());
+  // A ball can become centered on the return sweep rather than outbound.
+  // HOLD must stop the current return target, and RESUME must not reverse
+  // the camera back toward the far (45-degree) scan limit.
+  CameraMotion return_scan(cfg);
+  const auto second_start=start+std::chrono::seconds(10);
+  return_scan.StartScan(true,45,0.5,0.5,0.5,positions,second_start);
+  bool return_sweep=false;
+  auto return_at=second_start;
+  for(int i=0;i<95;++i) {
+    return_at=second_start+std::chrono::milliseconds(21*i);
+    return_scan.Update(return_at);
+    const double angle=return_scan.ScanCommandedYawDeg();
+    if(return_scan.ScanState()==CameraMotion::ScanPhase::Returning &&
+        angle > -40.0 && angle < -5.0) {
+      return_sweep=true;
+      break;
+    }
+  }
+  assert(return_sweep);
+  const auto held_angle=return_scan.ScanCommandedYawDeg();
+  assert(return_scan.HoldScan());
+  assert(return_scan.ScanState()==CameraMotion::ScanPhase::Paused);
+  for(int i=1;i<=10;++i)
+    return_scan.Update(return_at+std::chrono::milliseconds(21*i));
+  assert(std::abs(return_scan.ScanCommandedYawDeg()-held_angle)<0.01);
+  const auto resumed_at=return_at+std::chrono::milliseconds(230);
+  assert(return_scan.ResumeScan(resumed_at));
+  assert(return_scan.ScanState()==CameraMotion::ScanPhase::Returning);
+  bool return_finished=false;
+  for(int i=0;i<90;++i) {
+    const auto result=return_scan.Update(resumed_at+std::chrono::milliseconds(21*i));
+    assert(return_scan.ScanCommandedYawDeg()>=held_angle-0.5);
+    if(result==CameraMotion::Result::Verify) {
+      return_finished=true;
+      break;
+    }
+  }
+  assert(return_finished);
+  assert(return_scan.ConfirmArrival(cfg.forward));
+  assert(!return_scan.ScanActive());
   // The normal forward/down/goal interpolation remains available.
   camera.Start(1,positions,start);
   assert(!camera.ScanActive());
