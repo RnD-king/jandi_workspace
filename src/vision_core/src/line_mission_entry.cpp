@@ -200,14 +200,19 @@ MissionFrameResult MissionController::StepPlannedLine(
       curve_.phase==CurveSearchState::Phase::kReturnMiss ||
       curve_.phase==CurveSearchState::Phase::kProbeWalk ||
       curve_.phase==CurveSearchState::Phase::kBodyTurn ||
-      curve_.phase==CurveSearchState::Phase::kBodyForward;
-  if (automatic_approach && !curve_special) {
+      curve_.phase==CurveSearchState::Phase::kBodyForward ||
+      curve_.phase==CurveSearchState::Phase::kBodyObserve;
+  if (automatic_approach && (!curve_special ||
+      curve_.phase==CurveSearchState::Phase::kBodyObserve)) {
     route=PrepareContinuousApproach(input,output.line_features,idle);
     if (route.entered) {
       curve_.phase=CurveSearchState::Phase::kLocked;
       curve_.unlock_blocks=0;
       return StepWithLineImageCenter(input,image_center);
     }
+    if (continuous_.mission==MissionType::kHurdle && continuous_.near &&
+        curve_.phase==CurveSearchState::Phase::kLocked)
+      curve_.phase=CurveSearchState::Phase::kIdle;
     if (route.guide) {
       raw=*route.guide;decision=raw;
       output.line_decision_guide=decision;
@@ -265,6 +270,106 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   ActionRequest request;
   CameraRequest camera = route.camera;
+  const bool curve_override=automatic_approach && curve_special;
+  if(curve_override) {
+    const auto phase=curve_.phase;
+    if(phase==CurveSearchState::Phase::kDrain && idle && commands_allowed) {
+      if(last_ready_line_guide_ && last_ready_line_guide_->valid)
+        curve_.saved_line=last_ready_line_guide_;
+      curve_.center_hits.clear();curve_.object_hits.clear();
+      curve_.phase=CurveSearchState::Phase::kScan;
+      curve_.started=false;
+      ++curve_.head_attempts;
+      camera=curve_.direction>0 ? CameraRequest::kScanLeft :
+                                 CameraRequest::kScanRight;
+    } else if(phase==CurveSearchState::Phase::kScan ||
+             phase==CurveSearchState::Phase::kHold) {
+      const auto& sf=input.camera_scan;
+      if(sf.phase!=0) curve_.started=true;
+      const bool seen=input.scan_ball_u.has_value();
+      const bool centered=seen && std::abs(*input.scan_ball_u-
+          (input.image_width*0.5))<=config_.curve_search.center_half_width_px;
+      if(sf.phase==1 || sf.phase==2 || sf.phase==3) {
+        curve_.object_hits.push_back(seen);
+        curve_.center_hits.push_back(centered);
+        while(curve_.object_hits.size()>
+              static_cast<std::size_t>(config_.curve_search.verify_window))
+          curve_.object_hits.pop_front();
+        while(curve_.center_hits.size()>
+              static_cast<std::size_t>(config_.curve_search.pause_window))
+          curve_.center_hits.pop_front();
+      }
+      const int object_votes=std::count(curve_.object_hits.begin(),
+                                       curve_.object_hits.end(),true);
+      if(phase==CurveSearchState::Phase::kScan && sf.phase==1 &&
+         curve_.center_hits.size()==static_cast<std::size_t>(config_.curve_search.pause_window) &&
+         std::count(curve_.center_hits.begin(),curve_.center_hits.end(),true)>=
+             config_.curve_search.pause_hits) {
+        camera=CameraRequest::kScanHold;
+        curve_.phase=CurveSearchState::Phase::kHold;
+      } else if(phase==CurveSearchState::Phase::kHold && sf.phase==3) {
+        if(curve_.object_hits.size()==static_cast<std::size_t>(
+               config_.curve_search.verify_window) &&
+           object_votes>=config_.curve_search.verify_hits) {
+          curve_.found_yaw=sf.yaw_deg;
+          camera=CameraRequest::kScanReturn;
+          curve_.phase=CurveSearchState::Phase::kReturnFound;
+        } else if(curve_.object_hits.size()==static_cast<std::size_t>(
+                    config_.curve_search.verify_window)) {
+          curve_.center_hits.clear();
+          camera=CameraRequest::kScanResume;
+          curve_.phase=CurveSearchState::Phase::kScan;
+        }
+      }
+      if(sf.finished && curve_.started)
+        curve_.phase=CurveSearchState::Phase::kReturnMiss;
+    } else if(phase==CurveSearchState::Phase::kReturnFound &&
+              input.camera_scan.finished) {
+      if(++curve_.body_attempts>config_.curve_search.body_search_max_attempts) {
+        curve_.phase=CurveSearchState::Phase::kLocked;
+        curve_.unlock_blocks=config_.curve_search.failure_lock_line_blocks;
+        curve_.skip_pending=true;
+        BeginLineReacquisition();
+      } else {
+        const double yaw=std::abs(curve_.found_yaw.value_or(0.0));
+        curve_.phase=yaw>=30.0 ? CurveSearchState::Phase::kBodyTurn :
+                               CurveSearchState::Phase::kBodyForward;
+      }
+    } else if(phase==CurveSearchState::Phase::kReturnMiss &&
+              input.camera_scan.finished) {
+      if(curve_.head_attempts>=config_.curve_search.head_search_max_attempts ||
+         !curve_.saved_line || !curve_.saved_line->valid) {
+        curve_.phase=CurveSearchState::Phase::kLocked;
+        curve_.unlock_blocks=config_.curve_search.failure_lock_line_blocks;
+        curve_.skip_pending=true;
+        if(course_curve_index_==3) {
+          course_curve_index_=5;curve_.unlock_blocks=0;
+        }
+      } else curve_.phase=CurveSearchState::Phase::kProbeWalk;
+    } else if(phase==CurveSearchState::Phase::kProbeWalk && idle &&
+              commands_allowed && !line_plan_.Active() &&
+              curve_.saved_line && curve_.saved_line->valid) {
+      request=CruiseAction(*curve_.saved_line,false);
+    } else if(phase==CurveSearchState::Phase::kBodyTurn && idle &&
+              commands_allowed && curve_.correction_action_id==0) {
+      request=WalkTurn(curve_.direction>0);
+    } else if(phase==CurveSearchState::Phase::kBodyForward && idle &&
+              commands_allowed && !line_plan_.Active()) {
+      request={curve_.direction>0 ? MissionAction::kStepForwardLeft :
+                                   MissionAction::kStepForwardRight,
+               ActionCategory::kLocomotion,0,false};
+    } else if(phase==CurveSearchState::Phase::kBodyObserve) {
+      if(++curve_.observed_frames>=config_.curve_search.verify_window) {
+        if(curve_.body_attempts>=config_.curve_search.body_search_max_attempts) {
+          curve_.phase=CurveSearchState::Phase::kLocked;
+          curve_.unlock_blocks=config_.curve_search.failure_lock_line_blocks;
+          curve_.skip_pending=true;
+          if(course_curve_index_==3) {course_curve_index_=5;curve_.unlock_blocks=0;}
+          BeginLineReacquisition();
+        } else curve_.phase=CurveSearchState::Phase::kDrain;
+      }
+    }
+  }
   bool manual_line_hold = false;
   if (input.manual_observation_control && input.begin_manual_observation &&
       candidate_.phase == CandidatePhase::kNone && !line_plan_.Active() &&
@@ -398,7 +503,7 @@ MissionFrameResult MissionController::StepPlannedLine(
         else ReleaseCandidate();
       }
     }
-  } else if (input.advance_line_fsm && !manual_line_hold && !route.hold) {
+  } else if (!curve_override && input.advance_line_fsm && !manual_line_hold && !route.hold) {
     // A block remains valid if any rolling 10-frame window qualifies before
     // its final READY; a single missed frame never cancels the next unit.
     if (line_failure_pending_done_ && idle) {
@@ -578,7 +683,11 @@ MissionFrameResult MissionController::StepPlannedLine(
     }
   }
 
-  if (route.action.action!=MissionAction::kNone) request=route.action;
+  if (!curve_override && route.action.action!=MissionAction::kNone) request=route.action;
+  if(automatic_approach && curve_.phase==CurveSearchState::Phase::kDelay &&
+     curve_.delay_remaining==1 && input.delivery_feedback.ready &&
+     line_plan_.LastUnit(input.delivery_feedback.action_id))
+    request={};
   if (!commands_allowed || manual_line_hold || (route.hold && route.action.action==MissionAction::kNone) || input.now_sec + 1e-9 < settle_until_sec_ || (active_mission_ == MissionType::kLine &&
       (!input.advance_line_fsm || (!input.allow_new_line_action && !route.near_final_action)))) request = {};
   const bool wants_fine = request.action == MissionAction::kTurnLeft || request.action == MissionAction::kTurnRight;
@@ -610,6 +719,17 @@ MissionFrameResult MissionController::StepPlannedLine(
           1000 + static_cast<int>(candidate_.phase), request, camera,
       input.delivery_feedback, input.now_sec);
   const auto& command = output.command;
+  if(curve_.phase==CurveSearchState::Phase::kBodyTurn &&
+     request.action!=MissionAction::kNone &&
+     command.command_type==CommandType::kAction &&
+     command.action_id!=0 && command.action==request.action)
+    curve_.correction_action_id=command.action_id;
+  if(curve_.phase==CurveSearchState::Phase::kBodyTurn &&
+     input.delivery_feedback.done && curve_.correction_action_id!=0 &&
+     input.delivery_feedback.action_id==curve_.correction_action_id) {
+    curve_.correction_action_id=0;
+    curve_.phase=CurveSearchState::Phase::kBodyForward;
+  }
   if (LinePlan::IsUnit(command.action)) line_plan_.Issued(command,
       command.control_phase == ControlPhase::kWaitingQueuedActionAck ? parent_id : 0);
   output.approach_action_committed=automatic_approach &&
