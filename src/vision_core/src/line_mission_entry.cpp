@@ -302,7 +302,7 @@ MissionFrameResult MissionController::StepPlannedLine(
       const bool seen=input.scan_ball_u.has_value();
       const bool centered=seen && std::abs(*input.scan_ball_u-
           (input.image_width*0.5))<=config_.curve_search.center_half_width_px;
-      if(sf.phase==1 || sf.phase==2 || sf.phase==3) {
+      if(sf.phase==1 || sf.phase==2 || sf.phase==3 || sf.phase==4) {
         curve_.object_hits.push_back(seen);
         curve_.center_hits.push_back(centered);
         while(curve_.object_hits.size()>
@@ -314,7 +314,8 @@ MissionFrameResult MissionController::StepPlannedLine(
       }
       const int object_votes=std::count(curve_.object_hits.begin(),
                                        curve_.object_hits.end(),true);
-      if(phase==CurveSearchState::Phase::kScan && sf.phase==1 &&
+      if(phase==CurveSearchState::Phase::kScan &&
+          (sf.phase==1 || sf.phase==2 || sf.phase==4) &&
          curve_.center_hits.size()==static_cast<std::size_t>(config_.curve_search.pause_window) &&
          std::count(curve_.center_hits.begin(),curve_.center_hits.end(),true)>=
              config_.curve_search.pause_hits) {
@@ -345,6 +346,9 @@ MissionFrameResult MissionController::StepPlannedLine(
         curve_.skip_pending=true;
         BeginLineReacquisition();
       } else {
+        // A verified head sighting ends the head-miss streak. The body
+        // correction retry budget is independent of head-search misses.
+        curve_.head_attempts=0;
         const double yaw=std::abs(curve_.found_yaw.value_or(0.0));
         curve_.phase=yaw>=30.0 ? CurveSearchState::Phase::kBodyTurn :
                                CurveSearchState::Phase::kBodyForward;
