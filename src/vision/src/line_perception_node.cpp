@@ -507,6 +507,12 @@ public:
             response->message = "PAUSE requires RUNNING or OBSERVING";
             return;
           }
+          // A paused scan can hold the head indefinitely; request a physical
+          // return on the SAME camera ID before entering the PAUSING drain.
+          if(pending_camera_id_!=0 &&
+             (pending_camera_request_==vision_core::CameraRequest::kScanLeft ||
+              pending_camera_request_==vision_core::CameraRequest::kScanRight))
+            PublishCameraCommand(vision_core::CameraRequest::kScanReturn);
           // The single-threaded ROS executor serializes this with publication:
           // every command already sent is allowed to finish; no new ID is issued.
           pause_requested_sec_ = get_clock()->now().seconds();
