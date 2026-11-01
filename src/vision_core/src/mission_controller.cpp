@@ -2403,6 +2403,12 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   prepared.image_height = input.image_height;
   prepared.now_sec = input.now_sec;
   prepared.camera_feedback = input.camera_feedback;
+  prepared.camera_scan = input.camera_scan;
+  if (input.camera_scan.phase != 0 && !ball_candidates.empty()) {
+    const auto best=std::max_element(ball_candidates.begin(),ball_candidates.end(),
+        lower_raw_rank);
+    prepared.scan_ball_u=best->target.center_px.u;
+  }
   prepared.command_transport_enabled = input.command_transport_enabled;
   prepared.action_feedback = input.action_feedback;
   prepared.delivery_feedback = input.delivery_feedback;
