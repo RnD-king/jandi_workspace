@@ -327,7 +327,8 @@ MissionFrameResult MissionController::StepPlannedLine(
       if(sf.finished && curve_.started)
         curve_.phase=CurveSearchState::Phase::kReturnMiss;
     } else if(phase==CurveSearchState::Phase::kReturnFound &&
-              input.camera_scan.finished) {
+              input.camera_feedback.settled &&
+              input.camera_feedback.actual_mode==CameraMode::kForward) {
       if(++curve_.body_attempts>config_.curve_search.body_search_max_attempts) {
         curve_.phase=CurveSearchState::Phase::kLocked;
         curve_.unlock_blocks=config_.curve_search.failure_lock_line_blocks;
@@ -339,7 +340,8 @@ MissionFrameResult MissionController::StepPlannedLine(
                                CurveSearchState::Phase::kBodyForward;
       }
     } else if(phase==CurveSearchState::Phase::kReturnMiss &&
-              input.camera_scan.finished) {
+              input.camera_feedback.settled &&
+              input.camera_feedback.actual_mode==CameraMode::kForward) {
       if(curve_.head_attempts>=config_.curve_search.head_search_max_attempts ||
          !curve_.saved_line || !curve_.saved_line->valid) {
         curve_.phase=CurveSearchState::Phase::kLocked;
