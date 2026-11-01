@@ -206,8 +206,11 @@ MissionFrameResult MissionController::StepPlannedLine(
       curve_.phase==CurveSearchState::Phase::kBodyObserve)) {
     route=PrepareContinuousApproach(input,output.line_features,idle);
     if (route.entered) {
-      curve_.phase=CurveSearchState::Phase::kLocked;
-      curve_.unlock_blocks=0;
+      // Far-object loss must not lock out the next legitimate curve.
+      if(continuous_.mission==MissionType::kBall && continuous_.near) {
+        curve_.phase=CurveSearchState::Phase::kLocked;
+        curve_.unlock_blocks=0;
+      } else curve_.phase=CurveSearchState::Phase::kIdle;
       return StepWithLineImageCenter(input,image_center);
     }
     if (continuous_.mission==MissionType::kHurdle && continuous_.near &&
