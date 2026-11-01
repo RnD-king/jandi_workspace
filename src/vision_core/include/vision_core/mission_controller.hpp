@@ -188,6 +188,8 @@ struct MissionFrameResult {
   bool repeat_sequence{false};
   int repeat_scope{0};
   int ball_mission_index{1}, goal_mission_index{1};
+  int course_curve_index{1};
+  int curve_search_phase{0}, curve_confirmations{0}, curve_head_attempts{0}, curve_body_attempts{0};
   int recovery_turns_completed{0};
   bool recovery_failed{false};
   bool terminal_hold{false};
@@ -515,6 +517,23 @@ private:
   bool physical_reset_pending_{false}, reset_walk_done_{false};
   bool reset_camera_command_sent_{false};
   int ball_mission_index_{0}, goal_mission_index_{0};
+  int course_curve_index_{1};
+  bool goal_shot_done_{false};
+  struct CurveSearchState {
+    enum class Phase { kIdle, kConfirm, kDelay, kDrain, kScan, kHold,
+      kReturnFound, kReturnMiss, kProbeWalk, kBodyTurn, kBodyForward,
+      kBodyObserve, kLocked };
+    Phase phase{Phase::kIdle};
+    std::deque<int> frame_directions;
+    std::deque<bool> center_hits, object_hits;
+    int direction{0}, confirmations{0}, delay_remaining{0};
+    int head_attempts{0}, body_attempts{0}, unlock_blocks{0};
+    int observed_frames{0};
+    bool skip_pending{false}, started{false};
+    std::optional<double> found_yaw;
+    std::optional<LineGuide> saved_line;
+    std::uint64_t correction_action_id{0};
+  } curve_;
   int mission_recovery_turns_{0};
   bool mission_recovery_issued_{false};
   bool mission_recovery_failed_{false};
