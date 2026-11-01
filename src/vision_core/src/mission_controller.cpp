@@ -1910,6 +1910,11 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   output.curve_confirmations=curve_.confirmations;
   output.curve_head_attempts=curve_.head_attempts;
   output.curve_body_attempts=curve_.body_attempts;
+  output.course_curve_index=course_curve_index_;
+  output.curve_search_phase=static_cast<int>(curve_.phase);
+  output.curve_confirmations=curve_.confirmations;
+  output.curve_head_attempts=curve_.head_attempts;
+  output.curve_body_attempts=curve_.body_attempts;
   output.repeat_scope = RepeatScope();
   output.repeat_sequence = output.repeat_scope != 0;
   output.ball_mission_index = std::max(1, ball_mission_index_);
