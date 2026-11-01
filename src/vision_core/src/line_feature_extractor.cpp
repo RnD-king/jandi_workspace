@@ -267,4 +267,63 @@ Features ComputeLineFeatures(const std::vector<Point2> &input, int image_width,
   return f;
 }
 
+CurveEvidence ComputeCurveEvidence(const std::vector<Point2>& input,
+                                    int image_width, int image_height,
+                                    const FeatureConfig& cfg,
+                                    const CurveSearchConfig& curve_cfg) {
+  CurveEvidence out;
+  if (!curve_cfg.enabled || image_width<=1 || image_height<=1) return out;
+  std::vector<Point2> original;
+  for (const auto& point:input)
+    if (std::isfinite(point.u) && std::isfinite(point.v))
+      original.push_back({Clamp(point.u,0.0,image_width-1.0),
+                          Clamp(point.v,0.0,image_height-1.0)});
+  std::sort(original.begin(),original.end(),[](const Point2& a,const Point2& b) {
+    return a.v==b.v ? a.u<b.u : a.v>b.v;
+  });
+  original.resize(std::min({original.size(),
+      static_cast<std::size_t>(std::max(1,cfg.max_centers)),kMaxRansacPoints}));
+  if (original.size()<5) return out;
+  std::vector<Point2> lower_candidates=original;
+  std::vector<std::size_t> indices,removed;
+  for(std::size_t i=0;i<lower_candidates.size();++i) indices.push_back(i);
+  RemoveRansacOutliers(lower_candidates,cfg,indices,removed);
+  if (lower_candidates.size()<4) return out;
+  // The LINE RANSAC already selected these points; do not change its result.
+  std::vector<Point2> lower(lower_candidates.begin(),lower_candidates.begin()+4);
+  const auto lower_fit=FitLine(lower,0,lower.size());
+  if(!lower_fit.valid) return out;
+  const Point2 anchor=lower.back();
+  std::vector<Point2> upper{anchor};
+  for(const auto& pt:original)
+    if(pt.v<anchor.v) upper.push_back(pt);
+  std::sort(upper.begin(),upper.end(),[](const Point2& a,const Point2& b){
+    return a.v==b.v ? a.u<b.u : a.v>b.v;
+  });
+  if(upper.size()<static_cast<std::size_t>(curve_cfg.min_upper_points))
+    return out;
+  // Two upper points make an exact line; no outlier rejection is possible.
+  // For four or more, use a separate upper RANSAC without touching lower O/H.
+  if(upper.size()>=4) {
+    std::vector<std::size_t> upper_indices,upper_removed;
+    for(std::size_t i=0;i<upper.size();++i) upper_indices.push_back(i);
+    FeatureConfig upper_cfg=cfg;
+    upper_cfg.ransac_max_outliers=1;
+    RemoveRansacOutliers(upper,upper_cfg,upper_indices,upper_removed);
+  }
+  const auto upper_fit=FitLine(upper,0,upper.size());
+  if(!upper_fit.valid) return out;
+  constexpr double rad_to_deg=180.0/3.14159265358979323846;
+  double delta=(-std::atan(upper_fit.a)+std::atan(lower_fit.a))*rad_to_deg;
+  // Lines are unoriented: normalize the difference modulo 180 degrees.
+  if(delta>90.0) delta-=180.0;
+  if(delta< -90.0) delta+=180.0;
+  out.valid=std::isfinite(delta) && std::abs(delta)>=curve_cfg.threshold_deg;
+  out.delta_deg=delta;
+  out.direction=out.valid?(delta>0?1:-1):0;
+  out.lower_points=static_cast<int>(lower.size());
+  out.upper_points=static_cast<int>(upper.size());
+  return out;
+}
+
 } // namespace vision_core

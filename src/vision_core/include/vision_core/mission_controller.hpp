@@ -29,6 +29,7 @@ struct MissionControllerConfig {
   FeatureConfig line_features;
   LineTrackingConfig line;
   LineP2pConfig line_p2p;
+  CurveSearchConfig curve_search;
   BallConfig ball;
   HurdleConfig hurdle;
   GoalConfig goal;

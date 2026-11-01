@@ -29,6 +29,29 @@ vision_algorithm:
       curve_min_v_span_px: 80.0 # 곡률 계산에 세로 분포 폭
       curve_local_fit_points: 4 # 곡률 표시용 부분 직선 계산의 점 개수
 
+    # Separate from the unchanged normal LINE RANSAC and O/H steering.
+    curve_search:
+      enabled: true
+      threshold_deg: 20.0
+      min_upper_points: 2
+      stable_window: 10
+      stable_min_hits: 5
+      confirm_extra_sequences: 1
+      scan_delay_walk_sequences: 1
+      max_scan_yaw_deg: 45
+      scan_move_sec: 0.5
+      scan_hold_sec: 0.5
+      scan_return_sec: 0.5
+      center_half_width_px: 50.0
+      pause_window: 4
+      pause_hits: 2
+      verify_window: 10
+      verify_hits: 5
+      head_search_max_attempts: 3
+      body_search_max_attempts: 3
+      failure_lock_line_blocks: 20
+      post_goal_rearm_line_blocks: 3
+
     stability:
       line_stable_window: 10
       line_stable_min_hits: 5

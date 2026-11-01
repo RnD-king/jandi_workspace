@@ -43,6 +43,7 @@ YAML::Node AlgorithmSections(const YAML::Node &a) {
   sections["line_features"] = map(line, "features");
   sections["line"] = map(line, "stability");
   sections["line_p2p"] = map(line, "walk");
+  if (line["curve_search"]) sections["curve_search"] = line["curve_search"];
   const auto common = map(a, "common");
   sections["command"] = map(common, "command");
   sections["object_association"] = map(common, "object_association");
@@ -200,6 +201,30 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
       throw std::runtime_error("mission.object_ready_mean_actions has duplicate action IDs");
   }
 
+  if (c.curve_search.enabled) {
+    Positive(c.curve_search.threshold_deg, "curve_search.threshold_deg");
+    if (c.curve_search.threshold_deg >= 90)
+      throw std::runtime_error("curve_search.threshold_deg must be below 90");
+    if (c.curve_search.min_upper_points < 2)
+      throw std::runtime_error("curve_search.min_upper_points must be >= 2");
+    HitsWithinWindow(c.curve_search.stable_min_hits,c.curve_search.stable_window,
+        "curve_search.stable_min_hits","curve_search.stable_window");
+    HitsWithinWindow(c.curve_search.pause_hits,c.curve_search.pause_window,
+        "curve_search.pause_hits","curve_search.pause_window");
+    HitsWithinWindow(c.curve_search.verify_hits,c.curve_search.verify_window,
+        "curve_search.verify_hits","curve_search.verify_window");
+    NonnegativeInt(c.curve_search.confirm_extra_sequences,"curve_search.confirm_extra_sequences");
+    NonnegativeInt(c.curve_search.scan_delay_walk_sequences,"curve_search.scan_delay_walk_sequences");
+    PositiveInt(c.curve_search.max_scan_yaw_deg,"curve_search.max_scan_yaw_deg");
+    Positive(c.curve_search.scan_move_sec,"curve_search.scan_move_sec");
+    Nonnegative(c.curve_search.scan_hold_sec,"curve_search.scan_hold_sec");
+    Positive(c.curve_search.scan_return_sec,"curve_search.scan_return_sec");
+    Positive(c.curve_search.center_half_width_px,"curve_search.center_half_width_px");
+    PositiveInt(c.curve_search.head_search_max_attempts,"curve_search.head_search_max_attempts");
+    PositiveInt(c.curve_search.body_search_max_attempts,"curve_search.body_search_max_attempts");
+    NonnegativeInt(c.curve_search.failure_lock_line_blocks,"curve_search.failure_lock_line_blocks");
+    NonnegativeInt(c.curve_search.post_goal_rearm_line_blocks,"curve_search.post_goal_rearm_line_blocks");
+  }
   PositiveInt(c.line_features.max_centers, "line_features.max_centers");
   if (c.line_features.guide_min_points < 3 ||
       c.line_features.guide_min_points > c.line_features.max_centers)
@@ -490,6 +515,29 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(f, "ransac_min_sample_v_gap_px", c.line_features.ransac_min_sample_v_gap_px);
   Assign(f, "ransac_max_outliers", c.line_features.ransac_max_outliers);
 
+  const auto cs=a["curve_search"];
+  if (cs && cs.IsMap()) {
+    Assign(cs,"enabled",c.curve_search.enabled);
+    Assign(cs,"threshold_deg",c.curve_search.threshold_deg);
+    Assign(cs,"min_upper_points",c.curve_search.min_upper_points);
+    Assign(cs,"stable_window",c.curve_search.stable_window);
+    Assign(cs,"stable_min_hits",c.curve_search.stable_min_hits);
+    Assign(cs,"confirm_extra_sequences",c.curve_search.confirm_extra_sequences);
+    Assign(cs,"scan_delay_walk_sequences",c.curve_search.scan_delay_walk_sequences);
+    Assign(cs,"max_scan_yaw_deg",c.curve_search.max_scan_yaw_deg);
+    Assign(cs,"scan_move_sec",c.curve_search.scan_move_sec);
+    Assign(cs,"scan_hold_sec",c.curve_search.scan_hold_sec);
+    Assign(cs,"scan_return_sec",c.curve_search.scan_return_sec);
+    Assign(cs,"center_half_width_px",c.curve_search.center_half_width_px);
+    Assign(cs,"pause_window",c.curve_search.pause_window);
+    Assign(cs,"pause_hits",c.curve_search.pause_hits);
+    Assign(cs,"verify_window",c.curve_search.verify_window);
+    Assign(cs,"verify_hits",c.curve_search.verify_hits);
+    Assign(cs,"head_search_max_attempts",c.curve_search.head_search_max_attempts);
+    Assign(cs,"body_search_max_attempts",c.curve_search.body_search_max_attempts);
+    Assign(cs,"failure_lock_line_blocks",c.curve_search.failure_lock_line_blocks);
+    Assign(cs,"post_goal_rearm_line_blocks",c.curve_search.post_goal_rearm_line_blocks);
+  }
   const auto line = a["line"];
   Assign(line, "line_stable_window", c.line.line_stable_window);
   Assign(line, "line_stable_min_hits", c.line.line_stable_min_hits);

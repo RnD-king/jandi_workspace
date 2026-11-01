@@ -36,6 +36,37 @@ struct FeatureConfig {
   int ransac_max_outliers{};
 };
 
+// Curve detection is independent of the LINE O/H controller. All defaults are
+// local to the optional curve-search feature, so legacy configs stay loadable.
+struct CurveSearchConfig {
+  bool enabled{true};
+  double threshold_deg{20.0};
+  int min_upper_points{2};
+  int stable_window{10};
+  int stable_min_hits{5};
+  int confirm_extra_sequences{1};
+  int scan_delay_walk_sequences{1};
+  int max_scan_yaw_deg{45};
+  double scan_move_sec{0.5};
+  double scan_hold_sec{0.5};
+  double scan_return_sec{0.5};
+  double center_half_width_px{50.0};
+  int pause_window{4}, pause_hits{2};
+  int verify_window{10}, verify_hits{5};
+  int head_search_max_attempts{3};
+  int body_search_max_attempts{3};
+  int failure_lock_line_blocks{20};
+  int post_goal_rearm_line_blocks{3};
+};
+
+struct CurveEvidence {
+  bool valid{false};
+  int direction{0}; // +1 right-hand curve, -1 left-hand curve
+  double delta_deg{0.0};
+  int lower_points{0};
+  int upper_points{0};
+};
+
 // P2P 모션 판단에 필요한 최소 라인 기하 표현이다.
 struct LineGuide {
   // 모든 signed 값은 image-right가 양수다.
