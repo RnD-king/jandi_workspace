@@ -73,6 +73,7 @@
 #include "vision/yolo_trt_engine.hpp"
 #include "vision/msg/action_command.hpp"
 #include "vision/msg/camera_command.hpp"
+#include "vision/msg/camera_scan_status.hpp"
 #include "vision/msg/command_status.hpp"
 
 namespace vision {
@@ -286,6 +287,7 @@ public:
         get_parameter("goal_throw_landing_z_m").as_double();
     goal_cmd_cfg.position_tolerance_m =
         get_parameter("goal_position_tolerance_m").as_double();
+    curve_search_config_=algorithm_defaults.curve_search;
     vision_core::MissionControllerConfig mission_config = algorithm_defaults;
     mission_config.backboard_depth_strip_width_px=backboard_depth_strip_width_px_;
     mission_config.camera_motion_timeout_sec =
@@ -462,6 +464,15 @@ public:
     camera_status_sub_ = create_subscription<vision::msg::CommandStatus>(
         camera_status_topic_, command_qos,
         std::bind(&LinePerceptionNode::OnCameraStatus, this, std::placeholders::_1));
+    camera_scan_status_sub_ = create_subscription<vision::msg::CameraScanStatus>(
+        "/jandi_vision/camera_scan_status", command_qos,
+        [this](const vision::msg::CameraScanStatus::SharedPtr message) {
+          if (message->command_id==0 || message->command_id!=pending_camera_id_) return;
+          camera_scan_feedback_.command_id=message->command_id;
+          camera_scan_feedback_.phase=message->phase;
+          camera_scan_feedback_.yaw_deg=message->commanded_yaw_deg;
+          camera_scan_feedback_.finished=false;
+        });
 
     start_service_ = create_service<std_srvs::srv::Trigger>(
         "start", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
@@ -996,7 +1007,17 @@ private:
     last_camera_done_event_sec_ = this->get_clock()->now().seconds();
     RCLCPP_INFO(get_logger(),"[FEEDBACK] CAMERA DONE id=%llu received; awaiting fresh image",
         static_cast<unsigned long long>(msg->command_id));
+    if (pending_camera_request_==vision_core::CameraRequest::kScanLeft ||
+        pending_camera_request_==vision_core::CameraRequest::kScanRight) {
+      camera_scan_feedback_.command_id=pending_camera_id_;
+      camera_scan_feedback_.phase=0;
+      camera_scan_feedback_.finished=true;
+    }
     switch (pending_camera_request_) {
+    case vision_core::CameraRequest::kScanLeft:
+    case vision_core::CameraRequest::kScanRight:
+      camera_feedback_ = {vision_core::CameraMode::kForward, true};
+      break;
     case vision_core::CameraRequest::kDown:
       camera_feedback_ = {vision_core::CameraMode::kDown, true};
       break;
@@ -1006,7 +1027,7 @@ private:
     case vision_core::CameraRequest::kGoal:
       camera_feedback_ = {vision_core::CameraMode::kGoal, true};
       break;
-    case vision_core::CameraRequest::kNone:
+    default:
       break;
     }
     outstanding_cameras_.erase(msg->command_id);
@@ -1135,6 +1156,27 @@ private:
 
   void PublishCameraCommand(vision_core::CameraRequest request) {
     if (request == vision_core::CameraRequest::kNone) return;
+    const bool scan_control=request==vision_core::CameraRequest::kScanHold ||
+        request==vision_core::CameraRequest::kScanResume ||
+        request==vision_core::CameraRequest::kScanReturn;
+    if(scan_control) {
+      if(pending_camera_id_==0 ||
+         (pending_camera_request_!=vision_core::CameraRequest::kScanLeft &&
+          pending_camera_request_!=vision_core::CameraRequest::kScanRight)) return;
+      if(simulate_camera_feedback_) {
+        if(request==vision_core::CameraRequest::kScanReturn) {
+          camera_scan_feedback_.finished=true;camera_scan_feedback_.phase=0;
+          camera_feedback_={vision_core::CameraMode::kForward,true};
+        } else camera_scan_feedback_.phase=
+            request==vision_core::CameraRequest::kScanHold?3:1;
+        return;
+      }
+      vision::msg::CameraCommand control;
+      control.command_id=pending_camera_id_;
+      control.request=static_cast<std::uint8_t>(request);
+      camera_cmd_pub_->publish(control);
+      return;
+    }
     // The node may only originate new camera requests in RUNNING.
     if (run_state_ != RunState::kRunning &&
         !(run_state_==RunState::kResetting &&
@@ -1150,7 +1192,13 @@ private:
       case vision_core::CameraRequest::kGoal:
         camera_feedback_ = {vision_core::CameraMode::kGoal, true};
         break;
-      case vision_core::CameraRequest::kNone:
+      case vision_core::CameraRequest::kScanLeft:
+      case vision_core::CameraRequest::kScanRight:
+        camera_scan_feedback_.command_id=++simulated_camera_scan_id_;
+        camera_scan_feedback_.phase=1;camera_scan_feedback_.finished=false;
+        camera_feedback_={vision_core::CameraMode::kTransition,false};
+        break;
+      default:
         break;
       }
       return;
@@ -1160,6 +1208,8 @@ private:
     // in-flight command's ID, even if the desired camera mode changes.
     // Keep retransmitting the original request until ACK, then wait for DONE.
     if (pending_camera_id_ == 0) {
+      if(request==vision_core::CameraRequest::kScanLeft ||
+         request==vision_core::CameraRequest::kScanRight) camera_scan_feedback_={};
       pending_camera_id_ = next_camera_id_++;
       outstanding_cameras_.insert(pending_camera_id_);
       pending_camera_request_ = request;
@@ -1178,6 +1228,10 @@ private:
     vision::msg::CameraCommand message;
     message.command_id = pending_camera_id_;
     message.request = static_cast<std::uint8_t>(pending_camera_request_);
+    message.scan_max_yaw_deg=static_cast<std::uint16_t>(curve_search_config_.max_scan_yaw_deg);
+    message.scan_move_sec=static_cast<float>(curve_search_config_.scan_move_sec);
+    message.scan_hold_sec=static_cast<float>(curve_search_config_.scan_hold_sec);
+    message.scan_return_sec=static_cast<float>(curve_search_config_.scan_return_sec);
     camera_cmd_pub_->publish(message);
   }
 
@@ -1443,6 +1497,7 @@ private:
     }
     if (!applied_action_feedback_queue_.empty()) perception_input.allow_new_commands=false;
     perception_input.camera_feedback = camera_feedback_;
+    perception_input.camera_scan = camera_scan_feedback_;
     perception_input.command_transport_enabled =
         enable_command_transport_ || simulate_decision_;
     perception_input.delivery_feedback = action_delivery_feedback_;
@@ -1649,6 +1704,10 @@ private:
   std::deque<vision_core::CommandDeliveryFeedback>
       simulated_action_feedback_queue_;
   vision_core::CameraFeedback camera_feedback_{};
+  vision_core::CameraScanFeedback camera_scan_feedback_{};
+  vision_core::CurveSearchConfig curve_search_config_{};
+  std::uint64_t simulated_camera_scan_id_{0};
+  rclcpp::Subscription<vision::msg::CameraScanStatus>::SharedPtr camera_scan_status_sub_;
   // ROS-clock timestamps of the latest completion events. Image header
   // stamps are compared before YOLO/FSM processing, so stale frames cannot
   // satisfy the post-DONE observation window.

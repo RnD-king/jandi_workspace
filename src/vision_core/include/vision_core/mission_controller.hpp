@@ -106,6 +106,8 @@ struct MissionFrameInput {
   int image_height{0};
   double now_sec{0.0};
   CameraFeedback camera_feedback;
+  CameraScanFeedback camera_scan;
+  std::optional<double> scan_ball_u; // filtered YOLO candidate, independent of FORWARD tracker
   // true이면 controller용 ActionExecutionFeedback을 직전 공통 command와
   // delivery_feedback에서 MissionController가 직접 만든다. 실행기 어댑터는
   // controller 상태를 건드리지 않고 ACK/READY/DONE만 반환하면 된다.
@@ -226,6 +228,7 @@ struct PerceptionFrameInput {
   int image_height{0};
   double now_sec{0.0};
   CameraFeedback camera_feedback;
+  CameraScanFeedback camera_scan;
   bool command_transport_enabled{false};
   ActionExecutionFeedback action_feedback;
   CommandDeliveryFeedback delivery_feedback;

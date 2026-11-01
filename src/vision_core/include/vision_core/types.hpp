@@ -234,6 +234,17 @@ enum class CameraRequest {
   kDown = 1,
   kForward = 2,
   kGoal = 3,
+  kScanLeft = 4,
+  kScanRight = 5,
+  kScanHold = 6,
+  kScanResume = 7,
+  kScanReturn = 8,
+};
+struct CameraScanFeedback {
+  std::uint64_t command_id{0};
+  std::uint8_t phase{0}; // 1 outbound, 2 dwell, 3 paused, 4 return, 5 verify
+  double yaw_deg{0.0}; // commanded angle, not encoder measurement
+  bool finished{false}; // final camera DONE edge
 };
 
 struct CameraFeedback {
