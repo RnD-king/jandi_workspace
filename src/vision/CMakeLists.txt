@@ -41,6 +41,7 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ActionCommand.msg"
   "msg/CameraCommand.msg"
+  "msg/CameraScanStatus.msg"
   "msg/CommandStatus.msg"
   "msg/TerminalDetection.msg"
   "msg/TerminalFrame.msg"

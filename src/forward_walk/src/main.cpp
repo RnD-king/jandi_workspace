@@ -8,6 +8,7 @@
 #include "vision_core/config_loader.hpp"
 #include "vision/msg/action_command.hpp"
 #include "vision/msg/camera_command.hpp"
+#include "vision/msg/camera_scan_status.hpp"
 #include "vision/msg/command_status.hpp"
 #include "vision/msg/shoot_tuning_pose.hpp"
 
@@ -177,6 +178,7 @@ public:
             "/jandi_vision/action_status", 10);
         // Camera status는 별도 ID 공간과 토픽을 사용하므로 publisher도 분리한다.
         camera_status_pub_ = create_publisher<vision::msg::CommandStatus>(
+        camera_scan_status_pub_=create_publisher<vision::msg::CameraScanStatus>("/jandi_vision/camera_scan_status",10);
             "/jandi_vision/camera_status", 10);
 
         // 1 ms마다 상태를 확인하고, 실제 전송은 MotionLoop의 공통 마감 시각으로 50 Hz 제한한다.
@@ -736,7 +738,25 @@ private:
     // DOWN/FORWARD/GOAL 요청을 머리 관절 모션으로 만든다. 몸 동작과 동시에 실행할 수 있다.
     void CameraCommandCallback(const vision::msg::CameraCommand::SharedPtr message)
     {
-        try { camera_config_.Target(message->request); }
+        const auto req=message->request;
+        // Scan controls keep the original START command ID: only the scan
+        // itself receives one ACK and one DONE on its physical return.
+        if (req==vision::msg::CameraCommand::SCAN_HOLD ||
+            req==vision::msg::CameraCommand::SCAN_RESUME ||
+            req==vision::msg::CameraCommand::SCAN_RETURN) {
+            if (message->command_id==camera_transactions_.active_id &&
+                camera_motion_->ScanActive()) {
+                const auto now=std::chrono::steady_clock::now();
+                if(req==vision::msg::CameraCommand::SCAN_HOLD) camera_motion_->HoldScan();
+                else if(req==vision::msg::CameraCommand::SCAN_RESUME) camera_motion_->ResumeScan(now);
+                else camera_motion_->ReturnScan(now);
+                EnsureMotionLoop();
+            }
+            return;
+        }
+        const bool scan=req==vision::msg::CameraCommand::SCAN_LEFT ||
+                        req==vision::msg::CameraCommand::SCAN_RIGHT;
+        if (!scan) try { camera_config_.Target(req); }
         catch (const std::exception& e) {
             RCLCPP_WARN(get_logger(), "Camera request rejected: %s", e.what());
             return;
@@ -760,17 +780,22 @@ private:
         try {
             // 시작 자세 이동 때 저장한 마지막 전송 목표를 카메라의 출발점으로 사용한다.
             // 추가 encoder 읽기 통신을 하지 않는다. 이 값은 실제 측정 위치가 아니라 목표 위치다.
-            camera_motion_->Start(message->request, last_sent_positions_,
-                                  std::chrono::steady_clock::now());
+            if (scan)
+                camera_motion_->StartScan(req==vision::msg::CameraCommand::SCAN_LEFT,
+                    static_cast<int>(message->scan_max_yaw_deg),
+                    message->scan_move_sec,message->scan_hold_sec,message->scan_return_sec,
+                    last_sent_positions_,std::chrono::steady_clock::now());
+            else camera_motion_->Start(req,last_sent_positions_,
+                    std::chrono::steady_clock::now());
         } catch (const std::exception& e) {
             RCLCPP_ERROR(get_logger(), "Camera start failed, no ACK: %s", e.what());
             return;
         }
         camera_transactions_.active_id = message->command_id;
         next_camera_verify_at_={};
-        const auto target=camera_config_.Target(message->request);
+        const auto target=camera_motion_->TargetPose();
         RCLCPP_INFO(get_logger(),"[CAMERA] ACK id=%llu request=%u target=(%d,%d) tolerance=%.1f%%",
-            static_cast<unsigned long long>(message->command_id),unsigned(message->request),
+            static_cast<unsigned long long>(message->command_id),unsigned(req),
             target.yaw,target.pitch,100*camera_config_.position_tolerance_ratio);
         PublishCameraStatus(message->command_id, vision::msg::CommandStatus::ACK);
         EnsureMotionLoop();
@@ -881,6 +906,13 @@ private:
         // camera_result: Idle=재생 없음, Running=다음 단계/안정화 대기,
         // Command=새 카메라 목표 계산됨, Verify=encoder 도착 확인 대기.
         const auto camera_result = camera_motion_->Update(now);
+        if(camera_motion_->ScanActive() && camera_transactions_.active_id!=0) {
+            vision::msg::CameraScanStatus scan;
+            scan.command_id=camera_transactions_.active_id;
+            scan.phase=static_cast<std::uint8_t>(camera_motion_->ScanState());
+            scan.commanded_yaw_deg=camera_motion_->ScanCommandedYawDeg();
+            camera_scan_status_pub_->publish(scan);
+        }
         // camera_command는 위치 데이터가 아니라 "카메라 목표를 전송해야 하는가"라는 bool이다.
         // 시작 자세 완료 시 FORWARD 유지 목표도 이 경로로 한 번 전송한다.
         const bool camera_command = startup_completed ||
@@ -1087,7 +1119,8 @@ private:
     std::shared_ptr<Dxl> dxl_;                         // 모터 통신 객체: encoder 읽기와 목표 tick 쓰기
     std::unique_ptr<P2PMotionPlayer> p2p_player_;      // 몸 JSON의 키프레임·보간·유지 시간을 관리하는 재생기
     rclcpp::Publisher<vision::msg::CommandStatus>::SharedPtr action_status_pub_;  // 몸 ACK/READY/DONE 송신
-    rclcpp::Publisher<vision::msg::CommandStatus>::SharedPtr camera_status_pub_;  // 카메라 ACK/DONE 송신
+    rclcpp::Publisher<vision::msg::CommandStatus>::SharedPtr camera_status_pub_;
+    rclcpp::Publisher<vision::msg::CameraScanStatus>::SharedPtr camera_scan_status_pub_;  // 카메라 ACK/DONE 송신
     rclcpp::Subscription<vision::msg::ActionCommand>::SharedPtr action_cmd_sub_; // 몸 명령 수신 연결
     rclcpp::Subscription<vision::msg::ShootTuningPose>::SharedPtr shoot_pose_sub_;
     rclcpp::Subscription<vision::msg::CameraCommand>::SharedPtr camera_cmd_sub_; // 카메라 명령 수신 연결

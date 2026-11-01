@@ -191,35 +191,84 @@ struct CameraConfig {
 class CameraMotion {
 public:
     enum class Result { Idle, Running, Command, Verify };
+    enum class ScanPhase : uint8_t { None=0, Outbound=1, Dwell=2, Paused=3, Returning=4, Verify=5 };
+    ScanPhase ScanState() const { return scan_phase_; }
+    bool ScanActive() const { return scan_phase_ != ScanPhase::None; }
+    double ScanCommandedYawDeg() const {
+        return (static_cast<double>(current_.yaw)-config_.forward.yaw)*360.0/4096.0;
+    }
+    void StartScan(bool left, int max_yaw_deg, double move_sec,
+                   double hold_sec, double return_sec,
+                   const RawPositions& base, Clock::time_point now) {
+        if(active_) throw std::runtime_error("camera already active");
+        if(max_yaw_deg<1 || max_yaw_deg>90 || move_sec<=0 || hold_sec<0 || return_sec<=0 ||
+            !std::isfinite(move_sec) || !std::isfinite(hold_sec) || !std::isfinite(return_sec))
+            throw std::invalid_argument("invalid scan configuration");
+        const int sign=left ? -1 : 1; // Configurable sign must be calibrated on the robot.
+        scan_far_={std::clamp(config_.forward.yaw + static_cast<int>(
+                      std::lround(sign*max_yaw_deg*4096.0/360.0)),0,4095),config_.forward.pitch};
+        scan_move_sec_=move_sec;scan_hold_sec_=hold_sec;scan_return_sec_=return_sec;
+        current_={base.at(config_.yaw_id),base.at(config_.pitch_id)};
+        active_=override_enabled_=true;
+        scan_phase_=ScanPhase::Outbound;
+        BeginSegment(scan_far_,scan_move_sec_,now);
+    }
+    bool HoldScan() {
+        if(scan_phase_!=ScanPhase::Outbound && scan_phase_!=ScanPhase::Dwell)
+            return scan_phase_==ScanPhase::Paused;
+        paused_was_dwell_=scan_phase_==ScanPhase::Dwell;
+        scan_phase_=ScanPhase::Paused;
+        start_=target_=current_;
+        return true;
+    }
+    bool ResumeScan(Clock::time_point now) {
+        if(scan_phase_!=ScanPhase::Paused) return false;
+        if(paused_was_dwell_) {
+            scan_phase_=ScanPhase::Dwell;
+            dwell_until_=now + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double>(scan_hold_sec_));
+        } else {
+            scan_phase_=ScanPhase::Outbound;
+            const double full=std::max(1.0,std::abs(double(scan_far_.yaw-config_.forward.yaw)));
+            const double remaining=std::abs(double(scan_far_.yaw-current_.yaw))/full;
+            BeginSegment(scan_far_,std::max(0.02,scan_move_sec_*remaining),now);
+        }
+        return true;
+    }
+    bool ReturnScan(Clock::time_point now) {
+        if(scan_phase_==ScanPhase::None || scan_phase_==ScanPhase::Returning ||
+           scan_phase_==ScanPhase::Verify) return false;
+        scan_phase_=ScanPhase::Returning;
+        BeginSegment(config_.forward,scan_return_sec_,now);
+        return true;
+    }
     explicit CameraMotion(CameraConfig config = {}) : config_(config) { config_.Validate(); }
     void Start(uint8_t request, const RawPositions& base, Clock::time_point now) {
         const auto target = config_.Target(request);
-        const CameraPose start{base.at(config_.yaw_id), base.at(config_.pitch_id)};
-        target_ = target;
-        start_ = current_ = start;
-        steps_ = static_cast<std::size_t>(std::max(2.0, std::nearbyint(config_.move_sec * 50.0)));
-        step_ = 0;
-        next_at_ = now;
-        settling_ = false;
-        active_ = true;
-        override_enabled_ = true;
+        current_ = {base.at(config_.yaw_id), base.at(config_.pitch_id)};
+        scan_phase_=ScanPhase::None;
+        active_ = override_enabled_ = true;
+        BeginSegment(target,config_.move_sec,now);
     }
     Result Update(Clock::time_point now) {
         if (!active_) return Result::Idle;
-        if (now < next_at_) return Result::Running;
-        if (step_ == steps_) {
-            if (!settling_) { settling_ = true; settle_started_at_ = now; }
-            if (std::chrono::duration<double>(now - settle_started_at_).count() < config_.settle_sec) {
-                return Result::Running;
-            }
-            return Result::Verify; // Only measured arrival may finish this command.
+        if (scan_phase_==ScanPhase::Paused) return Result::Running;
+        if (scan_phase_==ScanPhase::Dwell) {
+            if(now<dwell_until_) return Result::Running;
+            scan_phase_=ScanPhase::Returning;
+            BeginSegment(config_.forward,scan_return_sec_,now);
         }
-        const double x = static_cast<double>(++step_) / steps_;
-        const double alpha = x*x*(3.0 - 2.0*x);
-        current_.yaw = static_cast<int32_t>(std::nearbyint(start_.yaw + alpha*(target_.yaw - start_.yaw)));
-        current_.pitch = static_cast<int32_t>(std::nearbyint(start_.pitch + alpha*(target_.pitch - start_.pitch)));
-        next_at_ = now + kPeriod;
-        return Result::Command;
+        if (scan_phase_==ScanPhase::Verify) return Result::Verify;
+        const auto result=UpdateSegment(now);
+        if(result==Result::Verify && scan_phase_==ScanPhase::Outbound) {
+            scan_phase_=ScanPhase::Dwell;
+            dwell_until_=now + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double>(scan_hold_sec_));
+            return Result::Running;
+        }
+        if(result==Result::Verify && scan_phase_==ScanPhase::Returning)
+            scan_phase_=ScanPhase::Verify;
+        return result;
     }
     void OnCommandWritten(Clock::time_point started, Clock::time_point written) {
         next_at_ = std::max(started + kPeriod, written);
@@ -240,6 +289,7 @@ public:
         };
         if (!close(measured.yaw,target_.yaw) || !close(measured.pitch,target_.pitch)) return false;
         active_=false;
+        scan_phase_=ScanPhase::None;
         return true;
     }
     bool OverrideEnabled() const { return override_enabled_; }
@@ -253,16 +303,43 @@ public:
         start_ = target_ = current_ = pose;
         step_ = steps_ = 0;
         active_ = settling_ = false;
+        scan_phase_=ScanPhase::None;
         override_enabled_ = true;
     }
     // Retain the last successfully transmitted override if the writer fails.
     void Abort(const RawPositions& last_sent) {
         active_ = false;
+        scan_phase_=ScanPhase::None;
         if (override_enabled_ && !last_sent.empty()) {
             current_ = {last_sent.at(config_.yaw_id), last_sent.at(config_.pitch_id)};
         }
     }
 private:
+    void BeginSegment(CameraPose goal,double seconds,Clock::time_point now) {
+        start_=current_;target_=goal;
+        steps_=static_cast<std::size_t>(std::max(2.0,std::nearbyint(seconds*50.0)));
+        step_=0;next_at_=now;settling_=false;
+    }
+    Result UpdateSegment(Clock::time_point now) {
+        if(now<next_at_) return Result::Running;
+        if(step_==steps_) {
+            if(!settling_) { settling_=true;settle_started_at_=now; }
+            if(std::chrono::duration<double>(now-settle_started_at_).count()<config_.settle_sec)
+                return Result::Running;
+            return Result::Verify;
+        }
+        const double x=static_cast<double>(++step_)/steps_;
+        const double alpha=x*x*(3.0-2.0*x); // Exactly the existing camera interpolation.
+        current_.yaw=static_cast<int32_t>(std::nearbyint(start_.yaw+alpha*(target_.yaw-start_.yaw)));
+        current_.pitch=static_cast<int32_t>(std::nearbyint(start_.pitch+alpha*(target_.pitch-start_.pitch)));
+        next_at_=now+kPeriod;
+        return Result::Command;
+    }
+    ScanPhase scan_phase_{ScanPhase::None};
+    CameraPose scan_far_{};
+    double scan_move_sec_{0.5},scan_hold_sec_{0.5},scan_return_sec_{0.5};
+    bool paused_was_dwell_{false};
+    Clock::time_point dwell_until_{};
     CameraConfig config_;
     CameraPose start_{0, 0}, target_{0, 0}, current_{0, 0};
     std::size_t step_{0}, steps_{0};
