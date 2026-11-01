@@ -4,6 +4,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cstdio>
 using namespace vision_core;
 
 int main() {
@@ -38,6 +39,9 @@ int main() {
     tick({id,true,false,false});
     for(int i=0;i<12;++i) tick();
     tick({id,true,true,false});
+    std::fprintf(stderr,"SEQ=%d phase=%d confirm=%d action=%d id=%llu line=%d\\n",
+        seq,out.curve_search_phase,out.curve_confirmations,int(out.command.action),
+        (unsigned long long)out.command.action_id,int(out.active_mission));
     if(seq==0) assert(out.curve_search_phase==1); // confirm
     if(seq==1) assert(out.curve_search_phase==2); // delay
   }
