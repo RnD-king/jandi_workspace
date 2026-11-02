@@ -292,8 +292,11 @@ int main() {
 
         action(1001,11);action(1001,11);action(1002,12);action(0,11);
         camera(1001,3);camera(1001,3);camera(2002,2);camera(0,2);camera(9000,9);
-        pump([&]{return node->camera_transactions_.completed.Contains(1001);});
-        Check(node->motion_in_progress_,"body stopped during camera transition");
+        // Camera DONE now waits for the concurrently moving shoulders.
+        // Its duration may exceed the body action's remaining time.
+        // Check body/READY while camera+shoulders run instead of assuming
+        // that camera DONE always precedes body DONE.
+        Check(node->motion_in_progress_,"body stopped before camera/arm transition");
         pump([&]{return node->action_transactions_.ready_sent;});
         const int reads=Dxl::reads;
         std::ofstream(right)<<"bad JSON";
@@ -303,6 +306,7 @@ int main() {
         action(1002,12);action(1002,12);action(1003,13);action(1004,18);action(1005,12,2);
         Check(Dxl::reads==reads,"queued preparation touched hardware");
         Check(node->queued_action_.has_value(),"prepared B not queued");
+        pump([&]{return node->camera_transactions_.completed.Contains(1001);});
         // Starting B must use the prepared object even if its file changes.
         std::ofstream(right)<<"changed after ACK";
         pump([&]{return node->action_transactions_.completed.Contains(1002);});flush();

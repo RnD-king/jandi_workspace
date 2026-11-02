@@ -240,7 +240,6 @@ inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
   // A center belongs to a displayed tracking ID, not filter acceptance alone.
   // LINE has neither an ID label nor a detection center marker.
   if (id && !is_line) {
-    cv::circle(vis,{clipped.x+clipped.width/2,clipped.y+clipped.height/2},3,color,-1);
     // Render IDs inside the visible box at the bottom centre. A black
     // outline gives the yellow text contrast on either light or dark RGB.
     // Use the clipped ROI so no text spills outside a clipped detection.
@@ -266,6 +265,9 @@ inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
       cv::putText(inside_box,label,origin,font,font_scale,
                   cv::Scalar(0,255,255),1,cv::LINE_AA);
     }
+    // Keep the tracked-centre marker intact even when the yellow ID
+    // overlaps its anti-aliased pixels in a short detection box.
+    cv::circle(vis,{clipped.x+clipped.width/2,clipped.y+clipped.height/2},3,color,-1);
     if (mission_target) {
       const auto outer=cv::Rect(clipped.x-3,clipped.y-3,clipped.width+6,clipped.height+6)
           & cv::Rect(0,0,vis.cols,vis.rows);
