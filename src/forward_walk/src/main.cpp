@@ -25,6 +25,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 using namespace std::chrono_literals;
 
@@ -154,6 +155,13 @@ public:
         camera_config_.position_tolerance_ratio = declare_parameter<double>("camera_position_tolerance_ratio",0.10);
         camera_config_.Validate();
         camera_motion_ = std::make_unique<motion_executor::CameraMotion>(camera_config_);
+        curve_scan_elbow_angle_deg_=declare_parameter<double>("curve_scan_elbow_angle_deg",90.0);
+        curve_scan_elbow_duration_sec_=declare_parameter<double>("curve_scan_elbow_duration_sec",1.5);
+        if (!std::isfinite(curve_scan_elbow_angle_deg_) ||
+            curve_scan_elbow_angle_deg_<=0.0 || curve_scan_elbow_angle_deg_>90.0 ||
+            !std::isfinite(curve_scan_elbow_duration_sec_) ||
+            curve_scan_elbow_duration_sec_<=0.0)
+            throw std::invalid_argument("invalid curve scan elbow configuration");
 
         if (!std::isfinite(ready_lead_sec_) || ready_lead_sec_ < 0.0 ||
             !std::isfinite(startup_pose_duration_sec_) || turn_step_deg_ <= 0.0 || max_turn_repetitions_ <= 0 ||
@@ -221,6 +229,38 @@ public:
     }
 
 private:
+    // Smoothstep interpolation for selected arm joints, using the same
+    // 50Hz SyncWrite packet as body and camera targets. No second player.
+    struct ArmTween {
+        using Clock=std::chrono::steady_clock;
+        using Positions=P2PMotionPlayer::RawPositions;
+        Positions source,target;
+        Clock::time_point started{};
+        double duration_sec{0.5};
+        bool active{false};
+        void Start(const Positions& base,Positions goals,double duration,Clock::time_point now) {
+            if (!std::isfinite(duration) || duration<=0.0)
+                throw std::invalid_argument("invalid arm tween duration");
+            source.clear();
+            for(const auto& item:goals) source[item.first]=base.at(item.first);
+            target=std::move(goals);
+            started=now;duration_sec=duration;active=true;
+        }
+        bool Sample(Positions& output,Clock::time_point now) {
+            if(!active) return false;
+            const double t=std::clamp(
+                std::chrono::duration<double>(now-started).count()/duration_sec,0.0,1.0);
+            const double alpha=t*t*(3.0-2.0*t);
+            for(const auto& item:target)
+                output[item.first]=static_cast<int32_t>(std::lround(
+                    source.at(item.first)+alpha*(item.second-source.at(item.first))));
+            if(t>=1.0) active=false;
+            return true;
+        }
+        void Cancel(){active=false;}
+        bool Active() const {return active;}
+    };
+
     // 전류/추정 토크 로그에서 사용하는 다리 관절 수(오른쪽 6개 + 왼쪽 6개).
     static constexpr int kLegJointCount = 12;
     // 모터 전류(mA)를 추정 토크(N·m)로 바꾸는 계수. 직접 측정한 토크는 아니다.
@@ -457,38 +497,25 @@ private:
         }
     }
 
-    bool NeedsArmTransition(std::uint16_t action) const
+    // The selected camera pose controls normal shoulder targets: ID15/16.
+    // Special actions (PICK/HURDLE/SHOOT) own their original JSON arm poses.
+    P2PMotionPlayer::RawPositions CameraArmTargets() const
     {
-        return line_arm_config_.enabled && (arm_pose_uncertain_ ||
-               arm_outward_pose_ != UsesOutwardArmPose(action));
+        return camera_arm_forward_
+            ? line_arm_config_.Targets()
+            : P2PMotionPlayer::RawPositions{{15,line_arm_config_.reference_15},
+                                            {16,line_arm_config_.reference_16}};
     }
-
-    // 실제 action은 먼저 검증하여 저장한다. 전환 중 몸 목표를 유지하며 팔/선택된 집게손만 이동한다.
+    bool NeedsArmTransition(std::uint16_t) const { return false; }
     bool StartMissionProgram(const std::optional<P2PMotionPlayer::PreparedProgram>& program,
-                             std::uint8_t mission, std::uint16_t action)
+                             std::uint8_t, std::uint16_t action)
     {
-        if (!NeedsArmTransition(action)) {
-            return program && p2p_player_->StartPrepared(*program);
-        }
-        const bool to_outward=UsesOutwardArmPose(action);
-        P2PMotionPlayer::RawPositions targets=to_outward ? line_arm_config_.Targets() :
-            P2PMotionPlayer::RawPositions{{15,line_arm_config_.reference_15},{16,line_arm_config_.reference_16}};
-        // 팔 출발점은 실제 encoder, 다른 관절은 직전 목표를 사용하여 몸 자세를 유지한다.
-        if (UsesFixedGripperPose(action)) targets[19]=gripper_tick_;
-        const auto actual=dxl_->GetRawPositions();
-        auto initial=last_sent_positions_;
-        initial.at(15)=actual.at(15); initial.at(16)=actual.at(16);
-        if (targets.count(19)) initial.at(19)=actual.at(19);
-        const auto transition=P2PMotionPlayer::PreparePoseTransition(initial,targets,arm_transition_sec_);
-        if (!p2p_player_->StartPrepared(transition,initial,std::chrono::steady_clock::now())) return false;
-        pending_mission_program_=program;
-        arm_transition_in_progress_=true;
-        arm_transition_to_outward_=to_outward;
-        RCLCPP_INFO(get_logger(), "Action arm transition: mission=%u action=%u pose=%s ID15=%d ID16=%d duration=%.2fs before action",
-                    unsigned(mission),unsigned(action),to_outward ? "OUTWARD" : "RESTORED",targets.at(15),targets.at(16),arm_transition_sec_);
-        return true;
+        if(!program) return false;
+        if(!UsesOutwardArmPose(action)) camera_arm_tween_.Cancel();
+        return p2p_player_->StartPrepared(*program);
     }
 
+    // 요청 각도를 회전 JSON 반복 횟수로 반올림하고 0~최대 반복 횟수로 제한한다.
     // 요청 각도를 회전 JSON 반복 횟수로 반올림하고 0~최대 반복 횟수로 제한한다.
     int CalculateTurnCount(int target_yaw_deg) const
     {
@@ -641,10 +668,10 @@ private:
                 start_options.repeat_count);
         }
         const std::filesystem::path path = asset_root / relative_path;  // 실제로 읽을 전체 경로
-        // 팔 목표는 action으로만 선택한다. 14/15/16/17/29/30은 JSON 팔 자세를 보존한다.
-        // 대기 명령도 이 옵션을 포함해 미리 검증·저장하므로 자동 시작 시 같은 팔 자세를 사용한다.
+        // Normal action arms follow the current CAMERA mode. Preserve
+        // PICK/HURDLE/SHOOT JSON without arm overrides.
         if (line_arm_config_.enabled && UsesOutwardArmPose(message->action)) {
-            start_options.position_overrides = line_arm_config_.Targets();
+            start_options.position_overrides = CameraArmTargets();
         }
         if (UsesFixedGripperPose(message->action)) start_options.position_overrides[19]=gripper_tick_;
         try {
@@ -760,6 +787,20 @@ private:
         }
         const bool scan=req==vision::msg::CameraCommand::SCAN_LEFT ||
                         req==vision::msg::CameraCommand::SCAN_RIGHT;
+        if (scan_elbow_stage_!=ScanElbowStage::kIdle ||
+            (scan && (motion_in_progress_ || queued_action_))) {
+            RCLCPP_WARN(get_logger(),"Camera command rejected while scan arms/body busy");
+            return;
+        }
+        if(scan && (message->scan_max_yaw_deg<1 || message->scan_max_yaw_deg>90 ||
+                    !std::isfinite(message->scan_move_sec) ||
+                    !std::isfinite(message->scan_hold_sec) ||
+                    !std::isfinite(message->scan_return_sec) ||
+                    message->scan_move_sec<=0.0 || message->scan_hold_sec<0.0 ||
+                    message->scan_return_sec<=0.0)) {
+            RCLCPP_WARN(get_logger(),"Invalid curve scan timing/angle");
+            return;
+        }
         if (!scan) try { camera_config_.Target(req); }
         catch (const std::exception& e) {
             RCLCPP_WARN(get_logger(), "Camera request rejected: %s", e.what());
@@ -784,13 +825,42 @@ private:
         try {
             // 시작 자세 이동 때 저장한 마지막 전송 목표를 카메라의 출발점으로 사용한다.
             // 추가 encoder 읽기 통신을 하지 않는다. 이 값은 실제 측정 위치가 아니라 목표 위치다.
-            if (scan)
-                camera_motion_->StartScan(req==vision::msg::CameraCommand::SCAN_LEFT,
-                    static_cast<int>(message->scan_max_yaw_deg),
-                    message->scan_move_sec,message->scan_hold_sec,message->scan_return_sec,
-                    last_sent_positions_,std::chrono::steady_clock::now());
-            else camera_motion_->Start(req,last_sent_positions_,
-                    std::chrono::steady_clock::now());
+            const auto now=std::chrono::steady_clock::now();
+            if(scan) {
+                // One 90-degree elbow extension (17 left / 18 right) BEFORE yaw.
+                scan_elbow_id_=req==vision::msg::CameraCommand::SCAN_LEFT ? 17 : 18;
+                scan_elbow_home_tick_=last_sent_positions_.at(scan_elbow_id_);
+                const int sign=scan_elbow_id_==17 ? +1 : -1;
+                const int offset=static_cast<int>(std::lround(
+                    curve_scan_elbow_angle_deg_*4096.0/360.0));
+                const int target=scan_elbow_home_tick_+sign*offset;
+                if(target<0 || target>4095)
+                    throw std::invalid_argument("curve scan elbow target outside 0..4095");
+                const double minimum=std::abs(target-scan_elbow_home_tick_)*
+                                     360.0/4096.0/60.0;
+                elbow_tween_.Start(last_sent_positions_,{{scan_elbow_id_,target}},
+                    std::max(curve_scan_elbow_duration_sec_,minimum),now);
+                scan_left_=req==vision::msg::CameraCommand::SCAN_LEFT;
+                scan_yaw_deg_=static_cast<int>(message->scan_max_yaw_deg);
+                scan_move_sec_=message->scan_move_sec;
+                scan_hold_sec_=message->scan_hold_sec;
+                scan_return_sec_=message->scan_return_sec;
+                scan_elbow_stage_=ScanElbowStage::kExtending;
+            } else {
+                camera_motion_->Start(req,last_sent_positions_,now);
+                camera_arm_forward_=req==vision::msg::CameraCommand::FORWARD;
+                const bool special=motion_in_progress_ &&
+                    (!UsesOutwardArmPose(current_action_) || shoot_pose_in_progress_);
+                if(line_arm_config_.enabled && !special) {
+                    const auto targets=CameraArmTargets();
+                    double minimum=0.0;
+                    for(const auto& item:targets) minimum=std::max(minimum,
+                        std::abs(item.second-last_sent_positions_.at(item.first))*
+                        360.0/4096.0/60.0);
+                    camera_arm_tween_.Start(last_sent_positions_,targets,
+                        std::max(camera_config_.move_sec,minimum),now);
+                }
+            }
         } catch (const std::exception& e) {
             RCLCPP_ERROR(get_logger(), "Camera start failed, no ACK: %s", e.what());
             return;
@@ -828,14 +898,14 @@ private:
             static_cast<int>(startup_pose_in_progress_), reason.c_str());
         p2p_player_->Stop();
         camera_motion_->Abort(last_sent_positions_);
+        camera_arm_tween_.Cancel();
+        elbow_tween_.Cancel();
+        scan_elbow_stage_=ScanElbowStage::kIdle;
         action_transactions_.Abort();
         queued_action_.reset();
         queued_action_acknowledged_=false;
         walk_hold_.Reset();
-        pending_mission_program_.reset();
-        arm_transition_in_progress_=false;
-        arm_pose_uncertain_=true; // 팔 전환 중단 후 다음 명령에서 출발점을 다시 읽고 재전환한다.
-        camera_transactions_.active_id = 0;
+         camera_transactions_.active_id = 0;
         startup_pose_in_progress_ = false;
         shoot_pose_in_progress_ = false;
         motion_in_progress_ = false;
@@ -877,7 +947,9 @@ private:
     // 몸 목표 계산 → 카메라 목표 계산 → 한 패킷으로 합쳐 전송 → READY/DONE 처리 순서.
     void MotionLoop()
     {
-        if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ && !camera_motion_->Active()) return;
+        if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ &&
+            !camera_motion_->Active() && !camera_arm_tween_.Active() &&
+            !elbow_tween_.Active() && scan_elbow_stage_==ScanElbowStage::kIdle) return;
         const auto now = std::chrono::steady_clock::now();
         StartQueuedAction(now);  // 시스템 시각 변경의 영향을 받지 않는 주기 기준
         // gap_ms는 타이머 콜백 사이의 간격이다. 모터 패킷 사이의 간격을 직접 측정한 값은 아니다.
@@ -907,6 +979,15 @@ private:
         // 시작 자세가 끝나면 FORWARD를 전송·유지한 뒤 구독을 연다.
         // 이후 몸 JSON에 머리 tick이 있어도 Merge()가 이 기본 자세로 덮어쓴다.
         if (startup_completed) camera_motion_->HoldForward();
+        P2PMotionPlayer::RawPositions arm_command;
+        if(camera_arm_tween_.Active()) camera_arm_tween_.Sample(arm_command,now);
+        if(elbow_tween_.Active()) elbow_tween_.Sample(arm_command,now);
+        if(scan_elbow_stage_==ScanElbowStage::kExtending && !elbow_tween_.Active()) {
+            // Start head scan only after the last arm-extension command is ready.
+            camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
+                scan_hold_sec_,scan_return_sec_,last_sent_positions_,now);
+            scan_elbow_stage_=ScanElbowStage::kScanning;
+        }
         // camera_result: Idle=재생 없음, Running=다음 단계/안정화 대기,
         // Command=새 카메라 목표 계산됨, Verify=encoder 도착 확인 대기.
         const auto camera_result = camera_motion_->Update(now);
@@ -921,7 +1002,7 @@ private:
         // 시작 자세 완료 시 FORWARD 유지 목표도 이 경로로 한 번 전송한다.
         const bool camera_command = startup_completed ||
             camera_result == motion_executor::CameraMotion::Result::Command;
-        if (!body_command.empty() || camera_command) {
+        if (!body_command.empty() || camera_command || !arm_command.empty()) {
             // command는 최종 전송용 전체 목표다. 몸 목표가 없으면 마지막 전체 목표를 복사해
             // 몸 자세를 유지하면서 카메라 관절만 바꾼다.
             auto command = body_command.empty() ? last_sent_positions_ : body_command;
@@ -929,6 +1010,16 @@ private:
                 // 시작 시 FORWARD 또는 이후 카메라 명령의 yaw/pitch 목표를 덮어쓴다.
                 // 카메라 DONE 뒤에도 그 자세를 유지한다.
                 if (!shoot_pose_in_progress_) camera_motion_->Merge(command);
+                const bool special=motion_in_progress_ &&
+                    (!UsesOutwardArmPose(current_action_) || shoot_pose_in_progress_);
+                if(line_arm_config_.enabled && !special && !startup_pose_in_progress_) {
+                    const auto targets=CameraArmTargets();
+                    for(const auto& item:targets) command[item.first]=item.second;
+                }
+                // Tween samples override regular JSON while moving. Never
+                // override the arms in special PICK/HURDLE/SHOOT motions.
+                if(!special)
+                    for(const auto& item:arm_command) command[item.first]=item.second;
                 // write_started/written_at: SDK 전송 호출의 시작/반환 시각. 실제 관절 도착 시각은 아니다.
                 const auto write_started = std::chrono::steady_clock::now();
                 // 몸과 카메라 Goal Position을 쓰는 단일 전송 지점.
@@ -949,7 +1040,7 @@ private:
         // Legacy 11/12/13, 21..25 and LINE units 32..34 send READY.
         // Existing 10/26/27 remain non-READY actions.
         // Queue admission depends only on the currently executing READY action.
-        if (motion_in_progress_ && !arm_transition_in_progress_ && !action_transactions_.ready_sent &&
+        if (motion_in_progress_ && !action_transactions_.ready_sent &&
             p2p_player_->IsNearCompletion(ready_lead_sec_, std::chrono::steady_clock::now()) &&
             action_transactions_.MarkReady()) {
             PublishActionStatus(action_transactions_.active_id, vision::msg::CommandStatus::READY);
@@ -957,7 +1048,7 @@ private:
         // End-of-playback is not arrival. Read only the two camera encoders,
         // at most every 100 ms with a bounded 5 ms timeout per motor.
         if (camera_result == motion_executor::CameraMotion::Result::Verify &&
-            now>=next_camera_verify_at_) {
+            !camera_arm_tween_.Active() && now>=next_camera_verify_at_) {
             next_camera_verify_at_=now+100ms;
             const auto target=camera_motion_->TargetPose();
             try {
@@ -965,11 +1056,23 @@ private:
                     dxl_->ReadRawPosition(camera_config_.yaw_id,5.0),
                     dxl_->ReadRawPosition(camera_config_.pitch_id,5.0)};
                 if (camera_motion_->ConfirmArrival(measured)) {
+                    if(scan_elbow_stage_==ScanElbowStage::kScanning) {
+                        // Camera returned physically. Restore elbow first,
+                        // then publish the original camera transaction DONE.
+                        const double minimum=std::abs(
+                            last_sent_positions_.at(scan_elbow_id_)-scan_elbow_home_tick_)*
+                            360.0/4096.0/60.0;
+                        elbow_tween_.Start(last_sent_positions_,
+                            {{scan_elbow_id_,scan_elbow_home_tick_}},
+                            std::max(curve_scan_elbow_duration_sec_,minimum),now);
+                        scan_elbow_stage_=ScanElbowStage::kRestoring;
+                    } else {
                     RCLCPP_INFO(get_logger(),"[CAMERA] DONE id=%llu target=(%d,%d) measured=(%d,%d)",
                         static_cast<unsigned long long>(camera_transactions_.active_id),
                         target.yaw,target.pitch,measured.yaw,measured.pitch);
                     PublishCameraStatus(camera_transactions_.active_id, vision::msg::CommandStatus::DONE);
                     camera_transactions_.CompleteActive();
+                    }
                 } else {
                     RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),1000,
                         "[CAMERA] waiting for encoder arrival id=%llu target=(%d,%d) measured=(%d,%d); no DONE",
@@ -982,34 +1085,25 @@ private:
                     static_cast<unsigned long long>(camera_transactions_.active_id),e.what());
             }
         }
+        if (scan_elbow_stage_==ScanElbowStage::kRestoring && !elbow_tween_.Active()) {
+            PublishCameraStatus(camera_transactions_.active_id,
+                                vision::msg::CommandStatus::DONE);
+            camera_transactions_.CompleteActive();
+            scan_elbow_stage_=ScanElbowStage::kIdle;
+        }
         if (body_result == P2PMotionPlayer::UpdateResult::kFinished) {
             if (startup_pose_in_progress_) {
                 startup_pose_in_progress_ = false;
                 current_action_ = 0;
                 CreateCommandSubscriptions();
             } else {
-                if (arm_transition_in_progress_) {
-                    arm_transition_in_progress_=false;
-                    arm_outward_pose_=arm_transition_to_outward_;
-                    arm_pose_uncertain_=false;
-                    RCLCPP_INFO(get_logger(), "Action arm transition complete; starting requested action=%u id=%llu",
-                                unsigned(current_action_),static_cast<unsigned long long>(action_transactions_.active_id));
-                    if (pending_mission_program_) {
-                        auto program=std::move(*pending_mission_program_);
-                        pending_mission_program_.reset();
-                        if (!p2p_player_->StartPrepared(program)) AbortPlayback("Action after arm transition failed: "+p2p_player_->Error());
-                        return; // 팔 전환 완료는 Action DONE이 아니다. 원래 action이 끝나야 DONE을 보낸다.
-                    }
-                    // 0도 회전 요청은 팔 전환만 마친 뒤 정상 DONE 처리한다.
-                }
-                if (shoot_pose_in_progress_) {
+                 if (shoot_pose_in_progress_) {
                     shoot_pose_in_progress_=false;
                     // Keep the head ticks reached by the combined interpolation;
                     // later body JSON must not restore the previous FORWARD hold.
                     camera_motion_->HoldPose({last_sent_positions_.at(camera_config_.yaw_id),
                                               last_sent_positions_.at(camera_config_.pitch_id)});
-                    arm_pose_uncertain_=true;
-                }
+                 }
                 const auto completed_id = action_transactions_.active_id;  // 방금 끝난 몸 명령의 ID
                 // A의 DONE을 먼저 보낸 뒤, 이미 ACK한 대기 동작 B를 활성 동작으로 올린다.
                 PublishActionStatus(completed_id, vision::msg::CommandStatus::DONE);
@@ -1022,7 +1116,9 @@ private:
             }
         }
         // 시작 자세/몸/카메라가 모두 유휴 상태일 때만 타이머를 끈다.
-        if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ && !camera_motion_->Active()) {
+        if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ &&
+            !camera_motion_->Active() && !camera_arm_tween_.Active() &&
+            !elbow_tween_.Active() && scan_elbow_stage_==ScanElbowStage::kIdle) {
             motion_loop_timer_->cancel();
         }
     }
@@ -1031,7 +1127,8 @@ private:
     void MotorHealthLoop()
     {
         const auto now=std::chrono::steady_clock::now();
-        const bool moving=startup_pose_in_progress_ || motion_in_progress_ || camera_motion_->Active();
+        const bool moving=startup_pose_in_progress_ || motion_in_progress_ ||
+            camera_motion_->Active() || camera_arm_tween_.Active() || elbow_tween_.Active();
         // 다음 목표 전송 직전에는 진단을 미룬다. 전송 주기보다 짧은 timeout 예산을 확보한다.
         if (moving && next_write_at_-now < std::chrono::duration<double,std::milli>(health_timeout_ms_+2.0)) return;
         const int id=Dxl::MotorIds()[health_index_++ % Dxl::MotorIds().size()];
@@ -1045,7 +1142,7 @@ private:
         const bool changed=reason!=state.reason;
         if (recovered || (!reason.empty() && (changed || now-state.last_logged>=5s))) {
             std::ostringstream event;
-            const char* phase=startup_pose_in_progress_ ? "startup" : arm_transition_in_progress_ ? "arm_transition" : motion_in_progress_ ? "action" :
+            const char* phase=startup_pose_in_progress_ ? "startup" : motion_in_progress_ ? "action" :
                               camera_motion_->Active() ? "camera" : "idle";
             const bool active=action_transactions_.active_id!=0;
             event << std::fixed << std::setprecision(3) << "ros_time=" << get_clock()->now().seconds()
@@ -1134,11 +1231,15 @@ private:
     std::string asset_directory_;                     // motions/와 missions/가 들어 있는 기준 폴더
     int32_t gripper_tick_{0}; // RECATCH 마지막 키프레임의 19번 목표
     motion_executor::LineArmConfig line_arm_config_;   // 제외 action 외에 유지할 팔 목표 (기존 파라미터명 유지)
-    double arm_transition_sec_{1.0};
-    bool arm_outward_pose_{true}; // startup은 기존대로 벌린 팔 자세로 시작한다.
-    bool arm_pose_uncertain_{false};
-    bool arm_transition_in_progress_{false}, arm_transition_to_outward_{false};
-    std::optional<P2PMotionPlayer::PreparedProgram> pending_mission_program_;
+    double arm_transition_sec_{1.0}; // Legacy declared parameter; no separate pre-action phase.
+    ArmTween camera_arm_tween_,elbow_tween_;
+    bool camera_arm_forward_{true};
+    enum class ScanElbowStage { kIdle, kExtending, kScanning, kRestoring };
+    ScanElbowStage scan_elbow_stage_{ScanElbowStage::kIdle};
+    int scan_elbow_id_{0},scan_elbow_home_tick_{0},scan_yaw_deg_{0};
+    bool scan_left_{true};
+    double scan_move_sec_{0.5},scan_hold_sec_{0.5},scan_return_sec_{0.5};
+    double curve_scan_elbow_angle_deg_{90.0},curve_scan_elbow_duration_sec_{1.5};
     double turn_step_deg_{15.0};                      // 회전 JSON 1회당 계획상 회전각(도)
     int max_turn_repetitions_{12};                     // 한 회전 요청의 최대 JSON 반복 횟수
     int waist_motor_id_{12};                          // SHOOT 각도 offset을 적용할 허리 모터 ID
