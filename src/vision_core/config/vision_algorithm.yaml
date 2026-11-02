@@ -99,8 +99,8 @@ vision_algorithm:
       down_max_depth_m: 0.5
     candidate_tracking:
       enabled: true
-      max_center_distance_px: 180.0
-      max_size_log_ratio: 0.50
+      max_center_distance_px: 800.0 # Temporary: tolerate full-frame motion jitter (640x480 diagonal=800px)
+      max_size_log_ratio: 4.605170185988092 # ln(100): up to 100x bbox width/height scale
       missing_frame_limit: 15
       max_tracks: 16
 
