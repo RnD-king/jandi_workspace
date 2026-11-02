@@ -76,6 +76,14 @@ int main() {
   const auto filtered_view=vision::RenderMissionDebug(
       image,raw_objects,{},c,filtered,line_view,
       {vision_core::CameraMode::kForward,true},{},state);
+  c.ball_view_line_image_center_u=360;
+  const auto ball_line_view=vision::RenderMissionDebug(
+      image,raw_objects,{},c,filtered,line_view,
+      {vision_core::CameraMode::kBallView,true},{},state);
+  Check(ball_line_view.image.at<cv::Vec3b>(150,360)==cv::Vec3b(255,255,0) &&
+        ball_line_view.image.at<cv::Vec3b>(150,320)==cv::Vec3b(0,0,0) &&
+        filtered_view.image.at<cv::Vec3b>(150,320)==cv::Vec3b(255,255,0),
+        "BALL_VIEW LINE debug reference did not follow 360px while normal LINE stayed 320px");
   Check(filtered_view.image.at<cv::Vec3b>(300,20)==cv::Vec3b(0,255,0) &&
         filtered_view.image.at<cv::Vec3b>(301,21)==cv::Vec3b(0,0,0),
         "raw YOLO box must be thin green");

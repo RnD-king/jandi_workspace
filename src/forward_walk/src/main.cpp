@@ -48,7 +48,9 @@ static_assert(vision::msg::ActionCommand::LINE_LEFT_UNIT == 32 &&
 static_assert(vision::msg::CommandStatus::READY == 3 &&
               vision::msg::CameraCommand::DOWN == 1 &&
               vision::msg::CameraCommand::FORWARD == 2 &&
-              vision::msg::CameraCommand::GOAL == 3);
+              vision::msg::CameraCommand::GOAL == 3 &&
+              vision::msg::CameraCommand::BALL_VIEW == 9 &&
+              vision::msg::CameraCommand::BALL_VIEW_LINE == 10);
 
 class MainNode : public rclcpp::Node
 {

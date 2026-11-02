@@ -348,7 +348,10 @@ int main() {
         Rejects([&] { overflowing_config.Validate(); });
         Require(config.Target(1).yaw==2036 && config.Target(1).pitch==2013 &&
                 config.Target(2).yaw==2077 && config.Target(2).pitch==1537 &&
-                config.Target(3).yaw==2054 && config.Target(3).pitch==966, "calibration mapping");
+                config.Target(3).yaw==2054 && config.Target(3).pitch==966 &&
+                config.Target(9).yaw==2036 && config.Target(9).pitch==1750 &&
+                config.Target(10).yaw==2036 && config.Target(10).pitch==1750,
+                "four camera poses and two BALL_VIEW arm policies");
         Rejects([&] { config.Target(0); });
         CameraMotion camera(config);
         auto base = InitialPose();

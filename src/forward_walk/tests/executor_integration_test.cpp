@@ -496,6 +496,32 @@ int main() {
               node->motion_loop_timer_->is_canceled(),"idle camera final pose/timer mismatch");
         for(std::size_t i=1;i<Dxl::packet_times.size();++i)
             Check(Dxl::packet_times[i]-Dxl::packet_times[i-1]>=19ms,"body/camera writer compressed packets");
+        // Both BALL_VIEW requests share exactly one camera pose. The
+        // request ID selects arm policy: near BALL down, GOAL retry outward.
+        Check(node->camera_config_.ball_view.yaw==node->camera_config_.down.yaw &&
+              node->camera_config_.ball_view.pitch==1750,
+              "BALL_VIEW did not load the shared 1750tick YAML calibration");
+        camera(2004,10);
+        pump([&]{return node->camera_transactions_.completed.Contains(2004);});flush();
+        Check(Dxl::current.at(21)==2036&&Dxl::current.at(22)==1750&&
+              Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,
+              "BALL_VIEW_LINE did not hold outward shoulders with 1750tick pitch");
+        camera(2005,9);
+        pump([&]{return node->camera_transactions_.completed.Contains(2005);});flush();
+        Check(Dxl::current.at(21)==2036&&Dxl::current.at(22)==1750&&
+              Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,
+              "BALL_VIEW did not lower shoulders without moving the head");
+        camera(2006,1);
+        pump([&]{return node->camera_transactions_.completed.Contains(2006);});flush();
+        Check(Dxl::current.at(21)==2036&&Dxl::current.at(22)==2013&&
+              Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,
+              "original HURDLE DOWN pose was altered");
+        camera(2007,2);
+        pump([&]{return node->camera_transactions_.completed.Contains(2007);});flush();
+        Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537&&
+              Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,
+              "FORWARD return from BALL_VIEW/DOWN failed");
+        std::cout<<"PASS BALL_VIEW head calibration and context-sensitive shoulders\n";
         std::cout<<"PASS body/camera simultaneous execution and idle camera single-writer spacing\n";
 
         // Special JSON arms return to FORWARD on the next camera command,
