@@ -31,6 +31,11 @@ class Frame:
     camera: str = "-"
     settled: bool = True
     filters_current: bool = False
+    curve_info: str = "CURVE:NONE IDX:-"
+    object_info: str = "OBJ:-"
+    control_info: str = "WAIT:IDLE STATE:NONE"
+    walk_info: str = "WALK DONE:0 ISSUED:0"
+    fine_info: str = "FINE:0 PROBE:0/1 BALL_REARM:N/A"
     boxes: list[Box] = field(default_factory=list)
 
 
@@ -40,14 +45,14 @@ def ascii_text(value: object) -> str:
 
 
 def grid_size(columns: int, rows: int, desired: int, width: int, height: int) -> tuple[int, int]:
-    """Two border rows + four status rows. Reserve the terminal's last column."""
-    if columns < 19 or rows < 9:
+    """Two border rows + six status rows. Reserve the terminal's last column."""
+    if columns < 19 or rows < 11:
         return 0, 0
     width, height = max(1, width), max(1, height)
     grid_columns = min(desired, columns - 3)
     grid_rows = max(1, round(grid_columns * height / (2 * width)))
-    if grid_rows > rows - 6:
-        grid_rows = rows - 6
+    if grid_rows > rows - 8:
+        grid_rows = rows - 8
         grid_columns = min(grid_columns, max(1, round(grid_rows * 2 * width / height)))
     return grid_columns, grid_rows
 
@@ -117,9 +122,11 @@ def render(frame: Frame | None, columns: int, rows: int, *, desired: int = 48,
     mode = "FILTERED" if source.filters_current else "RAW"
     run = "NO DATA: terminal_node:=true?" if frame is None else (
         f"STALE {age:.1f}s: no new frames" if stale else f"{source.run} {mode} RX {rx_hz:.1f}Hz")
-    status = [run,
-              f"{source.mission} {source.phase}",
-              f"{source.action} ID:{source.action_id} CAM:{source.camera}{'' if source.settled else '*'}",
+    status = [f"{run} CAM:{source.camera}{'' if source.settled else '*'} {source.curve_info}",
+              f"{source.mission} {source.phase} {source.object_info}",
+              f"{source.action} CMD:{source.action_id} {source.control_info}",
+              source.walk_info,
+              source.fine_info,
               f"L{counts[0]} B{counts[1]} G{counts[2]} D{counts[3]} H{counts[4]} "
               f"age:{age:.1f}s OUT:{output_kbps:.1f}KB/s"]
     if frame is None:
@@ -127,6 +134,7 @@ def render(frame: Frame | None, columns: int, rows: int, *, desired: int = 48,
         status[2] = "B:ball G:goal D:backboard H:hurdle .:line"
     border = "+" + "-" * w + "+"
     lines = [border] + [draw_row(row) for row in cells] + [border]
-    lines += [ascii_text(text)[:w+2].ljust(w+2) for text in status]
+    status_width = max(w+2, columns-1)
+    lines += [ascii_text(text)[:status_width].ljust(status_width) for text in status]
     # Erase each row's tail and any unused rows when terminal size shrinks.
     return "\x1b[H" + "\r\n".join(line + "\x1b[K" for line in lines) + "\x1b[0m\x1b[J"

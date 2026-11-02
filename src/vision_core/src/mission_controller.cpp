@@ -805,7 +805,56 @@ std::optional<LineGuide> MissionController::DecisionLineGuide() const {
 }
 
 MissionFrameResult MissionController::Step(const MissionFrameInput &input) {
-  return StepWithLineImageCenter(input, std::nullopt);
+  auto out=StepWithLineImageCenter(input,std::nullopt);
+  UpdateWalkDiagnostics(input,out);
+  return out;
+}
+
+void MissionController::UpdateWalkDiagnostics(
+    const MissionFrameInput& input,MissionFrameResult& out) {
+  // DONE only; an issued/queued command is not a completed walk.
+  if(input.delivery_feedback.done && input.delivery_feedback.action_id) {
+    const auto it=walk_records_.find(input.delivery_feedback.action_id);
+    if(it!=walk_records_.end()) {
+      const auto record=it->second;
+      ++walk_stats_.done;
+      switch(record.mission) {
+        case MissionType::kBall: ++walk_stats_.ball;break;
+        case MissionType::kGoal: ++walk_stats_.goal;break;
+        case MissionType::kHurdle: ++walk_stats_.hurdle;break;
+        default: ++walk_stats_.line;break;
+      }
+      if(record.probe) ++walk_stats_.probe;
+      if(record.fine) {
+        ++walk_stats_.fine;
+        switch(record.action) {
+          case MissionAction::kLeftSideStep:
+          case MissionAction::kRightSideStep: ++walk_stats_.fine_side;break;
+          case MissionAction::kTurnLeft:
+          case MissionAction::kTurnRight: ++walk_stats_.fine_turn;break;
+          default: ++walk_stats_.fine_forward;break;
+        }
+      }
+      walk_records_.erase(it);
+    }
+  }
+  const auto& cmd=out.command;
+  if(cmd.command_type==CommandType::kAction && cmd.action_id &&
+     cmd.action_category==ActionCategory::kLocomotion &&
+     !walk_records_.count(cmd.action_id) &&
+     cmd.action!=MissionAction::kNone &&
+     cmd.action!=MissionAction::kDefaultPosition &&
+     cmd.action!=MissionAction::kDefaultPoseMode &&
+     cmd.action!=MissionAction::kWalkMode) {
+    MissionType owner=out.active_mission;
+    if(owner==MissionType::kLine && out.approach_action_committed)
+      owner=out.approach_mission;
+    const bool fine=out.foot_pose==FootPose::kFine;
+    const bool probe=owner!=MissionType::kLine && line_plan_.IsProbe(cmd.action_id);
+    walk_records_.emplace(cmd.action_id,WalkRecord{owner,cmd.action,fine,probe});
+    walk_stats_.last=++walk_stats_.issued;
+  }
+  out.walking=walk_stats_;
 }
 
 MissionFrameResult MissionController::StepWithLineImageCenter(
@@ -1927,6 +1976,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
   output.curve_confirmations=curve_.confirmations;
   output.curve_head_attempts=curve_.head_attempts;
   output.curve_body_attempts=curve_.body_attempts;
+  output.curve_unlock_blocks=curve_.unlock_blocks;
   PopulateApproachDiagnostics(output);
   output.remembered_line_score=last_line_score_;
   output.line_score_recovery =
@@ -2485,6 +2535,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   // Line robot-reference is independent from the camera optical cx.
   std::optional<double> center = config_.line_features.image_center_u;
   output.mission = StepWithLineImageCenter(prepared, center);
+  UpdateWalkDiagnostics(prepared,output.mission);
   if(config_.ball_candidate_tracking.enabled) {
     const bool continuous_ball=continuous_.mission==MissionType::kBall && continuous_.locked;
     if (continuous_ball && !ball_target_locked_ && continuous_.id && continuous_.last) {
@@ -2983,6 +3034,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   post_pickup_straight_blocks_completed_ = 0;
   post_pickup_five_step_completed_ = false;
   post_pickup_line_actions_.clear();
+  walk_records_.clear();walk_stats_={};
   active_mission_ = MissionType::kLine;
   has_ball_ = config_.initial_has_ball;
   line_state_ = LineState::kNormal;

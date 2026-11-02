@@ -6,6 +6,27 @@
 #include <chrono>
 
 namespace vision {
+inline const char* CurveTerminalName(int phase) {
+  switch(phase) {
+    case 0:return "NONE";case 1:return "CONFIRM";case 2:return "DELAY";
+    case 3:return "DRAIN";case 4:return "SCAN";case 5:return "HOLD";
+    case 6:return "RETURN_FOUND";case 7:return "RETURN_MISS";
+    case 8:return "PROBE_WALK";case 9:return "BODY_TURN";
+    case 10:return "BODY_FORWARD";case 11:return "BODY_OBSERVE";
+    case 12:return "LOCKED";default:return "UNKNOWN";
+  }
+}
+inline const char* TerminalWaitName(vision_core::ControlPhase phase) {
+  using vision_core::ControlPhase;
+  switch(phase) {
+    case ControlPhase::kWaitingActionAck:return "ACK";
+    case ControlPhase::kWaitingActionDone:return "DONE";
+    case ControlPhase::kWaitingQueuedActionAck:return "QUEUED_ACK";
+    case ControlPhase::kWaitingQueuedActionStart:return "QUEUED_START";
+    case ControlPhase::kActionAckTimedOut:return "ACK_TIMEOUT";
+    default:return "IDLE";
+  }
+}
 
 template<typename DetectionRange>
 msg::TerminalFrame MakeTerminalFrame(const std_msgs::msg::Header& header,
@@ -34,6 +55,61 @@ msg::TerminalFrame MakeTerminalFrame(const std_msgs::msg::Header& header,
   frame.camera_settled=camera.settled;
   frame.filters_current=context.live_object_detections && camera.settled &&
       camera.actual_mode!=vision_core::CameraMode::kTransition;
+  const auto& m=result.mission;
+  const auto& perception=result.perception;
+  frame.curve_info="CURVE:"+std::string(CurveTerminalName(m.curve_search_phase))+
+      " IDX:"+std::to_string(m.course_curve_index)+
+      " HEAD:"+std::to_string(m.curve_head_attempts)+
+      " BODY:"+std::to_string(m.curve_body_attempts);
+  const std::uint64_t tracked=m.approach_track_id ? m.approach_track_id :
+      (m.active_mission==vision_core::MissionType::kBall ? perception.ball_target_id :
+       m.active_mission==vision_core::MissionType::kHurdle ? perception.hurdle_target_id :
+       m.active_mission==vision_core::MissionType::kGoal ? perception.backboard_target_id : 0);
+  std::uint64_t alternative=0;
+  for(const auto& candidate:perception.ball_tracks)
+    if(candidate.detection_index && candidate.id!=tracked) {
+      alternative=candidate.id;break;
+    }
+  frame.object_info="OBJ:"+std::to_string(tracked)+
+      " CAND:"+std::to_string(alternative)+
+      " MISS:"+std::to_string(m.approach_missing_frames);
+  if(perception.targets.ball)
+    frame.object_info+=" BALL_V:"+std::to_string(
+        static_cast<int>(std::lround(perception.targets.ball->center_px.v)));
+  const std::string wait=TerminalWaitName(m.command.control_phase);
+  std::string state="NONE";
+  if(m.command.control_phase==vision_core::ControlPhase::kActionAckTimedOut)
+    state="ACK_TIMEOUT";
+  else if(m.terminal_hold) state="FINAL_HOLD";
+  else if(m.recovery_failed) state="MISSION_RECOVERY_FAILED";
+  else if(m.approach_probe_active) state="PRELOCK_PROBE";
+  else if(m.approach_loss_pending) state="PRELOCK_LOSS";
+  else if(m.curve_search_phase==3 && m.approach_mission!=vision_core::MissionType::kNone)
+    state="CURVE_PREEMPT";
+  else if(m.curve_search_phase>=2 && m.curve_search_phase<=11)
+    state="CURVE_"+std::string(CurveTerminalName(m.curve_search_phase));
+  else if(!camera.settled) state="CAMERA_WAIT";
+  else if(m.post_motion_observing) state="POST_DONE_OBSERVE";
+  else if(m.line_score_recovery) state="LINE_SCORE_RECOVERY";
+  else if(m.line_in_recovery) state="LINE_RECOVERY";
+  else if(m.approach_missing_frames>0 && m.approach_mission!=vision_core::MissionType::kNone)
+    state="OBJECT_MISSING";
+  frame.control_info="WAIT:"+wait+" STATE:"+state;
+  const auto& w=m.walking;
+  frame.walk_info="WALK DONE:"+std::to_string(w.done)+
+      " ISSUED:"+std::to_string(w.issued)+
+      " LAST:#"+std::to_string(w.last)+
+      " LINE:"+std::to_string(w.line)+" BALL:"+std::to_string(w.ball)+
+      " GOAL:"+std::to_string(w.goal)+" HURDLE:"+std::to_string(w.hurdle);
+  frame.fine_info="FINE:"+std::to_string(w.fine)+
+      "(F"+std::to_string(w.fine_forward)+
+      "/S"+std::to_string(w.fine_side)+
+      "/T"+std::to_string(w.fine_turn)+") PROBE:"+
+      std::to_string(m.approach_probe_used ? 1 : 0)+"/"+
+      std::to_string(config.object_approach.prelock_loss_extra_blocks)+
+      " PROBE_DONE:"+std::to_string(w.probe)+
+      " CURVE_LOCK_REMAIN:"+std::to_string(m.curve_unlock_blocks)+
+      " BALL_REARM:N/A";
   std::size_t index=0;
   for (const auto& detection:detections) {
     const auto current=index++;

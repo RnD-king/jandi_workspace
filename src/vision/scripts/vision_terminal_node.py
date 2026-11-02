@@ -55,6 +55,9 @@ class VisionTerminalNode(Node):
             action=message.action_name, action_id=message.waiting_action_id,
             camera=message.camera, settled=message.camera_settled,
             filters_current=message.filters_current,
+            curve_info=message.curve_info, object_info=message.object_info,
+            control_info=message.control_info, walk_info=message.walk_info,
+            fine_info=message.fine_info,
             boxes=[Box(b.kind, b.x, b.y, b.width, b.height, b.filtered)
                    for b in message.detections])
 

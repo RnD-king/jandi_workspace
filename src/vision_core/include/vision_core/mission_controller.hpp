@@ -144,6 +144,10 @@ struct MissionFrameInput {
   std::optional<LineGuide> line_decision_guide_override;
 };
 
+struct WalkDiagnostics {
+  int issued{0}, done{0}, last{0}, line{0}, ball{0}, goal{0}, hurdle{0};
+  int fine{0}, fine_forward{0}, fine_side{0}, fine_turn{0}, probe{0};
+};
 struct MissionFrameResult {
   ControlCommand command;
   MissionType active_mission{MissionType::kLine};
@@ -192,6 +196,9 @@ struct MissionFrameResult {
   int ball_mission_index{1}, goal_mission_index{1};
   int course_curve_index{1};
   int curve_search_phase{0}, curve_confirmations{0}, curve_head_attempts{0}, curve_body_attempts{0};
+  int curve_unlock_blocks{0};
+  bool approach_loss_pending{false}, approach_probe_active{false}, approach_probe_used{false};
+  WalkDiagnostics walking;
   int recovery_turns_completed{0};
   bool recovery_failed{false};
   bool terminal_hold{false};
@@ -432,6 +439,7 @@ private:
   void EnterContinuousMission(const MissionFrameInput&,bool lost);
   bool ResumeContinuousApproach(const MissionFrameInput&);
   void PopulateApproachDiagnostics(MissionFrameResult&) const;
+  void UpdateWalkDiagnostics(const MissionFrameInput&,MissionFrameResult&);
   bool PrepareGoalDepthRecovery(const MissionFrameInput&,bool visible,bool usable,bool idle,RouteDecision&);
   enum class LineState {
     kNormal,
@@ -551,6 +559,13 @@ private:
   int post_pickup_straight_blocks_completed_{0};
   bool post_pickup_five_step_completed_{false};
   std::unordered_map<std::uint64_t, MissionAction> post_pickup_line_actions_;
+  struct WalkRecord {
+    MissionType mission{MissionType::kLine};
+    MissionAction action{MissionAction::kNone};
+    bool fine{false}, probe{false};
+  };
+  std::unordered_map<std::uint64_t,WalkRecord> walk_records_;
+  WalkDiagnostics walk_stats_;
   std::deque<bool> mission_recovery_hits_;
   double decision_object_weight_{0.0};
   // Width for renormalizing cached LINE offsets after optical reference edits.
