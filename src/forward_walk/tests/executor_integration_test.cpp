@@ -521,6 +521,28 @@ int main() {
         Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537&&
               Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,
               "FORWARD return from BALL_VIEW/DOWN failed");
+        // Aborted command must recover from the LAST SUCCESSFUL arm pose,
+        // even when the camera is physically at the ambiguous BALL_VIEW head.
+        camera(2008,9);
+        pump([&]{return node->camera_transactions_.completed.Contains(2008);});flush();
+        camera(2009,2);
+        Dxl::fail_write=true;
+        pump([&]{return !node->camera_motion_->Active();});
+        Dxl::fail_write=false;flush();
+        Check(!node->camera_arm_forward_ &&
+              Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,
+              "failed FORWARD transition changed held BALL_VIEW lowered shoulders");
+        camera(2010,10);
+        pump([&]{return node->camera_transactions_.completed.Contains(2010);});flush();
+        camera(2011,1);
+        Dxl::fail_write=true;
+        pump([&]{return !node->camera_motion_->Active();});
+        Dxl::fail_write=false;flush();
+        Check(node->camera_arm_forward_ &&
+              Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,
+              "failed DOWN transition changed held BALL_VIEW_LINE outward shoulders");
+        camera(2012,2);
+        pump([&]{return node->camera_transactions_.completed.Contains(2012);});flush();
         std::cout<<"PASS BALL_VIEW head calibration and context-sensitive shoulders\n";
         std::cout<<"PASS body/camera simultaneous execution and idle camera single-writer spacing\n";
 

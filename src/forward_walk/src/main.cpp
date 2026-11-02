@@ -903,23 +903,20 @@ private:
             static_cast<int>(startup_pose_in_progress_), reason.c_str());
         p2p_player_->Stop();
         camera_motion_->Abort(last_sent_positions_);
-        // A failed camera SyncWrite may leave the head at its PREVIOUS
-        // successfully transmitted pose. Do not keep the uncommitted
-        // camera_arm_forward_ target (e.g. DOWN) while the head is FORWARD.
-        // Choose the nearest calibrated head mode, so a subsequent normal
-        // action recovers shoulder targets consistent with the held head.
-        if (!last_sent_positions_.empty()) {
-            const auto yaw=last_sent_positions_.at(camera_config_.yaw_id);
-            const auto pitch=last_sent_positions_.at(camera_config_.pitch_id);
-            const auto distance_squared=[&](motion_executor::CameraPose pose) {
-                const double delta_yaw=static_cast<double>(yaw)-pose.yaw;
-                const double delta_pitch=static_cast<double>(pitch)-pose.pitch;
-                return delta_yaw*delta_yaw + delta_pitch*delta_pitch;
+        // BALL_VIEW and BALL_VIEW_LINE share identical head targets but
+        // intentionally use DIFFERENT shoulder poses. Infer the recovered
+        // arm policy from the last successful shoulder goals, never from
+        // head pitch (which cannot distinguish the two views).
+        if (last_sent_positions_.count(15) && last_sent_positions_.count(16)) {
+            const auto distance_squared=[&](int target_15,int target_16) {
+                const double d15=static_cast<double>(last_sent_positions_.at(15))-target_15;
+                const double d16=static_cast<double>(last_sent_positions_.at(16))-target_16;
+                return d15*d15+d16*d16;
             };
+            const auto outward=line_arm_config_.Targets();
             camera_arm_forward_=
-                distance_squared(camera_config_.forward) <= std::min(
-                    distance_squared(camera_config_.down),
-                    distance_squared(camera_config_.goal));
+                distance_squared(outward.at(15),outward.at(16)) <=
+                distance_squared(line_arm_config_.reference_15,line_arm_config_.reference_16);
         }
         camera_arm_tween_.Cancel();
         elbow_tween_.Cancel();
