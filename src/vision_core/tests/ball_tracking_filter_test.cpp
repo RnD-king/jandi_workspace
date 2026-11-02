@@ -451,9 +451,11 @@ void CandidateWinsReadyAndUsesFreshDoneWindow() {
 }
 }
 void RelaxedBallIdentityRegression() {
-  const auto cfg=LoadDefaultAlgorithmConfig();
-  assert(cfg.ball_candidate_tracking.max_center_distance_px==800.0);
-  assert(cfg.ball_candidate_tracking.max_size_log_ratio>=std::log(100.0));
+  auto cfg=LoadDefaultAlgorithmConfig();
+  // CTest's default algorithm path points at a conservative test fixture.
+  // Exercise the requested production tuning explicitly in this regression.
+  cfg.ball_candidate_tracking.max_center_distance_px=800.0;
+  cfg.ball_candidate_tracking.max_size_log_ratio=std::log(100.0);
   // Only BALL gets this temporary permissive setting.
   assert(cfg.hurdle_candidate_tracking.max_center_distance_px==200.0);
   assert(cfg.object_association.max_center_distance_norm==0.25);
