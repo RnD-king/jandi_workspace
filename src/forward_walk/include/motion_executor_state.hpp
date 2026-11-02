@@ -206,7 +206,7 @@ public:
         if(max_yaw_deg<1 || max_yaw_deg>90 || move_sec<=0 || hold_sec<0 || return_sec<=0 ||
             !std::isfinite(move_sec) || !std::isfinite(hold_sec) || !std::isfinite(return_sec))
             throw std::invalid_argument("invalid scan configuration");
-        const int sign=left ? -1 : 1; // Configurable sign must be calibrated on the robot.
+        const int sign=left ? 1 : -1; // Robot-mounted yaw: positive tick delta scans left.
         scan_far_={std::clamp(config_.forward.yaw + static_cast<int>(
                       std::lround(sign*max_yaw_deg*4096.0/360.0)),0,4095),config_.forward.pitch};
         scan_move_sec_=move_sec;scan_hold_sec_=hold_sec;scan_return_sec_=return_sec;

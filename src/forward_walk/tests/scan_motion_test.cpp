@@ -17,7 +17,7 @@ int main() {
   assert(camera.ScanState()==CameraMotion::ScanPhase::Outbound);
   for(int i=0;i<10;++i) camera.Update(start+std::chrono::milliseconds(21*i));
   const double paused=camera.ScanCommandedYawDeg();
-  assert(paused<0.0 && paused>-45.0);
+  assert(paused>0.0 && paused<45.0);
   assert(camera.HoldScan());
   assert(camera.ScanState()==CameraMotion::ScanPhase::Paused);
   for(int i=10;i<30;++i) camera.Update(start+std::chrono::milliseconds(21*i));
@@ -45,7 +45,7 @@ int main() {
     return_scan.Update(return_at);
     const double angle=return_scan.ScanCommandedYawDeg();
     if(return_scan.ScanState()==CameraMotion::ScanPhase::Returning &&
-        angle > -40.0 && angle < -5.0) {
+        angle < 40.0 && angle > 5.0) {
       return_sweep=true;
       break;
     }
@@ -63,7 +63,7 @@ int main() {
   bool return_finished=false;
   for(int i=0;i<90;++i) {
     const auto result=return_scan.Update(resumed_at+std::chrono::milliseconds(21*i));
-    assert(return_scan.ScanCommandedYawDeg()>=held_angle-0.5);
+    assert(return_scan.ScanCommandedYawDeg()<=held_angle+0.5);
     if(result==CameraMotion::Result::Verify) {
       return_finished=true;
       break;
@@ -72,6 +72,11 @@ int main() {
   assert(return_finished);
   assert(return_scan.ConfirmArrival(cfg.forward));
   assert(!return_scan.ScanActive());
+  // Right scan must use the opposite (negative) yaw delta.
+  CameraMotion right_scan(cfg);
+  right_scan.StartScan(false,45,0.5,0.5,0.5,positions,start);
+  for(int i=0;i<10;++i) right_scan.Update(start+std::chrono::milliseconds(21*i));
+  assert(right_scan.ScanCommandedYawDeg()<0.0);
   // The normal forward/down/goal interpolation remains available.
   camera.Start(1,positions,start);
   assert(!camera.ScanActive());

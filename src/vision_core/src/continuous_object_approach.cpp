@@ -322,6 +322,16 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const std::array<MissionType,3> missions{MissionType::kBall,MissionType::kGoal,MissionType::kHurdle};
   const std::array<std::optional<ObjectTarget>,3> targets{input.ball_target,input.backboard_target,input.hurdle_target};
   const std::array<std::uint64_t,3> ids{input.ball_track_id,input.backboard_track_id,input.hurdle_track_id};
+  // Keep the BALL approach identity gate consistent with candidate tracking.
+  // HURDLE and GOAL retain their original common association limits.
+  const auto same_target=[&](const ObjectTarget& previous,const ObjectTarget& current,std::size_t index) {
+    const double max_distance=index==0 ? config_.ball_candidate_tracking.max_center_distance_px :
+        config_.object_association.max_center_distance_norm*
+            std::hypot(input.image_width,input.image_height);
+    const double max_size=index==0 ? config_.ball_candidate_tracking.max_size_log_ratio :
+        config_.object_association.max_size_log_ratio;
+    return SamePosition(previous,current,max_distance,max_size);
+  };
   const std::array<int,3> windows{config_.ball.stable_window,config_.goal.stable_window,config_.hurdle.stable_window};
   const std::array<int,3> entry_hits{config_.ball.entry_min_hits,config_.goal.stable_min_hits,config_.hurdle.stable_min_hits};
   const std::array<bool,3> eligible{
@@ -335,8 +345,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     if (visible && i==0) visible=targets[i]->center_px.v<=config_.ball.upper_acquire_v_px;
     if (visible && i==2) visible=targets[i]->center_px.v<=config_.hurdle.upper_acquire_v_px;
     if (visible && evidence.last && ((ids[i] && evidence.id && ids[i]!=evidence.id) ||
-        !SamePosition(*evidence.last,*targets[i],config_.object_association.max_center_distance_norm*
-            std::hypot(input.image_width,input.image_height),config_.object_association.max_size_log_ratio))) evidence={};
+        !same_target(*evidence.last,*targets[i],i))) evidence={};
     Push(evidence.hits,visible,windows[i]);
     if (i==1) Push(evidence.near_hits,visible &&
         GoalNearDistanceSample(input.backboard_center_depth_m,input.goal_pose,
@@ -396,8 +405,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
                       continuous_.mission==MissionType::kGoal ? 1 : 2;
   auto target=targets[i];
   if (target && continuous_.last && ((ids[i] && continuous_.id && ids[i]!=continuous_.id) ||
-      !SamePosition(*continuous_.last,*target,config_.object_association.max_center_distance_norm*
-          std::hypot(input.image_width,input.image_height),config_.object_association.max_size_log_ratio))) target.reset();
+      !same_target(*continuous_.last,*target,i))) target.reset();
   if (target) {
     continuous_.last=target;continuous_.missing=0;
     if (ids[i]) continuous_.id=ids[i];

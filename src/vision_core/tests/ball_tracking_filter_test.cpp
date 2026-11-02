@@ -21,7 +21,10 @@ PerceptionDetection DetectionAt(double u,int cls=1,double w=40,double h=40,
   return d;
 }
 void TrackletRegressions() {
-  const auto c=LoadDefaultAlgorithmConfig();
+  auto c=LoadDefaultAlgorithmConfig();
+  // Historical identity-splitting fixtures intentionally exercise a strict gate.
+  c.ball_candidate_tracking.max_center_distance_px=180.0;
+  c.ball_candidate_tracking.max_size_log_ratio=0.50;
   BallCandidateTracker tracker;
   const auto update=[&](std::vector<ObjectTargetCandidate> ds) {
     tracker.Update(ds,c.ball_candidate_tracking,c.object_association,10,470);
@@ -175,6 +178,9 @@ struct Pipeline {
     // These scenarios exercise production's 6/10 entry contract, independently
     // of the historical fixture's seven-hit entry threshold.
     c.ball.entry_min_hits=6; c.ball.stable_window=10; c.ball.stable_min_hits=7;
+    // Preserve the historical strict multi-object rejection fixture.
+    c.ball_candidate_tracking.max_center_distance_px=180.0;
+    c.ball_candidate_tracking.max_size_log_ratio=0.50;
     c.ball.recovery_max_steps=0; // These motion-disabled tests isolate identity revalidation.
     return c;
   }
@@ -444,6 +450,24 @@ void CandidateWinsReadyAndUsesFreshDoneWindow() {
   assert(out.mission.post_motion_valid==7);
 }
 }
+void RelaxedBallIdentityRegression() {
+  auto cfg=LoadDefaultAlgorithmConfig();
+  // CTest's default algorithm path points at a conservative test fixture.
+  // Exercise the requested production tuning explicitly in this regression.
+  cfg.ball_candidate_tracking.max_center_distance_px=800.0;
+  cfg.ball_candidate_tracking.max_size_log_ratio=std::log(100.0);
+  // Only BALL gets this temporary permissive setting.
+  assert(cfg.hurdle_candidate_tracking.max_center_distance_px==200.0);
+  assert(cfg.object_association.max_center_distance_norm==0.25);
+  BallCandidateTracker tracker;
+  tracker.Update({Candidate(5,5,1)},cfg.ball_candidate_tracking,cfg.object_association,10,470);
+  const auto id=tracker.Best()->id;
+  // Same BALL: ~778px center movement and 100-fold bbox dimensions.
+  tracker.Update({Candidate(625,475,100)},cfg.ball_candidate_tracking,cfg.object_association,10,470);
+  assert(tracker.Tracks().size()==1);
+  assert(tracker.Find(id) && tracker.Find(id)->detection_index &&
+      tracker.Find(id)->target.center_px.u==625);
+}
 void ExtendedCandidateGraceAndDistance() {
   auto config=LoadDefaultAlgorithmConfig();
   auto tracking=config.ball_candidate_tracking;
@@ -463,6 +487,7 @@ void ExtendedCandidateGraceAndDistance() {
   update({Candidate(280)});assert(tracker.Best()->id!=id);
 }
 int main() {
+  RelaxedBallIdentityRegression();
   ExtendedCandidateGraceAndDistance();
   SharedObjectTrackingRegressions();HurdleIdentityEntryAndCameraReset();BackboardIdentityAndCameraReset();
   HurdleObservationRestartsAfterCamera();

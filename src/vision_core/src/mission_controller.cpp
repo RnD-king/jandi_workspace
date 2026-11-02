@@ -2269,6 +2269,17 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
     // only explicit recovery/camera episodes may acquire another identity.
     if(input.manual_ready_mean && input.ball_target_id && input.ball_target_id==ball_target_id_ && ball_candidates.size()==1)
       ball_association_tracker_.Seed(ball_candidates.front().target);
+    // BALL candidate IDs and the post-lock association must use the same
+    // temporary permissive gate; do not loosen HURDLE/GOAL association.
+    if (config_.ball_candidate_tracking.enabled) {
+      ObjectAssociationConfig ball_association=config_.object_association;
+      const double diagonal=std::max(1.0,std::hypot(
+          static_cast<double>(input.image_width),static_cast<double>(input.image_height)));
+      ball_association.max_center_distance_norm=
+          config_.ball_candidate_tracking.max_center_distance_px/diagonal;
+      ball_association.max_size_log_ratio=config_.ball_candidate_tracking.max_size_log_ratio;
+      ball_association_tracker_.UpdateConfig(ball_association);
+    }
     if(!(input.manual_ready_mean && input.ball_target_id && ball_target_locked_ && input.ball_target_id!=ball_target_id_))
       ball=ball_association_tracker_.Update(ball_candidates,input.image_width,input.image_height,!ball_target_locked_);
   }
