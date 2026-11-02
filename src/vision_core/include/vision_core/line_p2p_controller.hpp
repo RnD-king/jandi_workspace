@@ -64,7 +64,8 @@ public:
   void Add(std::uint64_t action_id, double now_sec, const LineGuide &guide);
   void AddCenter(std::uint64_t action_id, double now_sec, std::optional<Point2> center);
   std::optional<Point2> FinishCenter(std::uint64_t action_id, double now_sec,
-                                     double estimated_remaining_sec = 0.0);
+                                     double estimated_remaining_sec = 0.0,
+                                     bool require_line_stability = true);
   std::optional<LineGuide> Finish(std::uint64_t action_id, double now_sec,
                                   double estimated_remaining_sec = 0.0);
   std::optional<LineWindowStats> LastStats() const { return last_stats_; }

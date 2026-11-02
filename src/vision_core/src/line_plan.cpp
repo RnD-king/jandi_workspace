@@ -184,12 +184,15 @@ std::optional<LineGuide> LinePlan::Finish(std::uint64_t id, double now, double r
   return block->mean;
 }
 std::optional<Point2> LinePlan::FinishObjectCenter(
-    std::uint64_t id,double now,double remaining) {
+    std::uint64_t id,double now,double remaining,
+    bool require_line_stability,bool object_qualified) {
   const auto it=units_.find(id);
   auto* block=it==units_.end()?nullptr:Find(it->second.block);
   if (!block || block->aborted) return std::nullopt;
   if (!block->window_finished) {
-    block->mean_center=block->observations.FinishCenter(block->id,now,remaining);
+    block->mean_center=block->observations.FinishCenter(
+        block->id,now,remaining,require_line_stability);
+    if (!object_qualified) block->mean_center.reset();
     block->window_finished=true;
   }
   return block->mean_center;

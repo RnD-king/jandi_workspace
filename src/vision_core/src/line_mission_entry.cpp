@@ -616,7 +616,10 @@ MissionFrameResult MissionController::StepPlannedLine(
         std::optional<Point2> averaged_center;
         std::optional<LineGuide> mean;
         if (pixel_owner) {
-          averaged_center=line_plan_.FinishObjectCenter(id,input.now_sec,ready_remaining);
+          const bool ball_owner=continuous_.mission==MissionType::kBall;
+          averaged_center=line_plan_.FinishObjectCenter(
+              id,input.now_sec,ready_remaining,
+              !ball_owner, !ball_owner || line_plan_.ObjectQualified(id));
           if (averaged_center && continuous_.last) {
             auto averaged_target=*continuous_.last;
             averaged_target.center_px=*averaged_center;

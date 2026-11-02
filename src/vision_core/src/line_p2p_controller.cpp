@@ -151,7 +151,8 @@ void LineGuideAccumulator::AddCenter(std::uint64_t action_id, double now_sec,
 }
 
 std::optional<Point2> LineGuideAccumulator::FinishCenter(
-    std::uint64_t action_id,double now_sec,double estimated_remaining_sec) {
+    std::uint64_t action_id,double now_sec,double estimated_remaining_sec,
+    bool require_line_stability) {
   if (!ActiveFor(action_id)) { last_stats_.reset(); return std::nullopt; }
   const double end_sec=std::isfinite(now_sec)?std::max(begin_sec_,now_sec):begin_sec_;
   const double remaining=std::isfinite(estimated_remaining_sec)
@@ -187,8 +188,11 @@ std::optional<Point2> LineGuideAccumulator::FinishCenter(
   }
   last_stats_=stats;
   Reset();
-  if (!qualified || stats.used_frames<static_cast<std::size_t>(minimum_valid_samples_) ||
-      weight_sum<=0.0) return std::nullopt;
+  if (require_line_stability &&
+      (!qualified || stats.used_frames<static_cast<std::size_t>(minimum_valid_samples_)))
+    return std::nullopt;
+  // BALL uses the object's own 10/4 gate, not this LINE 10/5 gate.
+  if (weight_sum<=0.0 || stats.used_frames==0) return std::nullopt;
   return Point2{sum.u/weight_sum,sum.v/weight_sum};
 }
 

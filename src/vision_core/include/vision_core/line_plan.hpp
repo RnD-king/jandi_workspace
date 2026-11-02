@@ -50,7 +50,9 @@ public:
   bool Outstanding() const;
   bool WindowFinished(std::uint64_t id) const;
   std::optional<LineGuide> Finish(std::uint64_t id, double now, double remaining);
-  std::optional<Point2> FinishObjectCenter(std::uint64_t id,double now,double remaining);
+  std::optional<Point2> FinishObjectCenter(std::uint64_t id,double now,double remaining,
+                                            bool require_line_stability=true,
+                                            bool object_qualified=true);
   std::optional<LineWindowStats> Stats(std::uint64_t id) const;
   std::vector<MissionAction> TakeCompleted();
   struct CompletedBlock { MissionAction cruise; std::uint64_t owner; bool object_qualified; bool probe; };
