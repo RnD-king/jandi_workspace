@@ -850,6 +850,7 @@ void MissionController::UpdateWalkDiagnostics(
     if(owner==MissionType::kLine && out.approach_action_committed)
       owner=out.approach_mission;
     const bool fine=out.foot_pose==FootPose::kFine;
+    if(fine) ++walk_stats_.fine_issued;
     const bool probe=owner!=MissionType::kLine && line_plan_.IsProbe(cmd.action_id);
     walk_records_.emplace(cmd.action_id,WalkRecord{owner,cmd.action,fine,probe});
     walk_stats_.last=++walk_stats_.issued;
@@ -1979,6 +1980,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
   output.curve_unlock_blocks=curve_.unlock_blocks;
   PopulateApproachDiagnostics(output);
   output.remembered_line_score=last_line_score_;
+  output.line_recovery_phase=static_cast<int>(line_state_);
   output.line_score_recovery =
       line_state_ == LineState::kScoreRecovery ||
       (line_state_ == LineState::kFinalHold &&

@@ -28,6 +28,7 @@ int main() {
   result.mission.approach_missing_frames=18;
   result.mission.walking.done=8;result.mission.walking.issued=9;
   result.mission.walking.line=5;result.mission.walking.ball=3;
+  result.mission.walking.fine_issued=4;result.mission.walking.fine=3;
   auto frame=vision::MakeTerminalFrame(header,640,480,detections,config,result,camera,context);
   Check(frame.curve_info.find("CURVE:DELAY IDX:3")!=std::string::npos,
         "curve phase/index missing from SSH metadata");
@@ -37,6 +38,8 @@ int main() {
   Check(frame.walk_info.find("DONE:8")!=std::string::npos &&
         frame.walk_info.find("BALL:3")!=std::string::npos,
         "DONE-based walk telemetry missing");
+  Check(frame.fine_info.find("FINE_DONE:3 FINE_ISSUED:4")!=std::string::npos,
+        "fine walk DONE/issued must remain distinct");
   Check(frame.detections.size()==3,"unrecognized classes and rejected line centers must be omitted");
   Check(frame.header.stamp.sec==123 && frame.image_width==640 && frame.waiting_action_id==42,
       "metadata must retain the original frame and real action state");

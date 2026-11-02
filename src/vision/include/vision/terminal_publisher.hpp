@@ -16,6 +16,14 @@ inline const char* CurveTerminalName(int phase) {
     case 12:return "LOCKED";default:return "UNKNOWN";
   }
 }
+inline const char* LineTerminalName(int phase) {
+  switch(phase) {
+    case 0:return "NORMAL";case 1:return "FAIL_OBSERVE";
+    case 2:return "RECOVERY_TURN";case 3:return "RECOVERY_OBSERVE";
+    case 4:return "FINAL_HOLD";case 5:return "SCORE_RECOVERY";
+    default:return "UNKNOWN";
+  }
+}
 inline const char* TerminalWaitName(vision_core::ControlPhase phase) {
   using vision_core::ControlPhase;
   switch(phase) {
@@ -91,7 +99,7 @@ msg::TerminalFrame MakeTerminalFrame(const std_msgs::msg::Header& header,
   else if(!camera.settled) state="CAMERA_WAIT";
   else if(m.post_motion_observing) state="POST_DONE_OBSERVE";
   else if(m.line_score_recovery) state="LINE_SCORE_RECOVERY";
-  else if(m.line_in_recovery) state="LINE_RECOVERY";
+  else if(m.line_in_recovery) state="LINE_"+std::string(LineTerminalName(m.line_recovery_phase));
   else if(m.approach_missing_frames>0 && m.approach_mission!=vision_core::MissionType::kNone)
     state="OBJECT_MISSING";
   frame.control_info="WAIT:"+wait+" STATE:"+state;
@@ -101,7 +109,8 @@ msg::TerminalFrame MakeTerminalFrame(const std_msgs::msg::Header& header,
       " LAST:#"+std::to_string(w.last)+
       " LINE:"+std::to_string(w.line)+" BALL:"+std::to_string(w.ball)+
       " GOAL:"+std::to_string(w.goal)+" HURDLE:"+std::to_string(w.hurdle);
-  frame.fine_info="FINE:"+std::to_string(w.fine)+
+  frame.fine_info="FINE_DONE:"+std::to_string(w.fine)+
+      " FINE_ISSUED:"+std::to_string(w.fine_issued)+
       "(F"+std::to_string(w.fine_forward)+
       "/S"+std::to_string(w.fine_side)+
       "/T"+std::to_string(w.fine_turn)+") PROBE:"+
@@ -110,6 +119,15 @@ msg::TerminalFrame MakeTerminalFrame(const std_msgs::msg::Header& header,
       " PROBE_DONE:"+std::to_string(w.probe)+
       " CURVE_LOCK_REMAIN:"+std::to_string(m.curve_unlock_blocks)+
       " BALL_REARM:N/A";
+  if(m.active_mission==vision_core::MissionType::kBall && m.ball.recovery_step_limit>0)
+    frame.fine_info+=" BALL_REC:"+std::to_string(m.ball.recovery_steps_completed)+
+        "/"+std::to_string(m.ball.recovery_step_limit);
+  if(m.active_mission==vision_core::MissionType::kHurdle && m.hurdle.recovery_step_limit>0)
+    frame.fine_info+=" HURDLE_REC:"+std::to_string(m.hurdle.recovery_steps_completed)+
+        "/"+std::to_string(m.hurdle.recovery_step_limit);
+  if(m.goal.depth_recovery_active)
+    frame.fine_info+=" GOAL_DEPTH:"+std::to_string(m.goal.depth_recovery_steps)+
+        "/"+std::to_string(config.goal.depth_recovery_max_steps);
   std::size_t index=0;
   for (const auto& detection:detections) {
     const auto current=index++;

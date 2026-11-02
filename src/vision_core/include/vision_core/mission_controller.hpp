@@ -146,7 +146,7 @@ struct MissionFrameInput {
 
 struct WalkDiagnostics {
   int issued{0}, done{0}, last{0}, line{0}, ball{0}, goal{0}, hurdle{0};
-  int fine{0}, fine_forward{0}, fine_side{0}, fine_turn{0}, probe{0};
+  int fine{0}, fine_issued{0}, fine_forward{0}, fine_side{0}, fine_turn{0}, probe{0};
 };
 struct MissionFrameResult {
   ControlCommand command;
@@ -165,6 +165,7 @@ struct MissionFrameResult {
   bool approach_action_committed{false}; // The displayed action ID belongs to this object's LINE block.
   std::optional<LineWindowStats> line_window_stats;
   bool line_in_recovery{true};
+  int line_recovery_phase{0}; // LineState: NORMAL/FAIL_OBSERVE/TURN/OBSERVE/HOLD/SCORE.
   bool line_score_recovery{false};
   int line_score_recovery_turns_completed{0};
   bool has_ball{false};
