@@ -1108,6 +1108,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                                     config_.test_mission != MissionType::kGoal)
             ? CameraMode::kForward
             : (config_.test_mission == MissionType::kGoal ? CameraMode::kGoal
+                : config_.test_mission == MissionType::kBall ? CameraMode::kBallView
                                                           : CameraMode::kDown);
     const bool camera_ready = input.camera_feedback.settled &&
                               input.camera_feedback.actual_mode == wanted;
@@ -1130,6 +1131,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     if (!camera_ready)
       camera_request = wanted == CameraMode::kGoal   ? CameraRequest::kGoal
                        : wanted == CameraMode::kDown ? CameraRequest::kDown
+                       : wanted == CameraMode::kBallView ? CameraRequest::kBallView
                                                      : CameraRequest::kForward;
     if (!test_setup_pose_done_)
       pose = {initial_pose, ActionCategory::kLocomotion, 0, false};
@@ -1219,6 +1221,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
        previous_camera_mode_ == CameraMode::kTransition) &&
       input.camera_feedback.settled &&
       (input.camera_feedback.actual_mode == CameraMode::kDown ||
+       input.camera_feedback.actual_mode == CameraMode::kBallView ||
        input.camera_feedback.actual_mode == CameraMode::kGoal);
   if (camera_settle_edge)
     settle_until_sec_ = std::max(settle_until_sec_,
@@ -2112,9 +2115,12 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
       const bool ball=detection.class_id==cfg.ball_class_id;
       const bool enabled=ball ? cfg.ball_depth_enabled : cfg.hurdle_depth_enabled;
       const auto mode=input.camera_feedback.actual_mode;
-      if(enabled && (mode==CameraMode::kForward || mode==CameraMode::kDown)) {
-        const double lo=ball ? (mode==CameraMode::kDown ? cfg.ball_down_min_depth_m : cfg.ball_forward_min_depth_m) : cfg.hurdle_min_depth_m;
-        const double hi=ball ? (mode==CameraMode::kDown ? cfg.ball_down_max_depth_m : cfg.ball_forward_max_depth_m) : cfg.hurdle_max_depth_m;
+      if(enabled && (mode==CameraMode::kForward || mode==CameraMode::kDown ||
+                     mode==CameraMode::kBallView)) {
+        const double lo=ball ? (mode==CameraMode::kBallView ? cfg.ball_view_min_depth_m :
+            mode==CameraMode::kDown ? cfg.ball_down_min_depth_m : cfg.ball_forward_min_depth_m) : cfg.hurdle_min_depth_m;
+        const double hi=ball ? (mode==CameraMode::kBallView ? cfg.ball_view_max_depth_m :
+            mode==CameraMode::kDown ? cfg.ball_down_max_depth_m : cfg.ball_forward_max_depth_m) : cfg.hurdle_max_depth_m;
         diag.depth_passed=diag.depth_m ? (*diag.depth_m>=lo && *diag.depth_m<=hi) :
             (ball ? cfg.ball_allow_missing_depth : cfg.hurdle_allow_missing_depth);
       }
@@ -2547,7 +2553,8 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   prepared.manual_near_hits = input.manual_near_hits;
   prepared.line_decision_guide_override = input.line_decision_guide_override;
   // Line robot-reference is independent from the camera optical cx.
-  std::optional<double> center = config_.line_features.image_center_u;
+  std::optional<double> center = input.camera_feedback.actual_mode==CameraMode::kBallView
+      ? config_.ball_view_line_image_center_u : config_.line_features.image_center_u;
   output.mission = StepWithLineImageCenter(prepared, center);
   UpdateWalkDiagnostics(prepared,output.mission);
   if(config_.ball_candidate_tracking.enabled) {
@@ -3238,7 +3245,7 @@ bool MissionController::TestBoundaryReached(
   if (config_.test_stage != 1 || !camera.settled)
     return false;
   if (config_.test_mission == MissionType::kBall)
-    return camera.actual_mode == CameraMode::kDown &&
+    return camera.actual_mode == CameraMode::kBallView &&
            ball_result_.mode == BallMode::kDownSearch;
   if (config_.test_mission == MissionType::kHurdle)
     return camera.actual_mode == CameraMode::kDown &&

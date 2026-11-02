@@ -589,7 +589,7 @@ GoalResult GoalController::Compute(
           entry_line_retry_pending_ = true;
           mode_ = GoalMode::kEntryRetryCameraForward;
           state_enter_sec_ = now_sec;
-          result.camera_request = CameraRequest::kForward;
+          result.camera_request = CameraRequest::kBallViewLine;
           ClearTracking();
         }
         result.entry_line_retries = entry_line_retries_;
@@ -698,8 +698,8 @@ GoalResult GoalController::Compute(
   case GoalMode::kEntryRetryCameraForward:
     if (feedback.action_active && !feedback.action_done)
       return result;
-    result.camera_request = CameraRequest::kForward;
-    if (camera.actual_mode == CameraMode::kForward && camera.settled) {
+    result.camera_request = CameraRequest::kBallViewLine;
+    if (camera.actual_mode == CameraMode::kBallView && camera.settled) {
       // The coordinator owns LINE recovery/planning and will start a fresh
       // completed-block gate; this is not GOAL completion or a new mission.
       mode_ = GoalMode::kLineFollow;

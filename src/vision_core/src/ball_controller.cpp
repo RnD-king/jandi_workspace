@@ -383,7 +383,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
           mode_ = BallMode::kWaitCameraDown;
           state_enter_sec_ = now_sec;
           result.mode = mode_;
-          result.camera_request = CameraRequest::kDown;
+          result.camera_request = CameraRequest::kBallView;
           return result;
         }
         if (last_approach_zone_ == 4 || last_approach_zone_ == 6) {
@@ -508,7 +508,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       mode_ = BallMode::kWaitCameraDown;
       state_enter_sec_ = now_sec;
       result.mode = mode_;
-      result.camera_request = CameraRequest::kDown;
+      result.camera_request = CameraRequest::kBallView;
       return result;
     }
     result.action = Locomotion(near_turn_action_);
@@ -520,7 +520,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       mode_ = BallMode::kWaitCameraDown;
       state_enter_sec_ = now_sec;
       result.mode = mode_;
-      result.camera_request = CameraRequest::kDown;
+      result.camera_request = CameraRequest::kBallView;
       return result;
     }
     // Keep the originally chosen step count until its real DONE, even if
@@ -534,8 +534,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       state_enter_sec_ = now_sec;
       test_camera_pending_ = false;
     }
-    result.camera_request = CameraRequest::kDown;
-    if (camera.actual_mode == CameraMode::kDown && camera.settled) {
+    result.camera_request = CameraRequest::kBallView;
+    if (camera.actual_mode == CameraMode::kBallView && camera.settled) {
       ClearTracking(); // Start fine control with fresh DOWN-view evidence.
       last_seen_u_px_ = config_.far_u_des_px;
       mode_ = BallMode::kDownSearch;
