@@ -2392,7 +2392,17 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
     prepared.ball_entry_track_hits=entry_track ? entry_track->HitCount() : 0;
     prepared.ball_entry_track_frames=entry_track ? static_cast<int>(entry_track->hits.size()) : 0;
     prepared.ball_entry_detected=entry_track && entry_track->detection_index && entry_track->target.center_px.v<=config_.ball.upper_acquire_v_px;
-    if(entry_track) prepared.ball_entry_center_u=entry_track->MeanU();
+    if(entry_track) {
+      prepared.ball_entry_center_u=entry_track->MeanU();
+      if(entry_track->detection_index) {
+        Point2 sum{};
+        int valid=0;
+        for(const auto& point:entry_track->positions) if(point) {
+          sum.u+=point->u;sum.v+=point->v;++valid;
+        }
+        if(valid>0) prepared.ball_entry_mean_center=Point2{sum.u/valid,sum.v/valid};
+      }
+    }
   } else if(config_.ball_candidate_tracking.enabled && candidate_.mission==MissionType::kBall) {
     // During draining, only the pinned identity may update search direction;
     // an unrelated raw detection must not overwrite the selected A evidence.

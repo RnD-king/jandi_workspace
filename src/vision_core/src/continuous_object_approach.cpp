@@ -360,6 +360,9 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       continuous_.epoch=next_approach_epoch_++;
       continuous_.last=targets[i];continuous_.hits=evidence.hits;
       continuous_.near_hits=evidence.near_hits;
+      // The first object-owned READY does not exist yet. Preserve the real
+      // per-ID LINE admission mean for the single pre-lock loss probe.
+      if(i==0) continuous_.last_ready_center=input.ball_entry_mean_center;
       acquired=true;
       if (i==1) approach_goal_empty_retries_=0;
       break;
@@ -445,6 +448,13 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
                              stable_hits,std::min(near_hits,windows[i])));
   }
   if (target) continuous_.good_hits=continuous_.hits;
+  // An object may disappear before any object-owned block has been issued.
+  // READY evidence cannot mark that episode lost: after the last physical
+  // LINE unit drains, expire the pre-lock ID instead of holding forever.
+  if(i==0 && !target && !continuous_.locked && !continuous_.near &&
+     !continuous_.loss_pending && !line_plan_.Active() && !line_plan_.Outstanding() &&
+     continuous_.missing>config_.ball_candidate_tracking.missing_frame_limit)
+    continuous_.loss_pending=true;
   const bool lost=continuous_.loss_pending;
   if (lost && !continuous_.locked && !continuous_.near) {
     line_plan_.Abort();result.hold=true;

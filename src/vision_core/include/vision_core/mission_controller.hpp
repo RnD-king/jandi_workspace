@@ -92,7 +92,9 @@ struct MissionFrameInput {
   // Direct callers may omit this and use ball_target detection presence.
   std::optional<int> ball_entry_track_hits, ball_entry_track_frames;
   std::optional<bool> ball_entry_detected;
-  std::optional<double> ball_entry_center_u; // Actual candidate used for entry-direction memory.
+  std::optional<double> ball_entry_center_u;
+  // Mean of confirmed positions from the initial LINE admission window.
+  std::optional<Point2> ball_entry_mean_center; // Actual candidate used for entry-direction memory.
   std::optional<ObjectTarget> hurdle_target;
   std::optional<int> hurdle_entry_track_hits;
   std::optional<double> hurdle_entry_center_u;

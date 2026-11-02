@@ -203,7 +203,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   const bool idle = (!command_coordinator_.HasPendingAction() || completing_current) &&
       !line_plan_.Outstanding();
   RouteDecision route;
-  const bool curve_special=curve_.phase==CurveSearchState::Phase::kDrain ||
+  bool curve_special=curve_.phase==CurveSearchState::Phase::kDrain ||
       curve_.phase==CurveSearchState::Phase::kScan ||
       curve_.phase==CurveSearchState::Phase::kHold ||
       curve_.phase==CurveSearchState::Phase::kReturnFound ||
@@ -212,9 +212,28 @@ MissionFrameResult MissionController::StepPlannedLine(
       curve_.phase==CurveSearchState::Phase::kBodyTurn ||
       curve_.phase==CurveSearchState::Phase::kBodyForward ||
       curve_.phase==CurveSearchState::Phase::kBodyObserve;
+  // A qualified BALL must be allowed to enter even when a previously
+  // scheduled curve has reached DRAIN but the head scan has not started.
+  const bool ball_ready_during_drain=curve_.phase==CurveSearchState::Phase::kDrain &&
+      input.camera_feedback.settled &&
+      input.camera_feedback.actual_mode==CameraMode::kForward &&
+      input.ball_target && input.ball_entry_track_hits &&
+      *input.ball_entry_track_hits>=config_.ball.entry_min_hits &&
+      input.ball_target->center_px.v<=config_.ball.upper_acquire_v_px;
   if (automatic_approach && (!curve_special ||
-      curve_.phase==CurveSearchState::Phase::kBodyObserve)) {
+      curve_.phase==CurveSearchState::Phase::kBodyObserve || ball_ready_during_drain)) {
     route=PrepareContinuousApproach(input,output.line_features,idle);
+    if (continuous_.mission==MissionType::kBall &&
+        (curve_.phase==CurveSearchState::Phase::kConfirm ||
+         curve_.phase==CurveSearchState::Phase::kDelay ||
+         curve_.phase==CurveSearchState::Phase::kDrain)) {
+      // BALL admission wins over an UNSTARTED camera scan; never cancel an
+      // already running scan or an already issued motor action.
+      curve_.phase=CurveSearchState::Phase::kIdle;
+      curve_.delay_remaining=curve_.confirmations=0;
+      curve_.frame_directions.clear();curve_.block_curve_direction=0;
+      curve_special=false;
+    }
     if (route.entered) {
       // Far-object loss must not lock out the next legitimate curve.
       if(continuous_.mission==MissionType::kBall && continuous_.near) {
