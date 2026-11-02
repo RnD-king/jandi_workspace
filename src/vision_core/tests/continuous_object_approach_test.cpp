@@ -23,6 +23,11 @@ MissionControllerConfig Config() {
   c.ball.approach_short_v_px=100;c.ball.approach_two_step_v_px=240;c.ball.approach_direct_down_v_px=355;
   c.hurdle.approach_short_v_px=100;c.hurdle.approach_two_step_v_px=240;
   c.object_association.max_center_distance_norm=.5;
+  // This fixture changes the BALL center from v=100 to v=260 in one update.
+  // Its test YAML intentionally has an 80px candidate gate; give this
+  // direct-controller fixture the same wider gate the old association used.
+  c.ball_candidate_tracking.max_center_distance_px=400.0;
+  c.ball_candidate_tracking.max_size_log_ratio=c.object_association.max_size_log_ratio;
   c.object_approach.lock_blocks=3;
   return c;
 }
