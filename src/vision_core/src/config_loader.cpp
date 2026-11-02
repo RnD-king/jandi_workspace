@@ -60,8 +60,15 @@ YAML::Node AlgorithmSections(const YAML::Node &a) {
     const auto object = std::string(name) == "backboard"
         ? map(map(a, "goal"), "backboard") : map(a, name);
     const auto detection = map(object, "detection");
-    for (const auto &field : detection)
-      sections["object_targets"][std::string(name) + "_" + field.first.as<std::string>()] = field.second;
+    for (const auto &field : detection) {
+      const std::string field_name=field.first.as<std::string>();
+      // BALL's explicit ball_view_* depth keys must not acquire a
+      // redundant ball_ prefix during grouped-YAML normalization.
+      const std::string key=std::string(name)=="ball" &&
+          field_name.rfind("ball_view_",0)==0 ? field_name :
+          std::string(name)+"_"+field_name;
+      sections["object_targets"][key]=field.second;
+    }
     if (std::string(name) != "goal")
       sections[std::string(name) + "_candidate_tracking"] = map(object, "candidate_tracking");
   }
@@ -518,8 +525,11 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(f, "max_centers", c.line_features.max_centers);
   Assign(f, "guide_min_points", c.line_features.guide_min_points);
   Assign(f, "image_center_u", c.line_features.image_center_u);
-  Assign(f, "ball_view_image_center_u", c.ball_view_line_image_center_u);
-  Assign(a["camera"], "ball_view_pitch_tick", c.ball_view_pitch_tick);
+  if (f["ball_view_image_center_u"])
+    Assign(f, "ball_view_image_center_u", c.ball_view_line_image_center_u);
+  // Legacy flat regression scenarios intentionally omit the new camera mode.
+  if (a["camera"] && a["camera"]["ball_view_pitch_tick"])
+    Assign(a["camera"], "ball_view_pitch_tick", c.ball_view_pitch_tick);
   Assign(f, "curve_min_points", c.line_features.curve_min_points);
   Assign(f, "curve_min_v_span_px", c.line_features.curve_min_v_span_px);
   Assign(f, "curve_local_fit_points", c.line_features.curve_local_fit_points);
@@ -729,8 +739,10 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(t,"ball_forward_max_depth_m",c.object_targets.ball_forward_max_depth_m);
   Assign(t,"ball_down_min_depth_m",c.object_targets.ball_down_min_depth_m);
   Assign(t,"ball_down_max_depth_m",c.object_targets.ball_down_max_depth_m);
-  Assign(t,"ball_view_min_depth_m",c.object_targets.ball_view_min_depth_m);
-  Assign(t,"ball_view_max_depth_m",c.object_targets.ball_view_max_depth_m);
+  if (t["ball_view_min_depth_m"])
+    Assign(t,"ball_view_min_depth_m",c.object_targets.ball_view_min_depth_m);
+  if (t["ball_view_max_depth_m"])
+    Assign(t,"ball_view_max_depth_m",c.object_targets.ball_view_max_depth_m);
   Assign(t,"hurdle_min_depth_m",c.object_targets.hurdle_min_depth_m);
   Assign(t,"hurdle_max_depth_m",c.object_targets.hurdle_max_depth_m);
   Assign(t,"ball_depth_enabled",c.object_targets.ball_depth_enabled);

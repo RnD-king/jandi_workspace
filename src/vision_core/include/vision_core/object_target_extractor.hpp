@@ -34,7 +34,7 @@ struct ObjectTargetConfig {
   bool ball_allow_missing_depth{}, hurdle_allow_missing_depth{};
   double ball_forward_min_depth_m{}, ball_forward_max_depth_m{};
   double ball_down_min_depth_m{}, ball_down_max_depth_m{};
-  double ball_view_min_depth_m{}, ball_view_max_depth_m{};
+  double ball_view_min_depth_m{0.25}, ball_view_max_depth_m{0.80};
   double hurdle_min_depth_m{}, hurdle_max_depth_m{};
   int depth_roi_size_px{};
   bool SamePerceptionFilters(const ObjectTargetConfig& c) const {
