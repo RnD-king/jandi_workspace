@@ -8,6 +8,10 @@ int main() {
   CameraMotion camera(cfg);
   RawPositions positions{{21,cfg.forward.yaw},{22,cfg.forward.pitch}};
   const auto start=Clock::now();
+  assert(IsReadyWalkAction(34) && IsReadyWalkAction(36) && !IsReadyWalkAction(35));
+  WalkInterActionHold walk_hold;walk_hold.SetDuration(.2);walk_hold.Complete(36,start);
+  assert(walk_hold.Waiting(start+std::chrono::milliseconds(100)));
+  assert(!walk_hold.Waiting(start+std::chrono::milliseconds(250)));
   camera.StartScan(true,45,0.5,0.5,0.5,positions,start);
   assert(camera.ScanActive());
   assert(camera.ScanState()==CameraMotion::ScanPhase::Outbound);

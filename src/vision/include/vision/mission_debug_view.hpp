@@ -118,6 +118,7 @@ inline const char *DebugActionName(vision_core::MissionAction action) {
   case MissionAction::kLineLeftUnit: return "LEFT";
   case MissionAction::kLineStraightUnit: return "STRAIGHT";
   case MissionAction::kLineRightUnit: return "RIGHT";
+  case MissionAction::kLineRightUnitTurnFirst: return "RIGHT_TURN_FIRST";
   case MissionAction::kPickBall: return "PICK_BALL";
   case MissionAction::kRecatch: return "RECATCH";
   case MissionAction::kHurdle: return "HUDDLE";

@@ -91,12 +91,12 @@ int main() {
       d.Fail("locked phase must decrement on exactly 20 LINE block DONEs");
   }
   if(d.out.curve_search_phase!=0 || d.out.curve_unlock_blocks!=0 ||
-     d.out.curve_confirmations!=0 || !d.out.curve_skip_pending)
+     !d.out.curve_skip_pending)
     d.Fail("twentieth DONE failed to unlock without preserving any curve evidence");
   d.in.line_centers=left;
   d.Walk();
   if(d.out.curve_search_phase!=1 || d.out.course_curve_index!=1 ||
-     !d.out.curve_skip_pending)d.Fail("one fresh left curve must only confirm");
+     d.out.curve_confirmations!=0 || !d.out.curve_skip_pending)d.Fail("one fresh left curve must only confirm");
   d.Walk();
   if(d.out.curve_search_phase!=4 || d.out.course_curve_index!=3 ||
      d.out.curve_skip_pending ||

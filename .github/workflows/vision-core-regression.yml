@@ -37,5 +37,9 @@ jobs:
         run: python3 src/vision/tests/terminal_view_test.py
       - name: Test mock executor protocol
         run: python3 src/vision/tests/mock_executor_protocol_test.py
+      - name: Test LINE 36 READY and camera scan
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -I src/forward_walk/include src/forward_walk/tests/scan_motion_test.cpp -o /tmp/jandi_scan_motion_test
+          /tmp/jandi_scan_motion_test
       - name: Test forward_walk source contracts
         run: python3 src/forward_walk/tests/source_contract_test.py
