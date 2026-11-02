@@ -907,11 +907,46 @@ void FarReacquisitionReturnsToSharedPath(MissionType mission) {
   Check(d.out.active_mission==mission && d.out.ball_mission_index==ball_index && d.out.goal_mission_index==goal_index,
         "a repeated far loss admitted a new mission instead of preserving the existing mission");
 }
+void InitialLineMeanProbeAfterIdentityExpiry() {
+  // BALL was admitted while the first LINE unit was in flight. Its first
+  // object-owned READY mean does not exist; the tracked LINE mean must still
+  // supply exactly one bounded recovery block when ID 12 expires.
+  auto c=Config();
+  c.line_p2p.left_repetitions=c.line_p2p.straight_repetitions=
+      c.line_p2p.right_repetitions=1;
+  c.ball_candidate_tracking.missing_frame_limit=15;
+  Driver d(c);
+  d.in.ball_track_id=12;
+  d.in.ball_entry_mean_center=Point2{320,100};
+  d.Warm();
+  Check(d.out.approach_mission==MissionType::kBall &&
+        d.out.approach_completed_blocks==0,
+        "initial BALL admission fixture did not start before first owned block");
+  d.in.ball_target.reset();
+  for(int i=0;i<18;++i)d.Tick();
+  Check(!d.out.approach_loss_pending,"pre-lock identity expired before existing LINE block finished");
+  d.Tick({d.current,true,false,true});
+  d.Tick({d.current,true,true,false});
+  const auto probe=d.out.command.action_id;
+  Check(probe && probe!=d.current && LinePlan::IsUnit(d.out.command.action) &&
+        d.out.approach_probe_active,"expired ID did not issue one LINE-mean-based probe");
+  d.Tick({probe,true,false,false});
+  for(int i=0;i<12;++i)d.Tick();
+  d.Tick({probe,true,false,true});
+  d.Tick({probe,true,true,false});
+  Check(d.out.approach_mission==MissionType::kNone && d.out.walking.probe==1,
+        "failed pre-lock probe did not release the old ID after physical DONE");
+  d.in.ball_track_id=13;
+  d.in.ball_target=Target();
+  for(int i=0;i<12;++i)d.Tick();
+  Check(d.out.approach_mission==MissionType::kBall &&
+        d.out.approach_track_id==13,"released pre-lock ID did not accept a newly stable ID");
+}
 }
 int main() {
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
-  ReadyCenterAccumulator();
+  ReadyCenterAccumulator();InitialLineMeanProbeAfterIdentityExpiry();
   NearFinalActionSequence(150,true,true); NearFinalActionSequence(240,true,false);
   NearFinalActionSequence(575,false,true); NearFinalActionSequence(500,false,false);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
