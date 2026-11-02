@@ -101,11 +101,11 @@ static void TestNearBallTurnThenDown() {
     result=controller.Step(input);
     assert(!result.post_motion_observing);
     assert(result.ball.mode==(found ? BallMode::kApproachBall : BallMode::kWaitCameraDown));
-    assert(result.command.camera_request==(found ? CameraRequest::kNone : CameraRequest::kDown));
+    assert(result.command.camera_request==(found ? CameraRequest::kNone : CameraRequest::kBallView));
     assert(result.command.action==MissionAction::kNone);
     input=Frame(2.5);
     if (found) input.ball_target=Ball(.5,.8);
-    else input.camera_feedback={CameraMode::kDown,true};
+    else input.camera_feedback={CameraMode::kBallView,true};
     result=controller.Step(input);
     assert(result.ball.mode==(found ? BallMode::kApproachTwoBeforeDown : BallMode::kDownSearch));
     if (found) assert(result.command.action==MissionAction::kStepForwardTwo);

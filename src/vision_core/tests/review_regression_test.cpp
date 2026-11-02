@@ -160,7 +160,7 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   // otherwise end before the settle deadline and never reach kWaitFinePose.
 
   BallController ball(c.ball,3);
-  CameraFeedback forward{}, down{CameraMode::kDown,true};
+  CameraFeedback forward{}, down{CameraMode::kBallView,true};
   double now=0; BallResult b;
   for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.3),640,480,now+=.1,forward,{},false);
   for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.85),640,480,now+=.1,forward,{},false);

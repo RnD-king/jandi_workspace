@@ -74,7 +74,7 @@ static void EmptyEntryViewRetriesLine() {
     assert(goal.EntryLineRetries()==attempt+1 && goal.EntryLineRetryPending());
     g=goal.Compute({},{},{},640,480,now+1.2,true,{CameraMode::kTransition,false},{});
     assert(g.mode==GoalMode::kEntryRetryCameraForward);
-    g=goal.Compute({},{},{},640,480,now+1.3,true,forward,{});
+    g=goal.Compute({},{},{},640,480,now+1.3,true,{CameraMode::kBallView,true},{});
     assert(g.mode==GoalMode::kLineFollow && !g.active && goal.HasBall());
     assert(goal.RequiredLineWalkActions()==1);
     g=goal.Compute({},{},{},640,480,now+1.4,true,forward,{},true,{},false);

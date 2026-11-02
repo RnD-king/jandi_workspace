@@ -239,7 +239,8 @@ void ExecuteStageCompletesRecovery(MissionType mission) {
   t.TargetNow(mission);
   t.in.allow_new_body_actions=true;
   t.in.camera_feedback={mission==MissionType::kGoal
-      ? CameraMode::kGoal : CameraMode::kDown,true};
+      ? CameraMode::kGoal : mission==MissionType::kBall
+      ? CameraMode::kBallView : CameraMode::kDown,true};
   std::uint64_t delivered=0;
   int picked=0, recaught=0, stood=0, shot=0, backed=0;
   int contacted=0, crossed=0, turned=0, walk_pose=0;

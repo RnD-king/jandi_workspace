@@ -349,8 +349,8 @@ void PrelockProbeForMission(MissionType mission) {
     Check(d.out.remembered_line_score.has_value(),
           "HURDLE probe release erased the actual LINE memory");
   if(mission==MissionType::kGoal)
-    Check(d.out.command.camera_request==CameraRequest::kForward,
-          "failed GOAL probe did not request FORWARD before LINE recovery");
+    Check(d.out.command.camera_request==CameraRequest::kBallViewLine,
+          "failed GOAL probe did not request BALL_VIEW before LINE recovery");
 }
 void LockAndLoss() {
   Driver d(Config());d.Warm();d.Block();
@@ -400,9 +400,9 @@ void EmptyGoalRetryLimit() {
       done=active;fb={active,true,true,false};
       active=queued;queued=0;age=0;ready=false;
     }
-    if(d.out.command.camera_request==CameraRequest::kForward &&
-        d.in.camera_feedback.actual_mode!=CameraMode::kForward) {
-      ++returns;d.in.camera_feedback={CameraMode::kForward,true};
+    if(d.out.command.camera_request==CameraRequest::kBallViewLine &&
+        d.in.camera_feedback.actual_mode!=CameraMode::kBallView) {
+      ++returns;d.in.camera_feedback={CameraMode::kBallView,true};
     } else if(d.out.command.camera_request==CameraRequest::kGoal)
       d.in.camera_feedback={CameraMode::kGoal,true};
     d.Tick(fb,.1);
@@ -490,7 +490,7 @@ void NearFinalActionSequence(double u,bool left,bool extreme) {
         "camera switched to DOWN before centered forward DONE");
   d.Tick({id,true,true,false});
   Check(d.out.active_mission==MissionType::kBall &&
-        d.out.command.camera_request==CameraRequest::kDown,
+        d.out.command.camera_request==CameraRequest::kBallView,
         "centered forward DONE did not hand off to BALL DOWN");
 }
 void ReadyCenterAccumulator() {
@@ -528,7 +528,7 @@ void NearAndIdentity() {
   d.Tick({near_step,true,false,false});
   d.Tick({near_step,true,true,false});
   Check(d.out.active_mission==MissionType::kBall,"near object did not use the original near BALL controller");
-  Check(d.out.ball.mode==BallMode::kWaitCameraDown && d.out.command.camera_request==CameraRequest::kDown &&
+  Check(d.out.ball.mode==BallMode::kWaitCameraDown && d.out.command.camera_request==CameraRequest::kBallView &&
       !d.out.remembered_line_score,"near BALL did not discard LINE memory and enter DOWN immediately");
   Driver replacement(Config());replacement.Warm();replacement.Block();replacement.Block();
   replacement.in.ball_track_id=99;
@@ -759,8 +759,11 @@ void NearLossBeforeLock(MissionType mission) {
   Check(d.out.active_mission==mission && !d.out.remembered_line_score,
         "near loss returned to LINE instead of the committed object mission");
   if(mission!=MissionType::kGoal) {
-    Check(d.out.command.camera_request==CameraRequest::kDown,"BALL/HURDLE near loss did not request DOWN");
-    d.in.camera_feedback={CameraMode::kDown,true};
+    Check(d.out.command.camera_request==(mission==MissionType::kBall ?
+        CameraRequest::kBallView : CameraRequest::kDown),
+        "BALL/HURDLE near loss did not request its own camera pose");
+    d.in.camera_feedback={mission==MissionType::kBall ?
+        CameraMode::kBallView : CameraMode::kDown,true};
   } else Check(d.out.command.camera_request!=CameraRequest::kForward,
                "near GOAL loss restored FORWARD/LINE");
   d.in.allow_new_body_actions=false;
@@ -818,7 +821,7 @@ void SoftGoalLossClearsDepthEpisode() {
   bool returned=false;
   for(int i=0;i<40 && !returned;++i) {
     d.Tick({},.1);
-    returned=d.out.command.camera_request==CameraRequest::kForward;
+    returned=d.out.command.camera_request==CameraRequest::kBallViewLine;
   }
   Check(returned && d.out.approach_mission==MissionType::kNone,
         "soft Depth loss did not restore FORWARD after stopped observation");
