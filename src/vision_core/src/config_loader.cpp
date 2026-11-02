@@ -115,6 +115,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.line_p2p.left_repetitions, "line_p2p.left_repetitions");
   PositiveInt(c.line_p2p.straight_repetitions, "line_p2p.straight_repetitions");
   PositiveInt(c.line_p2p.right_repetitions, "line_p2p.right_repetitions");
+  if (c.line_p2p.right_unit_action!=34 && c.line_p2p.right_unit_action!=36)
+    throw std::runtime_error("line_p2p.right_unit_action must be 34 or 36");
   NonnegativeInt(c.candidate_search_max_turns, "mission.candidate_search_max_turns");
   PositiveInt(c.object_approach.lock_blocks,"object_approach.lock_blocks");
   NonnegativeInt(c.object_approach.prelock_loss_extra_blocks,"object_approach.prelock_loss_extra_blocks");
@@ -546,6 +548,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(lp, "left_repetitions", c.line_p2p.left_repetitions);
   Assign(lp, "straight_repetitions", c.line_p2p.straight_repetitions);
   Assign(lp, "right_repetitions", c.line_p2p.right_repetitions);
+  if(lp && lp["right_unit_action"])
+    Assign(lp,"right_unit_action",c.line_p2p.right_unit_action);
   Assign(lp, "offset_gain", c.line_p2p.offset_gain);
   Assign(lp, "heading_gain", c.line_p2p.heading_gain);
   Assign(lp, "steering_deadband", c.line_p2p.steering_deadband);

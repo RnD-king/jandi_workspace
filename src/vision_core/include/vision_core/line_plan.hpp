@@ -18,7 +18,8 @@ public:
   static bool IsUnit(MissionAction action) {
     return action == MissionAction::kLineLeftUnit ||
            action == MissionAction::kLineStraightUnit ||
-           action == MissionAction::kLineRightUnit;
+           action == MissionAction::kLineRightUnit ||
+           action == MissionAction::kLineRightUnitTurnFirst;
   }
   static bool IsCruise(MissionAction action) {
     return action == MissionAction::kStepForwardLeft ||

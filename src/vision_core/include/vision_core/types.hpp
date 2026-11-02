@@ -184,6 +184,7 @@ enum class MissionAction {
   kLineRightUnit = 34,
   // Legacy one-step action ID; executor maps it to the same motion as action 10.
   kStepForwardOneAlternate = 35,
+  kLineRightUnitTurnFirst = 36,
 };
 
 enum class CruiseDirection {

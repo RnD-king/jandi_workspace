@@ -43,6 +43,7 @@ for action, filename in {
     'LINE_LEFT_UNIT': 'motions/보행_좌회전전진_20도_최종_초기X_수정.json',
     'LINE_STRAIGHT_UNIT': 'missions/2걸음_1차찐.json',
     'LINE_RIGHT_UNIT': 'missions/직진후우회전_2걸음.json',
+    'LINE_RIGHT_UNIT_TURN_FIRST': 'missions/직진후우회전_2걸음_우회전먼저.json',
     'STEP_FORWARD_LEFT_THREE': 'missions/좌회전전진_3회.json',
     'STEP_FORWARD_RIGHT_THREE': 'missions/우회전전진_3회.json',
     'STEP_FORWARD_TWO': 'missions/2걸음_1차찐.json',
@@ -66,6 +67,8 @@ for action, filename in {
     checks[action+' mapping'] = match is not None and match.group(1)==filename
 checks['TURN_LEFT_IN_PLACE action number'] = 'uint16 TURN_LEFT_IN_PLACE=31' in (
     root.parent / 'vision/msg/ActionCommand.msg').read_text()
+checks['LINE_RIGHT_UNIT_TURN_FIRST action number'] = 'uint16 LINE_RIGHT_UNIT_TURN_FIRST=36' in (
+    root.parent / 'vision/msg/ActionCommand.msg').read_text()
 checks['STEP_FORWARD_ONE_ALTERNATE action number'] = 'uint16 STEP_FORWARD_ONE_ALTERNATE=35' in (
     root.parent / 'vision/msg/ActionCommand.msg').read_text()
 one_step = '보행_1걸음_초기X_수정3.json'
@@ -82,6 +85,13 @@ right_step = json.loads((root / 'missions/직진후우회전_2걸음.json').read
 checks['right-line unit walks straight then turns right'] = [
     motion['filename'] for motion in right_step['motions']
 ] == [one_step, '보행_우회전전진_20도_최종_초기X_찐.json']
+turn_first = json.loads((root / 'missions/직진후우회전_2걸음_우회전먼저.json').read_text())
+checks['new 36 motion order'] = [
+    motion['filename'] for motion in turn_first['motions']
+] == ['보행_우회전전진_20도_최종_초기X_찐.json', one_step]
+checks['new 36 time metadata'] = sum(
+    motion['nominal_sec'] for motion in turn_first['motions']
+) == sum(motion['nominal_sec'] for motion in right_step['motions'])
 checks['active multi-step missions retain the original one-step'] = all(
     all(motion['filename'] == one_step for motion in
         json.loads((root / 'missions' / mission).read_text())['motions'])

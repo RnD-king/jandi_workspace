@@ -20,7 +20,8 @@ inline constexpr std::chrono::milliseconds kPeriod{20};
 inline bool IsReadyWalkAction(uint16_t action)
 {
     return action == 11 || action == 12 || action == 13 ||
-        (action >= 21 && action <= 25) || (action >= 32 && action <= 34);
+        (action >= 21 && action <= 25) || (action >= 32 && action <= 34) ||
+        action == 36;
 }
 inline bool IsLongLineAction(uint8_t mission, uint16_t action)
 {
@@ -143,7 +144,8 @@ public:
     }
     void Complete(uint16_t action, Clock::time_point now) {
         const bool walk = (action >= 10 && action <= 13) ||
-            (action >= 21 && action <= 28) || (action >= 31 && action <= 34);
+            (action >= 21 && action <= 28) || (action >= 31 && action <= 34) ||
+            action == 36;
         until_ = walk ? now + std::chrono::duration_cast<Clock::duration>(
             std::chrono::duration<double>(duration_)) : now;
     }

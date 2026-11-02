@@ -11,6 +11,7 @@ bool IsLongLineAction(MissionAction action) {
   return action == MissionAction::kLineLeftUnit ||
          action == MissionAction::kLineStraightUnit ||
          action == MissionAction::kLineRightUnit ||
+         action == MissionAction::kLineRightUnitTurnFirst ||
          action == MissionAction::kStepForwardFive ||
          action == MissionAction::kStepForwardFour ||
          action == MissionAction::kStepForwardLeft ||

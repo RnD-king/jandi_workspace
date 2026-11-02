@@ -29,7 +29,8 @@ ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner, bool pr
   const bool left = cruise == MissionAction::kStepForwardLeft;
   const bool right = cruise == MissionAction::kStepForwardRight;
   const auto unit = left ? MissionAction::kLineLeftUnit :
-      right ? MissionAction::kLineRightUnit : MissionAction::kLineStraightUnit;
+      right ? static_cast<MissionAction>(config_.right_unit_action) :
+           MissionAction::kLineStraightUnit;
   const int count = left ? config_.left_repetitions :
       right ? config_.right_repetitions : config_.straight_repetitions;
   blocks_.emplace_back(next_block_++, cruise, unit, count, config_,window_,required_hits_);

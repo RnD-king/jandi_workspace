@@ -42,7 +42,8 @@ static_assert(vision::msg::ActionCommand::STEP_FORWARD_TWO == 21 &&
 static_assert(vision::msg::ActionCommand::LINE_LEFT_UNIT == 32 &&
               vision::msg::ActionCommand::LINE_STRAIGHT_UNIT == 33 &&
               vision::msg::ActionCommand::LINE_RIGHT_UNIT == 34 &&
-              vision::msg::ActionCommand::STEP_FORWARD_ONE_ALTERNATE == 35);
+              vision::msg::ActionCommand::STEP_FORWARD_ONE_ALTERNATE == 35 &&
+               vision::msg::ActionCommand::LINE_RIGHT_UNIT_TURN_FIRST == 36);
 static_assert(vision::msg::CommandStatus::READY == 3 &&
               vision::msg::CameraCommand::DOWN == 1 &&
               vision::msg::CameraCommand::FORWARD == 2 &&
@@ -335,6 +336,8 @@ private:
 
         case vision::msg::ActionCommand::LINE_RIGHT_UNIT:
             return "missions/직진후우회전_2걸음.json";
+        case vision::msg::ActionCommand::LINE_RIGHT_UNIT_TURN_FIRST:
+            return "missions/직진후우회전_2걸음_우회전먼저.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_LEFT_THREE:
             return "missions/좌회전전진_3회.json";
