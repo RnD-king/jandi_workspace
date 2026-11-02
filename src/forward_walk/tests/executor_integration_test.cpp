@@ -605,13 +605,29 @@ int main() {
             Check(Dxl::current.at(side.second)==home+(side.second==17?1024:-1024) &&
                   Count(cameras,id,Status::DONE)==0,
                   "curve elbow did not extend 90 degrees before head motion");
-            pump([&]{return node->camera_transactions_.completed.Contains(id);},6.0);
-            Check(node->scan_elbow_stage_==MainNode::ScanElbowStage::kIdle &&
+            // Internal completion precedes ROS subscription delivery in the
+            // single-threaded executor. Wait for BOTH before checking the
+            // complete scan lifecycle (a missing DONE still times out).
+            pump([&]{return node->camera_transactions_.completed.Contains(id) &&
+                             Count(cameras,id,Status::DONE)==1;},6.0);
+            flush();
+            if (!(node->scan_elbow_stage_==MainNode::ScanElbowStage::kIdle &&
                   Dxl::current.at(side.second)==home &&
                   Dxl::current.at(side.second==17?18:17)==other &&
                   Dxl::current.at(21)==2077 &&
-                  Count(cameras,id,Status::ACK)==1 && Count(cameras,id,Status::DONE)==1,
-                  "curve scan did not restore the correct elbow and head before DONE");
+                  Dxl::current.at(22)==1537 &&
+                  Count(cameras,id,Status::ACK)==1 && Count(cameras,id,Status::DONE)==1)) {
+                std::cerr<<"Curve scan failure: id="<<id
+                         <<" stage="<<static_cast<int>(node->scan_elbow_stage_)
+                         <<" elbow="<<Dxl::current.at(side.second)
+                         <<" expected_elbow="<<home
+                         <<" opposite_elbow="<<Dxl::current.at(side.second==17?18:17)
+                         <<" expected_opposite="<<other
+                         <<" head=("<<Dxl::current.at(21)<<","<<Dxl::current.at(22)<<")"
+                         <<" ACK="<<Count(cameras,id,Status::ACK)
+                         <<" DONE="<<Count(cameras,id,Status::DONE)<<"\\n";
+                Check(false,"curve scan did not restore the correct elbow and head before DONE");
+            }
         }
         std::cout<<"PASS sequenced 17/18 elbow extension, camera scan and safe restoration\n";
         rclcpp::shutdown();fs::remove_all(directory);return 0;
