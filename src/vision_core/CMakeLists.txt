@@ -107,6 +107,11 @@ if(BUILD_TESTING)
   add_test(NAME shared_vision_core_curve_search_test COMMAND shared_vision_core_curve_search_test)
   set_tests_properties(shared_vision_core_curve_search_test PROPERTIES ENVIRONMENT
     "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+  add_executable(shared_vision_core_curve_rearm_test tests/curve_rearm_test.cpp)
+  target_link_libraries(shared_vision_core_curve_rearm_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_curve_rearm_test COMMAND shared_vision_core_curve_rearm_test)
+  set_tests_properties(shared_vision_core_curve_rearm_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_down_search_hold_test tests/down_search_hold_test.cpp)
   target_link_libraries(shared_vision_core_down_search_hold_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_down_search_hold_test COMMAND shared_vision_core_down_search_hold_test)

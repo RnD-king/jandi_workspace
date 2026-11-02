@@ -198,6 +198,7 @@ struct MissionFrameResult {
   int course_curve_index{1};
   int curve_search_phase{0}, curve_confirmations{0}, curve_head_attempts{0}, curve_body_attempts{0};
   int curve_unlock_blocks{0};
+  bool curve_skip_pending{false};
   bool approach_loss_pending{false}, approach_probe_active{false}, approach_probe_used{false};
   WalkDiagnostics walking;
   int recovery_turns_completed{0};

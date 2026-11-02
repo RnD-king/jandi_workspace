@@ -1978,6 +1978,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
   output.curve_head_attempts=curve_.head_attempts;
   output.curve_body_attempts=curve_.body_attempts;
   output.curve_unlock_blocks=curve_.unlock_blocks;
+  output.curve_skip_pending=curve_.skip_pending;
   PopulateApproachDiagnostics(output);
   output.remembered_line_score=last_line_score_;
   output.line_recovery_phase=static_cast<int>(line_state_);
