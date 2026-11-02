@@ -525,6 +525,9 @@ int main() {
         pump([&]{return !node->camera_motion_->Active();});Dxl::fail_write=false;flush();
         Check(Count(cameras,4001,Status::ACK)==1&&Count(cameras,4001,Status::DONE)==0&&
               node->camera_transactions_.active_id==0,"failed writer produced fake camera DONE");
+        Check(Dxl::current.at(21)==2077 && Dxl::current.at(22)==1537 &&
+              node->camera_arm_forward_,
+              "failed DOWN camera write incorrectly retained the uncommitted DOWN arm mode");
         // A failed normal BODY write also must not fabricate DONE.
         WriteMotion(directory/node->ProgramFileForAction(21));
         action(4101,21,2);
@@ -559,6 +562,24 @@ int main() {
               [](int id){return id==21 || id==22;}),"camera verification read unrelated motors");
         Dxl::measured.clear();
         std::cout<<"PASS camera encoder mismatch, duplicate, read failure and measured arrival\n";
+
+        // Reverse failure: head really is DOWN; an uncommitted FORWARD
+        // camera request must not reopen shoulders during the next walk.
+        Check(Dxl::current.at(21)==2036 && Dxl::current.at(22)==2013,
+              "reverse aborted-camera fixture did not start from DOWN");
+        camera(62001,2);
+        Dxl::fail_write=true;
+        pump([&]{return !node->camera_motion_->Active();});
+        Dxl::fail_write=false;flush();
+        Check(node->camera_transactions_.active_id==0 &&
+              Count(cameras,62001,Status::DONE)==0 &&
+              !node->camera_arm_forward_,
+              "failed FORWARD camera write incorrectly retained FORWARD arm mode");
+        WriteMotion(directory/node->ProgramFileForAction(21));
+        action(62002,21);
+        pump([&]{return node->action_transactions_.completed.Contains(62002);});flush();
+        Check(Dxl::current.at(15)==1071 && Dxl::current.at(16)==3073,
+              "DOWN camera write recovery did not keep lowered shoulders");
 
         // Curve scan: extend the selected elbow, scan the head, restore head,
         // then restore elbow before reporting camera DONE. Both signs matter.

@@ -898,6 +898,24 @@ private:
             static_cast<int>(startup_pose_in_progress_), reason.c_str());
         p2p_player_->Stop();
         camera_motion_->Abort(last_sent_positions_);
+        // A failed camera SyncWrite may leave the head at its PREVIOUS
+        // successfully transmitted pose. Do not keep the uncommitted
+        // camera_arm_forward_ target (e.g. DOWN) while the head is FORWARD.
+        // Choose the nearest calibrated head mode, so a subsequent normal
+        // action recovers shoulder targets consistent with the held head.
+        if (!last_sent_positions_.empty()) {
+            const auto yaw=last_sent_positions_.at(camera_config_.yaw_id);
+            const auto pitch=last_sent_positions_.at(camera_config_.pitch_id);
+            const auto distance_squared=[&](motion_executor::CameraPose pose) {
+                const double delta_yaw=static_cast<double>(yaw)-pose.yaw;
+                const double delta_pitch=static_cast<double>(pitch)-pose.pitch;
+                return delta_yaw*delta_yaw + delta_pitch*delta_pitch;
+            };
+            camera_arm_forward_=
+                distance_squared(camera_config_.forward) <= std::min(
+                    distance_squared(camera_config_.down),
+                    distance_squared(camera_config_.goal));
+        }
         camera_arm_tween_.Cancel();
         elbow_tween_.Cancel();
         scan_elbow_stage_=ScanElbowStage::kIdle;
