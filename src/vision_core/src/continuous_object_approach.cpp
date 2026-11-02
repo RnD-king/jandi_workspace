@@ -322,14 +322,16 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const std::array<MissionType,3> missions{MissionType::kBall,MissionType::kGoal,MissionType::kHurdle};
   const std::array<std::optional<ObjectTarget>,3> targets{input.ball_target,input.backboard_target,input.hurdle_target};
   const std::array<std::uint64_t,3> ids{input.ball_track_id,input.backboard_track_id,input.hurdle_track_id};
-  // Keep the BALL approach identity gate consistent with candidate tracking.
-  // HURDLE and GOAL retain their original common association limits.
+  // Each object uses the SAME permissive identity gate for both its
+  // candidate tracker and the continuous-approach router. An additional
+  // common 200px / size-ratio gate must not reject a still-tracked target.
   const auto same_target=[&](const ObjectTarget& previous,const ObjectTarget& current,std::size_t index) {
     const double max_distance=index==0 ? config_.ball_candidate_tracking.max_center_distance_px :
-        config_.object_association.max_center_distance_norm*
-            std::hypot(input.image_width,input.image_height);
+        index==1 ? config_.backboard_candidate_tracking.max_center_distance_px :
+                   config_.hurdle_candidate_tracking.max_center_distance_px;
     const double max_size=index==0 ? config_.ball_candidate_tracking.max_size_log_ratio :
-        config_.object_association.max_size_log_ratio;
+        index==1 ? config_.backboard_candidate_tracking.max_size_log_ratio :
+                   config_.hurdle_candidate_tracking.max_size_log_ratio;
     return SamePosition(previous,current,max_distance,max_size);
   };
   const std::array<int,3> windows{config_.ball.stable_window,config_.goal.stable_window,config_.hurdle.stable_window};

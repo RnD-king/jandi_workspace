@@ -957,6 +957,51 @@ void InitialLineMeanProbeAfterIdentityExpiry() {
         d.out.approach_track_id==13,"released pre-lock ID did not accept a newly stable ID");
 }
 
+void RelaxedHurdleBackboardContinuousIdentity() {
+  // The per-object candidate tracker already permits 800px / 100x size,
+  // so the continuous router must not reject a stable ID using the stricter
+  // common association limits.
+  for (const auto mission : {MissionType::kHurdle,MissionType::kGoal}) {
+    auto c=Config();
+    c.enable_ball=false;
+    c.enable_hurdle=mission==MissionType::kHurdle;
+    c.enable_goal=mission==MissionType::kGoal;
+    c.initial_has_ball=c.goal_trial_start_goal=mission==MissionType::kGoal;
+    c.object_association.max_center_distance_norm=.25;
+    c.object_association.max_size_log_ratio=.80;
+    c.hurdle_candidate_tracking.max_center_distance_px=800;
+    c.hurdle_candidate_tracking.max_size_log_ratio=std::log(100.0);
+    c.backboard_candidate_tracking.max_center_distance_px=800;
+    c.backboard_candidate_tracking.max_size_log_ratio=std::log(100.0);
+    Driver d(c);
+    d.in.ball_target.reset();
+    if (mission==MissionType::kHurdle) {
+      d.in.hurdle_target=Target(200,100,4);
+      d.in.hurdle_track_id=5;
+    } else {
+      d.in.camera_feedback={CameraMode::kGoal,true};
+      d.in.line_centers.clear();
+      d.in.backboard_target=Target(200,100,3);
+      d.in.backboard_track_id=9;
+      d.in.backboard_center_depth_m=2;
+      d.in.goal_pose={true,0,2,0,1};
+    }
+    for (int i=0;i<12;++i) d.Tick();
+    Check(d.out.approach_mission==mission && d.out.approach_missing_frames==0,
+          "HURDLE/GOAL initial identity fixture did not acquire target");
+    auto larger=Target(530,100,mission==MissionType::kHurdle?4:3);
+    larger.box_px={430,0,200,200};
+    larger.width_px=larger.height_px=200;
+    larger.area_px=40000;
+    if (mission==MissionType::kHurdle) d.in.hurdle_target=larger;
+    else d.in.backboard_target=larger;
+    d.Tick();
+    Check(d.out.approach_mission==mission && d.out.approach_missing_frames==0 &&
+          !d.out.approach_loss_pending,
+          "HURDLE/GOAL same-ID candidate was rejected by a second, stricter identity gate");
+  }
+}
+
 void GoalAutoReferenceIsIsolated() {
   for(double reference : {310.0,380.0}) {
     auto c=Config();
@@ -974,6 +1019,7 @@ void GoalAutoReferenceIsIsolated() {
 }
 }
 int main() {
+  RelaxedHurdleBackboardContinuousIdentity();
   GoalAutoReferenceIsIsolated();
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
