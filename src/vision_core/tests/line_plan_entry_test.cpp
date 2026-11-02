@@ -595,9 +595,25 @@ void PauseDuringSearch() {
   d.core.Reset(true); d.Tick();
   assert(d.out.candidate_mission==MissionType::kNone && d.out.command.action_id>turn);
 }
+
+void SelectRightUnitAction() {
+  for(int action : {34,36}) {
+    auto c=Configuration();c.line_p2p.right_unit_action=action;
+    Driver d(c);d.Line(384);d.Tick();
+    const auto id=d.out.command.action_id;
+    assert(id && static_cast<int>(d.out.command.action)==action);
+    assert(LinePlan::IsUnit(d.out.command.action));
+    d.Tick(.01,{id,true,false,false});
+    for(int j=0;j<12;++j)d.Tick(.04);
+    d.Tick(.01,{id,true,false,true});
+    assert(d.out.command.action_id!=id &&
+           static_cast<int>(d.out.command.action)==action);
+  }
+}
 }
 
 int main() {
+  SelectRightUnitAction();
   NormalBlocks(false, .40); NormalBlocks(true, .40); NormalBlocks(true, .20);
   StartEstimatesAndReset(); SparseUnitsAndFreshVerification();
   CandidateWinsReady(false,false); CandidateWinsReady(true,false); CandidateWinsReady(true,true);

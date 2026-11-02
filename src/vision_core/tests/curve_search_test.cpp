@@ -7,6 +7,37 @@
 #include <cstdio>
 using namespace vision_core;
 
+
+void ZeroDelayCurveRegression() {
+  auto cfg=LoadDefaultAlgorithmConfig();
+  cfg.enable_ball=true;cfg.enable_goal=cfg.enable_hurdle=false;
+  cfg.curve_search.enabled=true;cfg.curve_search.scan_delay_walk_sequences=0;
+  cfg.curve_search.confirm_extra_sequences=1;
+  cfg.line_p2p.left_repetitions=cfg.line_p2p.straight_repetitions=
+      cfg.line_p2p.right_repetitions=1;
+  MissionController core(cfg);MissionFrameInput in;MissionFrameResult out;
+  in.image_width=640;in.image_height=480;
+  in.command_transport_enabled=true;
+  in.camera_feedback={CameraMode::kForward,true};
+  in.line_centers={{380,450},{380,400},{380,350},{380,300},{410,250}};
+  auto tick=[&](CommandDeliveryFeedback fb={}) {
+    in.now_sec+=.07;in.delivery_feedback=fb;out=core.Step(in);
+  };
+  tick();
+  for(int block=0;block<2;++block) {
+    const auto id=out.command.action_id;
+    assert(id && out.command.action==MissionAction::kLineStraightUnit);
+    tick({id,true,false,false});
+    for(int j=0;j<12;++j)tick();
+    tick({id,true,false,true});
+    if(block==1)assert(out.command.action_id==id); // No third block queued at READY.
+    tick({id,true,true,false});
+    if(block==0)assert(out.curve_search_phase==1);
+  }
+  assert(out.curve_search_phase==4);
+  assert(out.command.camera_request==CameraRequest::kScanLeft);
+}
+
 int main() {
   auto cfg=LoadDefaultAlgorithmConfig();
   cfg.enable_ball=true; cfg.enable_hurdle=false; cfg.enable_goal=false;
@@ -110,5 +141,6 @@ int main() {
   assert(bout.approach_mission==MissionType::kBall);
   assert(bout.curve_search_phase==0);
   assert(bout.command.camera_request==CameraRequest::kNone);
+  ZeroDelayCurveRegression();
   return 0;
 }

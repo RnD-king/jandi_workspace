@@ -943,8 +943,25 @@ void InitialLineMeanProbeAfterIdentityExpiry() {
   Check(d.out.approach_mission==MissionType::kBall &&
         d.out.approach_track_id==13,"released pre-lock ID did not accept a newly stable ID");
 }
+
+void GoalAutoReferenceIsIsolated() {
+  for(double reference : {310.0,380.0}) {
+    auto c=Config();
+    c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
+    c.goal_trial_start_goal=true;c.goal.auto_approach_reference_u_px=reference;
+    Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
+    d.in.camera_feedback={CameraMode::kGoal,true};
+    d.in.backboard_target=Target(500,100);d.in.backboard_track_id=7;
+    d.in.backboard_center_depth_m=2;d.in.goal_pose={true,.6,2,0,1};
+    for(int i=0;i<12;++i)d.Tick();
+    Check(d.out.approach_path_guide && d.out.approach_path_guide->valid &&
+          std::abs(d.out.approach_path_reference_px.u-reference)<1e-9,
+          "GOAL AUTO path ignored dedicated horizontal reference");
+  }
+}
 }
 int main() {
+  GoalAutoReferenceIsIsolated();
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
   ReadyCenterAccumulator();InitialLineMeanProbeAfterIdentityExpiry();
