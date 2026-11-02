@@ -787,11 +787,6 @@ private:
         }
         const bool scan=req==vision::msg::CameraCommand::SCAN_LEFT ||
                         req==vision::msg::CameraCommand::SCAN_RIGHT;
-        if (scan_elbow_stage_!=ScanElbowStage::kIdle ||
-            (scan && (motion_in_progress_ || queued_action_))) {
-            RCLCPP_WARN(get_logger(),"Camera command rejected while scan arms/body busy");
-            return;
-        }
         if(scan && (message->scan_max_yaw_deg<1 || message->scan_max_yaw_deg>90 ||
                     !std::isfinite(message->scan_move_sec) ||
                     !std::isfinite(message->scan_hold_sec) ||
@@ -815,6 +810,11 @@ private:
         }
         if (admission == Admission::CompletedDuplicate) {
             PublishCameraStatus(message->command_id, vision::msg::CommandStatus::DONE);
+            return;
+        }
+        if (scan_elbow_stage_!=ScanElbowStage::kIdle ||
+            (scan && (motion_in_progress_ || queued_action_))) {
+            RCLCPP_WARN(get_logger(),"Camera command rejected while scan arms/body busy");
             return;
         }
         if (admission != Admission::Start || shoot_pose_in_progress_) {

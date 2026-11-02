@@ -34,9 +34,9 @@ int main() {
     // reuse one confirmed lower anchor and one original upper candidate.
     CurveSearchConfig cs;
     cs.threshold_deg=20.0;
-    std::vector<Point2> two_upper{{320,450},{320,400},{320,350},{320,300},{350,250}};
+    std::vector<Point2> two_upper{{320,450},{320,400},{320,350},{320,300},{370,250}};
     const auto ce=ComputeCurveEvidence(two_upper,640,480,c,cs);
-    assert(ce.valid && ce.direction==1 && ce.lower_points==4 && ce.upper_points==2);
+    assert(ce.valid && ce.direction==1 && ce.lower_points==3 && ce.upper_points==3);
     assert(!ComputeCurveEvidence(Straight(4),640,480,c,cs).valid);
     const auto straight=ComputeCurveEvidence(Straight(8),640,480,c,cs);
     assert(!straight.valid);

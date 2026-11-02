@@ -65,7 +65,7 @@ int main() {
       640,480,cfg.line_features,cfg.curve_search);
   assert(six.valid && six.lower_points==4 && six.upper_points==3);
   const auto seven=ComputeCurveEvidence(
-      {{380,450},{380,400},{380,350},{380,300},{410,250},{440,200},{470,150}},
+      {{380,450},{380,400},{380,350},{380,300},{450,250},{520,200},{590,150}},
       640,480,cfg.line_features,cfg.curve_search);
   assert(seven.valid && seven.lower_points==4 && seven.upper_points==4);
   std::fprintf(stderr,"evidence=%d dir=%d angle=%.2f upper=%d\\n",

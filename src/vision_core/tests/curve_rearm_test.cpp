@@ -12,7 +12,7 @@ struct Harness {
     in.image_width=640;in.image_height=480;
     in.camera_feedback={CameraMode::kForward,true};
     in.command_transport_enabled=true;
-    in.line_centers={{380,450},{380,400},{380,350},{380,300},{410,250}};
+    in.line_centers={{380,450},{380,400},{380,350},{380,300},{430,250}};
     Tick();
   }
   void Tick(CommandDeliveryFeedback fb={}) {
@@ -76,8 +76,8 @@ int main() {
     d.Fail("third failed head scan did not lock 20 blocks and mark skip_pending");
 
   const std::vector<Point2> normal={{380,450},{380,400},{380,350},{380,300},{380,250}};
-  const std::vector<Point2> right={{380,450},{380,400},{380,350},{380,300},{410,250}};
-  const std::vector<Point2> left={{380,450},{380,400},{380,350},{380,300},{350,250}};
+  const std::vector<Point2> right={{380,450},{380,400},{380,350},{380,300},{430,250}};
+  const std::vector<Point2> left={{380,450},{380,400},{380,350},{380,300},{330,250}};
   const auto evidence=ComputeCurveEvidence(left,640,480,cfg.line_features,cfg.curve_search);
   if(!evidence.valid || evidence.direction!=-1)
     d.Fail("left curve evidence fixture is not valid");

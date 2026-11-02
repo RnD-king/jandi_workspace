@@ -473,17 +473,25 @@ void NearFinalActionSequence(double u,bool left,bool extreme) {
     d.Tick({id,true,false,false});
     d.Tick({id,true,true,false});
   }
-  Check(d.out.command.action==MissionAction::kStepForwardOne &&
+  // No blind forward or camera DOWN after an off-centre rotation group.
+  Check(d.out.active_mission==MissionType::kLine &&
+        d.out.command.camera_request==CameraRequest::kNone &&
+        !d.out.approach_near_final_motion,
+        "near turn incorrectly caused an immediate blind forward/DOWN");
+  d.in.ball_target=Target(380,260);
+  for(int n=0;n<45 && (d.out.command.action_id==0 ||
+                         d.out.command.action_id==id);++n)d.Tick();
+  Check(d.out.command.action==MissionAction::kStepForwardTwo &&
         d.out.command.action_id!=id && d.out.approach_near_final_motion,
-        "near rotation was not followed by a distinct one-step forward action");
+        "fresh central observation did not choose the original two-step plan");
   id=d.out.command.action_id;
   d.Tick({id,true,false,false});
   Check(d.out.active_mission==MissionType::kLine,
-        "camera switched to DOWN before last forward DONE");
+        "camera switched to DOWN before centered forward DONE");
   d.Tick({id,true,true,false});
   Check(d.out.active_mission==MissionType::kBall &&
         d.out.command.camera_request==CameraRequest::kDown,
-        "last forward DONE did not hand off to BALL DOWN");
+        "centered forward DONE did not hand off to BALL DOWN");
 }
 void ReadyCenterAccumulator() {
   LineGuideAccumulator acc(5,0.0,10,5);
