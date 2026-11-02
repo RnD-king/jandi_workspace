@@ -290,10 +290,9 @@ CurveEvidence ComputeCurveEvidence(const std::vector<Point2>& input,
   RemoveRansacOutliers(lower_candidates,cfg,indices,removed);
   if (lower_candidates.size()<4) return out;
   // The LINE RANSAC already selected these points; do not change its result.
-  std::vector<Point2> lower(lower_candidates.begin(),lower_candidates.begin()+4);
-  const auto lower_fit=FitLine(lower,0,lower.size());
-  if(!lower_fit.valid) return out;
-  const Point2 anchor=lower.back();
+  // Keep the original lower LINE RANSAC and upper RANSAC candidate policy.
+  // P4 is the common anchor in the six-/seven-point cases.
+  const Point2 anchor=lower_candidates[3];
   std::vector<Point2> upper{anchor};
   for(const auto& pt:original)
     if(pt.v<anchor.v) upper.push_back(pt);
@@ -302,8 +301,6 @@ CurveEvidence ComputeCurveEvidence(const std::vector<Point2>& input,
   });
   if(upper.size()<static_cast<std::size_t>(curve_cfg.min_upper_points))
     return out;
-  // Two upper points make an exact line; no outlier rejection is possible.
-  // For four or more, use a separate upper RANSAC without touching lower O/H.
   if(upper.size()>=4) {
     std::vector<std::size_t> upper_indices,upper_removed;
     for(std::size_t i=0;i<upper.size();++i) upper_indices.push_back(i);
@@ -311,8 +308,23 @@ CurveEvidence ComputeCurveEvidence(const std::vector<Point2>& input,
     upper_cfg.ransac_max_outliers=1;
     RemoveRansacOutliers(upper,upper_cfg,upper_indices,upper_removed);
   }
+  if(upper.size()<2) return out;
+  // Reject the frame rather than fit two non-overlapping lines when upper
+  // RANSAC rejects the shared lower anchor.
+  if(std::none_of(upper.begin(),upper.end(),[&](const Point2& point) {
+       return point.u==anchor.u && point.v==anchor.v;
+     })) return out;
+  // Five usable points: P1..P3 / P3..P5 (3/3).
+  // Six: P1..P4 / P4..P6 (4/3).
+  // Seven or more: P1..P4 / P4..P7 (4/4).
+  const bool five_points=upper.size()==2;
+  std::vector<Point2> lower(lower_candidates.begin(),
+                            lower_candidates.begin()+(five_points?3:4));
+  if(five_points) upper.insert(upper.begin(),lower_candidates[2]);
+  if(upper.size()>4) upper.resize(4);
+  const auto lower_fit=FitLine(lower,0,lower.size());
   const auto upper_fit=FitLine(upper,0,upper.size());
-  if(!upper_fit.valid) return out;
+  if(!lower_fit.valid || !upper_fit.valid) return out;
   constexpr double rad_to_deg=180.0/3.14159265358979323846;
   double delta=(-std::atan(upper_fit.a)+std::atan(lower_fit.a))*rad_to_deg;
   // Lines are unoriented: normalize the difference modulo 180 degrees.

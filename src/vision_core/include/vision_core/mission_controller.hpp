@@ -409,6 +409,8 @@ private:
     bool near_observing{false}, near_qualified{false};
     double near_observation_started_sec{0.0}, near_sum_u{0.0}, near_sum_v{0.0};
     int near_valid_count{0}, near_attempts{0};
+    int near_turn_batches{0}; // Direction-independent rotation group budget.
+    bool near_reobserve_after_turns{false};
     std::deque<bool> near_observation_hits;
     ActionRequest near_motion;
     std::uint64_t near_motion_id{0};

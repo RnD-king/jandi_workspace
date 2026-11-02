@@ -19,7 +19,7 @@ void ZeroDelayCurveRegression() {
   in.image_width=640;in.image_height=480;
   in.command_transport_enabled=true;
   in.camera_feedback={CameraMode::kForward,true};
-  in.line_centers={{380,450},{380,400},{380,350},{380,300},{410,250}};
+  in.line_centers={{380,450},{380,400},{380,350},{380,300},{430,250}};
   auto tick=[&](CommandDeliveryFeedback fb={}) {
     in.now_sec+=.07;in.delivery_feedback=fb;out=core.Step(in);
   };
@@ -56,9 +56,18 @@ int main() {
   in.command_transport_enabled=true;
   // Four lower RANSAC survivors and one upper original point: shared-anchor
   // upper fit has two points, and normal O/H remains approximately straight.
-  in.line_centers={{380,450},{380,400},{380,350},{380,300},{410,250}};
+  in.line_centers={{380,450},{380,400},{380,350},{380,300},{430,250}};
   const auto evidence=ComputeCurveEvidence(in.line_centers,640,480,
       cfg.line_features,cfg.curve_search);
+  assert(evidence.lower_points==3 && evidence.upper_points==3);
+  const auto six=ComputeCurveEvidence(
+      {{380,450},{380,400},{380,350},{380,300},{410,250},{440,200}},
+      640,480,cfg.line_features,cfg.curve_search);
+  assert(six.valid && six.lower_points==4 && six.upper_points==3);
+  const auto seven=ComputeCurveEvidence(
+      {{380,450},{380,400},{380,350},{380,300},{410,250},{440,200},{470,150}},
+      640,480,cfg.line_features,cfg.curve_search);
+  assert(seven.valid && seven.lower_points==4 && seven.upper_points==4);
   std::fprintf(stderr,"evidence=%d dir=%d angle=%.2f upper=%d\\n",
       int(evidence.valid),evidence.direction,evidence.delta_deg,evidence.upper_points);
   assert(evidence.valid && evidence.direction==1);
@@ -117,7 +126,7 @@ int main() {
   b.image_width=640;b.image_height=480;
   b.camera_feedback={CameraMode::kForward,true};
   b.command_transport_enabled=true;
-  b.line_centers={{380,450},{380,400},{380,350},{380,300},{410,250}};
+  b.line_centers={{380,450},{380,400},{380,350},{380,300},{430,250}};
   MissionFrameResult bout;
   const auto ptick=[&](CommandDeliveryFeedback fb={}) {
     b.now_sec+=.07;b.delivery_feedback=fb;bout=priority.Step(b);

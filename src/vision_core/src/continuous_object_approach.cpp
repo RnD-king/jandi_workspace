@@ -532,6 +532,18 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       continuous_.near_motion_id=0;
       continuous_.near_motion={};
       if (continuous_.near_actions.empty()) {
+        if (i==0 && continuous_.near_reobserve_after_turns) {
+          // The 1/2-turn group has physically finished. Only fresh pixels
+          // may decide whether the next move is a turn or a forward step.
+          continuous_.near_reobserve_after_turns=false;
+          continuous_.near_observing=false;
+          continuous_.near_qualified=false;
+          continuous_.near_observation_hits.clear();
+          continuous_.near_sum_u=continuous_.near_sum_v=0.0;
+          continuous_.near_valid_count=0;
+          continuous_.near_attempts=0;
+          return result;
+        }
         EnterContinuousMission(input,false);result.entered=true;
         return result;
       }
@@ -574,7 +586,11 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       const int limit=i==0 ? config_.ball.recovery_max_observations :
           i==1 ? config_.goal.recovery_max_observations : config_.hurdle.recovery_max_observations;
       if (continuous_.near_attempts>=limit) {
-        if (input.allow_new_commands && input.allow_new_body_actions) {
+        if (i==0 && continuous_.near_turn_batches>0) {
+          // Never lower the camera after a failed post-turn observation.
+          ReleaseContinuousApproach();
+          line_state_=LineState::kFinalHold;
+        } else if (input.allow_new_commands && input.allow_new_body_actions) {
           EnterContinuousMission(input,true);result.entered=true;
         }
       } else {
@@ -601,13 +617,21 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       const double u=continuous_.last->center_px.u;
       const bool left=u<bounds.first, right=u>bounds.second;
       if (left || right) {
+        if (continuous_.near_turn_batches>=3) {
+          // Three 1/2-turn groups in total, regardless of turn direction.
+          ReleaseContinuousApproach();
+          line_state_=LineState::kFinalHold;
+          return result;
+        }
+        ++continuous_.near_turn_batches;
+        continuous_.near_reobserve_after_turns=true;
         const auto turn=left ? MissionAction::kTurnLeftInPlace :
                                MissionAction::kStepForwardRightOneHurdle;
         const double excess=left ? bounds.first-u : u-bounds.second;
         continuous_.near_actions.push_back(turn);
         if (excess>=config_.ball.approach_extreme_turn_margin_px)
           continuous_.near_actions.push_back(turn);
-        continuous_.near_actions.push_back(MissionAction::kStepForwardOne);
+        // No blind forward after side turns: wait for a fresh observation.
       } else {
         continuous_.near_actions.push_back(
             v<config_.ball.approach_direct_down_v_px ?
