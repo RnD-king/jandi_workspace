@@ -90,7 +90,7 @@ int main() {
   assert(out.command.camera_request==CameraRequest::kScanLeft);
   assert(out.curve_search_phase==4);
   in.camera_feedback={CameraMode::kTransition,false};
-  in.camera_scan.phase=1;in.camera_scan.command_id=10;in.camera_scan.yaw_deg=-25;
+  in.camera_scan.phase=1;in.camera_scan.command_id=10;in.camera_scan.yaw_deg=25;
   in.scan_ball_u=320;
   bool hold=false;
   for(int i=0;i<5;++i) {
