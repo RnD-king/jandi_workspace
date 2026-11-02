@@ -340,7 +340,7 @@ void NearGoalWithoutPoseCannotStride() {
 void AutoPoseDonePrecedesFreshObservation() {
   auto c=Config(MissionType::kBall,2);MissionController core(c);MissionFrameInput in;
   in.image_width=640;in.image_height=480;in.command_transport_enabled=true;
-  in.camera_feedback={CameraMode::kDown,true};in.ball_target=Target();
+  in.camera_feedback={CameraMode::kBallView,true};in.ball_target=Target();
   MissionFrameResult out;bool reached_pose=false;
   for(int i=0;i<100;++i) {
     in.now_sec+=.12;in.delivery_feedback={};

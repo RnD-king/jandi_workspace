@@ -642,8 +642,8 @@ void CameraDrainAndProbe() {
   // No qualified GOAL READY mean was observed before the loss. The controller
   // must not infer a search direction from an instantaneous last detection.
   Check(d.out.approach_mission==MissionType::kNone &&
-        d.out.command.camera_request==CameraRequest::kForward,
-        "soft GOAL loss without READY mean should release to FORWARD without a blind probe");
+        d.out.command.camera_request==CameraRequest::kBallViewLine,
+        "soft GOAL loss without READY mean should use BALL_VIEW without a blind probe");
 }
 void GoalTurnObservationUsesSelectedPath() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;

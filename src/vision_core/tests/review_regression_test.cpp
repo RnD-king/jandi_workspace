@@ -160,7 +160,7 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   // otherwise end before the settle deadline and never reach kWaitFinePose.
 
   BallController ball(c.ball,3);
-  CameraFeedback forward{}, down{CameraMode::kBallView,true};
+  CameraFeedback forward{}, down{CameraMode::kDown,true},ball_view{CameraMode::kBallView,true};
   double now=0; BallResult b;
   for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.3),640,480,now+=.1,forward,{},false);
   for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.85),640,480,now+=.1,forward,{},false);
@@ -169,16 +169,16 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   ActionExecutionFeedback done; done.action_done=true;
   b=ball.Compute({},640,480,now+=.1,forward,done,false);
   assert(b.mode==BallMode::kWaitCameraDown);
-  ball.Compute({},640,480,now+=.1,down,{},false);
-  for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.7),640,480,now+=.1,down,{},false);
+  ball.Compute({},640,480,now+=.1,ball_view,{},false);
+  for(int i=0;i<10;++i) b=ball.Compute(Target(.5,.7),640,480,now+=.1,ball_view,{},false);
   assert(b.mode==BallMode::kWaitFinePose);
-  b=ball.Compute(Target(.5,.7),640,480,now+=.1,down,{},true);
-  b=ball.Compute({},640,480,now+=.1,down,done,false);
+  b=ball.Compute(Target(.5,.7),640,480,now+=.1,ball_view,{},true);
+  b=ball.Compute({},640,480,now+=.1,ball_view,done,false);
   assert(b.mode==BallMode::kFineAdjustForPickup);
-  for(int i=0;i<10;++i)b=ball.Compute({},640,480,now+=.1,down,{},false);
+  for(int i=0;i<10;++i)b=ball.Compute({},640,480,now+=.1,ball_view,{},false);
   assert(b.mode==BallMode::kBallRecoveryDown);
   for(int i=0;i<60;++i) {
-    b=ball.Compute({},640,480,now+=.1,down,{},false);
+    b=ball.Compute({},640,480,now+=.1,ball_view,{},false);
   }
   assert(b.mode==BallMode::kBallRecoveryDown && ball.RecoveryObservationsCompleted()==0);
 

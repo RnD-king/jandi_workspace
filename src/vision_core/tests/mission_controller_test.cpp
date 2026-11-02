@@ -631,13 +631,13 @@ int main() {
   mi.now_sec=(.11) + 3.0; mi.manual_observation_control=true; mi.allow_new_body_actions=false;
   mi.delivery_feedback={mr.command.action_id,true,true,false};
   mr=manual.Step(mi);
-  assert(mr.command.camera_request==CameraRequest::kDown);
+  assert(mr.command.camera_request==CameraRequest::kBallView);
   mi=Frame(.2); mi.manual_observation_control=true; mi.allow_new_body_actions=false;
-  mi.camera_feedback={CameraMode::kDown,true};
+  mi.camera_feedback={CameraMode::kBallView,true};
   mi.ball_target=Ball(.5,.7);
   mr=manual.Step(mi);
   mi=Frame(.3); mi.manual_observation_control=true; mi.allow_new_body_actions=false;
-  mi.camera_feedback={CameraMode::kDown,true};
+  mi.camera_feedback={CameraMode::kBallView,true};
   mi.ball_target=Ball(.5,.7);
   mr=manual.Step(mi);
   assert(mr.ball.mode==BallMode::kWaitFinePose);

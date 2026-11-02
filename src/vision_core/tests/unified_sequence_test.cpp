@@ -71,8 +71,8 @@ Trial BallSearch(MissionControllerConfig config=Config()) {
   t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardTwo);
   t.Tick(true);
   assert(t.out.ball.mode==BallMode::kWaitCameraDown);
-  assert(t.out.command.camera_request==CameraRequest::kDown);
-  t.in.camera_feedback={CameraMode::kDown,true}; t.in.ball_target.reset(); t.Tick(); t.Tick();
+  assert(t.out.command.camera_request==CameraRequest::kBallView);
+  t.in.camera_feedback={CameraMode::kBallView,true}; t.in.ball_target.reset(); t.Tick(); t.Tick();
   assert(t.out.ball.mode==BallMode::kDownSearch);
   assert(t.out.command.action_id==0);
   return t;
