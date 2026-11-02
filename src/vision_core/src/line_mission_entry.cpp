@@ -623,7 +623,9 @@ MissionFrameResult MissionController::StepPlannedLine(
                 : config_.object_approach.reference_v_ratio*input.image_height;
             auto guide=ObjectApproachGuide(averaged_target,false,0,input.intrinsics,
                 ApproachCameraPose{},input.image_width,input.image_height,
-                last_line_image_center_u_,ref_v,input.rectify_approach,
+                (continuous_.mission==MissionType::kGoal ?
+                     config_.goal.auto_approach_reference_u_px : last_line_image_center_u_),
+                 ref_v,input.rectify_approach,
                 input.approach_roll_rad,input.approach_pitch_rad);
             if (guide.valid) mean=guide;
           }
@@ -689,8 +691,18 @@ MissionFrameResult MissionController::StepPlannedLine(
           line_auxiliary_id_ = 0;
         }
       }
+      // CONFIRM becomes DRAIN only on the second actual LINE block DONE.
+      // With zero delay, do not prebook a third block at its final READY.
+      // If the next block is not confirmed, LINE resumes normally on DONE.
+      const bool defer_curve_confirm_ready=automatic_approach &&
+          config_.curve_search.enabled &&
+          config_.curve_search.scan_delay_walk_sequences==0 &&
+          curve_.phase==CurveSearchState::Phase::kConfirm && !has_ball_ &&
+          continuous_.mission==MissionType::kNone && ready && final_edge &&
+          line_plan_.CruiseFor(id)!=MissionAction::kNone;
       if (!observation_wait && !line_failure_pending_done_ &&
-          !route.hold && line_state_ != LineState::kFinalHold) {
+          !route.hold && line_state_ != LineState::kFinalHold &&
+          !defer_curve_confirm_ready) {
         if (automatic_approach && ready && !line_plan_.Active() && !route.hold &&
             decision.valid && !goal_will_enter && !straight_goal && line_ready_handled_id_!=id) {
           bool reference=false;
@@ -786,7 +798,8 @@ MissionFrameResult MissionController::StepPlannedLine(
       output.approach_action_committed) {
     output.approach_path_guide=route.display_guide.value_or(*route.guide);
     output.approach_path_reference_px={
-        last_line_image_center_u_,
+         (continuous_.mission==MissionType::kGoal ?
+             config_.goal.auto_approach_reference_u_px : last_line_image_center_u_),
         output.line_features.guide.valid
             ? output.line_features.guide_reference_v_px
             : config_.object_approach.reference_v_ratio * input.image_height};

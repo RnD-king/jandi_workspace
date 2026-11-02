@@ -315,7 +315,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     const double z=input.backboard_center_depth_m.value_or(input.goal_pose.valid ? input.goal_pose.z_m : 0);
     goal_depth_usable=std::isfinite(z) && z>0.05;
     goal_guide=ObjectApproachGuide(*input.backboard_target,false,0,input.intrinsics,{},
-        input.image_width,input.image_height,last_line_image_center_u_,
+        input.image_width,input.image_height,config_.goal.auto_approach_reference_u_px,
         line.guide.valid ? line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
         input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
   }
@@ -479,7 +479,8 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         averaged_target.center_px=*continuous_.last_ready_center;
         probe_guide=ObjectApproachGuide(averaged_target,false,0,
             input.intrinsics,ApproachCameraPose{},input.image_width,input.image_height,
-            last_line_image_center_u_,line.guide.valid ?
+            (i==1 ? config_.goal.auto_approach_reference_u_px :
+                last_line_image_center_u_),line.guide.valid ?
                 line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
             input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
       }
@@ -630,7 +631,8 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       averaged_target.center_px=*continuous_.last_ready_center;
       saved_guide=ObjectApproachGuide(averaged_target,false,0,input.intrinsics,
           ApproachCameraPose{},input.image_width,input.image_height,
-          last_line_image_center_u_,line.guide.valid ?
+          (i==1 ? config_.goal.auto_approach_reference_u_px :
+              last_line_image_center_u_),line.guide.valid ?
               line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
           input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
     }

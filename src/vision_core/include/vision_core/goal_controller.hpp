@@ -50,6 +50,7 @@ struct GoalConfig {
   int post_pickup_walk_fallback_actions{}; // 0 preserves immediate GOAL entry.
   int entry_line_retry_max_attempts{}; // Extra LINE blocks after an entirely empty first GOAL view; 0 disables.
   double target_u_px{};
+  double auto_approach_reference_u_px{380.0}; // GOAL AUTO virtual path only.
   double approach_u_deadband_px{};
   double hoop_radius_m{};
   double throw_landing_x_m{};

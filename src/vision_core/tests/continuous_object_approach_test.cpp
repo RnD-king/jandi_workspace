@@ -17,6 +17,7 @@ MissionControllerConfig Config() {
   c.initial_has_ball=c.goal_trial_start_goal=false;
   c.test_mission=MissionType::kNone;
   c.line_features.image_center_u=320;
+  c.goal.auto_approach_reference_u_px=320; // Preserve legacy GOAL geometry fixtures.
   c.line_p2p.left_repetitions=c.line_p2p.straight_repetitions=c.line_p2p.right_repetitions=2;
   c.ball.entry_min_hits=4;c.ball.stable_window=10;c.ball.stable_min_hits=7;
   c.ball.approach_short_v_px=100;c.ball.approach_two_step_v_px=240;c.ball.approach_direct_down_v_px=355;

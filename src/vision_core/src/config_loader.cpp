@@ -371,6 +371,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   NonnegativeInt(c.goal.post_pickup_walk_fallback_actions, "goal.post_pickup_walk_fallback_actions");
   NonnegativeInt(c.goal.entry_line_retry_max_attempts, "goal.entry_line_retry_max_attempts");
   Nonnegative(c.goal.target_u_px, "goal.target_u_px");
+  Nonnegative(c.goal.auto_approach_reference_u_px, "goal.auto_approach_reference_u_px");
   Nonnegative(c.goal.approach_u_deadband_px, "goal.approach_u_deadband_px");
   Nonnegative(c.goal.hoop_radius_m, "goal.hoop_radius_m");
   Finite(c.goal.throw_landing_x_m, "goal.throw_landing_x_m");
@@ -648,6 +649,11 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "fine_line_max_search_steps", c.hurdle.fine_line_max_search_steps);
 
   const auto g = a["goal"];
+  // Existing unmodified fixtures preserve their LINE anchor; the production
+  // GOAL AUTO YAML explicitly selects the 310px experimental reference.
+  c.goal.auto_approach_reference_u_px=c.line_features.image_center_u;
+  if(g && g["auto_approach_reference_u_px"])
+    Assign(g,"auto_approach_reference_u_px",c.goal.auto_approach_reference_u_px);
   Assign(g, "edge_margin_px", c.goal.edge_margin_px);
   Assign(g, "trial_start_goal", c.goal_trial_start_goal);
   Assign(g, "test_mission_index", c.test_goal_mission_index);
