@@ -10,6 +10,7 @@ inline const char* StateCameraName(vision_core::CameraMode mode) {
   switch(mode) {
     case CameraMode::kForward:return "FORWARD";
     case CameraMode::kDown:return "DOWN";
+    case CameraMode::kBallView:return "BALL_VIEW";
     case CameraMode::kGoal:return "GOAL";
     default:return "TRANSITION";
   }

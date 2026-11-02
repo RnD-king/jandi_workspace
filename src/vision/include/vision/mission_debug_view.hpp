@@ -335,8 +335,9 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
       DrawFilteredDebugDetection(vis,detection,config,id,mission_target);
     }
   }
-  const int ref_u = static_cast<int>(std::lround(
-      config.line_features.image_center_u));
+  const double line_reference_u = camera.actual_mode==vision_core::CameraMode::kBallView
+      ? config.ball_view_line_image_center_u : config.line_features.image_center_u;
+  const int ref_u = static_cast<int>(std::lround(line_reference_u));
   const bool line_view=mission_result.active_mission==vision_core::MissionType::kLine ||
       ball_cmd.mode==vision_core::BallMode::kPostPickupLineRecovery ||
       goal_cmd.mode==vision_core::GoalMode::kHeadingRecovery;
@@ -352,7 +353,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     const auto &guide = mission_result.line_decision_guide
         ? *mission_result.line_decision_guide : feats.guide;
     if (guide.valid && std::isfinite(guide.offset) && vis.cols > 1) {
-      const double u = config.line_features.image_center_u +
+      const double u = line_reference_u +
           0.5 * static_cast<double>(vis.cols) * guide.offset;
       if (std::isfinite(u) && u >= 0.0 && u < vis.cols) {
         const int x = static_cast<int>(std::lround(u));
@@ -468,7 +469,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
 
   // The pickup region uses the same four pixel edges as FineAction.
   // Its single decision-center marker is above.
-  if (selected_ball && camera.actual_mode==vision_core::CameraMode::kDown) {
+  if (selected_ball && camera.actual_mode==vision_core::CameraMode::kBallView) {
     const auto &c = config.ball;
     const cv::Rect image_bounds(0, 0, vis.cols, vis.rows);
     const std::vector<cv::Point> corners{
