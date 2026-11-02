@@ -507,6 +507,25 @@ void ReadyCenterAccumulator() {
     acc.AddCenter(43,n*0.1,n<=4 ? std::optional<Point2>{Point2{320,120}} : std::nullopt);
   Check(!acc.FinishCenter(43,1.0,0.0),
         "READY averaged insufficient valid coordinate samples");
+
+  // A BALL-owned block uses its 10/4 detector gate, not LINE's 10/5.
+  auto c=Config();c.line_p2p.straight_repetitions=1;
+  LinePlan plan(c.line_p2p,10,5);
+  plan.Begin(MissionAction::kStepForwardFour,77);
+  ControlCommand issued;issued.command_type=CommandType::kAction;
+  issued.action=MissionAction::kLineStraightUnit;issued.action_id=750;
+  plan.Issued(issued,0);
+  plan.Feedback({750,true,false,false},0,0);
+  for(int n=1;n<=10;++n) {
+    const bool detected=n<=4;
+    plan.Observe(n*.1,{}, {},77,
+                 detected ? std::optional<Point2>{Point2{365.0,120.0}} : std::nullopt,true);
+    plan.ObserveObject(n*.1,77,detected,10,4);
+  }
+  Check(plan.ObjectQualified(750),"10/4 BALL evidence was not qualified");
+  const auto center=plan.FinishObjectCenter(750,1.0,0.0,false,plan.ObjectQualified(750));
+  Check(center && std::abs(center->u-365.0)<1e-6,
+        "qualified 10/4 BALL detection failed the READY average due to LINE 10/5");
 }
 void NearAndIdentity() {
   Driver d(Config());d.Warm();d.Block();d.Block();

@@ -129,6 +129,12 @@ void FilterRegressions() {
   assert(accepts(DetectionAt(300,1,40,40,1.0),CameraMode::kForward));
   assert(!accepts(DetectionAt(300,1,40,40,1.0),CameraMode::kDown));
   assert(accepts(DetectionAt(300,1,40,40,.8),CameraMode::kDown));
+  c.object_targets.ball_view_min_depth_m=.25;
+  c.object_targets.ball_view_max_depth_m=.80;
+  assert(accepts(DetectionAt(300,1,40,40,.25),CameraMode::kBallView));
+  assert(accepts(DetectionAt(300,1,40,40,.80),CameraMode::kBallView));
+  assert(!accepts(DetectionAt(300,1,40,40,.249),CameraMode::kBallView));
+  assert(!accepts(DetectionAt(300,1,40,40,.81),CameraMode::kBallView));
   for(auto depth:{std::optional<double>{},std::optional<double>{0},
       std::optional<double>{std::numeric_limits<double>::quiet_NaN()},
       std::optional<double>{std::numeric_limits<double>::infinity()}})
