@@ -15,6 +15,7 @@ vision_algorithm:
       max_centers: 8
       guide_min_points: 3 # 필요한 최소 개수
       image_center_u: 380.0 # 라인 중앙 기준선
+      ball_view_image_center_u: 360.0 # BALL_VIEW LINE only
 
       # 직선 피팅과 이상점 제거
       ransac_enabled: true
@@ -97,6 +98,8 @@ vision_algorithm:
       forward_max_depth_m: 2.70
       down_min_depth_m: 0.25
       down_max_depth_m: 0.5
+      ball_view_min_depth_m: 0.25 # 20 degree BALL_VIEW initial test range
+      ball_view_max_depth_m: 0.80
     candidate_tracking:
       enabled: true
       max_center_distance_px: 800.0 # Temporary: tolerate full-frame motion jitter (640x480 diagonal=800px)
@@ -121,7 +124,7 @@ vision_algorithm:
       approach_right_top_u_px: 470.0 # 화면 위쪽(v=0) 오른쪽 경계 x; 아래쪽은 380+90=470
       approach_short_v_px: 100.0 # 위 가로선 (4걸음)
       approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
-      approach_direct_down_v_px: 355.0 # 8번 중앙 가로선 (1걸음 후 down)
+      approach_direct_down_v_px: 410.0 # 8번 중앙 가로선 (1걸음 후 down)
       approach_extreme_turn_margin_px: 90.0 # 좌우 접근 경계 바깥 추가 거리: 초과하면 2회 회전
 
       # DOWN 1걸음 탐색
@@ -300,6 +303,8 @@ vision_algorithm:
 
   # COMMON: Depth 표본 → 객체 연결 → 명령 → 미션 공통 동작
   common:
+    camera:
+      ball_view_pitch_tick: 1750 # ID22, yaw always follows DOWN
     depth_roi_size_px: 5 # 공·허들 BBox 중심 Depth 표본의 한 변 길이 (px)
     object_association:
       # 동일 객체로 연결하는 허용 범위

@@ -228,6 +228,7 @@ enum class CameraMode {
   kDown = 1,
   kTransition = 2,
   kGoal = 3,
+  kBallView = 4,
 };
 
 enum class CameraRequest {
@@ -240,6 +241,8 @@ enum class CameraRequest {
   kScanHold = 6,
   kScanResume = 7,
   kScanReturn = 8,
+  kBallView = 9, // BALL near, lowered shoulders
+  kBallViewLine = 10, // GOAL retry LINE, outward shoulders
 };
 struct CameraScanFeedback {
   std::uint64_t command_id{0};

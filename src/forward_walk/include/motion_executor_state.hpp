@@ -163,6 +163,7 @@ struct CameraConfig {
     CameraPose forward{2077, 1537};
     CameraPose down{2036, 2013};
     CameraPose goal{2054, 966};
+    CameraPose ball_view{2036, 1750};
     double move_sec{0.5};
     double settle_sec{0.0};
     double position_tolerance_ratio{0.10};
@@ -174,7 +175,7 @@ struct CameraConfig {
             !std::isfinite(position_tolerance_ratio) || position_tolerance_ratio<0 || position_tolerance_ratio>1) {
             throw std::invalid_argument("invalid camera IDs/timing");
         }
-        for (const auto pose : {forward, down, goal}) {
+        for (const auto pose : {forward, down, goal, ball_view}) {
             if (pose.yaw < 0 || pose.yaw > 4095 || pose.pitch < 0 || pose.pitch > 4095) {
                 throw std::invalid_argument("camera tick outside 0..4095");
             }
@@ -185,6 +186,7 @@ struct CameraConfig {
         case 1: return down;
         case 2: return forward;
         case 3: return goal;
+        case 9: case 10: return ball_view;
         default: throw std::invalid_argument("unknown camera request");
         }
     }

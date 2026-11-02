@@ -27,6 +27,8 @@ namespace vision_core {
 
 struct MissionControllerConfig {
   FeatureConfig line_features;
+  double ball_view_line_image_center_u{360.0};
+  int ball_view_pitch_tick{1750};
   LineTrackingConfig line;
   LineP2pConfig line_p2p;
   CurveSearchConfig curve_search;

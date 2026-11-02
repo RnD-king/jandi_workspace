@@ -41,6 +41,7 @@ YAML::Node AlgorithmSections(const YAML::Node &a) {
   const auto line = map(a, "line");
   sections["line_detection"] = map(line, "detection");
   sections["line_features"] = map(line, "features");
+  sections["camera"] = map(map(a, "common"), "camera");
   sections["line"] = map(line, "stability");
   sections["line_p2p"] = map(line, "walk");
   if (line["curve_search"]) sections["curve_search"] = line["curve_search"];
@@ -228,6 +229,11 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     NonnegativeInt(c.curve_search.post_goal_rearm_line_blocks,"curve_search.post_goal_rearm_line_blocks");
   }
   PositiveInt(c.line_features.max_centers, "line_features.max_centers");
+  if (!std::isfinite(c.ball_view_line_image_center_u) ||
+      c.ball_view_line_image_center_u<0 || c.ball_view_line_image_center_u>=640.0)
+    throw std::runtime_error("line.features.ball_view_image_center_u must be in [0,640)");
+  if (c.ball_view_pitch_tick<0 || c.ball_view_pitch_tick>4095)
+    throw std::runtime_error("common.camera.ball_view_pitch_tick must be in [0,4095]");
   if (c.line_features.guide_min_points < 3 ||
       c.line_features.guide_min_points > c.line_features.max_centers)
     throw std::runtime_error(
@@ -427,6 +433,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.object_targets.ball_forward_max_depth_m,"object_targets.ball_forward_max_depth_m");
   Nonnegative(c.object_targets.ball_down_min_depth_m,"object_targets.ball_down_min_depth_m");
   Nonnegative(c.object_targets.ball_down_max_depth_m,"object_targets.ball_down_max_depth_m");
+  Nonnegative(c.object_targets.ball_view_min_depth_m,"object_targets.ball_view_min_depth_m");
+  Nonnegative(c.object_targets.ball_view_max_depth_m,"object_targets.ball_view_max_depth_m");
   Nonnegative(c.object_targets.hurdle_min_depth_m,"object_targets.hurdle_min_depth_m");
   Nonnegative(c.object_targets.hurdle_max_depth_m,"object_targets.hurdle_max_depth_m");
   if(c.object_targets.ball_aspect_ratio_min<=0 || c.object_targets.ball_aspect_ratio_min>c.object_targets.ball_aspect_ratio_max ||
@@ -434,8 +442,10 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     throw std::runtime_error("invalid BALL/HURDLE aspect ratio range");
   if(c.object_targets.ball_forward_min_depth_m>c.object_targets.ball_forward_max_depth_m ||
       c.object_targets.ball_down_min_depth_m>c.object_targets.ball_down_max_depth_m ||
+      c.object_targets.ball_view_min_depth_m>c.object_targets.ball_view_max_depth_m ||
       c.object_targets.hurdle_min_depth_m>c.object_targets.hurdle_max_depth_m ||
-      c.object_targets.ball_forward_max_depth_m<=0 || c.object_targets.ball_down_max_depth_m<=0 || c.object_targets.hurdle_max_depth_m<=0)
+      c.object_targets.ball_forward_max_depth_m<=0 || c.object_targets.ball_down_max_depth_m<=0 ||
+      c.object_targets.ball_view_max_depth_m<=0 || c.object_targets.hurdle_max_depth_m<=0)
     throw std::runtime_error("invalid BALL/HURDLE depth range");
   if(c.object_targets.depth_roi_size_px<3 || c.object_targets.depth_roi_size_px>31 || c.object_targets.depth_roi_size_px%2==0)
     throw std::runtime_error("depth_roi_size_px must be odd in [3,31]");
@@ -508,6 +518,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(f, "max_centers", c.line_features.max_centers);
   Assign(f, "guide_min_points", c.line_features.guide_min_points);
   Assign(f, "image_center_u", c.line_features.image_center_u);
+  Assign(f, "ball_view_image_center_u", c.ball_view_line_image_center_u);
+  Assign(a["camera"], "ball_view_pitch_tick", c.ball_view_pitch_tick);
   Assign(f, "curve_min_points", c.line_features.curve_min_points);
   Assign(f, "curve_min_v_span_px", c.line_features.curve_min_v_span_px);
   Assign(f, "curve_local_fit_points", c.line_features.curve_local_fit_points);
@@ -717,6 +729,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(t,"ball_forward_max_depth_m",c.object_targets.ball_forward_max_depth_m);
   Assign(t,"ball_down_min_depth_m",c.object_targets.ball_down_min_depth_m);
   Assign(t,"ball_down_max_depth_m",c.object_targets.ball_down_max_depth_m);
+  Assign(t,"ball_view_min_depth_m",c.object_targets.ball_view_min_depth_m);
+  Assign(t,"ball_view_max_depth_m",c.object_targets.ball_view_max_depth_m);
   Assign(t,"hurdle_min_depth_m",c.object_targets.hurdle_min_depth_m);
   Assign(t,"hurdle_max_depth_m",c.object_targets.hurdle_max_depth_m);
   Assign(t,"ball_depth_enabled",c.object_targets.ball_depth_enabled);

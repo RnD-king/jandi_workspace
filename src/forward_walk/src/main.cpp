@@ -144,6 +144,8 @@ public:
         camera_config_.forward.pitch = declare_parameter<int>("camera_forward_pitch_tick", 1537);
         camera_config_.down.yaw = declare_parameter<int>("camera_down_yaw_tick", 2036);
         camera_config_.down.pitch = declare_parameter<int>("camera_down_pitch_tick", 2013);
+        // Shared algorithm YAML controls BALL_VIEW pitch only; yaw reuses DOWN.
+        camera_config_.ball_view={camera_config_.down.yaw,algorithm.ball_view_pitch_tick};
         camera_config_.goal.yaw = declare_parameter<int>("camera_goal_yaw_tick", 2054);
         camera_config_.goal.pitch = declare_parameter<int>("camera_goal_pitch_tick", 966);
         // The core owns transition settling after camera DONE; no default extra executor wait.
@@ -848,7 +850,8 @@ private:
                 scan_elbow_stage_=ScanElbowStage::kExtending;
             } else {
                 camera_motion_->Start(req,last_sent_positions_,now);
-                camera_arm_forward_=req==vision::msg::CameraCommand::FORWARD;
+                camera_arm_forward_=req==vision::msg::CameraCommand::FORWARD ||
+                    req==vision::msg::CameraCommand::BALL_VIEW_LINE;
                 const bool special=motion_in_progress_ &&
                     (!UsesOutwardArmPose(current_action_) || shoot_pose_in_progress_);
                 if(line_arm_config_.enabled && !special) {
@@ -1285,7 +1288,7 @@ private:
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr timing_parameter_callback_;
     std::optional<QueuedAction> queued_action_;        // 비어 있으면 다음 동작 없음, 값이 있으면 1개 대기
     motion_executor::CameraTransactions camera_transactions_; // 몸과 독립인 카메라 활성/완료 ID 기록
-    motion_executor::CameraConfig camera_config_;     // 카메라 모터 ID, 세 자세 tick, 이동/안정화 시간
+    motion_executor::CameraConfig camera_config_;     // 카메라 모터 ID, 네 자세 tick, 이동/안정화 시간
     std::chrono::steady_clock::time_point next_camera_verify_at_{};
     std::unique_ptr<motion_executor::CameraMotion> camera_motion_; // 머리 보간 및 완료 후 자세 유지 상태
     // 마지막으로 전송 호출에 성공한 전체 목표 tick. 실제 encoder 측정값과 구분해야 한다.

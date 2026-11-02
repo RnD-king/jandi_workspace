@@ -6,6 +6,8 @@ uint8 SCAN_RIGHT=5
 uint8 SCAN_HOLD=6
 uint8 SCAN_RESUME=7
 uint8 SCAN_RETURN=8
+uint8 BALL_VIEW=9
+uint8 BALL_VIEW_LINE=10
 
 uint64 command_id
 uint8 request
