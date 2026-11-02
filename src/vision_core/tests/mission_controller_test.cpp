@@ -905,9 +905,9 @@ int main() {
   ready_frame.delivery_feedback={early_b,true,true,false};
   ready_result=early_done.Step(ready_frame);
   assert(ready_result.command.action_id==0);
-  assert(ready_result.command.camera_request==CameraRequest::kDown);
+  assert(ready_result.command.camera_request==CameraRequest::kBallView);
 
-  // A=22 can reserve B=25. B's number never restricts READY queue admission.
+  // A=22 can reserve B=25; B's number never restricts READY queue admission.
   MissionController turn_successor(ready_cfg);
   AdmitObjectAtRest(turn_successor, Ball(.5,.2));
   ready_frame=Frame(0.0); ready_frame.ball_target=Ball(.5,.2);
