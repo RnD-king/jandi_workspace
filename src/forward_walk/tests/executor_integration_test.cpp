@@ -339,7 +339,8 @@ int main() {
                   Count(actions,first,Status::DONE)==1&&Count(actions,second,Status::ACK)==1&&
                   Count(actions,second,Status::READY)==1&&Count(actions,second,Status::DONE)==1,
                   "new action READY/queue/auto-start lifecycle mismatch");
-            Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"new queued walk lost symmetric arms");
+            Check(Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,
+                  "new queued walk ignored the camera-GOAL lowered arm targets");
         }
         std::cout<<"PASS all six new action ACK/READY/queue/DONE and arm targets\n";
         // A missing action-31 asset must not ACK or move.
@@ -554,6 +555,40 @@ int main() {
               [](int id){return id==21 || id==22;}),"camera verification read unrelated motors");
         Dxl::measured.clear();
         std::cout<<"PASS camera encoder mismatch, duplicate, read failure and measured arrival\n";
+
+        // Curve scan: extend the selected elbow, scan the head, restore head,
+        // then restore elbow before reporting camera DONE. Both signs matter.
+        camera(70000,2);
+        pump([&]{return node->camera_transactions_.completed.Contains(70000);});
+        for(const auto side:{std::pair<uint8_t,int>{vision::msg::CameraCommand::SCAN_LEFT,17},
+                             std::pair<uint8_t,int>{vision::msg::CameraCommand::SCAN_RIGHT,18}}) {
+            const auto id=static_cast<uint64_t>(70001+side.second);
+            const int home=Dxl::current.at(side.second);
+            const int other=Dxl::current.at(side.second==17?18:17);
+            auto scan=std::make_shared<vision::msg::CameraCommand>();
+            scan->command_id=id;
+            scan->request=side.first;
+            scan->scan_max_yaw_deg=45;
+            scan->scan_move_sec=0.1;
+            scan->scan_hold_sec=0.1;
+            scan->scan_return_sec=0.1;
+            node->CameraCommandCallback(scan);
+            Check(node->scan_elbow_stage_==MainNode::ScanElbowStage::kExtending &&
+                  !node->camera_motion_->ScanActive(),
+                  "head moved before the elbow extension started");
+            pump([&]{return node->scan_elbow_stage_==MainNode::ScanElbowStage::kScanning;},3.0);
+            Check(Dxl::current.at(side.second)==home+(side.second==17?1024:-1024) &&
+                  Count(cameras,id,Status::DONE)==0,
+                  "curve elbow did not extend 90 degrees before head motion");
+            pump([&]{return node->camera_transactions_.completed.Contains(id);},6.0);
+            Check(node->scan_elbow_stage_==MainNode::ScanElbowStage::kIdle &&
+                  Dxl::current.at(side.second)==home &&
+                  Dxl::current.at(side.second==17?18:17)==other &&
+                  Dxl::current.at(21)==2077 &&
+                  Count(cameras,id,Status::ACK)==1 && Count(cameras,id,Status::DONE)==1,
+                  "curve scan did not restore the correct elbow and head before DONE");
+        }
+        std::cout<<"PASS sequenced 17/18 elbow extension, camera scan and safe restoration\n";
         rclcpp::shutdown();fs::remove_all(directory);return 0;
     } catch(const std::exception& e) {
         if(rclcpp::ok())rclcpp::shutdown();fs::remove_all(directory);
