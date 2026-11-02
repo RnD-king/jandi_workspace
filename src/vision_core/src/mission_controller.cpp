@@ -3012,7 +3012,7 @@ void MissionController::Reset() { Reset(false); }
 void MissionController::Reset(bool preserve_action_ids) {
   recovering_approach_.reset();
   continuous_={};approach_evidence_={};
-  approach_goal_probe_=approach_return_forward_=false;
+  approach_goal_probe_=approach_return_ball_view_=false;
   approach_goal_empty_frames_=approach_goal_retry_after_=0;
   approach_goal_empty_retries_=0;
   approach_goal_search_failed_=false;

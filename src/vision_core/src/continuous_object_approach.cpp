@@ -114,7 +114,7 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
     actual_line_stability_history_.clear();
   }
   continuous_={};approach_evidence_={};
-  approach_goal_probe_=approach_return_forward_=false;
+  approach_goal_probe_=approach_return_ball_view_=false;
   approach_goal_empty_retries_=0;
   approach_goal_bad_depth_frames_=0;
   approach_goal_depth_action_id_=0;
@@ -198,7 +198,7 @@ bool MissionController::ResumeContinuousApproach(const MissionFrameInput& input)
     // This is the same object mission, not completion or a new admission.
     // Keep its lock, completed blocks, identity, and mission sequence number.
     active_mission_=MissionType::kLine;
-    approach_goal_probe_=approach_return_forward_=false;
+    approach_goal_probe_=approach_return_ball_view_=false;
   }
   return true;
 }
@@ -241,10 +241,10 @@ bool MissionController::PrepareGoalDepthRecovery(const MissionFrameInput& input,
       result.entered=true;
     } else {
       ReleaseContinuousApproach();
-      approach_return_forward_=true;
+      approach_return_ball_view_=true;
       post_pickup_goal_line_gate_active_=true;
       approach_goal_retry_after_=post_pickup_line_actions_completed_+1;
-      if (idle && input.allow_new_commands) result.camera=CameraRequest::kForward;
+      if (idle && input.allow_new_commands) result.camera=CameraRequest::kBallViewLine;
     }
   } else if (recovery.recovered) {
     approach_goal_bad_depth_frames_=0;
@@ -282,11 +282,11 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     }
     result.camera=request;
   };
-  if (approach_return_forward_) {
-    if (!settled || camera.actual_mode!=CameraMode::kForward) {
-      camera_request(CameraRequest::kForward);return result;
+  if (approach_return_ball_view_) {
+    if (!settled || camera.actual_mode!=CameraMode::kBallView) {
+      camera_request(CameraRequest::kBallViewLine);return result;
     }
-    approach_return_forward_=false;approach_camera_started_=-1;
+    approach_return_ball_view_=false;approach_camera_started_=-1;
     line_stability_history_.clear();
     actual_line_stability_history_.clear();
   }
@@ -295,7 +295,9 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const bool goal_gate=has_ball_ && config_.enable_goal && post_pickup_goal_line_gate_active_ &&
       (post_pickup_five_step_completed_ || post_pickup_line_actions_completed_>=goal_controller_.RequiredLineWalkActions()) &&
       post_pickup_line_actions_completed_>=approach_goal_retry_after_;
-  if (advance && settled && camera.actual_mode==CameraMode::kForward && goal_gate &&
+  if (advance && settled &&
+      (camera.actual_mode==CameraMode::kForward || camera.actual_mode==CameraMode::kBallView) &&
+      goal_gate &&
       continuous_.mission==MissionType::kNone && line_state_==LineState::kNormal) {
     approach_goal_probe_=true;line_plan_.Abort();
   }
@@ -395,10 +397,10 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
           return result;
         }
         ++approach_goal_empty_retries_;
-        approach_return_forward_=true;
+        approach_return_ball_view_=true;
         post_pickup_goal_line_gate_active_=true;
         approach_goal_retry_after_=post_pickup_line_actions_completed_+1;
-        line_plan_.Abort();camera_request(CameraRequest::kForward);
+        line_plan_.Abort();camera_request(CameraRequest::kBallViewLine);
       }
     }
     return result;
@@ -507,10 +509,10 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     const bool restore=goal_view;
     ReleaseContinuousApproach();
     if (restore) {
-      approach_return_forward_=true;
+      approach_return_ball_view_=true;
       post_pickup_goal_line_gate_active_=true;
       approach_goal_retry_after_=post_pickup_line_actions_completed_+1;
-      camera_request(CameraRequest::kForward);
+      camera_request(CameraRequest::kBallViewLine);
     }
     return result;
   }

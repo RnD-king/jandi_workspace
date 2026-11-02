@@ -432,7 +432,7 @@ private:
   };
   std::array<ApproachEvidence,3> approach_evidence_;
   std::uint64_t next_approach_epoch_{1};
-  bool approach_goal_probe_{false}, approach_return_forward_{false};
+  bool approach_goal_probe_{false}, approach_return_ball_view_{false};
   int approach_goal_empty_frames_{0}, approach_goal_retry_after_{0};
   int approach_goal_empty_retries_{0};
   bool approach_goal_search_failed_{false};

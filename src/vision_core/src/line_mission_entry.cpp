@@ -589,7 +589,8 @@ MissionFrameResult MissionController::StepPlannedLine(
       // The previous block may not have reached sensory DONE yet; count the
       // qualifying block prospectively ONLY to suppress its final READY queue.
       const bool goal_will_enter = has_ball_ && config_.enable_goal &&
-          (!automatic_approach || (input.camera_feedback.actual_mode==CameraMode::kForward &&
+          (!automatic_approach || ((input.camera_feedback.actual_mode==CameraMode::kForward ||
+             input.camera_feedback.actual_mode==CameraMode::kBallView) &&
             post_pickup_line_actions_completed_+(line_plan_.Done(id)?0:1)>=approach_goal_retry_after_)) &&
           goal_controller_.CanEnterFromLine() &&
           post_pickup_goal_line_gate_active_ && line_valid && final_edge &&
@@ -598,7 +599,8 @@ MissionFrameResult MissionController::StepPlannedLine(
                goal_controller_.RequiredLineWalkActions());
       // Only the configured number of completed straight blocks satisfies the shortcut.
       const bool straight_goal = has_ball_ && config_.enable_goal &&
-          (!automatic_approach || (input.camera_feedback.actual_mode==CameraMode::kForward &&
+          (!automatic_approach || ((input.camera_feedback.actual_mode==CameraMode::kForward ||
+             input.camera_feedback.actual_mode==CameraMode::kBallView) &&
             post_pickup_line_actions_completed_+(line_plan_.Done(id)?0:1)>=approach_goal_retry_after_)) &&
           goal_controller_.CanEnterFromLine() &&
           post_pickup_goal_line_gate_active_ && line_valid && final_edge &&
