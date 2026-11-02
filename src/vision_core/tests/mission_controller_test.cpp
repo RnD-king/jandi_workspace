@@ -1110,7 +1110,7 @@ int main() {
   ready_frame.delivery_feedback={two_id,true,true,false};
   ready_result=straight_two.Step(ready_frame);
   assert(!ready_result.object_ready_mean_used);
-  assert(ready_result.command.camera_request==CameraRequest::kDown);
+  assert(ready_result.command.camera_request==CameraRequest::kBallView);
 
   // Missing READY: reject moving samples and retain stationary 1s gate.
   MissionController no_ready(ready_cfg);
@@ -1240,7 +1240,7 @@ int main() {
   MissionController stage_probe(stage_cfg);
   assert(stage_probe.TestSetupPending());
   auto stage_input=Frame(0);
-  stage_input.camera_feedback={CameraMode::kDown,true};
+  stage_input.camera_feedback={CameraMode::kBallView,true};
   stage_input.allow_new_body_actions=false;
   stage_input.allow_test_setup_body_actions=true;
   auto stage_step=stage_probe.Step(stage_input);
@@ -1249,7 +1249,7 @@ int main() {
   const auto stage_id=stage_step.command.action_id;
   assert(stage_id!=0);
   stage_input=Frame(1);
-  stage_input.camera_feedback={CameraMode::kDown,true};
+  stage_input.camera_feedback={CameraMode::kBallView,true};
   stage_input.allow_new_body_actions=false;
   stage_input.allow_test_setup_body_actions=true;
   stage_input.delivery_feedback={stage_id,true,true,false};
@@ -1261,7 +1261,7 @@ int main() {
   // dispatch its initial pose automatically.
   MissionController gated_stage(stage_cfg);
   auto gated_stage_input=Frame(0);
-  gated_stage_input.camera_feedback={CameraMode::kDown,true};
+  gated_stage_input.camera_feedback={CameraMode::kBallView,true};
   gated_stage_input.allow_new_body_actions=false;
   auto gated_stage_result=gated_stage.Step(gated_stage_input);
   assert(gated_stage_result.command.action_id==0);
