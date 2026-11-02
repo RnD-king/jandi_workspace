@@ -1,5 +1,12 @@
 name: Vision core regression
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/vision_core/**'
+      - 'src/vision/**'
+      - 'src/forward_walk/**'
+      - '.github/workflows/vision-core-regression.yml'
   pull_request:
     paths:
       - 'src/vision_core/**'
@@ -26,6 +33,8 @@ jobs:
         run: |
           g++ -std=c++17 -I src/vision/include src/vision/tests/backboard_depth_regions_test.cpp $(pkg-config --cflags --libs opencv4) -o /tmp/vision_backboard_depth_regions_test
           /tmp/vision_backboard_depth_regions_test
+      - name: Test SSH terminal renderer
+        run: python3 src/vision/tests/terminal_view_test.py
       - name: Test mock executor protocol
         run: python3 src/vision/tests/mock_executor_protocol_test.py
       - name: Test forward_walk source contracts

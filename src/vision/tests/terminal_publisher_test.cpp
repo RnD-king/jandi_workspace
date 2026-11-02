@@ -21,7 +21,22 @@ int main() {
   context.control_state="RUNNING"; context.waiting_action_id=42;
   const vision_core::CameraFeedback camera{vision_core::CameraMode::kGoal,true};
   std_msgs::msg::Header header; header.frame_id="camera"; header.stamp.sec=123;
+  result.mission.course_curve_index=3;
+  result.mission.curve_search_phase=2; // DELAY
+  result.mission.approach_mission=vision_core::MissionType::kBall;
+  result.mission.approach_track_id=12;
+  result.mission.approach_missing_frames=18;
+  result.mission.walking.done=8;result.mission.walking.issued=9;
+  result.mission.walking.line=5;result.mission.walking.ball=3;
   auto frame=vision::MakeTerminalFrame(header,640,480,detections,config,result,camera,context);
+  Check(frame.curve_info.find("CURVE:DELAY IDX:3")!=std::string::npos,
+        "curve phase/index missing from SSH metadata");
+  Check(frame.object_info.find("OBJ:12")!=std::string::npos &&
+        frame.object_info.find("MISS:18")!=std::string::npos,
+        "object ID/loss telemetry missing");
+  Check(frame.walk_info.find("DONE:8")!=std::string::npos &&
+        frame.walk_info.find("BALL:3")!=std::string::npos,
+        "DONE-based walk telemetry missing");
   Check(frame.detections.size()==3,"unrecognized classes and rejected line centers must be omitted");
   Check(frame.header.stamp.sec==123 && frame.image_width==640 && frame.waiting_action_id==42,
       "metadata must retain the original frame and real action state");

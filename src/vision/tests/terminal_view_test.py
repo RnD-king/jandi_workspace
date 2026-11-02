@@ -15,11 +15,12 @@ def visible(text):
 
 class TerminalViewTest(unittest.TestCase):
     def test_24_rows_and_aspect_ratio(self):
-        self.assertEqual(grid_size(72, 24, 48, 640, 480), (48, 18))
+        self.assertEqual(grid_size(72, 24, 48, 640, 480), (43, 16))
         text = render(Frame(), 72, 24)
         lines = visible(text)
         self.assertEqual(len(lines), 24)
-        self.assertTrue(all(len(line) == 50 for line in lines))
+        self.assertTrue(all(len(line) == 45 for line in lines[:18]))
+        self.assertTrue(all(len(line) == 71 for line in lines[18:]))
         self.assertFalse(text.endswith("\n"))
         self.assertLess(len(text.encode("ascii")), 4096)
 
@@ -31,7 +32,7 @@ class TerminalViewTest(unittest.TestCase):
             Box(0, 638, 478, 2, 2),
             Box(2, 650, 500, 20, 20),  # outside image, must not accumulate at edge
             Box(4, 100, 100, 100, 100, False)])
-        lines = visible(render(frame, 72, 24, color=False))
+        lines = visible(render(frame, 72, 26, color=False))
         self.assertEqual(lines[1][1], ".")
         self.assertEqual(lines[18][48], ".")
         self.assertIn("B", lines[2])
@@ -42,8 +43,8 @@ class TerminalViewTest(unittest.TestCase):
     def test_pause_raw_and_stale_do_not_reuse_old_boxes(self):
         frame = Frame(run="PAUSED", filters_current=False,
                       boxes=[Box(1, 100, 100, 50, 50, False)])
-        self.assertIn("B", "".join(visible(render(frame, 72, 24))[1:19]))
-        stale = visible(render(frame, 72, 24, age=3))
+        self.assertIn("B", "".join(visible(render(frame, 72, 26))[1:19]))
+        stale = visible(render(frame, 72, 26, age=3))
         self.assertIn("STALE", stale[20])
         self.assertTrue(all(line == "|" + " " * 48 + "|" for line in stale[1:19]))
 
@@ -51,7 +52,7 @@ class TerminalViewTest(unittest.TestCase):
         def painted(box):
             # 480x360 -> 48x18: a cell corresponds to 10x20 pixels.
             frame = Frame(width=480, height=360, boxes=[box])
-            lines = visible(render(frame, 72, 24, color=False))[1:19]
+            lines = visible(render(frame, 72, 26, color=False))[1:19]
             return {(x, y) for y, line in enumerate(lines)
                     for x, char in enumerate(line[1:-1]) if char == "B"}
 
@@ -64,6 +65,21 @@ class TerminalViewTest(unittest.TestCase):
         # A visible edge fragment whose original center is off-image survives.
         self.assertEqual(painted(Box(1, -20, 1, 21, 1)), {(0, 0)})
         self.assertEqual(painted(Box(1, -20, 1, 10, 1)), set())
+
+    def test_six_status_rows_and_curve_index(self):
+        frame = Frame(curve_info="CURVE:DELAY IDX:3", object_info="OBJ:12 CAND:13",
+                      control_info="WAIT:DONE STATE:CURVE_PREEMPT",
+                      walk_info="WALK DONE:24 ISSUED:25",
+                      fine_info="FINE:3 PROBE:1/1")
+        lines = visible(render(frame, 120, 26, color=False))
+        self.assertEqual(len(lines), 26)
+        self.assertTrue(all(len(row) == 119 for row in lines[-6:]))
+        self.assertIn("CURVE:DELAY IDX:3", lines[-6])
+        self.assertIn("OBJ:12 CAND:13", lines[-5])
+        self.assertIn("CURVE_PREEMPT", lines[-4])
+        self.assertIn("WALK DONE:24", lines[-3])
+        self.assertIn("FINE:3", lines[-2])
+        self.assertIn("L0 B0", lines[-1])
 
     def test_waiting_small_terminal_and_hostile_text(self):
         self.assertIn("NO DATA", render(None, 72, 24))

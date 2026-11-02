@@ -80,5 +80,35 @@ int main() {
   in.scan_ball_u.reset();
   tick(); // return DONE, choose the in-place correction for a >=30 degree yaw
   assert(out.curve_search_phase==10 || out.curve_search_phase==9);
+  // A confirmed BALL admission cancels only a curve scan that has not started.
+  MissionController priority(cfg);
+  MissionFrameInput b;
+  b.image_width=640;b.image_height=480;
+  b.camera_feedback={CameraMode::kForward,true};
+  b.command_transport_enabled=true;
+  b.line_centers={{380,450},{380,400},{380,350},{380,300},{410,250}};
+  MissionFrameResult bout;
+  const auto ptick=[&](CommandDeliveryFeedback fb={}) {
+    b.now_sec+=.07;b.delivery_feedback=fb;bout=priority.Step(b);
+  };
+  ptick();
+  for(int seq=0;seq<2;++seq) {
+    const auto id=bout.command.action_id;
+    assert(id && bout.command.action==MissionAction::kLineStraightUnit);
+    ptick({id,true,false,false});
+    for(int j=0;j<12;++j)ptick();
+    ptick({id,true,true,false});
+  }
+  assert(bout.curve_search_phase==2);
+  ObjectTarget ball;
+  ball.class_id=cfg.object_targets.ball_class_id;
+  ball.confidence=.95;ball.center_px={320,100};
+  ball.width_px=ball.height_px=40;ball.area_px=1600;
+  b.ball_target=ball;b.ball_track_id=12;
+  b.ball_entry_track_hits=cfg.ball.entry_min_hits;
+  ptick();
+  assert(bout.approach_mission==MissionType::kBall);
+  assert(bout.curve_search_phase==0);
+  assert(bout.command.camera_request==CameraRequest::kNone);
   return 0;
 }
