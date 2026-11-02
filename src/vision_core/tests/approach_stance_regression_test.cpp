@@ -23,8 +23,8 @@ void BallStages() {
   ActionExecutionFeedback busy; busy.action_active=true;
   r=ball.Compute({},640,480,.1,{},busy); assert(r.camera_request==CameraRequest::kNone);
   ActionExecutionFeedback done; done.action_done=true;
-  r=ball.Compute({},640,480,.2,{},done); assert(r.camera_request==CameraRequest::kDown);
-  CameraFeedback down{CameraMode::kDown,true};
+  r=ball.Compute({},640,480,.2,{},done); assert(r.camera_request==CameraRequest::kBallView);
+  CameraFeedback down{CameraMode::kBallView,true};
   r=ball.Compute({},640,480,.3,down,{}); assert(r.mode==BallMode::kDownSearch);
   r=ball.Compute(Target(320,200),640,480,.4,down,{});
   assert(r.mode==BallMode::kWaitFinePose && r.action.action==MissionAction::kDefaultPoseMode);

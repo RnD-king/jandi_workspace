@@ -70,7 +70,7 @@ static void EmptyEntryViewRetriesLine() {
       break;
     }
     assert(g.mode==GoalMode::kEntryRetryCameraForward);
-    assert(g.camera_request==CameraRequest::kForward);
+    assert(g.camera_request==CameraRequest::kBallViewLine);
     assert(goal.EntryLineRetries()==attempt+1 && goal.EntryLineRetryPending());
     g=goal.Compute({},{},{},640,480,now+1.2,true,{CameraMode::kTransition,false},{});
     assert(g.mode==GoalMode::kEntryRetryCameraForward);

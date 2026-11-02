@@ -126,7 +126,7 @@ struct BallPipeline {
     assert(result.mission.ball.mode==BallMode::kApproachTwoBeforeDown);
     Tick({},true);
     assert(result.mission.ball.mode==BallMode::kWaitCameraDown);
-    input.camera_feedback={CameraMode::kDown,true};
+    input.camera_feedback={CameraMode::kBallView,true};
     Tick({BallDetection(.5,.7)});
     assert(result.mission.ball.mode==BallMode::kDownSearch);
     for (int i=0;i<80;++i) {

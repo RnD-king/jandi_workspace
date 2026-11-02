@@ -256,7 +256,7 @@ void GoalEmptyViewLineRetry(bool straight) {
   for(int i=0;i<40 && d.out.goal.mode!=GoalMode::kEntryRetryCameraForward;++i)
     d.Tick(.05);
   assert(d.out.goal.mode==GoalMode::kEntryRetryCameraForward && d.out.has_ball);
-  assert(d.out.command.camera_request==CameraRequest::kForward);
+  assert(d.out.command.camera_request==CameraRequest::kBallViewLine);
   assert(d.out.goal.entry_line_retries==1 && d.out.command.action_id==0);
   d.frame.camera_feedback={CameraMode::kTransition,false};
   d.frame.allow_new_commands=d.frame.allow_new_mission_entry=d.frame.advance_line_fsm=false;
@@ -266,7 +266,7 @@ void GoalEmptyViewLineRetry(bool straight) {
     assert(d.out.goal.mode==GoalMode::kEntryRetryCameraForward);
   }
   d.frame.allow_new_commands=d.frame.allow_new_mission_entry=d.frame.advance_line_fsm=true;
-  d.frame.camera_feedback={CameraMode::kForward,true};d.Tick();
+  d.frame.camera_feedback={CameraMode::kBallView,true};d.Tick();
   assert(d.out.active_mission==MissionType::kLine && d.out.has_ball);
   assert(d.out.goal_walk_actions_completed==0 && d.out.goal_mission_index==mission_index);
   // Camera feedback alone cannot re-enter GOAL, and an invalid LINE cannot

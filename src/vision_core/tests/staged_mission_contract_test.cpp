@@ -53,6 +53,7 @@ struct Trial {
         (stage==1 && mission!=MissionType::kGoal)
         ? CameraMode::kForward
         : (mission==MissionType::kGoal ? CameraMode::kGoal
+            : mission==MissionType::kBall ? CameraMode::kBallView
                                        : CameraMode::kDown);
     in.camera_feedback={camera,true};
     if(mission==MissionType::kHurdle && stage<=1)
@@ -95,8 +96,10 @@ void FarStageStopsAfterCamera(MissionType mission) {
     t.in.delivery_feedback={id,true,false,false};t.Tick();
     assert(!t.out.trial_complete); // ACK alone cannot finish
     t.in.delivery_feedback={id,true,true,false};t.Tick();
-    assert(t.out.command.camera_request==CameraRequest::kDown);
-    t.in.camera_feedback={CameraMode::kDown,true};
+    assert(t.out.command.camera_request==(mission==MissionType::kBall ?
+        CameraRequest::kBallView : CameraRequest::kDown));
+    t.in.camera_feedback={mission==MissionType::kBall ?
+        CameraMode::kBallView : CameraMode::kDown,true};
     for(int n=0;n<10 && !t.out.trial_complete;++n)t.Tick();
     assert(t.out.trial_complete);
   } else {

@@ -125,7 +125,7 @@ void TestManualPerceptionStationaryRecovery() {
   in.delivery_feedback={out.mission.command.action_id,true,true,false};
   out=core.StepPerception(in); in.delivery_feedback={};
   assert(out.mission.ball.mode==BallMode::kWaitCameraDown);
-  in.camera_feedback={CameraMode::kDown,true}; in.detections.clear(); in.now_sec+=.1;
+  in.camera_feedback={CameraMode::kBallView,true}; in.detections.clear(); in.now_sec+=.1;
   core.StepPerception(in);
   for(int i=0;i<20;++i) { in.now_sec+=.1; in.detections={detection(.7)}; out=core.StepPerception(in); }
   assert(out.mission.ball.mode==BallMode::kWaitFinePose);

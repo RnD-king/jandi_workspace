@@ -34,8 +34,8 @@ void Run(bool goal) {
   std::uint64_t last_done=0;bool fine_requested=false,fine_done=false,down=false,finished=false;
   for(int frame=0;frame<300;++frame) {
     in.delivery_feedback={};
-    if(out.command.camera_request==CameraRequest::kDown) {
-      down=true;in.camera_feedback={CameraMode::kDown,true};in.ball_target=Target(5);
+    if(out.command.camera_request==CameraRequest::kBallView) {
+      down=true;in.camera_feedback={CameraMode::kBallView,true};in.ball_target=Target(5);
     }
     if(out.command.command_type==CommandType::kAction && out.command.action_id && out.command.action_id!=last_done) {
       const auto a=out.command.action;

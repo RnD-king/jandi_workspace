@@ -41,7 +41,7 @@ YAML::Node AlgorithmSections(const YAML::Node &a) {
   const auto line = map(a, "line");
   sections["line_detection"] = map(line, "detection");
   sections["line_features"] = map(line, "features");
-  sections["camera"] = map(map(a, "common"), "camera");
+  if (map(a,"common")["camera"]) sections["camera"] = map(map(a, "common"), "camera");
   sections["line"] = map(line, "stability");
   sections["line_p2p"] = map(line, "walk");
   if (line["curve_search"]) sections["curve_search"] = line["curve_search"];

@@ -138,7 +138,7 @@ void TestCameraLatchSurvivesLoss() {
   auto b=ball.Compute(Target(.5,.85),640,480,.1,{},busy);
   assert(b.mode==BallMode::kApproachTwoBeforeDown && b.camera_request==CameraRequest::kNone);
   b=ball.Compute({},640,480,.2,{},busy); assert(b.mode==BallMode::kApproachTwoBeforeDown);
-  b=ball.Compute({},640,480,.3,{},done); assert(b.camera_request==CameraRequest::kDown);
+  b=ball.Compute({},640,480,.3,{},done); assert(b.camera_request==CameraRequest::kBallView);
   c.hurdle.down_search_min_hits=1; c.hurdle.stable_window=c.hurdle.stable_min_hits=1; c.hurdle.lost_frames=1;
   c.hurdle.upper_acquire_v_px=480;
   HurdleController hurdle(c.hurdle,3);

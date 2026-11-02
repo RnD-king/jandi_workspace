@@ -27,8 +27,8 @@ static BallResult EnterPickupVerification(BallController &controller,
                               start_sec + 0.7, {}, done);
   assert(result.action.action == MissionAction::kStepForwardTwo);
   result = controller.Compute(Ball(.5,.8),640,480,start_sec+.71,{},done);
-  assert(result.camera_request == CameraRequest::kDown);
-  const CameraFeedback down{CameraMode::kDown, true};
+  assert(result.camera_request == CameraRequest::kBallView);
+  const CameraFeedback down{CameraMode::kBallView, true};
   for (int i=0;i<8;++i)
     result=controller.Compute(Ball(.5,.7),640,480,start_sec+.8+.1*i,down,{});
   result=controller.Compute(Ball(.5,.7),640,480,start_sec+1.6,down,{});
@@ -84,7 +84,7 @@ int main() {
     finished.action_done=true;
     const auto after=grid.Compute(scenario.first,640,480,.1,{},finished);
     assert(after.camera_request==(scenario.second==MissionAction::kStepForwardTwo
-        ? CameraRequest::kDown : CameraRequest::kNone));
+        ? CameraRequest::kBallView : CameraRequest::kNone));
   }
   // Zones 7/9: one failed post-DONE observation permits exactly one extra
   // same-direction turn, then reobserve before deciding on DOWN. Cover PREVIEW
@@ -132,7 +132,7 @@ int main() {
     if (found) reappeared=Ball(.5,.8);
     n=near.Compute(reappeared,640,480,2.7,{},observed);
     assert(n.mode==(found ? BallMode::kApproachBall : BallMode::kWaitCameraDown));
-    assert(n.camera_request==(found ? CameraRequest::kNone : CameraRequest::kDown));
+    assert(n.camera_request==(found ? CameraRequest::kNone : CameraRequest::kBallView));
     assert(n.action.action==MissionAction::kNone);
     if (found) {
       n=near.Compute(reappeared,640,480,2.8,{},{});
@@ -142,7 +142,7 @@ int main() {
     } else {
       n=near.Compute({},640,480,2.8,{},finished);
       assert(n.mode==BallMode::kWaitCameraDown && n.action.action==MissionAction::kNone);
-      n=near.Compute({},640,480,2.9,{CameraMode::kDown,true},{});
+      n=near.Compute({},640,480,2.9,{CameraMode::kBallView,true},{});
       assert(n.mode==BallMode::kDownSearch && n.camera_request==CameraRequest::kNone);
       assert(n.action.action==MissionAction::kNone);
     }
@@ -173,8 +173,8 @@ int main() {
   assert(r.action.action == MissionAction::kStepForwardTwo);
   assert(r.camera_request == CameraRequest::kNone);
   r=controller.Compute(Ball(.5,.8),640,480,.21,{},done);
-  assert(r.camera_request == CameraRequest::kDown);
-  CameraFeedback down{CameraMode::kDown, true};
+  assert(r.camera_request == CameraRequest::kBallView);
+  CameraFeedback down{CameraMode::kBallView, true};
   r = controller.Compute(Ball(0.4, 0.6), 640,480, 0.3, down, {});
   r = controller.Compute(Ball(0.4, 0.6), 640,480, 0.4, down, {});
   r = controller.Compute(Ball(.4,.6),640,480,.401,down,{});
