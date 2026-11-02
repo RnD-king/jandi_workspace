@@ -147,19 +147,20 @@ void FailedSearchConfirmationResumes(bool partial_hits) {
 
   auto bc=c.ball;bc.stable_window=10;bc.stable_min_hits=7;bc.down_search_min_hits=3;bc.lost_frames=1;
   bc.pickup_u1_px=300;bc.pickup_u2_px=340;bc.pickup_v1_px=100;bc.pickup_v2_px=150;
-  BallController ball(bc,3);ball.StartTestNear();ball.Compute({},640,480,0,down,{});
-  ball.Compute({},640,480,.1,down,{});
-  for(int i=0;i<7;++i)ball.Compute(t,640,480,.2+.1*i,down,{false,true,false});
-  auto bres=ball.Compute({},640,480,1,down,{true,false,false});
+  const CameraFeedback ball_view{CameraMode::kBallView,true};
+  BallController ball(bc,3);ball.StartTestNear();ball.Compute({},640,480,0,ball_view,{});
+  ball.Compute({},640,480,.1,ball_view,{});
+  for(int i=0;i<7;++i)ball.Compute(t,640,480,.2+.1*i,ball_view,{false,true,false});
+  auto bres=ball.Compute({},640,480,1,ball_view,{true,false,false});
   assert(bres.mode==BallMode::kWaitFinePose && bres.action.action==MissionAction::kDefaultPoseMode);
-  bres=ball.Compute({},640,480,1.1,down,{false,true,false});
+  bres=ball.Compute({},640,480,1.1,ball_view,{false,true,false});
   assert(bres.mode==BallMode::kWaitFinePose);
-  bres=ball.Compute({},640,480,1.2,down,{true,false,false});
+  bres=ball.Compute({},640,480,1.2,ball_view,{true,false,false});
   assert(bres.mode==BallMode::kFineAdjustForPickup);
   ball.UseVerifiedObservation({},failed,640,480);
-  bres=ball.Compute({},640,480,2.3,down,{false,false,true});
+  bres=ball.Compute({},640,480,2.3,ball_view,{false,false,true});
   assert(bres.mode==BallMode::kBallRecoveryDown);
-  bres=ball.Compute({},640,480,2.4,down,{});
+  bres=ball.Compute({},640,480,2.4,ball_view,{});
   assert(bres.action.action==MissionAction::kStepForwardHalf);
   assert(ball.DownSearchStepsRemaining()==bc.down_search_max_steps-1); // No WALK search restart.
 }
