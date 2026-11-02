@@ -90,9 +90,19 @@ int main() {
   filtered.accepted_object_indices={1};filtered.detection_track_ids={0,47};
   const auto id_view=vision::RenderMissionDebug(label_image,raw_objects,{},c,filtered,line_view,
       {vision_core::CameraMode::kForward,true},{},state);
-  Check(cv::norm(id_view.image(cv::Rect(122,302,24,12)),
-        label_baseline.image(cv::Rect(122,302,24,12)),cv::NORM_INF)>0,
-        "real candidate ID was not drawn on its matching detection");
+  // ID text appears only at the bottom centre, not the former top-left.
+  const auto yellow_pixels=[](const cv::Mat& region) {
+    cv::Mat mask;
+    cv::inRange(region,cv::Scalar(0,225,225),cv::Scalar(65,255,255),mask);
+    return cv::countNonZero(mask);
+  };
+  Check(yellow_pixels(id_view.image(cv::Rect(122,323,36,15)))>0,
+        "tracking ID was not yellow inside the box at bottom centre");
+  Check(yellow_pixels(id_view.image(cv::Rect(122,303,36,16)))==0,
+        "tracking ID still appeared at the top of the bounding box");
+  Check(cv::norm(id_view.image(cv::Rect(122,323,36,15)),
+        label_baseline.image(cv::Rect(122,323,36,15)),cv::NORM_INF)>0,
+        "the tracked ID did not change its corresponding detection box");
   Check(id_view.image.at<cv::Vec3b>(320,140)==cv::Vec3b(0,165,255),
         "a displayed ID must have a center in its box color");
   for(const auto& entry:std::vector<std::pair<int,cv::Vec3b>>{

@@ -178,8 +178,8 @@ vision_algorithm:
       max_depth_m: 2.00
     candidate_tracking:
       enabled: true
-      max_center_distance_px: 200.0
-      max_size_log_ratio: 0.60
+      max_center_distance_px: 800.0 # Temporary: same permissive identity gate as BALL
+      max_size_log_ratio: 4.605170185988092 # ln(100): 100x bbox width/height change
       missing_frame_limit: 15
       max_tracks: 16
 
@@ -249,8 +249,8 @@ vision_algorithm:
         min_box_height: 20 # backboard 최소 세로
       candidate_tracking:
         enabled: true
-        max_center_distance_px: 200.0
-        max_size_log_ratio: 0.60
+        max_center_distance_px: 800.0 # Temporary: same permissive identity gate as BALL
+        max_size_log_ratio: 4.605170185988092 # ln(100): 100x bbox width/height change
         missing_frame_limit: 15
         max_tracks: 16
       depth:

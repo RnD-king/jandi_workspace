@@ -456,8 +456,8 @@ void RelaxedBallIdentityRegression() {
   // Exercise the requested production tuning explicitly in this regression.
   cfg.ball_candidate_tracking.max_center_distance_px=800.0;
   cfg.ball_candidate_tracking.max_size_log_ratio=std::log(100.0);
-  // Only BALL gets this temporary permissive setting.
-  assert(cfg.hurdle_candidate_tracking.max_center_distance_px==200.0);
+  // CTest uses a conservative fixture; HURDLE/BACKBOARD are verified in
+  // their own explicit permissive gate regression below.
   assert(cfg.object_association.max_center_distance_norm==0.25);
   BallCandidateTracker tracker;
   tracker.Update({Candidate(5,5,1)},cfg.ball_candidate_tracking,cfg.object_association,10,470);
@@ -467,6 +467,29 @@ void RelaxedBallIdentityRegression() {
   assert(tracker.Tracks().size()==1);
   assert(tracker.Find(id) && tracker.Find(id)->detection_index &&
       tracker.Find(id)->target.center_px.u==625);
+}
+void RelaxedHurdleBackboardIdentityRegression() {
+  const auto cfg=LoadDefaultAlgorithmConfig();
+  for(auto tracking:{cfg.hurdle_candidate_tracking,cfg.backboard_candidate_tracking}) {
+    // Production YAML sets these as BALL; this unit test does not depend
+    // on the conservative, fixed test fixture.
+    tracking.max_center_distance_px=800.0;
+    tracking.max_size_log_ratio=std::log(100.0);
+    ObjectTargetTracker tracker;
+    const auto first=tracker.Observe({Candidate(5,5,1)},tracking,
+        cfg.object_association,640,480,10,470,true,false);
+    assert(first.target && tracker.TargetId());
+    const auto original_id=tracker.TargetId();
+    // ~778 px and 100x dimensions retain the same unlocked track ID.
+    const auto moved=tracker.Observe({Candidate(625,475,100)},tracking,
+        cfg.object_association,640,480,10,470,true,false);
+    assert(moved.target && tracker.TargetId()==original_id);
+    tracker.Lock();
+    const auto returned=tracker.Observe({Candidate(5,5,1)},tracking,
+        cfg.object_association,640,480,10,470,true,false);
+    assert(returned.target && tracker.TargetId()==original_id &&
+           tracker.Locked());
+  }
 }
 void ExtendedCandidateGraceAndDistance() {
   auto config=LoadDefaultAlgorithmConfig();
@@ -488,6 +511,7 @@ void ExtendedCandidateGraceAndDistance() {
 }
 int main() {
   RelaxedBallIdentityRegression();
+  RelaxedHurdleBackboardIdentityRegression();
   ExtendedCandidateGraceAndDistance();
   SharedObjectTrackingRegressions();HurdleIdentityEntryAndCameraReset();BackboardIdentityAndCameraReset();
   HurdleObservationRestartsAfterCamera();

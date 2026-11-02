@@ -241,8 +241,31 @@ inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
   // LINE has neither an ID label nor a detection center marker.
   if (id && !is_line) {
     cv::circle(vis,{clipped.x+clipped.width/2,clipped.y+clipped.height/2},3,color,-1);
-    cv::putText(vis,std::to_string(id),{clipped.x+2,std::min(vis.rows-1,clipped.y+14)},
-        cv::FONT_HERSHEY_SIMPLEX,.5,cv::Scalar(0,0,0),1,cv::LINE_AA);
+    // Render IDs inside the visible box at the bottom centre. A black
+    // outline gives the yellow text contrast on either light or dark RGB.
+    // Use the clipped ROI so no text spills outside a clipped detection.
+    const std::string label=std::to_string(id);
+    constexpr int font=cv::FONT_HERSHEY_SIMPLEX;
+    constexpr int padding=3;
+    double font_scale=0.5;
+    int baseline=0;
+    auto text_size=cv::getTextSize(label,font,font_scale,1,&baseline);
+    while ((text_size.width>clipped.width-2*padding ||
+            text_size.height+baseline>clipped.height-2*padding) &&
+           font_scale>0.16) {
+      font_scale*=0.85;
+      text_size=cv::getTextSize(label,font,font_scale,1,&baseline);
+    }
+    if (text_size.width<=clipped.width-2*padding &&
+        text_size.height+baseline<=clipped.height-2*padding) {
+      cv::Mat inside_box=vis(clipped);
+      const cv::Point origin{(clipped.width-text_size.width)/2,
+                             clipped.height-padding-baseline};
+      cv::putText(inside_box,label,origin,font,font_scale,
+                  cv::Scalar(0,0,0),3,cv::LINE_AA);
+      cv::putText(inside_box,label,origin,font,font_scale,
+                  cv::Scalar(0,255,255),1,cv::LINE_AA);
+    }
     if (mission_target) {
       const auto outer=cv::Rect(clipped.x-3,clipped.y-3,clipped.width+6,clipped.height+6)
           & cv::Rect(0,0,vis.cols,vis.rows);
