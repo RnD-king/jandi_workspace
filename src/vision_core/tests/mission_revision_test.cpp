@@ -18,11 +18,11 @@ void VerifiedFineWindows() {
   const ActionExecutionFeedback done{true,false,true};
   BallController ball(c.ball,3); ball.StartTestExecute();
   ball.UseVerifiedObservation(Target(345,100),hits,640,480);
-  auto b=ball.Compute(Target(0,0),640,480,1,{CameraMode::kDown,true},done);
+  auto b=ball.Compute(Target(0,0),640,480,1,{CameraMode::kBallView,true},done);
   assert(b.action.action==MissionAction::kPickBall && b.tracked.stable);
   BallController single(c.ball,3);single.StartTestExecute();
   single.UseVerifiedObservation(Target(345,100),{true},640,480);
-  b=single.Compute(Target(345,100),640,480,1,{CameraMode::kDown,true},done);
+  b=single.Compute(Target(345,100),640,480,1,{CameraMode::kBallView,true},done);
   assert(b.action.action==MissionAction::kNone && !single.ExecutionObservationReady());
   HurdleController hurdle(c.hurdle,3);hurdle.StartTestExecute();
   hurdle.UseVerifiedObservation(Target(320,270),hits,640,480);
@@ -40,7 +40,7 @@ void InvalidAndNearWindows() {
   const ActionExecutionFeedback done{true,false,true};
   BallController ball(c.ball,3);ball.StartTestExecute();
   ball.UseVerifiedObservation({},missing,640,480);
-  auto b=ball.Compute({},640,480,1,{CameraMode::kDown,true},done);
+  auto b=ball.Compute({},640,480,1,{CameraMode::kBallView,true},done);
   assert(b.mode==BallMode::kBallRecoveryDown);
   HurdleController hurdle(c.hurdle,3);hurdle.StartTestExecute();
   hurdle.UseVerifiedObservation({},missing,640,480);
@@ -221,7 +221,7 @@ void BallEntryCountsOnlyDetections() {
   BallController fine(c,3);fine.StartTestExecute();
   fine.UseVerifiedObservation(Target(345,100),
       {true,true,true,true,true,true,false,false,false,false},640,480);
-  b=fine.Compute({},640,480,1,{CameraMode::kDown,true},{true,false,true});
+  b=fine.Compute({},640,480,1,{CameraMode::kBallView,true},{true,false,true});
   assert(!b.tracked.stable && b.action.action==MissionAction::kNone);
 }
 
@@ -460,7 +460,7 @@ void PoseSettleAndConcurrentObservation() {
   c.enable_goal=c.enable_hurdle=false;
   c.transition_settle_sec=.6;c.post_motion_observation_sec=1;
   MissionController core(c);
-  auto f=Frame(0);f.camera_feedback={CameraMode::kDown,true};
+  auto f=Frame(0);f.camera_feedback={CameraMode::kBallView,true};
   auto r=core.Step(f);assert(r.command.action==MissionAction::kDefaultPoseMode);
   const auto id=r.command.action_id;
   const double pose_done_at=.1;
@@ -489,7 +489,7 @@ void FineObservationTiming(double extra_settle, bool manual=false,
   c.enable_goal=c.enable_hurdle=false;c.fine_motion_settle_sec=extra_settle;
   c.post_motion_observation_sec=observation_sec;
   MissionController core(c);
-  auto f=Frame(0);f.camera_feedback={CameraMode::kDown,true};
+  auto f=Frame(0);f.camera_feedback={CameraMode::kBallView,true};
   MissionFrameResult r;
   std::uint64_t setup_done=0;
   for(int i=0;i<=240;++i) {
@@ -624,7 +624,7 @@ void FineSidePairDirect(bool left) {
   const auto side=left?MissionAction::kLeftSideStep:MissionAction::kRightSideStep;
   const auto target=Target(left?c.pickup_u1_px-100:c.pickup_u2_px+100,c.PickupCenterV());
   const std::deque<bool> hits(10,true);
-  const CameraFeedback down{CameraMode::kDown,true};
+  const CameraFeedback down{CameraMode::kBallView,true};
   BallController ball(c,3);ball.StartTestExecute();
   ball.UseVerifiedObservation(target,hits,640,480);
   auto b=ball.Compute({},640,480,0,down,{},false);
@@ -662,7 +662,7 @@ void FineSidePairTransport(bool left, bool manual) {
   c.enable_goal=c.enable_hurdle=false;c.ball.fine_side_two_step_margin_px=100;
   c.fine_motion_settle_sec=.2;
   MissionController core(c);
-  auto f=Frame(0);f.camera_feedback={CameraMode::kDown,true};
+  auto f=Frame(0);f.camera_feedback={CameraMode::kBallView,true};
   const auto side=left?MissionAction::kLeftSideStep:MissionAction::kRightSideStep;
   const auto target=Target(left?c.ball.pickup_u1_px-100:c.ball.pickup_u2_px+100,c.ball.PickupCenterV());
   MissionFrameResult r;std::uint64_t setup_done=0;

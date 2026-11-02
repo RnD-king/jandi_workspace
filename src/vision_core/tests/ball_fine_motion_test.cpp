@@ -74,7 +74,7 @@ void DirectRepeat(MissionAction action) {
     default:start={500,105};c.fine_motion.right_delta_px={-50,0};break;
   }
   BallController ball(c,3);ball.StartTestExecute();
-  const CameraFeedback down{CameraMode::kDown,true};
+  const CameraFeedback down{CameraMode::kBallView,true};
   ball.UseVerifiedObservation(Target(start.u,start.v),std::deque<bool>(10,true),640,480);
   auto b=ball.Compute({},640,480,0,down,{},false);
   assert(b.mode==BallMode::kFineAdjustForPickup && b.action.action==action);
@@ -107,18 +107,18 @@ void DirectRepeat(MissionAction action) {
 void LegacyFallback() {
   auto c=Config();BallController ball(c,3);ball.StartTestExecute();
   ball.UseVerifiedObservation(Target(500,105),std::deque<bool>(10,true),640,480);
-  auto b=ball.Compute({},640,480,0,{CameraMode::kDown,true},{});
+  auto b=ball.Compute({},640,480,0,{CameraMode::kBallView,true},{});
   assert(b.mode==BallMode::kFineSidePair && b.action.action==MissionAction::kRightSideStep);
   c.fine_motion.max_repetitions=1;BallController single(c,3);single.StartTestExecute();
   single.UseVerifiedObservation(Target(500,105),std::deque<bool>(10,true),640,480);
-  b=single.Compute({},640,480,0,{CameraMode::kDown,true},{});
+  b=single.Compute({},640,480,0,{CameraMode::kBallView,true},{});
   assert(b.mode==BallMode::kFineAdjustForPickup && b.action.action==MissionAction::kRightSideStep);
   // An unmeasured side never inherits the legacy blind pair when a partial
   // calibration is active and the measured direction cannot help.
   c.fine_motion.max_repetitions=3;c.fine_motion.forward_delta_px={0,20};
   BallController partial(c,3);partial.StartTestExecute();
   partial.UseVerifiedObservation(Target(500,105),std::deque<bool>(10,true),640,480);
-  b=partial.Compute({},640,480,0,{CameraMode::kDown,true},{});
+  b=partial.Compute({},640,480,0,{CameraMode::kBallView,true},{});
   assert(b.mode==BallMode::kFineAdjustForPickup && b.action.action==MissionAction::kRightSideStep);
 }
 void Transport(bool manual,bool pause) {
@@ -127,7 +127,7 @@ void Transport(bool manual,bool pause) {
   c.fine_motion_settle_sec=.2;c.ball.fine_motion.right_delta_px={-50,0};
   MissionController core(c);MissionFrameInput f;
   f.image_width=640;f.image_height=480;f.command_transport_enabled=true;
-  f.camera_feedback={CameraMode::kDown,true};f.ball_target=Target(500,105);
+  f.camera_feedback={CameraMode::kBallView,true};f.ball_target=Target(500,105);
   MissionFrameResult r;std::uint64_t setup_done=0;
   for (int i=0;i<=200;++i) {
     f.now_sec=.05*i;f.delivery_feedback={};

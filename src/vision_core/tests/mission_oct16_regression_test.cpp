@@ -35,7 +35,7 @@ void BallMiddleLoss(int zone) {
   ActionExecutionFeedback observed;observed.observation_complete=true;
   r=ball.Compute({},640,480,1.2,{},observed,false);
   if(zone==5) {
-    assert(r.mode==BallMode::kWaitCameraDown && r.camera_request==CameraRequest::kDown);
+    assert(r.mode==BallMode::kWaitCameraDown && r.camera_request==CameraRequest::kBallView);
     assert(r.action.action==MissionAction::kNone);
   } else {
     const auto turn=zone==4?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
@@ -98,7 +98,7 @@ void BallZoneEightOneStepThenDown() {
     ActionExecutionFeedback done;done.action_done=true;
     auto completed=ball.Compute({},640,480,.2,{},done);
     assert(completed.mode==BallMode::kWaitCameraDown);
-    assert(completed.camera_request==CameraRequest::kDown && completed.action.action==MissionAction::kNone);
+    assert(completed.camera_request==CameraRequest::kBallView && completed.action.action==MissionAction::kNone);
   }
   for(double u:{289.,471.}) {
     BallController ball(c,3);
@@ -121,8 +121,8 @@ void BallZoneEightOneStepThenDown() {
   r=preview.Compute(Target(200,250),640,480,.3,{},active);
   assert(r.action.action==MissionAction::kStepForwardOne && r.camera_request==CameraRequest::kNone);
   r=preview.Compute({},640,480,.4,{},unissued_done);
-  assert(r.mode==BallMode::kWaitCameraDown && r.camera_request==CameraRequest::kDown);
-  const CameraFeedback down{CameraMode::kDown,true};
+  assert(r.mode==BallMode::kWaitCameraDown && r.camera_request==CameraRequest::kBallView);
+  const CameraFeedback down{CameraMode::kBallView,true};
   r=preview.Compute({},640,480,.5,down,{});
   assert(r.mode==BallMode::kDownSearch && r.action.action==MissionAction::kNone);
   r=preview.Compute({},640,480,.6,down,{});
@@ -139,7 +139,7 @@ void BallZoneEightOneStepThenDown() {
   assert(r.camera_request==CameraRequest::kNone);
   ActionExecutionFeedback done;done.action_done=true;
   r=pending.Compute({},640,480,.2,{},done);
-  assert(r.camera_request==CameraRequest::kDown);
+  assert(r.camera_request==CameraRequest::kBallView);
   pending.Reset();
   r=pending.Compute(Target(380,400),640,480,1,{},{});
   assert(r.camera_request==CameraRequest::kNone && r.action.action==MissionAction::kStepForwardOne);
@@ -164,7 +164,7 @@ void BallZoneEightOneStepThenDown() {
     output=core.Step(f);assert(output.command.camera_request==CameraRequest::kNone);
     f.now_sec=3.2;f.delivery_feedback={id,true,true,false};
     output=core.Step(f);
-    assert(!output.post_motion_observing && output.command.camera_request==CameraRequest::kDown);
+    assert(!output.post_motion_observing && output.command.camera_request==CameraRequest::kBallView);
     assert(output.command.action==MissionAction::kNone);
   }
 }
@@ -191,9 +191,10 @@ void SearchOnlyFiveHits() {
   BallController ball(c.ball,3);HurdleController hurdle(c.hurdle,3);
   ball.StartTestNear();hurdle.StartTestNear();
   const CameraFeedback down{CameraMode::kDown,true};
-  ball.Compute({},640,480,.8,down,{});
+  const CameraFeedback ball_view{CameraMode::kBallView,true};
+  ball.Compute({},640,480,.8,ball_view,{});
   hurdle.Compute({},640,480,.8,down,{},{});
-  auto b=ball.Compute({},640,480,.81,down,{});
+  auto b=ball.Compute({},640,480,.81,ball_view,{});
   auto h=hurdle.Compute({},640,480,.81,down,{},{});
   assert(b.action.action==MissionAction::kStepForwardOne && h.action.action==MissionAction::kStepForwardOne);
   ActionExecutionFeedback active;active.action_active=true;
@@ -201,14 +202,14 @@ void SearchOnlyFiveHits() {
   for(int i=0;i<7;++i) {
     const auto t=hits[i]?std::optional<ObjectTarget>(Target(320,200)):std::nullopt;
     // The rolling window crosses 1.0 s; no periodic reset is permitted.
-    b=ball.Compute(t,640,480,.9+.05*i,down,active);
+    b=ball.Compute(t,640,480,.9+.05*i,ball_view,active);
     h=hurdle.Compute(t,640,480,.9+.05*i,down,active,{});
     assert(b.mode==BallMode::kDownSearch && h.mode==HurdleMode::kDownSearch);
     assert(b.action.action==MissionAction::kNone && h.action.action==MissionAction::kNone);
   }
   assert(!b.tracked.stable && !h.tracked.stable); // still only five, not seven
   ActionExecutionFeedback done;done.action_done=true;
-  b=ball.Compute({},640,480,1.3,down,done);
+  b=ball.Compute({},640,480,1.3,ball_view,done);
   h=hurdle.Compute({},640,480,1.3,down,done,{});
   assert(b.mode==BallMode::kWaitFinePose && h.mode==HurdleMode::kCoarseAdjust);
   assert(b.action.action==MissionAction::kDefaultPoseMode && h.action.action==MissionAction::kNone);
@@ -217,7 +218,7 @@ void SearchOnlyFiveHits() {
   const std::deque<bool> five{true,true,true,true,true,false,false,false,false,false};
   ball.UseVerifiedObservation(Target(345,100),five,640,480);
   hurdle.UseVerifiedObservation(Target(320,270),five,640,480);
-  b=ball.Compute({},640,480,2,down,done);
+  b=ball.Compute({},640,480,2,ball_view,done);
   h=hurdle.Compute({},640,480,2,down,done,{});
   assert(b.action.action==MissionAction::kNone && h.action.action==MissionAction::kNone);
 }
@@ -230,20 +231,21 @@ void CountedDownSearch(bool found_on_last) {
   BallController ball(c.ball,3);HurdleController hurdle(c.hurdle,3);
   ball.StartTestNear();hurdle.StartTestNear();
   const CameraFeedback down{CameraMode::kDown,true};
-  ball.Compute({},640,480,0,down,{});
+  const CameraFeedback ball_view{CameraMode::kBallView,true};
+  ball.Compute({},640,480,0,ball_view,{});
   hurdle.Compute({},640,480,0,down,{},{});
-  auto b=ball.Compute({},640,480,1,down,{});
+  auto b=ball.Compute({},640,480,1,ball_view,{});
   auto h=hurdle.Compute({},640,480,1,down,{},{});
   assert(b.action.action==MissionAction::kStepForwardOne && h.action.action==b.action.action);
   for(int i=1;i<=3;++i) {
     ActionExecutionFeedback active;active.action_active=true;
-    b=ball.Compute({},640,480,i*100,down,active);
+    b=ball.Compute({},640,480,i*100,ball_view,active);
     h=hurdle.Compute({},640,480,i*100,down,active,{});
     assert(b.mode==BallMode::kDownSearch && h.mode==HurdleMode::kDownSearch);
     assert(ball.DownSearchStepsRemaining()==4-i && hurdle.DownSearchStepsRemaining()==4-i);
     ActionExecutionFeedback done;done.action_done=true;
     const auto target=found_on_last && i==3?std::optional<ObjectTarget>(Target(320,200)):std::nullopt;
-    b=ball.Compute(target,640,480,i*100+1,down,done);
+    b=ball.Compute(target,640,480,i*100+1,ball_view,done);
     h=hurdle.Compute(target,640,480,i*100+1,down,done,{});
     assert(ball.DownSearchStepsRemaining()==3-i && hurdle.DownSearchStepsRemaining()==3-i);
     if(i<3) {

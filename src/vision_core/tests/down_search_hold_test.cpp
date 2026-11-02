@@ -28,7 +28,8 @@ struct SearchPair {
             const std::optional<ObjectTarget>& target=std::nullopt) {
     ActionExecutionFeedback feedback;feedback.action_active=active;feedback.action_done=done;
     const CameraFeedback down{CameraMode::kDown,true};
-    b=ball.Compute(target,640,480,now,down,feedback);
+    const CameraFeedback ball_view{CameraMode::kBallView,true};
+    b=ball.Compute(target,640,480,now,ball_view,feedback);
     h=hurdle.Compute(target,640,480,now,down,feedback,{});
   }
   void NoStep() const {
@@ -41,7 +42,8 @@ struct SearchPair {
     hurdle.UseVerifiedObservation(mean,hits,640,480);
     ActionExecutionFeedback feedback;feedback.observation_complete=true;
     const CameraFeedback down{CameraMode::kDown,true};
-    b=ball.Compute({},640,480,now,down,feedback);
+    const CameraFeedback ball_view{CameraMode::kBallView,true};
+    b=ball.Compute({},640,480,now,ball_view,feedback);
     h=hurdle.Compute({},640,480,now,down,feedback,{});
   }
 };
