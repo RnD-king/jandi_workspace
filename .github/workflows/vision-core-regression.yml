@@ -29,6 +29,8 @@ jobs:
         run: cmake --build build/shared_vision_core --parallel 2
       - name: Run shared vision core regressions
         run: ctest --test-dir build/shared_vision_core --output-on-failure
+      - name: Validate production YAML and selected GOAL/LINE values
+        run: build/shared_vision_core/shared_vision_core_runtime_config_check src/vision_core/config/vision_algorithm.yaml
       - name: Build and test backboard band diagnostics without ROS
         run: |
           g++ -std=c++17 -I src/vision/include src/vision/tests/backboard_depth_regions_test.cpp $(pkg-config --cflags --libs opencv4) -o /tmp/vision_backboard_depth_regions_test

@@ -84,6 +84,8 @@ void CheckConfiguration(const std::string& path) {
   FIELD(line_p2p, left_repetitions);
   FIELD(line_p2p, straight_repetitions);
   FIELD(line_p2p, right_repetitions);
+  if (AlgorithmField(a,"line_p2p","right_unit_action"))
+    FIELD(line_p2p, right_unit_action);
   FIELD(line_p2p, offset_gain);
   FIELD(line_p2p, heading_gain);
   FIELD(line_p2p, steering_deadband);
@@ -182,6 +184,8 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, post_pickup_walk_fallback_actions);
   FIELD(goal, entry_line_retry_max_attempts);
   FIELD(goal, target_u_px);
+  if (AlgorithmField(a,"goal","auto_approach_reference_u_px"))
+    FIELD(goal, auto_approach_reference_u_px);
   FIELD(goal, approach_u_deadband_px);
   FIELD(goal, approach_short_z_m);
   FIELD(goal, camera_goal_start_z_m);
