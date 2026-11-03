@@ -261,6 +261,7 @@ public:
   ActionRequest PlanFineAction(const GoalPoseObservation &pose) const {
     return FineAction(pose);
   }
+  GoalFineMotionPlan PlanFineMotion(const GoalPoseObservation &pose) const;
   void ShiftTimers(double duration) { state_enter_sec_+=duration; }
   void Reset();
 
@@ -275,6 +276,13 @@ private:
   std::optional<GoalPoseObservation> FinePoseMean() const;
   ActionRequest FineAction(const GoalPoseObservation &pose) const;
   double ComputeShootYawRad(double x_m, double z_m, double yaw_rad) const;
+  struct ShotSolution {
+    int yaw_deg{0};
+    Point2 landing;
+    double error{0.0};
+  };
+  Point2 LandingPointM(double yaw_rad) const;
+  ShotSolution BestShot(double rim_x,double rim_z) const;
   double LandingErrorM(double rim_x_m, double rim_z_m, double shoot_yaw_rad) const;
   double ThrowRangeM() const;
   void ClearTracking();
@@ -298,6 +306,9 @@ private:
   TrackedGoalPose tracked_pose_;
   double state_enter_sec_{0.0};
   double shoot_yaw_rad_{0.0};
+  MissionAction fine_repeat_action_{MissionAction::kNone};
+  int fine_repeat_remaining_{0};
+  bool fine_repeat_pending_{false};
   bool has_ball_{false};
   bool ball_consumed_{false};
   bool goal_entry_armed_{false};
