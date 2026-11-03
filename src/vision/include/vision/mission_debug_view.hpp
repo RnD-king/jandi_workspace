@@ -42,19 +42,30 @@ inline GoalLandingDebug ComputeGoalLandingDebug(
     // Match the robot-facing normal of the edge-depth yaw convention.
     landing.rim_x_m=fine.x_m-config.hoop_radius_m*std::sin(fine.yaw_rad);
     landing.rim_z_m=fine.z_m-config.hoop_radius_m*std::cos(fine.yaw_rad);
-    const double distance=std::hypot(landing.rim_x_m,landing.rim_z_m);
+    const double wx=config.waist_axis_in_camera_x_m;
+    const double wz=config.waist_axis_in_camera_z_m;
+    const double distance=std::hypot(landing.rim_x_m-wx,landing.rim_z_m-wz);
     if (std::isfinite(distance)) {
       landing.rim_valid=true;
-      double angle=distance>1e-9
-          ? std::atan2(config.throw_landing_x_m,config.throw_landing_z_m)
-              -std::atan2(landing.rim_x_m,landing.rim_z_m) : 0.0;
-      while (angle>kDebugPi) angle-=2*kDebugPi;
-      while (angle<-kDebugPi) angle+=2*kDebugPi;
-      // FineAction checks the landing error at this integer command angle.
-      landing.yaw_deg=static_cast<double>(std::lround(angle*180/kDebugPi));
+      // Exactly the same integer yaw search and physical pivot as FineAction.
+      const int limit=static_cast<int>(std::floor(std::min(180.0,config.shoot_yaw_limit_deg)));
+      double best=std::numeric_limits<double>::infinity();
+      int best_deg=0;
+      for(int degrees=-limit;degrees<=limit;++degrees) {
+        const double angle=degrees*kDebugPi/180.0;
+        const double dx=config.throw_landing_x_m-wx,dz=config.throw_landing_z_m-wz;
+        const double x=wx+std::cos(angle)*dx-std::sin(angle)*dz;
+        const double z=wz+std::sin(angle)*dx+std::cos(angle)*dz;
+        const double error=std::hypot(landing.rim_x_m-x,landing.rim_z_m-z);
+        if(error<best-1e-12 ||
+           (std::abs(error-best)<=1e-12 && std::abs(degrees)<std::abs(best_deg))) {
+          best=error;best_deg=degrees;
+        }
+      }
+      landing.yaw_deg=best_deg;
       landing.valid=true;
-      landing.range_error_m=distance-std::hypot(
-          config.throw_landing_x_m,config.throw_landing_z_m);
+      landing.range_error_m=distance-std::hypot(config.throw_landing_x_m-wx,
+                                                  config.throw_landing_z_m-wz);
     }
   }
   // During SHOOT, keep using the issued angle even if live depth changes or
@@ -70,10 +81,11 @@ inline GoalLandingDebug ComputeGoalLandingDebug(
   }
   if (landing.valid) {
     const double angle=landing.yaw_deg*kDebugPi/180;
-    landing.x_m=std::cos(angle)*config.throw_landing_x_m
-        -std::sin(angle)*config.throw_landing_z_m;
-    landing.z_m=std::sin(angle)*config.throw_landing_x_m
-        +std::cos(angle)*config.throw_landing_z_m;
+    const double wx=config.waist_axis_in_camera_x_m;
+    const double wz=config.waist_axis_in_camera_z_m;
+    const double dx=config.throw_landing_x_m-wx,dz=config.throw_landing_z_m-wz;
+    landing.x_m=wx+std::cos(angle)*dx-std::sin(angle)*dz;
+    landing.z_m=wz+std::sin(angle)*dx+std::cos(angle)*dz;
     if (landing.rim_valid) landing.position_error_m=std::hypot(
         landing.rim_x_m-landing.x_m,landing.rim_z_m-landing.z_m);
   }
@@ -338,7 +350,10 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   const double line_reference_u = camera.actual_mode==vision_core::CameraMode::kBallView
       ? config.ball_view_line_image_center_u : config.line_features.image_center_u;
   const int ref_u = static_cast<int>(std::lround(line_reference_u));
-  const bool line_view=mission_result.active_mission==vision_core::MissionType::kLine ||
+  const bool active_goal_auto=mission_result.approach_mission==vision_core::MissionType::kGoal &&
+      camera.actual_mode==vision_core::CameraMode::kGoal;
+  const bool line_view=(mission_result.active_mission==vision_core::MissionType::kLine &&
+      !active_goal_auto) ||
       ball_cmd.mode==vision_core::BallMode::kPostPickupLineRecovery ||
       goal_cmd.mode==vision_core::GoalMode::kHeadingRecovery;
   if (line_view && ref_u >= 0 && ref_u < vis.cols) {
@@ -348,7 +363,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   // LINE uses an O/H guide: it has a horizontal decision reference,
   // but no unique 2D object center. Do not invent a vertical point.
   if (mission_result.active_mission ==
-          vision_core::MissionType::kLine &&
+          vision_core::MissionType::kLine && !active_goal_auto &&
       (!mission_result.line_in_recovery || mission_result.line_score_recovery)) {
     const auto &guide = mission_result.line_decision_guide
         ? *mission_result.line_decision_guide : feats.guide;
@@ -427,33 +442,55 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
       mission_result.approach_mission == vision_core::MissionType::kHurdle &&
       (mission_result.approach_near_observing ||
        mission_result.approach_near_final_motion);
+  const auto draw_diagonal=[&](double x0,double y0,double x1,double y1,cv::Scalar color) {
+    if(!std::isfinite(x0)||!std::isfinite(x1)) return;
+    auto clamp_x=[&](double x) {
+      return std::clamp(static_cast<int>(std::lround(x)),-100000,100000);
+    };
+    cv::Point a{clamp_x(x0),static_cast<int>(std::lround(y0))};
+    cv::Point b{clamp_x(x1),static_cast<int>(std::lround(y1))};
+    if(cv::clipLine(cv::Rect(0,0,vis.cols,vis.rows),a,b))
+      cv::line(vis,a,b,color,1,cv::LINE_AA);
+  };
+  if(camera.actual_mode==vision_core::CameraMode::kForward &&
+     mission_result.active_mission==vision_core::MissionType::kLine &&
+     mission_result.approach_mission==vision_core::MissionType::kBall &&
+     !mission_result.approach_near) {
+    // Far BALL: two converging diagonal boundaries, without the old H path.
+    const auto& c=config.ball;
+    const auto upper=c.ApproachBounds(0,vis.rows);
+    const auto lower=c.ApproachBounds(vis.rows-1,vis.rows);
+    draw_diagonal(upper.first,0,lower.first,vis.rows-1,cv::Scalar(0,100,255));
+    draw_diagonal(upper.second,0,lower.second,vis.rows-1,cv::Scalar(0,100,255));
+  }
   if (near_ball_guide && camera.actual_mode==vision_core::CameraMode::kForward) {
     const auto& c=config.ball;
-    const int v=std::clamp(static_cast<int>(std::lround(c.approach_two_step_v_px)),0,vis.rows-1);
-    const auto bounds=c.ApproachBounds(c.approach_two_step_v_px,vis.rows);
-    draw_v_line(c.approach_two_step_v_px,cv::Scalar(0,100,255));
-    const auto vertical=[&](double u,cv::Scalar color) {
-      if (std::isfinite(u) && u>=0 && u<vis.cols)
-        cv::line(vis,{static_cast<int>(std::lround(u)),v},
-                 {static_cast<int>(std::lround(u)),vis.rows-1},color,1,cv::LINE_AA);
-    };
-    vertical(bounds.first-c.approach_extreme_turn_margin_px,cv::Scalar(0,165,255));
-    vertical(bounds.first,cv::Scalar(0,100,255));
-    vertical(bounds.second,cv::Scalar(0,100,255));
-    vertical(bounds.second+c.approach_extreme_turn_margin_px,cv::Scalar(0,165,255));
-    const int y=static_cast<int>(std::lround(c.approach_direct_down_v_px));
-    if (y>=v && y<vis.rows) {
-      cv::line(vis,
-          {std::clamp(static_cast<int>(std::lround(bounds.first)),0,vis.cols-1),y},
-          {std::clamp(static_cast<int>(std::lround(bounds.second)),0,vis.cols-1),y},
-          cv::Scalar(0,230,255),2,cv::LINE_AA);
-    }
+    const double y0=std::clamp(c.approach_two_step_v_px,0.0,static_cast<double>(vis.rows-1));
+    const double y1=vis.rows-1;
+    const auto top=c.ApproachBounds(y0,vis.rows);
+    const auto bottom=c.ApproachBounds(y1,vis.rows);
+    const auto outer_top=c.ExtremeApproachBounds(y0,vis.rows);
+    const auto outer_bottom=c.ExtremeApproachBounds(y1,vis.rows);
+    draw_v_line(y0,cv::Scalar(0,100,255));
+    draw_diagonal(outer_top.first,y0,outer_bottom.first,y1,cv::Scalar(0,165,255));
+    draw_diagonal(top.first,y0,bottom.first,y1,cv::Scalar(0,100,255));
+    draw_diagonal(top.second,y0,bottom.second,y1,cv::Scalar(0,100,255));
+    draw_diagonal(outer_top.second,y0,outer_bottom.second,y1,cv::Scalar(0,165,255));
+    const double y=std::clamp(c.approach_direct_down_v_px,y0,y1);
+    const auto mid=c.ApproachBounds(y,vis.rows);
+    draw_diagonal(mid.first,y,mid.second,y,cv::Scalar(0,230,255));
   }
   if (near_hurdle_guide && camera.actual_mode==vision_core::CameraMode::kForward)
     draw_v_line(config.hurdle.approach_two_step_v_px,cv::Scalar(200,0,200));
-  if (selected_goal && (goal_cmd.mode == vision_core::GoalMode::kForwardApproach ||
+  if (active_goal_auto && camera.settled) {
+    // GOAL AUTO has exactly two vertical pixel boundaries, no horizontal row.
+    const auto& c=config.goal;
+    draw_u_line(c.auto_approach_center_u_px-c.auto_approach_half_width_px,cv::Scalar(0,160,160));
+    draw_u_line(c.auto_approach_center_u_px+c.auto_approach_half_width_px,cv::Scalar(0,160,160));
+  } else if (selected_goal && (goal_cmd.mode == vision_core::GoalMode::kForwardApproach ||
       goal_cmd.mode == vision_core::GoalMode::kApproach ||
       goal_cmd.mode == vision_core::GoalMode::kSearch)) {
+    // Retain separate legacy/direct GOAL controller's coarse reference.
     const auto& c=config.goal;
     draw_u_line(c.target_u_px,cv::Scalar(0,255,255));
     draw_u_line(c.target_u_px-c.approach_u_deadband_px,cv::Scalar(0,160,160));
@@ -550,10 +587,10 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   const bool object_heading=virtual_candidate && mission_result.approach_action_committed;
   add_row(line_rows,object_heading ? "OBJECT PATH / CURRENT FRAME" : "LINE / CURRENT FRAME",line_color);
   if (object_heading)
-    std::snprintf(buf,sizeof(buf),"reference=%.1fpx  straight<=%.1fdeg  turn>%.1fdeg",
-        config.line_features.image_center_u,
-        config.object_approach.steering_deadband_deg,
-        config.object_approach.in_place_turn_deg);
+    std::snprintf(buf,sizeof(buf),"PIXEL ZONES: %s | GOAL=%.0f+/−%.0f BALL bottom=%.0f+/−%.0f",
+        mission_result.approach_mission==vision_core::MissionType::kGoal?"GOAL":"BALL",
+        config.goal.auto_approach_center_u_px,config.goal.auto_approach_half_width_px,
+        config.ball.far_u_des_px,config.ball.approach_u_deadband_px);
   else
     std::snprintf(buf,sizeof(buf),
         "reference=%.1fpx  Ko=%.3f  Kh=%.3f  deadband=%.4f  turn>%.3f",
