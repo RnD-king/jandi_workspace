@@ -498,17 +498,24 @@ int main() {
             Check(Dxl::packet_times[i]-Dxl::packet_times[i-1]>=19ms,"body/camera writer compressed packets");
         // Both BALL_VIEW requests share exactly one camera pose. The
         // request ID selects arm policy: near BALL down, GOAL retry outward.
+        // The production BALL_VIEW pitch is operator-configurable in the
+        // installed shared algorithm YAML. Verify the executor and actual
+        // motor commands against that configuration, not a fixed 1750tick.
+        const int ball_view_pitch_tick =
+            vision_core::LoadDefaultAlgorithmConfig().ball_view_pitch_tick;
         Check(node->camera_config_.ball_view.yaw==node->camera_config_.down.yaw &&
-              node->camera_config_.ball_view.pitch==1750,
-              "BALL_VIEW did not load the shared 1750tick YAML calibration");
+              node->camera_config_.ball_view.pitch==ball_view_pitch_tick,
+              "BALL_VIEW did not load the shared YAML pitch calibration");
         camera(2004,10);
         pump([&]{return node->camera_transactions_.completed.Contains(2004);});flush();
-        Check(Dxl::current.at(21)==2036&&Dxl::current.at(22)==1750&&
+        Check(Dxl::current.at(21)==2036&&
+              Dxl::current.at(22)==ball_view_pitch_tick&&
               Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,
-              "BALL_VIEW_LINE did not hold outward shoulders with 1750tick pitch");
+              "BALL_VIEW_LINE did not hold outward shoulders with configured pitch");
         camera(2005,9);
         pump([&]{return node->camera_transactions_.completed.Contains(2005);});flush();
-        Check(Dxl::current.at(21)==2036&&Dxl::current.at(22)==1750&&
+        Check(Dxl::current.at(21)==2036&&
+              Dxl::current.at(22)==ball_view_pitch_tick&&
               Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,
               "BALL_VIEW did not lower shoulders without moving the head");
         camera(2006,1);
