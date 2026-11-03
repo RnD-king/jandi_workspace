@@ -1,6 +1,8 @@
 #include "vision_core/config_loader.hpp"
 #include "vision_core/mission_controller.hpp"
 #include <cmath>
+#include <array>
+#include <utility>
 #include <stdexcept>
 #include <limits>
 
@@ -1030,6 +1032,80 @@ void RelaxedHurdleBackboardContinuousIdentity() {
   }
 }
 
+void AcquiredGoalLossScansBeforeLineReturn() {
+  auto c=Config();
+  c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
+  c.goal_trial_start_goal=true;c.goal.lost_frames=3;
+  c.goal.head_scan_enabled=true;
+  Driver d(c);
+  d.in.ball_target.reset();d.in.line_centers.clear();
+  d.in.camera_feedback={CameraMode::kGoal,true};
+  d.in.backboard_target=Target(280,100);d.in.backboard_track_id=9;
+  d.in.backboard_center_depth_m=2;
+  d.in.goal_pose={true,-.1,2,0,1};
+  for(int i=0;i<12;++i)d.Tick();
+  const auto first=d.out.command.action_id;
+  Check(first && d.out.approach_mission==MissionType::kGoal,
+        "acquired-loss scan fixture did not start GOAL approach");
+  d.Tick({first,true,false,false});
+  d.in.backboard_target.reset();
+  d.in.backboard_center_depth_m.reset();d.in.goal_pose={};
+  for(int i=0;i<12;++i)d.Tick();
+  d.Tick({first,true,false,true});
+  const auto second=d.out.command.action_id;
+  Check(second && second!=first && LinePlan::IsUnit(d.out.command.action),
+        "GOAL scan test accidentally interrupted accepted first block");
+  d.Tick({second,true,false,false});
+  d.Tick({first,true,true,false});
+  for(int i=0;i<12;++i)d.Tick();
+  d.Tick({second,true,false,true});
+  Check(d.out.command.camera_request==CameraRequest::kNone,
+        "GOAL head scan started while a walking unit was still active");
+  d.Tick({second,true,true,false});
+  bool started=false;
+  for(int i=0;i<30 && !started;++i){
+    d.Tick();
+    started=d.out.command.camera_request==CameraRequest::kGoalScanLeft;
+  }
+  Check(started,"acquired far GOAL loss skipped left head scan and returned to LINE");
+  d.in.camera_scan.phase=1;d.in.camera_scan.finished=false;
+  d.Tick();
+  d.in.camera_scan.phase=4;d.in.camera_scan.finished=true;
+  d.Tick();
+  d.in.camera_scan.phase=0;d.in.camera_scan.finished=false;
+  bool right=false;
+  for(int i=0;i<8 && !right;++i){
+    d.Tick();right=d.out.command.camera_request==CameraRequest::kGoalScanRight;
+  }
+  Check(right,"GOAL lost-object scan never tried right after failed left");
+  d.in.camera_scan.phase=1;d.in.camera_scan.finished=false;d.Tick();
+  d.in.camera_scan.phase=4;d.in.camera_scan.finished=true;d.Tick();
+  d.in.camera_scan.phase=0;d.in.camera_scan.finished=false;
+  bool returned=false;
+  for(int i=0;i<12 && !returned;++i){
+    d.Tick();returned=d.out.command.camera_request==CameraRequest::kBallViewLine;
+  }
+  Check(returned,"GOAL scan exhausted both sides without BALL_VIEW_LINE fallback");
+}
+void GoalAutoThreePixelZones() {
+  for(const auto &item:std::array<std::pair<double,MissionAction>,3>{{
+       {179.0,MissionAction::kLineLeftUnit},
+       {280.0,MissionAction::kLineStraightUnit},
+       {381.0,MissionAction::kLineRightUnitTurnFirst}}}) {
+    auto c=Config();
+    c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
+    c.goal_trial_start_goal=true;c.line_p2p.right_unit_action=36;
+    c.goal.auto_approach_center_u_px=280;
+    c.goal.auto_approach_half_width_px=100;
+    Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
+    d.in.camera_feedback={CameraMode::kGoal,true};
+    d.in.backboard_target=Target(item.first,100);d.in.backboard_track_id=7;
+    d.in.backboard_center_depth_m=2;d.in.goal_pose={true,0,2,0,1};
+    for(int i=0;i<12;++i)d.Tick();
+    Check(d.out.command.action==item.second,
+        "GOAL AUTO 180/380 pixel boundaries did not select left/straight/right");
+  }
+}
 void GoalAutoReferenceIsIsolated() {
   for(double legacy_reference : {310.0,380.0}) {
     auto c=Config();
@@ -1068,6 +1144,8 @@ void GoalAutoReferenceIsIsolated() {
 int main() {
   RelaxedHurdleBackboardContinuousIdentity();
   GoalAutoReferenceIsIsolated();
+  GoalAutoThreePixelZones();
+  AcquiredGoalLossScansBeforeLineReturn();
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
   ReadyCenterAccumulator();InitialLineMeanProbeAfterIdentityExpiry();
