@@ -307,7 +307,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       const bool left=scan.phase==Phase::kScanningLeft ||
                       scan.phase==Phase::kHoldingLeft;
       const bool centered=input.scan_backboard_u &&
-          std::abs(*input.scan_backboard_u-input.image_width*0.5)<=
+          std::abs(*input.scan_backboard_u-config_.goal.auto_approach_center_u_px)<=
           config_.goal.head_scan_center_half_width_px;
       if(sf.phase>=1 && sf.phase<=4) {
         scan.pause_hits.push_back(centered);
@@ -384,6 +384,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         continuous_.pose_hits.clear();
         line_plan_.Reset();
         continuous_.probe_used=false;
+        scan.used=false; // Verified re-acquisition permits a later independent loss scan.
       }
     }
     if(scan.phase!=Phase::kIdle) return result;
