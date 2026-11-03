@@ -5,8 +5,10 @@
 #include "vision_core/object_observation_window.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 namespace vision_core {
 bool GoalNearDistanceSample(std::optional<double> center_depth_m,
@@ -125,6 +127,8 @@ const char *GoalController::ModeName(GoalMode mode) {
     return "GOAL_APPROACH";
   case GoalMode::kFineAdjust:
     return "GOAL_FINE";
+  case GoalMode::kFineMotionRepeat:
+    return "GOAL_FINE_REPEAT";
   case GoalMode::kShoot:
     return "GOAL_SHOOT";
   case GoalMode::kReturnCameraToLine:
@@ -363,78 +367,145 @@ std::optional<GoalPoseObservation> GoalController::FinePoseMean() const {
 }
 
 double GoalController::ThrowRangeM() const {
-  return std::hypot(config_.throw_landing_x_m, config_.throw_landing_z_m);
+  // Rotating about the physical waist, not the optical origin.
+  return std::hypot(config_.throw_landing_x_m-config_.waist_axis_in_camera_x_m,
+                    config_.throw_landing_z_m-config_.waist_axis_in_camera_z_m);
 }
 
-double GoalController::LandingErrorM(double rim_x, double rim_z, double angle) const {
-  const double cosine = std::cos(angle);
-  const double sine = std::sin(angle);
-  const double x = cosine * config_.throw_landing_x_m -
-                   sine * config_.throw_landing_z_m;
-  const double z = sine * config_.throw_landing_x_m +
-                   cosine * config_.throw_landing_z_m;
-  return std::hypot(rim_x - x, rim_z - z);
+Point2 GoalController::LandingPointM(double angle) const {
+  const double wx=config_.waist_axis_in_camera_x_m;
+  const double wz=config_.waist_axis_in_camera_z_m;
+  const double dx=config_.throw_landing_x_m-wx;
+  const double dz=config_.throw_landing_z_m-wz;
+  return {wx+std::cos(angle)*dx-std::sin(angle)*dz,
+          wz+std::sin(angle)*dx+std::cos(angle)*dz};
 }
 
-double GoalController::ComputeShootYawRad(double x_m, double z_m,
-                                          double yaw_rad) const {
-  // Edge-depth yaw uses atan2(Z_left-Z_right, X_right-X_left).
-  // The board tangent is (cos(yaw),-sin(yaw)), so its robot-facing
-  // normal is (-sin(yaw),-cos(yaw)).
-  const double rim_x = x_m - config_.hoop_radius_m * std::sin(yaw_rad);
-  const double rim_z = z_m - config_.hoop_radius_m * std::cos(yaw_rad);
-  if (!std::isfinite(rim_x) || !std::isfinite(rim_z) ||
-      std::hypot(rim_x, rim_z) <= kEpsilon)
-    return 0.0;
-  // Camera +X is right. Negative waist yaw rotates landing toward +X.
-  return Wrap(std::atan2(config_.throw_landing_x_m, config_.throw_landing_z_m) -
-              std::atan2(rim_x, rim_z));
+double GoalController::LandingErrorM(double rim_x,double rim_z,double angle) const {
+  const auto p=LandingPointM(angle);
+  return std::hypot(rim_x-p.u,rim_z-p.v);
 }
 
-ActionRequest
-GoalController::FineAction(const GoalPoseObservation &pose) const {
-  if (!pose.valid || !std::isfinite(pose.x_m) || !std::isfinite(pose.z_m) ||
-      pose.z_m <= 0.0 || !std::isfinite(pose.yaw_rad))
-    return {};
-  const double rim_x =
-      pose.x_m - config_.hoop_radius_m * std::sin(pose.yaw_rad);
-  const double rim_z =
-      pose.z_m - config_.hoop_radius_m * std::cos(pose.yaw_rad);
-  // Compare only actually commandable integer waist angles before asking
-  // for translation. An ideal angle outside the limit may still have an
-  // acceptable landing point at the permitted endpoint.
-  const int limit_deg = static_cast<int>(
-      std::floor(std::min(180.0, config_.shoot_yaw_limit_deg)));
-  int best_deg = 0;
-  double best_error = std::numeric_limits<double>::infinity();
-  constexpr double tie_epsilon = 1e-12;
-  for (int degrees = -limit_deg; degrees <= limit_deg; ++degrees) {
-    const double error = LandingErrorM(rim_x, rim_z, degrees * kPi / 180.0);
-    if (error < best_error - tie_epsilon ||
-        (std::abs(error - best_error) <= tie_epsilon &&
-         std::abs(degrees) < std::abs(best_deg))) {
-      best_error = error;
-      best_deg = degrees;
+GoalController::ShotSolution GoalController::BestShot(double rim_x,double rim_z) const {
+  ShotSolution best;
+  best.error=std::numeric_limits<double>::infinity();
+  const int limit=static_cast<int>(std::floor(std::min(180.0,config_.shoot_yaw_limit_deg)));
+  constexpr double tie=1e-12;
+  for(int degrees=-limit;degrees<=limit;++degrees){
+    const auto landing=LandingPointM(degrees*kPi/180.0);
+    const double error=std::hypot(rim_x-landing.u,rim_z-landing.v);
+    if(error<best.error-tie ||
+       (std::abs(error-best.error)<=tie && std::abs(degrees)<std::abs(best.yaw_deg))){
+      best={degrees,landing,error};
     }
   }
-  if (best_error <= config_.position_tolerance_m)
-    return Mission(MissionAction::kShoot, static_cast<std::int16_t>(best_deg));
+  return best;
+}
 
-  // No permitted rotation is sufficient: retain the existing translation
-  // priorities and the ideal-angle side-step direction.
-  const double range_error = std::hypot(rim_x, rim_z) - ThrowRangeM();
-  if (range_error > config_.position_tolerance_m)
-    return Locomotion(MissionAction::kStepForwardHalf);
-  if (range_error < -config_.position_tolerance_m)
-    return Locomotion(MissionAction::kStepBack);
-  const double yaw_deg =
-      ComputeShootYawRad(pose.x_m, pose.z_m, pose.yaw_rad) * 180.0 / kPi;
-  if (std::abs(yaw_deg) <= config_.shoot_yaw_limit_deg) {
-    return Locomotion(range_error >= 0.0 ?
-                          MissionAction::kStepForwardHalf : MissionAction::kStepBack);
+double GoalController::ComputeShootYawRad(double x_m,double z_m,double yaw_rad) const {
+  const double rim_x=x_m-config_.hoop_radius_m*std::sin(yaw_rad);
+  const double rim_z=z_m-config_.hoop_radius_m*std::cos(yaw_rad);
+  const double wx=config_.waist_axis_in_camera_x_m;
+  const double wz=config_.waist_axis_in_camera_z_m;
+  if(!std::isfinite(rim_x)||!std::isfinite(rim_z)||
+     std::hypot(rim_x-wx,rim_z-wz)<=kEpsilon) return 0.0;
+  return Wrap(std::atan2(config_.throw_landing_x_m-wx,
+                         config_.throw_landing_z_m-wz) -
+              std::atan2(rim_x-wx,rim_z-wz));
+}
+
+GoalFineMotionPlan GoalController::PlanFineMotion(const GoalPoseObservation& pose) const {
+  GoalFineMotionPlan best;
+  if(!config_.fine_motion.HasCalibration() || !pose.valid ||
+     !std::isfinite(pose.x_m) || !std::isfinite(pose.z_m) ||
+     pose.z_m<=0 || !std::isfinite(pose.yaw_rad)) return best;
+  const double rim_x=pose.x_m-config_.hoop_radius_m*std::sin(pose.yaw_rad);
+  const double rim_z=pose.z_m-config_.hoop_radius_m*std::cos(pose.yaw_rad);
+  const auto origin=BestShot(rim_x,rim_z);
+  if(origin.error<=config_.position_tolerance_m) return best;
+  const double ex=rim_x-origin.landing.u;
+  const double ez=rim_z-origin.landing.v;
+  const bool x_primary=std::abs(ex)>=std::abs(ez);
+  const double primary_before=x_primary ? std::abs(ex) : std::abs(ez);
+  const std::array<std::pair<MissionAction,Point2>,4> effects{{
+      {MissionAction::kStepForwardHalf,config_.fine_motion.forward_delta_m},
+      {MissionAction::kStepBack,config_.fine_motion.backward_delta_m},
+      {MissionAction::kLeftSideStep,config_.fine_motion.left_delta_m},
+      {MissionAction::kRightSideStep,config_.fine_motion.right_delta_m}}};
+  bool best_finishes=false;
+  double best_primary=std::numeric_limits<double>::infinity();
+  double best_total=std::numeric_limits<double>::infinity();
+  for(const auto& effect:effects){
+    const auto d=effect.second;
+    if(d.u==0.0 && d.v==0.0) continue;
+    double previous_total=origin.error;
+    double previous_primary=primary_before;
+    for(int n=1;n<=config_.fine_motion.max_repetitions;++n){
+      const double nx=rim_x+n*d.u, nz=rim_z+n*d.v;
+      if(!std::isfinite(nx)||!std::isfinite(nz)||nz<=0) break;
+      const auto trial=BestShot(nx,nz);
+      const double next_error=x_primary ? nx-trial.landing.u : nz-trial.landing.v;
+      const double primary=std::abs(next_error);
+      // Do not cross the high-error axis unless the step lands within tolerance.
+      const double original_sign=x_primary ? ex : ez;
+      if(next_error*original_sign<0 && primary>config_.position_tolerance_m) break;
+      // Every prefix must improve primary axis and total landing error.
+      if(primary>=previous_primary-1e-9 ||
+         trial.error>=previous_total-1e-9) break;
+      const bool finishes=trial.error<=config_.position_tolerance_m;
+      bool select=false;
+      if(best.action==MissionAction::kNone) select=true;
+      else if(finishes!=best_finishes) select=finishes;
+      else if(finishes) {
+        select=n<best.repetitions ||
+            (n==best.repetitions && trial.error<best_total-1e-9);
+      } else {
+        select=primary<best_primary-1e-9 ||
+            (std::abs(primary-best_primary)<=1e-9 &&
+             (trial.error<best_total-1e-9 ||
+              (std::abs(trial.error-best_total)<=1e-9 && n<best.repetitions)));
+      }
+      if(select){
+        best={effect.first,n};
+        best_finishes=finishes;
+        best_primary=primary;
+        best_total=trial.error;
+      }
+      previous_primary=primary;
+      previous_total=trial.error;
+      if(finishes) break;
+    }
   }
-  return Locomotion(yaw_deg < 0.0 ? MissionAction::kRightSideStep
-                                  : MissionAction::kLeftSideStep);
+  return best;
+}
+
+ActionRequest GoalController::FineAction(const GoalPoseObservation& pose) const {
+  if(!pose.valid || !std::isfinite(pose.x_m) ||
+     !std::isfinite(pose.z_m) || pose.z_m<=0 ||
+     !std::isfinite(pose.yaw_rad)) return {};
+  const double rim_x=pose.x_m-config_.hoop_radius_m*std::sin(pose.yaw_rad);
+  const double rim_z=pose.z_m-config_.hoop_radius_m*std::cos(pose.yaw_rad);
+  const auto best=BestShot(rim_x,rim_z);
+  if(best.error<=config_.position_tolerance_m)
+    return Mission(MissionAction::kShoot,static_cast<std::int16_t>(best.yaw_deg));
+  // On real calibration, choose the translation that most reduces the larger
+  // residual axis while also reducing the total X/Z error.
+  const auto plan=PlanFineMotion(pose);
+  if(plan.repetitions>0) return Locomotion(plan.action);
+  // Preserve the historical one-step fallback while effects are uncalibrated.
+  const double range_error=std::hypot(
+      rim_x-config_.waist_axis_in_camera_x_m,
+      rim_z-config_.waist_axis_in_camera_z_m)-ThrowRangeM();
+  if(range_error>config_.position_tolerance_m)
+    return Locomotion(MissionAction::kStepForwardHalf);
+  if(range_error<-config_.position_tolerance_m)
+    return Locomotion(MissionAction::kStepBack);
+  const double yaw_deg=ComputeShootYawRad(pose.x_m,pose.z_m,pose.yaw_rad)*180.0/kPi;
+  if(std::abs(yaw_deg)<=config_.shoot_yaw_limit_deg)
+    return Locomotion(range_error>=0.0 ? MissionAction::kStepForwardHalf :
+                                        MissionAction::kStepBack);
+  return Locomotion(yaw_deg<0.0 ? MissionAction::kRightSideStep :
+                                     MissionAction::kLeftSideStep);
 }
 
 void GoalController::BeginDepthRecovery(bool fine) {
@@ -807,6 +878,17 @@ GoalResult GoalController::Compute(
     result.fine_decision_pose = *mean_pose;
     result.fine_decision_pose_used = true;
     result.action = FineAction(*mean_pose);
+    if(allow_new_body_actions && result.action.category==ActionCategory::kLocomotion) {
+      const auto plan=PlanFineMotion(*mean_pose);
+      if(plan.action==result.action.action && plan.repetitions>1) {
+        fine_repeat_action_=plan.action;
+        fine_repeat_remaining_=plan.repetitions;
+        fine_repeat_pending_=true; // First motion is issued with this result.
+        mode_=GoalMode::kFineMotionRepeat;
+        result.mode=mode_;
+        return result;
+      }
+    }
     if (test_execute_requires_stable_ &&
         result.action.action == MissionAction::kShoot &&
         !ExecutionObservationReady())
@@ -820,6 +902,25 @@ GoalResult GoalController::Compute(
       result.mode = mode_;
       result.shoot_yaw_rad = shoot_yaw_rad_;
     }
+    return result;
+  }
+  case GoalMode::kFineMotionRepeat: {
+    if(fine_repeat_pending_) {
+      if(!feedback.action_done) return result;
+      fine_repeat_pending_=false;
+      if(--fine_repeat_remaining_<=0) {
+        fine_repeat_action_=MissionAction::kNone;
+        fine_repeat_remaining_=0;
+        mode_=GoalMode::kFineAdjust;
+        ClearTracking();
+        result.mode=mode_;
+        result.tracked={};result.pose={};
+        return result;
+      }
+    }
+    if(!allow_new_body_actions) return result;
+    result.action=Locomotion(fine_repeat_action_);
+    fine_repeat_pending_=true;
     return result;
   }
   case GoalMode::kEdgeTurn: {
@@ -1080,6 +1181,8 @@ void GoalController::ClearTracking() {
 
 void GoalController::Reset() {
   depth_recovery_={};depth_recovery_in_mission_=false;
+  fine_repeat_action_=MissionAction::kNone;
+  fine_repeat_remaining_=0;fine_repeat_pending_=false;
   depth_recovery_resume_mode_=GoalMode::kSearch;
   entry_view_board_seen_ = entry_line_retry_pending_ = false;
   entry_line_retries_ = 0;
