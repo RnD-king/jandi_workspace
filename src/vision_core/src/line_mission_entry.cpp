@@ -715,12 +715,17 @@ MissionFrameResult MissionController::StepPlannedLine(
             const double ref_v=output.line_features.guide.valid
                 ? output.line_features.guide_reference_v_px
                 : config_.object_approach.reference_v_ratio*input.image_height;
-            auto guide=ObjectApproachGuide(averaged_target,false,0,input.intrinsics,
-                ApproachCameraPose{},input.image_width,input.image_height,
-                (continuous_.mission==MissionType::kGoal ?
-                     config_.goal.auto_approach_reference_u_px : last_line_image_center_u_),
-                 ref_v,input.rectify_approach,
-                input.approach_roll_rad,input.approach_pitch_rad);
+            LineGuide guide;
+            if(continuous_.mission==MissionType::kGoal)
+              guide=ObjectZoneGuide(averaged_target,
+                  config_.goal.auto_approach_center_u_px-config_.goal.auto_approach_half_width_px,
+                  config_.goal.auto_approach_center_u_px+config_.goal.auto_approach_half_width_px,
+                  config_.object_approach.steering_deadband_deg,input.image_width);
+            else {
+              const auto bounds=config_.ball.ApproachBounds(averaged_target.center_px.v,input.image_height);
+              guide=ObjectZoneGuide(averaged_target,bounds.first,bounds.second,
+                  config_.object_approach.steering_deadband_deg,input.image_width);
+            }
             if (guide.valid) mean=guide;
           }
         } else {
@@ -905,7 +910,7 @@ MissionFrameResult MissionController::StepPlannedLine(
     output.approach_path_guide=route.display_guide.value_or(*route.guide);
     output.approach_path_reference_px={
          (continuous_.mission==MissionType::kGoal ?
-             config_.goal.auto_approach_reference_u_px : last_line_image_center_u_),
+             config_.goal.auto_approach_center_u_px : config_.ball.far_u_des_px),
         output.line_features.guide.valid
             ? output.line_features.guide_reference_v_px
             : config_.object_approach.reference_v_ratio * input.image_height};
