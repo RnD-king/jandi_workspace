@@ -188,22 +188,23 @@ ActionRequest BallController::FineAction() const {
 }
 
 ActionRequest BallController::FineActionAt(Point2 center) const {
+  const auto pickup=EffectivePickupConfig();
   const double u=center.u, v=center.v;
-  const double left=config_.PickupLeftAt(v);
-  const double right=config_.PickupRightAt(v);
+  const double left=pickup.PickupLeftAt(v);
+  const double right=pickup.PickupRightAt(v);
   const double half_width=(right-left)*0.5;
   const double ru=std::max({left-u,0.0,u-right})/half_width;
-  const double rv=std::max({config_.pickup_v1_px-v,0.0,v-config_.pickup_v2_px})/
-                  config_.PickupHalfHeight();
-  if (config_.PickupContains(center))
+  const double rv=std::max({pickup.pickup_v1_px-v,0.0,v-pickup.pickup_v2_px})/
+                  pickup.PickupHalfHeight();
+  if (pickup.PickupContains(center))
     return Mission(MissionAction::kPickBall);
   // Preserve axis priority, using tapered left/right bounds at this v.
   if (ru>=rv) {
     if (u<left) return Locomotion(MissionAction::kLeftSideStep);
     if (u>right) return Locomotion(MissionAction::kRightSideStep);
   }
-  if (v<config_.pickup_v1_px) return Locomotion(MissionAction::kStepForwardHalf);
-  if (v>config_.pickup_v2_px) return Locomotion(MissionAction::kStepBack);
+  if (v<pickup.pickup_v1_px) return Locomotion(MissionAction::kStepForwardHalf);
+  if (v>pickup.pickup_v2_px) return Locomotion(MissionAction::kStepBack);
   return {};
 }
 
@@ -335,6 +336,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       mode_ = BallMode::kApproachBall;
       state_enter_sec_ = now_sec;
       pickup_attempt_count_ = 0;
+      pickup_shrink_count_ = 0;
       pickup_failed_ = false;
       has_ball_ = false;
     }
@@ -348,6 +350,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   result.has_ball = has_ball_;
   result.pickup_failed = pickup_failed_;
   result.pickup_attempt_count = pickup_attempt_count_;
+  result.pickup_shrink_count = pickup_shrink_count_;
   result.recovery_steps_completed = RecoveryStepsCompleted();
   result.recovery_step_limit = RecoveryStepLimit();
   result.entry_recovery = EntryRecovery();
@@ -602,11 +605,12 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     if (!ExecutionObservationReady())
       return result;
     result.action = FineAction();
+    const auto pickup=EffectivePickupConfig();
     if (result.action.category==ActionCategory::kLocomotion && config_.fine_motion.HasCalibration()) {
       const auto plan=PlanBallFineMotion(config_.fine_motion,tracked_.center_px,
-          config_.pickup_u1_px,config_.pickup_u2_px,config_.pickup_v1_px,config_.pickup_v2_px,
+          pickup.pickup_u1_px,pickup.pickup_u2_px,pickup.pickup_v1_px,pickup.pickup_v2_px,
           image_width,image_height,allow_fine_pair ? config_.fine_motion.max_repetitions : 1,
-          config_.pickup_top_inset_px);
+          pickup.pickup_top_inset_px);
       if (plan.action!=MissionAction::kNone) {
         result.action=Locomotion(plan.action);
         if (plan.repetitions>1 && allow_new_body_actions && allow_fine_pair) {
@@ -623,8 +627,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     } else if (result.action.action == MissionAction::kLeftSideStep ||
                result.action.action == MissionAction::kRightSideStep) {
       const double excess = result.action.action == MissionAction::kLeftSideStep
-          ? config_.PickupLeftAt(tracked_.center_px.v) - tracked_.center_px.u
-          : tracked_.center_px.u - config_.PickupRightAt(tracked_.center_px.v);
+          ? pickup.PickupLeftAt(tracked_.center_px.v) - tracked_.center_px.u
+          : tracked_.center_px.u - pickup.PickupRightAt(tracked_.center_px.v);
       if (excess >= config_.fine_side_two_step_margin_px &&
           allow_new_body_actions && allow_fine_pair && config_.fine_motion.max_repetitions>=2) {
         fine_side_action_ = result.action.action;
@@ -689,6 +693,12 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       result.action = Mission(MissionAction::kDefaultPosition);
     } else {
       if (pickup_attempt_count_ < std::max(1, config_.pickup_max_attempts)) {
+        // One inward inset only after a completed pickup's residual-ball verdict.
+        // Repeated frames in this observation do not count as extra failures.
+        if (config_.pickup_shrink_enabled &&
+            pickup_shrink_count_ < config_.pickup_shrink_max_failures)
+          ++pickup_shrink_count_;
+        result.pickup_shrink_count=pickup_shrink_count_;
         // 공이 이동했을 수 있으므로 새 위치에서 다시 fine 정렬한다.
         // attempt는 실제 다음 PICK을 발행할 때만 증가한다.
         mode_ = BallMode::kFineAdjustForPickup;
@@ -964,7 +974,8 @@ void BallController::EnterVerified(const std::optional<ObjectTarget>& mean,
   UseVerifiedObservation(mean, hits, width, height);
   mode_ = BallMode::kApproachBall;
   state_enter_sec_ = now;
-  pickup_attempt_count_ = 0; pickup_failed_ = false; has_ball_ = false;
+  pickup_attempt_count_ = 0; pickup_shrink_count_ = 0;
+  pickup_failed_ = false; has_ball_ = false;
   entry_recovery_u_ = mean ? std::optional<double>(mean->center_px.u) : std::nullopt;
   entry_recovery_pending_ = true;
   entry_recovery_allowed_ = allow_entry_recovery;
@@ -1080,6 +1091,7 @@ void BallController::Reset() {
   has_ball_ = false;
   pickup_failed_ = false;
   pickup_attempt_count_ = 0;
+  pickup_shrink_count_ = 0;
   ResetToLine();
 }
 

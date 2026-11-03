@@ -470,7 +470,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   // The pickup region uses the same four pixel edges as FineAction.
   // Its single decision-center marker is above.
   if (selected_ball && camera.actual_mode==vision_core::CameraMode::kBallView) {
-    const auto &c = config.ball;
+    const auto c=config.ball.PickupRegionAfterFailures(ball_cmd.pickup_shrink_count);
     const cv::Rect image_bounds(0, 0, vis.cols, vis.rows);
     const std::vector<cv::Point> corners{
         {static_cast<int>(std::lround(c.PickupLeftAt(c.pickup_v1_px))),
@@ -653,8 +653,13 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   } else {
     add_row(ball_approach_rows,"far u-target: --",ball_color);
   }
-  std::snprintf(buf, sizeof(buf), "PICK u=[%.1f,%.1f] v=[%.1f,%.1f]",
-      bc.pickup_u1_px, bc.pickup_u2_px, bc.pickup_v1_px, bc.pickup_v2_px);
+  const auto effective_pickup=bc.PickupRegionAfterFailures(ball_cmd.pickup_shrink_count);
+  std::snprintf(buf, sizeof(buf),
+      "PICK u=[%.1f,%.1f] v=[%.1f,%.1f] shrink=%d/%d (%s, %.1fpx/edge)",
+      effective_pickup.pickup_u1_px,effective_pickup.pickup_u2_px,
+      effective_pickup.pickup_v1_px,effective_pickup.pickup_v2_px,
+      ball_cmd.pickup_shrink_count,bc.pickup_shrink_max_failures,
+      bc.pickup_shrink_enabled ? "ON" : "OFF",bc.pickup_shrink_step_px);
   add_row(ball_fine_rows,buf,ball_color);
   if (bc.fine_motion.HasCalibration())
     std::snprintf(buf,sizeof(buf),"FINE SAME-DIR max=%d | measured ball delta ON",bc.fine_motion.max_repetitions);

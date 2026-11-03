@@ -84,6 +84,9 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.line_p2p.ready_lead_sec==baseline.line_p2p.ready_lead_sec);
   assert(c.line_p2p.observation_start_ratio==baseline.line_p2p.observation_start_ratio);
   assert(c.ball.pickup_v2_px==baseline.ball.pickup_v2_px);
+  assert(c.ball.pickup_shrink_enabled==baseline.ball.pickup_shrink_enabled);
+  assert(c.ball.pickup_shrink_step_px==baseline.ball.pickup_shrink_step_px);
+  assert(c.ball.pickup_shrink_max_failures==baseline.ball.pickup_shrink_max_failures);
   assert(c.hurdle.contact_steps==baseline.hurdle.contact_steps);
   assert(c.goal.throw_landing_z_m==baseline.goal.throw_landing_z_m);
   assert(c.object_association.max_center_distance_norm==baseline.object_association.max_center_distance_norm);

@@ -361,6 +361,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.ball.approach_direct_down_v_px <= c.ball.approach_two_step_v_px)
     throw std::runtime_error("ball.approach_direct_down_v_px must exceed ball.approach_two_step_v_px");
   PositiveInt(c.ball.pickup_max_attempts, "ball.pickup_max_attempts");
+  Nonnegative(c.ball.pickup_shrink_step_px, "ball.pickup_shrink_step_px");
+  NonnegativeInt(c.ball.pickup_shrink_max_failures, "ball.pickup_shrink_max_failures");
   HitsWithinWindow(c.ball.pickup_verify_min_hits, c.ball.stable_window,
                    "ball.pickup_verify_min_hits", "ball.stable_window");
   Nonnegative(c.ball.pickup_u1_px, "ball.pickup_u1_px");
@@ -374,6 +376,12 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.ball.pickup_u1_px >= c.ball.pickup_u2_px ||
       c.ball.pickup_v1_px >= c.ball.pickup_v2_px)
     throw std::runtime_error("ball pickup edges require u1 < u2 and v1 < v2");
+  if (c.ball.pickup_shrink_enabled) {
+    const auto smallest=c.ball.PickupRegionAfterFailures(c.ball.pickup_shrink_max_failures);
+    if (smallest.pickup_u2_px-smallest.pickup_u1_px <= 2*smallest.pickup_top_inset_px ||
+        smallest.pickup_v1_px >= smallest.pickup_v2_px)
+      throw std::runtime_error("ball pickup shrink must preserve positive trapezoid width and height");
+  }
   Nonnegative(c.ball.recovery_center_tolerance_px,
        "ball.recovery_center_tolerance_px");
 
@@ -683,6 +691,12 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "approach_direct_down_v_px", c.ball.approach_direct_down_v_px);
   Assign(b, "pickup_max_attempts", c.ball.pickup_max_attempts);
   Assign(b, "pickup_verify_min_hits", c.ball.pickup_verify_min_hits);
+  if (b["pickup_shrink_enabled"])
+    Assign(b,"pickup_shrink_enabled",c.ball.pickup_shrink_enabled);
+  if (b["pickup_shrink_step_px"])
+    Assign(b,"pickup_shrink_step_px",c.ball.pickup_shrink_step_px);
+  if (b["pickup_shrink_max_failures"])
+    Assign(b,"pickup_shrink_max_failures",c.ball.pickup_shrink_max_failures);
   Assign(b, "pickup_u1_px", c.ball.pickup_u1_px);
   Assign(b, "pickup_u2_px", c.ball.pickup_u2_px);
   if (b["pickup_top_inset_px"]) Assign(b, "pickup_top_inset_px", c.ball.pickup_top_inset_px);

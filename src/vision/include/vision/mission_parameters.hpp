@@ -54,6 +54,9 @@ inline const CandidateTrackingParameterGroup kAdditionalCandidateTracking[] = {
 };
 inline void DeclareMissionParameters(rclcpp::Node& node,
                                     const vision_core::MissionControllerConfig& c) {
+  node.declare_parameter<bool>("ball_pickup_shrink_enabled",c.ball.pickup_shrink_enabled);
+  node.declare_parameter<double>("ball_pickup_shrink_step_px",c.ball.pickup_shrink_step_px);
+  node.declare_parameter<int>("ball_pickup_shrink_max_failures",c.ball.pickup_shrink_max_failures);
   node.declare_parameter<int>("ball_fine_max_repetitions",c.ball.fine_motion.max_repetitions);
   auto fine_motion=c.ball.fine_motion;
   for (const auto& setting : BallFineMotionParameters(fine_motion))
@@ -114,6 +117,12 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   if (fine_repetitions<1 || fine_repetitions>3)
     throw std::invalid_argument("ball_fine_max_repetitions must be an integer in [1,3]");
   c.ball.fine_motion.max_repetitions=static_cast<int>(fine_repetitions);
+  c.ball.pickup_shrink_enabled=node.get_parameter("ball_pickup_shrink_enabled").as_bool();
+  c.ball.pickup_shrink_step_px=node.get_parameter("ball_pickup_shrink_step_px").as_double();
+  const auto max_shrinks=node.get_parameter("ball_pickup_shrink_max_failures").as_int();
+  if (max_shrinks<0 || max_shrinks>std::numeric_limits<int>::max())
+    throw std::invalid_argument("ball_pickup_shrink_max_failures must be a nonnegative int");
+  c.ball.pickup_shrink_max_failures=static_cast<int>(max_shrinks);
   for (const auto& setting : BallFineMotionParameters(c.ball.fine_motion)) {
     const double value=node.get_parameter(setting.first).as_double();
     if (!std::isfinite(value)) throw std::invalid_argument(std::string(setting.first)+" must be finite");
@@ -201,6 +210,26 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
 inline bool ApplyLivePerceptionParameter(const rclcpp::Parameter& p,
                                         vision_core::MissionControllerConfig& c) {
   const auto& name=p.get_name();
+  if (name=="ball_pickup_shrink_enabled") {
+    if (p.get_type()!=rclcpp::ParameterType::PARAMETER_BOOL)
+      throw std::invalid_argument(name+" must be bool");
+    c.ball.pickup_shrink_enabled=p.as_bool();
+    return true;
+  }
+  if (name=="ball_pickup_shrink_step_px") {
+    if (p.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
+        !std::isfinite(p.as_double()) || p.as_double()<0.0)
+      throw std::invalid_argument(name+" must be finite nonnegative double");
+    c.ball.pickup_shrink_step_px=p.as_double();
+    return true;
+  }
+  if (name=="ball_pickup_shrink_max_failures") {
+    if (p.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER ||
+        p.as_int()<0 || p.as_int()>std::numeric_limits<int>::max())
+      throw std::invalid_argument(name+" must be nonnegative integer");
+    c.ball.pickup_shrink_max_failures=static_cast<int>(p.as_int());
+    return true;
+  }
   if (name=="ball_fine_max_repetitions") {
     if (p.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || p.as_int()<1 || p.as_int()>3)
       throw std::invalid_argument(name+" must be an integer in [1,3]");

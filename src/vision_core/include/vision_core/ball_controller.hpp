@@ -80,10 +80,23 @@ struct BallConfig {
   double fine_side_two_step_margin_px{};
   BallFineMotionConfig fine_motion;
   int pickup_max_attempts{};
-  int pickup_verify_min_hits{}; // Residual ball votes after PICK DONE; independent of stability.
+  int pickup_verify_min_hits{};
+  bool pickup_shrink_enabled{true}; // AUTO default; ball_tuning_node overrides to false.
+  double pickup_shrink_step_px{3.0}; // All four edges per failed PICK.
+  int pickup_shrink_max_failures{2}; // Residual ball votes after PICK DONE; independent of stability.
   // Inclusive pickup rectangle edges, in input-image pixels.
   double pickup_u1_px{}, pickup_u2_px{}, pickup_v1_px{}, pickup_v2_px{};
   double pickup_top_inset_px{0.0}; // Top-only taper; preserve the current outer bounding box.
+  BallConfig PickupRegionAfterFailures(int failures) const {
+    BallConfig effective=*this;
+    const double shrink=pickup_shrink_enabled
+        ? std::min(std::max(0,failures),pickup_shrink_max_failures)*pickup_shrink_step_px : 0.0;
+    effective.pickup_u1_px+=shrink;
+    effective.pickup_u2_px-=shrink;
+    effective.pickup_v1_px+=shrink;
+    effective.pickup_v2_px-=shrink;
+    return effective;
+  }
   double PickupLeftAt(double v) const {
     const double t=std::clamp((v-pickup_v1_px)/(pickup_v2_px-pickup_v1_px),0.0,1.0);
     return pickup_u1_px+(1.0-t)*pickup_top_inset_px;
@@ -119,6 +132,7 @@ struct BallResult {
   bool has_ball{false};
   bool pickup_failed{false};
   int pickup_attempt_count{0};
+  int pickup_shrink_count{0}; // Applied failed-PICK insets.
   int entry_frames{0};
   int entry_hits{0};
   int recovery_observations_completed{0};
@@ -294,6 +308,10 @@ private:
   bool has_ball_{false};
   bool pickup_failed_{false};
   int pickup_attempt_count_{0};
+  int pickup_shrink_count_{0};
+  BallConfig EffectivePickupConfig() const {
+    return config_.PickupRegionAfterFailures(pickup_shrink_count_);
+  }
 };
 
 } // namespace vision_core

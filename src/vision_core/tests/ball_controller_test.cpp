@@ -4,6 +4,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -347,6 +348,55 @@ int main() {
     assert(r.action.action == MissionAction::kNone);
     assert(r.mode == BallMode::kVerifyPickupObservation);
   }
+  // Shrink after confirmed residual-ball PICK failures; bound at two 3px
+  // insets and reset for the next mission, without changing the top taper.
+  BallConfig shrink_config=verify_config;
+  shrink_config.pickup_max_attempts=5;
+  shrink_config.pickup_shrink_enabled=true;
+  shrink_config.pickup_shrink_step_px=3.0;
+  shrink_config.pickup_shrink_max_failures=2;
+  BallController shrinking(shrink_config,3.0);
+  r=EnterPickupVerification(shrinking,100.0);
+  assert(r.pickup_shrink_count==0);
+  double shrink_time=102.0;
+  for(int failure=1;failure<=3;++failure) {
+    for(int i=0;i<10;++i) {
+      r=shrinking.Compute(Ball(.5,.7),640,480,shrink_time,down,{});
+      shrink_time+=.1;
+      if(i<9) assert(r.pickup_shrink_count==std::min(failure-1,2));
+    }
+    assert(r.mode==BallMode::kFineAdjustForPickup);
+    assert(r.pickup_shrink_count==std::min(failure,2));
+    const auto region=shrink_config.PickupRegionAfterFailures(r.pickup_shrink_count);
+    assert(region.pickup_u1_px==288+3*std::min(failure,2));
+    assert(region.pickup_u2_px==352-3*std::min(failure,2));
+    assert(region.pickup_v1_px==312+3*std::min(failure,2));
+    assert(region.pickup_v2_px==360-3*std::min(failure,2));
+    if(failure==2) {
+      // x=294 is inside the original trapezoid but outside the 6px-inset
+      // trapezoid: a retry must align, never pick immediately.
+      shrinking.ClearObservationHistory();
+      r=fine_window(shrinking,294.0/640.0,.7,shrink_time);
+      assert(r.action.action!=MissionAction::kPickBall);
+    }
+    shrinking.ClearObservationHistory();
+    r=fine_window(shrinking,.5,.7,shrink_time);
+    assert(r.action.action==MissionAction::kPickBall);
+    r=shrinking.Compute(Ball(.5,.7),640,480,shrink_time,down,done);
+    shrink_time+=.1;
+    assert(r.mode==BallMode::kVerifyPickupObservation);
+  }
+  shrinking.Reset();
+  r=shrinking.Compute(Ball(.5,.7),640,480,shrink_time,down,{});
+  assert(r.pickup_shrink_count==0);
+  BallConfig no_shrink=shrink_config;
+  no_shrink.pickup_shrink_enabled=false;
+  const auto fixed=no_shrink.PickupRegionAfterFailures(2);
+  assert(fixed.pickup_u1_px==no_shrink.pickup_u1_px &&
+         fixed.pickup_u2_px==no_shrink.pickup_u2_px &&
+         fixed.pickup_v1_px==no_shrink.pickup_v1_px &&
+         fixed.pickup_v2_px==no_shrink.pickup_v2_px);
+
   // Camera-moving frames must not survive into the DOWN-view fine adjustment.
   BallController fresh_down(c,3.0);
   fresh_down.Compute(Ball(.3,.3),640,480,0,{},{});

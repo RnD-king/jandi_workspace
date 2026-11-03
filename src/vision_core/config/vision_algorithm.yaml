@@ -174,6 +174,9 @@ vision_algorithm:
       pickup_v2_px: 130 # 픽업 영역 아래쪽 경계 (px)
       pickup_max_attempts: 100
       pickup_verify_min_hits: 3 # 픽업 DONE 후 stable_window 중 잔존 공 검출 기준; 이상이면 재픽업
+      pickup_shrink_enabled: true # AUTO: 픽업 실패 확정 후에만 경계 축소
+      pickup_shrink_step_px: 3.0 # 실패마다 상하좌우를 각각 3px씩 줄임
+      pickup_shrink_max_failures: 2 # 최대 2회 축소(변당 총 6px), 새 공 미션 시작 시 초기화
 
       # 픽업 후 복귀
       post_pickup_back_steps: 0 # 0: 픽업 후 후진 없이 카메라를 복귀하고 LINE 재탐색

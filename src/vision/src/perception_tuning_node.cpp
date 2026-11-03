@@ -146,8 +146,13 @@ public:
       "perception_tuning_node"
 #endif
   ) {
-    const vision_core::MissionControllerConfig algorithm_defaults =
+    vision_core::MissionControllerConfig algorithm_defaults =
         LoadSharedAlgorithmDefaults();
+#if defined(VISION_BALL_TUNING_NODE)
+    // Normal AUTO takes the shared YAML (true). Dedicated BALL tuning starts
+    // with a fixed trapezoid but can opt in using the ROS boolean parameter.
+    algorithm_defaults.ball.pickup_shrink_enabled=false;
+#endif
     vision::DeclareMissionParameters(*this,algorithm_defaults);
     declare_parameter<bool>("goal_trial_start_goal",algorithm_defaults.goal_trial_start_goal);
     declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw"); // 입력 이미지 토픽

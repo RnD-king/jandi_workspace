@@ -137,6 +137,24 @@ int main(int argc,char** argv) {
       }
     }
 
+    Check(vision::ApplyLivePerceptionParameter(
+        rclcpp::Parameter("ball_pickup_shrink_enabled",false),applied) &&
+        !applied.ball.pickup_shrink_enabled,"BALL shrink enable live override failed");
+    Check(vision::ApplyLivePerceptionParameter(
+        rclcpp::Parameter("ball_pickup_shrink_step_px",3.0),applied) &&
+        applied.ball.pickup_shrink_step_px==3.0,"BALL shrink step live override failed");
+    Check(vision::ApplyLivePerceptionParameter(
+        rclcpp::Parameter("ball_pickup_shrink_max_failures",2),applied) &&
+        applied.ball.pickup_shrink_max_failures==2,"BALL shrink max live override failed");
+    for(const auto& wrong:std::vector<rclcpp::Parameter>{
+         rclcpp::Parameter("ball_pickup_shrink_enabled",1),
+         rclcpp::Parameter("ball_pickup_shrink_step_px",-1.0),
+         rclcpp::Parameter("ball_pickup_shrink_max_failures",-1)}) {
+      bool rejected=false;
+      try {vision::ApplyLivePerceptionParameter(wrong,applied);}
+      catch(const std::invalid_argument&) {rejected=true;}
+      Check(rejected,"BALL shrink invalid parameter accepted");
+    }
     Check(applied.ball.recovery_walk_turn_max==5,"BALL startup override was lost");
     Check(applied.ball.recovery_max_steps==2 && applied.ball.entry_recovery_max_steps==4,
           "BALL entry/general recovery step overrides were not independent");
