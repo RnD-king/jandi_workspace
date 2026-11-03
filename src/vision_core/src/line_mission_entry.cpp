@@ -712,9 +712,6 @@ MissionFrameResult MissionController::StepPlannedLine(
           if (averaged_center && continuous_.last) {
             auto averaged_target=*continuous_.last;
             averaged_target.center_px=*averaged_center;
-            const double ref_v=output.line_features.guide.valid
-                ? output.line_features.guide_reference_v_px
-                : config_.object_approach.reference_v_ratio*input.image_height;
             LineGuide guide;
             if(continuous_.mission==MissionType::kGoal)
               guide=ObjectZoneGuide(averaged_target,
