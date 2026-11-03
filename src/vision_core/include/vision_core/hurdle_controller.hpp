@@ -32,6 +32,7 @@ enum class HurdleMode {
 
 struct HurdleConfig {
   double approach_short_v_px{};
+  int pre_down_extra_forward_steps{2}; // Additional physical steps after the existing near 2-step.
   int down_search_max_steps{10};
   double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
   double recovery_observation_sec{};
