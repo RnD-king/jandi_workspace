@@ -64,6 +64,7 @@ struct BallConfig {
   double approach_u_deadband_px{};
   double approach_left_top_u_px{};
   double approach_right_top_u_px{};
+  double approach_extreme_turn_top_margin_px{45.0}; // Outer near-zone slope at v=0.
   // Top endpoints are at v=0; bottom endpoints keep the legacy center/band
   // at v=image_height-1. Use the same interpolation for control and drawing.
   std::pair<double,double> ApproachBounds(double v, int image_height) const {
@@ -73,6 +74,13 @@ struct BallConfig {
     if (t==1.0) return {left_bottom,right_bottom};
     return {approach_left_top_u_px+t*(left_bottom-approach_left_top_u_px),
             approach_right_top_u_px+t*(right_bottom-approach_right_top_u_px)};
+  }
+  std::pair<double,double> ExtremeApproachBounds(double v,int image_height) const {
+    const auto inner=ApproachBounds(v,image_height);
+    const double t=std::clamp(v/std::max(1,image_height-1),0.0,1.0);
+    const double margin=(1.0-t)*approach_extreme_turn_top_margin_px+
+        t*approach_extreme_turn_margin_px;
+    return {inner.first-margin,inner.second+margin};
   }
   double upper_acquire_v_px{};
   double approach_two_step_v_px{};
