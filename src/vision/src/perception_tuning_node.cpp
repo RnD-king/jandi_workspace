@@ -487,6 +487,7 @@ public:
             return;
           }
           authorized_repeat_scope_=0; trial_finished_=false;
+          stage_setup_action_id_=0; // Allow one initial stance per explicit START.
           mission_controller_->Reset(true); // Preserve issued action IDs.
           last_debug_result_={};
           observation_accumulator_.Reset();
@@ -832,7 +833,8 @@ private:
           !mission_controller_->SetTestStage(tuning_config_.test_mission,static_cast<int>(stage_parameter->as_int()))) {
         response.successful=false; response.reason="test_stage: dedicated node, WAIT_START, integer 0..3; change separately"; return response;
       }
-      tuning_config_.test_stage=static_cast<int>(stage_parameter->as_int()); trial_finished_=false; return response;
+      tuning_config_.test_stage=static_cast<int>(stage_parameter->as_int());
+      stage_setup_action_id_=0; trial_finished_=false; return response;
     }
     const bool edits_index=std::any_of(parameters.begin(),parameters.end(),[](const auto& p) {
       return p.get_name()=="test_ball_mission_index" || p.get_name()=="test_goal_mission_index";
@@ -2357,8 +2359,29 @@ private:
         control_command.mission_phase == 903 &&
         (control_command.action == vision_core::MissionAction::kWalkMode ||
          control_command.action == vision_core::MissionAction::kDefaultPoseMode);
-    if (!preview_ready_ && (manual_action_active_ || stage_pose_command))
-      PublishActionCommand(control_command);
+    if (!preview_ready_ && (manual_action_active_ || stage_pose_command)) {
+      if (stage_pose_command &&
+          control_command.command_type == vision_core::CommandType::kAction &&
+          control_command.action_id != 0) {
+        // Safety: a dedicated TEST setup admits only one initial pose ID per
+        // START. Repeated publishes of that same ID are allowed for ACK
+        // recovery, but a fresh ID must never execute a second pose.
+        if (stage_setup_action_id_ == 0)
+          stage_setup_action_id_ = control_command.action_id;
+        if (stage_setup_action_id_ != control_command.action_id) {
+          RCLCPP_ERROR_THROTTLE(
+              get_logger(), *get_clock(), 2000,
+              "[TEST SETUP] BLOCKED duplicate pose id=%llu; original id=%llu. "
+              "Check ACK/DONE feedback before a new START.",
+              static_cast<unsigned long long>(control_command.action_id),
+              static_cast<unsigned long long>(stage_setup_action_id_));
+        } else {
+          PublishActionCommand(control_command);
+        }
+      } else {
+        PublishActionCommand(control_command);
+      }
+    }
     if (!preview_ready_)
       PublishCameraCommand(control_command.camera_request);
     if (stage_setup_was_pending && !mission_controller_->TestSetupPending() &&
@@ -2458,6 +2481,7 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr stop_repeat_service_;
   bool manual_action_active_{false};
   std::uint64_t manual_action_id_{0};
+  std::uint64_t stage_setup_action_id_{0};
   std::optional<vision_core::LineGuide> cached_ready_guide_;
   vision_core::PerceptionFrameInput preview_input_;
   vision_core::PerceptionMissionFrameResult preview_result_;
