@@ -17,7 +17,7 @@ MissionControllerConfig Config() {
   c.initial_has_ball=c.goal_trial_start_goal=false;
   c.test_mission=MissionType::kNone;
   c.line_features.image_center_u=320;
-  c.goal.auto_approach_reference_u_px=320; // Preserve legacy GOAL geometry fixtures.
+  c.goal.auto_approach_center_u_px=280; // Dedicated GOAL vertical zone center.
   c.line_p2p.left_repetitions=c.line_p2p.straight_repetitions=c.line_p2p.right_repetitions=2;
   c.ball.entry_min_hits=4;c.ball.stable_window=10;c.ball.stable_min_hits=7;
   c.ball.approach_short_v_px=100;c.ball.approach_two_step_v_px=240;c.ball.approach_direct_down_v_px=355;
@@ -160,16 +160,16 @@ void VirtualHeadingOnly() {
                  ball_heading)<1e-9 &&
         goal.out.line_decision_guide->heading_rad>0.25 &&
         goal.out.command.action==MissionAction::kLineRightUnit,
-        "GOAL did not steer from its 2D virtual image path");
+        "GOAL did not steer from the dedicated vertical pixel zone");
 
   c.object_approach.steering_deadband_deg=30.0;
   Driver tuned(c);tuned.in.ball_target.reset();tuned.in.line_centers.clear();
   tuned.in.camera_feedback={CameraMode::kGoal,true};
-  tuned.in.backboard_target=Target(500,100);tuned.in.backboard_track_id=7;
+  tuned.in.backboard_target=Target(340,100);tuned.in.backboard_track_id=7;
   tuned.in.backboard_center_depth_m=2;tuned.in.goal_pose={true,.6,2,0,1};
   for(int i=0;i<12;++i)tuned.Tick();
   Check(tuned.out.command.action==MissionAction::kLineStraightUnit,
-        "GOAL virtual heading angle threshold did not tune its direction independently");
+        "GOAL center zone did not command straight walking");
 }
 void WeightedProbeDirection() {
   auto c=Config();
@@ -301,6 +301,7 @@ void ProbeRediscoveryAndLineMemory() {
 }
 void PrelockProbeForMission(MissionType mission) {
   auto c=Config();c.enable_ball=false;
+  if(mission==MissionType::kGoal) c.goal.head_scan_enabled=false;
   c.enable_hurdle=mission==MissionType::kHurdle;
   c.enable_goal=mission==MissionType::kGoal;
   c.initial_has_ball=c.goal_trial_start_goal=mission==MissionType::kGoal;
@@ -475,25 +476,20 @@ void NearFinalActionSequence(double u,bool left,bool extreme) {
     d.Tick({id,true,false,false});
     d.Tick({id,true,true,false});
   }
-  // No blind forward or camera DOWN after an off-centre rotation group.
-  Check(d.out.active_mission==MissionType::kLine &&
-        d.out.command.camera_request==CameraRequest::kNone &&
-        !d.out.approach_near_final_motion,
-        "near turn incorrectly caused an immediate blind forward/DOWN");
-  d.in.ball_target=Target(380,260);
-  for(int n=0;n<45 && (d.out.command.action_id==0 ||
-                         d.out.command.action_id==id);++n)d.Tick();
+  // A committed near chain must now move forward without an intermediate
+  // observation after the 1/2 rotation actions.
   Check(d.out.command.action==MissionAction::kStepForwardTwo &&
         d.out.command.action_id!=id && d.out.approach_near_final_motion,
-        "fresh central observation did not choose the original two-step plan");
+        "near 5-zone did not append two forward steps after the turns");
   id=d.out.command.action_id;
   d.Tick({id,true,false,false});
   Check(d.out.active_mission==MissionType::kLine,
-        "camera switched to DOWN before centered forward DONE");
+        "BALL near switched camera before committed forward DONE");
   d.Tick({id,true,true,false});
   Check(d.out.active_mission==MissionType::kBall &&
         d.out.command.camera_request==CameraRequest::kBallView,
-        "centered forward DONE did not hand off to BALL DOWN");
+        "BALL near committed turn + forward chain did not hand off to DOWN");
+
 }
 void ReadyCenterAccumulator() {
   LineGuideAccumulator acc(5,0.0,10,5);
@@ -584,9 +580,15 @@ void HurdleAndGoal() {
   for(int n=0;n<30 && h.out.command.action_id==0;++n)h.Tick();
   const auto hurdle_step=h.out.command.action_id;
   Check(hurdle_step && h.out.command.action==MissionAction::kStepForwardTwo,
-        "near HURDLE did not use its horizontal-line two-step action");
+        "near HURDLE did not use its original two-step action");
   h.Tick({hurdle_step,true,false,false});h.Tick({hurdle_step,true,true,false});
-  Check(h.out.active_mission==MissionType::kHurdle,"HURDLE did not hand off to the existing DOWN approach");
+  const auto extra=h.out.command.action_id;
+  Check(extra && extra!=hurdle_step &&
+        h.out.command.action==MissionAction::kStepForwardTwo,
+        "HURDLE did not add the configured second two-step before DOWN");
+  h.Tick({extra,true,false,false});h.Tick({extra,true,true,false});
+  Check(h.out.active_mission==MissionType::kHurdle,
+        "HURDLE did not hand off to DOWN after four real steps");
 
   c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;c.goal_trial_start_goal=true;
   Driver g(c);g.in.ball_target.reset();g.in.camera_feedback={CameraMode::kGoal,true};
@@ -624,6 +626,7 @@ void ManualAndReset() {
 }
 void CameraDrainAndProbe() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
+  c.goal.head_scan_enabled=false; // Old pre-lock fallback contract; scan tested separately.
   c.goal.post_pickup_walk_fallback_actions=3;
   Driver d(c);d.in.ball_target.reset();d.Warm();
   d.Tick({d.current,true,false,true});
@@ -669,7 +672,7 @@ void CameraDrainAndProbe() {
 void GoalTurnObservationUsesSelectedPath() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
   c.object_approach.steering_deadband_deg=2.0;
-  c.object_approach.in_place_turn_deg=10.0;
+  c.object_approach.in_place_turn_deg=2.5;
   Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
   d.in.camera_feedback={CameraMode::kGoal,true};d.in.backboard_target=Target(500,100);
   d.in.backboard_track_id=7;d.in.backboard_center_depth_m=2;d.in.goal_pose={true,.6,2,0,1};
@@ -883,6 +886,7 @@ void HurdleLineLossUsesLineRecovery() {
 
 void FarReacquisitionReturnsToSharedPath(MissionType mission) {
   auto c=Config();c.enable_ball=mission==MissionType::kBall;
+  if(mission==MissionType::kGoal) c.goal.head_scan_enabled=false;
   c.enable_hurdle=mission==MissionType::kHurdle;c.enable_goal=mission==MissionType::kGoal;
   c.initial_has_ball=c.goal_trial_start_goal=mission==MissionType::kGoal;
   Driver d(c);
@@ -1027,19 +1031,36 @@ void RelaxedHurdleBackboardContinuousIdentity() {
 }
 
 void GoalAutoReferenceIsIsolated() {
-  for(double reference : {310.0,380.0}) {
+  for(double legacy_reference : {310.0,380.0}) {
     auto c=Config();
     c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
-    c.goal_trial_start_goal=true;c.goal.auto_approach_reference_u_px=reference;
+    c.goal_trial_start_goal=true;
+    c.goal.auto_approach_reference_u_px=legacy_reference;
+    c.goal.auto_approach_center_u_px=280.0;
+    c.goal.auto_approach_half_width_px=100.0;
     Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
     d.in.camera_feedback={CameraMode::kGoal,true};
     d.in.backboard_target=Target(500,100);d.in.backboard_track_id=7;
     d.in.backboard_center_depth_m=2;d.in.goal_pose={true,.6,2,0,1};
     for(int i=0;i<12;++i)d.Tick();
     Check(d.out.approach_path_guide && d.out.approach_path_guide->valid &&
-          std::abs(d.out.approach_path_reference_px.u-reference)<1e-9,
-          "GOAL AUTO path ignored dedicated horizontal reference");
+          std::abs(d.out.approach_path_reference_px.u-280.0)<1e-9,
+          "GOAL AUTO leaked legacy virtual H reference into zone steering");
   }
+  const auto right=ObjectZoneGuide(Target(381,100),180,380,15,640);
+  const auto center=ObjectZoneGuide(Target(280,400),180,380,15,640);
+  const auto left=ObjectZoneGuide(Target(179,470),180,380,15,640);
+  Check(right.heading_rad>0 && center.heading_rad==0 &&
+        left.heading_rad<0,"GOAL vertical-zone decision depended on target v");
+  auto b=Config().ball;
+  const auto upper=b.ApproachBounds(0,480), lower=b.ApproachBounds(479,480);
+  Check(upper.first>lower.first && upper.second<lower.second,
+        "BALL far bounds do not converge toward image top");
+  const auto near=b.ExtremeApproachBounds(260,480);
+  Check(near.first<b.ApproachBounds(260,480).first &&
+        near.second>b.ApproachBounds(260,480).second,
+        "BALL near outer diagonal zones were not added");
+
 }
 }
 int main() {
@@ -1048,7 +1069,7 @@ int main() {
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
   ReadyCenterAccumulator();InitialLineMeanProbeAfterIdentityExpiry();
-  NearFinalActionSequence(150,true,true); NearFinalActionSequence(240,true,false);
+  NearFinalActionSequence(150,true,true); NearFinalActionSequence(280,true,false);
   NearFinalActionSequence(575,false,true); NearFinalActionSequence(500,false,false);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
   FarGoalDepthRecovery(false,true);FarGoalDepthRecovery(true,true);
