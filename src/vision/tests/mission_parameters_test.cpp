@@ -156,6 +156,13 @@ int main(int argc,char** argv) {
             "384,338;370,282;380,265;394,256;438,254;450,298;433,338"),applied) &&
         applied.ball.pickup_polygon.size()==7,
         "BALL polygon vertex addition failed");
+    // ReadMissionParameters is also called after a live tuning update.
+    // Its empty node-level polygon parameter must preserve the existing
+    // polygon instead of passing an empty string to the geometry parser.
+    auto preserved=applied;
+    vision::ReadMissionParameters(*node,preserved);
+    Check(preserved.ball.pickup_polygon.size()==7,
+        "empty ROS polygon override discarded existing live geometry");
     Check(vision::ApplyLivePerceptionParameter(
         rclcpp::Parameter("ball_pickup_shrink_max_failures",2),applied) &&
         applied.ball.pickup_shrink_max_failures==2,"BALL shrink max live override failed");

@@ -123,7 +123,10 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   c.ball.pickup_shrink_enabled=node.get_parameter("ball_pickup_shrink_enabled").as_bool();
   c.ball.pickup_shrink_percent=node.get_parameter("ball_pickup_shrink_percent").as_double();
   const auto polygon_text=node.get_parameter("ball_pickup_polygon_points").as_string();
-  if (!polygon_text.empty() || !c.ball.pickup_polygon.empty())
+  // An empty ROS override means "keep the current YAML/runtime default".
+  // It must never be parsed as geometry merely because the target config
+  // already contains a polygon (e.g. a prior live rqt preview).
+  if (!polygon_text.empty())
     c.ball.pickup_polygon=vision_core::ParsePickupPolygonPoints(polygon_text);
   const auto max_shrinks=node.get_parameter("ball_pickup_shrink_max_failures").as_int();
   if (max_shrinks<0 || max_shrinks>std::numeric_limits<int>::max())
