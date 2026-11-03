@@ -111,7 +111,41 @@ static void TestNearBallTurnThenDown() {
     if (found) assert(result.command.action==MissionAction::kStepForwardTwo);
   }
 }
+
+static void TestLiveBallPickupTrapezoidTuning() {
+  auto base=LoadDefaultAlgorithmConfig();
+  base.ball.pickup_shrink_enabled=false;
+  MissionController core(base);
+  auto valid=base;
+  valid.ball.pickup_u1_px=290;
+  valid.ball.pickup_u2_px=400;
+  valid.ball.pickup_top_inset_px=20;
+  valid.ball.pickup_v1_px=70;
+  valid.ball.pickup_v2_px=145;
+  core.SetLivePerceptionTuning(valid);
+
+  // Each malformed individual field must reach core validation.  If a field
+  // is accidentally omitted by SetLivePerceptionTuning, this test fails.
+  for (int field=0;field<5;++field) {
+    MissionController individual(base);
+    auto invalid=base;
+    switch (field) {
+    case 0: invalid.ball.pickup_u1_px=invalid.ball.pickup_u2_px;break;
+    case 1: invalid.ball.pickup_u2_px=invalid.ball.pickup_u1_px;break;
+    case 2: invalid.ball.pickup_top_inset_px=
+        (invalid.ball.pickup_u2_px-invalid.ball.pickup_u1_px)/2;break;
+    case 3: invalid.ball.pickup_v1_px=invalid.ball.pickup_v2_px;break;
+    case 4: invalid.ball.pickup_v2_px=invalid.ball.pickup_v1_px;break;
+    }
+    bool rejected=false;
+    try { individual.SetLivePerceptionTuning(invalid); }
+    catch (const std::exception&) { rejected=true; }
+    assert(rejected);
+  }
+}
+
 int main() {
+  TestLiveBallPickupTrapezoidTuning();
   TestNearBallTurnThenDown();
   auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;
   c.line_features.image_center_u=320;

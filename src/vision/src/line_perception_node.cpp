@@ -140,6 +140,13 @@ public:
     const vision_core::MissionControllerConfig algorithm_defaults =
         LoadSharedAlgorithmDefaults();
     vision::DeclareMissionParameters(*this,algorithm_defaults);
+    // BALL pickup trapezoid: isolated from shared declarations so dedicated
+    // tuning nodes retain their own parameter and preview contracts.
+    declare_parameter<double>("ball_pickup_u1_px", algorithm_defaults.ball.pickup_u1_px);
+    declare_parameter<double>("ball_pickup_u2_px", algorithm_defaults.ball.pickup_u2_px);
+    declare_parameter<double>("ball_pickup_top_inset_px", algorithm_defaults.ball.pickup_top_inset_px);
+    declare_parameter<double>("ball_pickup_v1_px", algorithm_defaults.ball.pickup_v1_px);
+    declare_parameter<double>("ball_pickup_v2_px", algorithm_defaults.ball.pickup_v2_px);
     declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw"); // 입력 이미지 토픽
     declare_parameter<std::string>("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw");
     declare_parameter<std::string>("camera_info_topic", "/camera/camera/color/camera_info");
@@ -297,6 +304,11 @@ public:
     mission_config.line_features = line_feature_cfg;
     mission_config.line = algorithm_defaults.line;
     mission_config.ball = ball_cmd_cfg;
+    mission_config.ball.pickup_u1_px = get_parameter("ball_pickup_u1_px").as_double();
+    mission_config.ball.pickup_u2_px = get_parameter("ball_pickup_u2_px").as_double();
+    mission_config.ball.pickup_top_inset_px = get_parameter("ball_pickup_top_inset_px").as_double();
+    mission_config.ball.pickup_v1_px = get_parameter("ball_pickup_v1_px").as_double();
+    mission_config.ball.pickup_v2_px = get_parameter("ball_pickup_v2_px").as_double();
     mission_config.hurdle = hurdle_cmd_cfg;
     mission_config.goal = goal_cmd_cfg;
     mission_config.line_detection.class_id = line_class_id_;
@@ -363,6 +375,33 @@ public:
               }
             } catch(const std::exception& error) {
               response.successful=false; response.reason=error.what(); return response;
+            }
+            // Apply pickup geometry only while disarmed or safely PAUSED.
+            // Validate the complete candidate below to prevent collapsed or
+            // inverted trapezoids even when several edges change together.
+            const auto& name = parameter.get_name();
+            double* pickup_edge = nullptr;
+            if (name=="ball_pickup_u1_px") pickup_edge=&candidate.ball.pickup_u1_px;
+            else if (name=="ball_pickup_u2_px") pickup_edge=&candidate.ball.pickup_u2_px;
+            else if (name=="ball_pickup_top_inset_px") pickup_edge=&candidate.ball.pickup_top_inset_px;
+            else if (name=="ball_pickup_v1_px") pickup_edge=&candidate.ball.pickup_v1_px;
+            else if (name=="ball_pickup_v2_px") pickup_edge=&candidate.ball.pickup_v2_px;
+            if (pickup_edge) {
+              if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
+                  !std::isfinite(parameter.as_double()) || parameter.as_double()<0.0) {
+                response.successful=false;
+                response.reason=name+" must be a finite nonnegative double";
+                return response;
+              }
+              if ((run_state_!=RunState::kWaitStart && run_state_!=RunState::kPaused) ||
+                  !outstanding_actions_.empty() || !outstanding_cameras_.empty() || pending_camera_id_!=0) {
+                response.successful=false;
+                response.reason="Change BALL pickup edges in WAIT_START or PAUSED after DONE";
+                return response;
+              }
+              *pickup_edge=parameter.as_double();
+              live_perception_touched=true;
+              continue;
             }
             if (parameter.get_name()=="ball_fine_side_two_step_margin_px") {
               if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
