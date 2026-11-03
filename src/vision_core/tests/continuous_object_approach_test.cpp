@@ -1053,6 +1053,8 @@ void GoalAutoReferenceIsIsolated() {
   Check(right.heading_rad>0 && center.heading_rad==0 &&
         left.heading_rad<0,"GOAL vertical-zone decision depended on target v");
   auto b=Config().ball;
+  b.approach_left_top_u_px=345.0;
+  b.approach_right_top_u_px=415.0;
   const auto upper=b.ApproachBounds(0,480), lower=b.ApproachBounds(479,480);
   Check(upper.first>lower.first && upper.second<lower.second,
         "BALL far bounds do not converge toward image top");
