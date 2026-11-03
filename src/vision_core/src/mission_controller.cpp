@@ -1817,8 +1817,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         input.backboard_image_without_depth);
     // Fixed edge turns share the existing repeat gate. After the second actual
     // DONE, collect one fresh observation before resuming approach decisions.
-    if (before == GoalMode::kEdgeTurn &&
-        goal_result_.mode != GoalMode::kEdgeTurn &&
+    if ((before == GoalMode::kEdgeTurn || before == GoalMode::kFineMotionRepeat) &&
+        goal_result_.mode != before &&
         !input.manual_observation_control &&
         config_.post_motion_observation_sec > 0.0) {
       BeginDecisionObservation(input.now_sec, active_mission_, false, {});
@@ -2827,6 +2827,7 @@ int MissionController::RepeatScope() const {
       return 400 + static_cast<int>(hurdle_result_.mode);
   } else if (active_mission_ == MissionType::kGoal) {
     if (goal_result_.mode == GoalMode::kPostShootBackAway ||
+        goal_result_.mode == GoalMode::kFineMotionRepeat ||
         goal_result_.mode == GoalMode::kEntryRetryCameraForward ||
         goal_result_.mode == GoalMode::kHeadingRecovery ||
         goal_result_.mode == GoalMode::kEdgeTurn)
