@@ -288,6 +288,8 @@ public:
     goal_cmd_cfg.position_tolerance_m =
         get_parameter("goal_position_tolerance_m").as_double();
     curve_search_config_=algorithm_defaults.curve_search;
+    line_recovery_config_=algorithm_defaults.line_recovery;
+    goal_scan_config_=algorithm_defaults.goal;
     vision_core::MissionControllerConfig mission_config = algorithm_defaults;
     mission_config.backboard_depth_strip_width_px=backboard_depth_strip_width_px_;
     mission_config.camera_motion_timeout_sec =
@@ -1014,7 +1016,11 @@ private:
     RCLCPP_INFO(get_logger(),"[FEEDBACK] CAMERA DONE id=%llu received; awaiting fresh image",
         static_cast<unsigned long long>(msg->command_id));
     if (pending_camera_request_==vision_core::CameraRequest::kScanLeft ||
-        pending_camera_request_==vision_core::CameraRequest::kScanRight) {
+        pending_camera_request_==vision_core::CameraRequest::kScanRight ||
+        pending_camera_request_==vision_core::CameraRequest::kLineScanLeft ||
+        pending_camera_request_==vision_core::CameraRequest::kLineScanRight ||
+        pending_camera_request_==vision_core::CameraRequest::kGoalScanLeft ||
+        pending_camera_request_==vision_core::CameraRequest::kGoalScanRight) {
       camera_scan_feedback_.command_id=pending_camera_id_;
       camera_scan_feedback_.phase=0;
       camera_scan_feedback_.finished=true;
@@ -1022,7 +1028,13 @@ private:
     switch (pending_camera_request_) {
     case vision_core::CameraRequest::kScanLeft:
     case vision_core::CameraRequest::kScanRight:
+    case vision_core::CameraRequest::kLineScanLeft:
+    case vision_core::CameraRequest::kLineScanRight:
       camera_feedback_ = {vision_core::CameraMode::kForward, true};
+      break;
+    case vision_core::CameraRequest::kGoalScanLeft:
+    case vision_core::CameraRequest::kGoalScanRight:
+      camera_feedback_ = {vision_core::CameraMode::kGoal, true};
       break;
     case vision_core::CameraRequest::kDown:
       camera_feedback_ = {vision_core::CameraMode::kDown, true};
@@ -1172,11 +1184,18 @@ private:
     if(scan_control) {
       if(pending_camera_id_==0 ||
          (pending_camera_request_!=vision_core::CameraRequest::kScanLeft &&
-          pending_camera_request_!=vision_core::CameraRequest::kScanRight)) return;
+          pending_camera_request_!=vision_core::CameraRequest::kScanRight &&
+          pending_camera_request_!=vision_core::CameraRequest::kLineScanLeft &&
+          pending_camera_request_!=vision_core::CameraRequest::kLineScanRight &&
+          pending_camera_request_!=vision_core::CameraRequest::kGoalScanLeft &&
+          pending_camera_request_!=vision_core::CameraRequest::kGoalScanRight)) return;
       if(simulate_camera_feedback_) {
         if(request==vision_core::CameraRequest::kScanReturn) {
           camera_scan_feedback_.finished=true;camera_scan_feedback_.phase=0;
-          camera_feedback_={vision_core::CameraMode::kForward,true};
+          camera_feedback_={
+              pending_camera_request_==vision_core::CameraRequest::kGoalScanLeft ||
+              pending_camera_request_==vision_core::CameraRequest::kGoalScanRight
+                  ? vision_core::CameraMode::kGoal : vision_core::CameraMode::kForward,true};
         } else camera_scan_feedback_.phase=
             request==vision_core::CameraRequest::kScanHold?3:1;
         return;
@@ -1208,6 +1227,10 @@ private:
         break;
       case vision_core::CameraRequest::kScanLeft:
       case vision_core::CameraRequest::kScanRight:
+      case vision_core::CameraRequest::kLineScanLeft:
+      case vision_core::CameraRequest::kLineScanRight:
+      case vision_core::CameraRequest::kGoalScanLeft:
+      case vision_core::CameraRequest::kGoalScanRight:
         camera_scan_feedback_.command_id=++simulated_camera_scan_id_;
         camera_scan_feedback_.phase=1;camera_scan_feedback_.finished=false;
         camera_feedback_={vision_core::CameraMode::kTransition,false};
@@ -1223,7 +1246,11 @@ private:
     // Keep retransmitting the original request until ACK, then wait for DONE.
     if (pending_camera_id_ == 0) {
       if(request==vision_core::CameraRequest::kScanLeft ||
-         request==vision_core::CameraRequest::kScanRight) camera_scan_feedback_={};
+         request==vision_core::CameraRequest::kScanRight ||
+         request==vision_core::CameraRequest::kLineScanLeft ||
+         request==vision_core::CameraRequest::kLineScanRight ||
+         request==vision_core::CameraRequest::kGoalScanLeft ||
+         request==vision_core::CameraRequest::kGoalScanRight) camera_scan_feedback_={};
       pending_camera_id_ = next_camera_id_++;
       outstanding_cameras_.insert(pending_camera_id_);
       pending_camera_request_ = request;
@@ -1242,10 +1269,23 @@ private:
     vision::msg::CameraCommand message;
     message.command_id = pending_camera_id_;
     message.request = static_cast<std::uint8_t>(pending_camera_request_);
-    message.scan_max_yaw_deg=static_cast<std::uint16_t>(curve_search_config_.max_scan_yaw_deg);
-    message.scan_move_sec=static_cast<float>(curve_search_config_.scan_move_sec);
-    message.scan_hold_sec=static_cast<float>(curve_search_config_.scan_hold_sec);
-    message.scan_return_sec=static_cast<float>(curve_search_config_.scan_return_sec);
+    const bool line_scan=pending_camera_request_==vision_core::CameraRequest::kLineScanLeft ||
+                         pending_camera_request_==vision_core::CameraRequest::kLineScanRight;
+    const bool goal_scan=pending_camera_request_==vision_core::CameraRequest::kGoalScanLeft ||
+                         pending_camera_request_==vision_core::CameraRequest::kGoalScanRight;
+    message.scan_max_yaw_deg=static_cast<std::uint16_t>(goal_scan
+        ? goal_scan_config_.head_scan_max_yaw_deg :
+          line_scan ? line_recovery_config_.scan_max_yaw_deg :
+                      curve_search_config_.max_scan_yaw_deg);
+    message.scan_move_sec=static_cast<float>(goal_scan
+        ? goal_scan_config_.head_scan_move_sec :
+          line_scan ? line_recovery_config_.scan_move_sec : curve_search_config_.scan_move_sec);
+    message.scan_hold_sec=static_cast<float>(goal_scan
+        ? goal_scan_config_.head_scan_hold_sec :
+          line_scan ? line_recovery_config_.scan_hold_sec : curve_search_config_.scan_hold_sec);
+    message.scan_return_sec=static_cast<float>(goal_scan
+        ? goal_scan_config_.head_scan_return_sec :
+          line_scan ? line_recovery_config_.scan_return_sec : curve_search_config_.scan_return_sec);
     camera_cmd_pub_->publish(message);
   }
 
@@ -1722,6 +1762,8 @@ private:
   vision_core::CameraFeedback camera_feedback_{};
   vision_core::CameraScanFeedback camera_scan_feedback_{};
   vision_core::CurveSearchConfig curve_search_config_{};
+  vision_core::LineLossRecoveryConfig line_recovery_config_{};
+  vision_core::GoalConfig goal_scan_config_{};
   std::uint64_t simulated_camera_scan_id_{0};
   rclcpp::Subscription<vision::msg::CameraScanStatus>::SharedPtr camera_scan_status_sub_;
   // ROS-clock timestamps of the latest completion events. Image header

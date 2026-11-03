@@ -125,12 +125,14 @@ int main() {
   assert(two_point_result.line_in_recovery);
   assert(two_point_result.command.action_id==0);
   assert(two_point_result.command.mission_phase==1); // FailureObserve.
+  // Missing guide after two dots: stationary recovery, then 10/5 valid
+  // four-point input restores normal LINE without any speculative walk.
   for (int i=1;i<=9;++i) {
-    two_point_input=Frame(.2*i);
+    two_point_input=Frame(.1*i);
     two_point_result=two_point_controller.Step(two_point_input);
     assert(two_point_result.command.action_id==0);
   }
-  two_point_input=Frame(2.0);
+  two_point_input=Frame(1.01);
   two_point_result=two_point_controller.Step(two_point_input);
   assert(!two_point_result.line_in_recovery);
   assert(two_point_result.command.action==MissionAction::kLineStraightUnit);
@@ -197,103 +199,33 @@ int main() {
   assert(r.command.command_type==CommandType::kHold);
   assert(r.line_in_recovery);
 
-  // 마지막 유효 점수의 부호를 기억하고, 실패 관측 뒤 WALK 자세로 회전한다.
-  controller.Reset();
-  in=Frame(0); in.line_decision_guide_override=Guide(-.2);
-  r=controller.Step(in);
-  assert(r.command.action==MissionAction::kLineLeftUnit);
-  const auto left_id=r.command.action_id;
-  in=Frame(.1); in.line_centers.clear(); in.line_decision_guide_override.reset();
-  in.delivery_feedback={left_id,true,true,false};
-  r=controller.Step(in); assert(r.command.command_type==CommandType::kHold);
-  for(int i=1;i<=10;++i) {
-    in=Frame(.1+.1*i);in.line_centers.clear();r=controller.Step(in);
-  }
-  in=Frame(2.2); in.line_centers.clear();
-  r=controller.Step(in);
-  assert(r.command.action==MissionAction::kTurnLeftInPlace);
-  assert(r.foot_pose==FootPose::kWalk);
-
-  // 방향 근거가 없으면 회전하지 않고 다섯 정지 관측 후 최종 정지한다.
+  // No LINE dots: 1s stationary recovery followed by a LINE-only
+  // camera scan; never walk from the stale steering sign.
   controller.Reset();
   in=Frame(0); in.line_centers.clear(); r=controller.Step(in);
-  for (int i=1;i<=200 && r.command.mission_phase!=4;++i) {
-    in=Frame(.1*i); in.line_centers.clear();
+  bool line_scan_issued=false;
+  for (int i=1;i<=12;++i) {
+    in=Frame(.1*i);in.line_centers.clear();
     r=controller.Step(in);
+    line_scan_issued |= r.command.camera_request==CameraRequest::kLineScanLeft;
     assert(r.command.action==MissionAction::kNone);
   }
-  assert(r.command.mission_phase==4);
-  in=Frame(21.0); in.line_decision_guide_override=Guide(0);
-  r=controller.Step(in);
-  assert(r.command.action==MissionAction::kNone);
-  assert(r.command.mission_phase==4);
+  assert(line_scan_issued);
 
-  // 중앙 점수 0은 방향 근거가 아니므로 임의의 우회전을 하지 않는다.
+  // Three sparse dots: unfiltered O/H score with zero choosing RIGHT, not
+  // the normal 4-point RANSAC guide or straight deadband.
   controller.Reset();
-  in=Frame(0); in.line_decision_guide_override=Guide(0);
-  r=controller.Step(in);
-  assert(r.command.action==MissionAction::kLineStraightUnit);
-  const auto straight_id=r.command.action_id;
-  in=Frame(.1); in.line_centers.clear();
-  in.delivery_feedback={straight_id,true,true,false};
-  r=controller.Step(in);
-  for(int i=1;i<=100;++i) {
-    in=Frame(.1+i*.1); in.line_centers.clear(); r=controller.Step(in);
-    assert(r.command.action==MissionAction::kNone);
+  in=Frame(0);in.line_centers.resize(3);r=controller.Step(in);
+  bool sparse_forward_issued=false;
+  for(int i=1;i<=12;++i) {
+    in=Frame(.1*i);in.line_centers.resize(3);
+    r=controller.Step(in);
+    sparse_forward_issued |= r.command.action==MissionAction::kLineRightUnitTurnFirst &&
+                              r.command.action_id!=0;
   }
-  assert(r.command.mission_phase==4);
-
-  // FINAL HOLD에서는 유효한 object detection도 새 mission을 시작하지 않는다.
-  auto terminal_config=c;
-  terminal_config.line_p2p.failure_observation_sec=0.0;
-  terminal_config.line_p2p.last_score_recovery_max_turns=0;
-  terminal_config.enable_ball=true;
-  terminal_config.enable_hurdle=false;
-  terminal_config.ball.entry_min_hits=1; terminal_config.ball.down_search_min_hits=1; terminal_config.ball.stable_window=1;
-  terminal_config.ball.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
-  terminal_config.ball.stable_min_hits=1;
-  MissionController terminal(terminal_config);
-  in=Frame(0); in.line_centers.clear(); r=terminal.Step(in);
-  for(int i=1;i<=50;++i) {
-    in=Frame(.1*i); in.line_centers.clear(); r=terminal.Step(in);
-  }
-  assert(r.command.mission_phase==4);
-  in=Frame(5.1); in.line_centers.clear(); in.ball_target=Ball(.5,.3);
-  r=terminal.Step(in);
-  assert(r.active_mission==MissionType::kLine);
-  assert(r.command.action==MissionAction::kNone);
-  assert(r.command.mission_phase==4);
-
-  // 방향성 복구는 설정된 5회만 WALK 회전하고 그 뒤 terminal이다.
-  auto turn_config=c;
-  turn_config.line_p2p.failure_observation_sec=0.0;
-  turn_config.line_p2p.recovery_observation_sec=0.0; // Frame count still requires a full 10-frame window.
-  turn_config.line_p2p.last_score_recovery_max_turns=5;
-  MissionController turning(turn_config);
-  in=Frame(0); in.line_decision_guide_override=Guide(-.3);
-  r=turning.Step(in);
-  auto action_id=r.command.action_id;
-  in=Frame(.1); in.line_centers.clear();
-  in.delivery_feedback={action_id,true,true,false};
-  r=turning.Step(in);
-  double turn_time=.1;
-  for (int turn=1; turn<=5; ++turn) {
-    for(int sample=0;sample<10;++sample) {
-      turn_time+=.1;
-      in=Frame(turn_time);in.line_centers.clear();r=turning.Step(in);
-    }
-    assert(r.command.action==MissionAction::kTurnLeftInPlace);
-    action_id=r.command.action_id;
-    turn_time+=.1;
-    in=Frame(turn_time); in.line_centers.clear();
-    in.delivery_feedback={action_id,true,true,false};
-    r=turning.Step(in);
-  }
-  for(int sample=0;sample<10;++sample) {
-    turn_time+=.1;in=Frame(turn_time);in.line_centers.clear();r=turning.Step(in);
-  }
-  assert(r.command.action==MissionAction::kNone);
-  assert(r.command.mission_phase==4);
+  assert(sparse_forward_issued);
+  assert(r.line_in_recovery);
+  assert(!r.line_features.guide.valid);
 
   // one-shot gate는 기존 action ACK/DONE을 처리하되 READY queue와 DONE
   // successor를 새로 만들지 않는다.
@@ -1365,15 +1297,10 @@ int main() {
   assert(turn_result.goal_walk_actions_completed==1);
   turn_frame=Frame(2.3); turn_frame.line_centers.clear();
   turn_result=rotation_only.Step(turn_frame);
-  assert(turn_result.command.action==MissionAction::kTurnLeftInPlace ||
-         turn_result.command.action==MissionAction::kStepForwardRightOneHurdle);
-  const auto recovery_turn_id=turn_result.command.action_id;
-  turn_frame=Frame(3.9); turn_frame.line_centers.clear();
-  turn_frame.delivery_feedback={recovery_turn_id,true,true,false};
-  turn_result=rotation_only.Step(turn_frame);
+  // A failed 1s observation cannot issue a stale-score body turn.
+  assert(turn_result.command.action==MissionAction::kNone);
   assert(turn_result.goal_walk_actions_completed==1);
   assert(turn_result.active_mission==MissionType::kLine);
-  assert(turn_result.command.camera_request==CameraRequest::kNone);
 
   // Switching GOAL trial start mode only changes the next explicit Reset.
   {

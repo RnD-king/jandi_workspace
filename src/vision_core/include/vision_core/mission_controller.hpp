@@ -25,12 +25,30 @@
 
 namespace vision_core {
 
+struct LineLossRecoveryConfig {
+  double observation_sec{1.0};
+  int min_points{3};
+  bool ransac_enabled{false};
+  double offset_gain{0.3};
+  double heading_gain{0.3};
+  int forward_max_turns{2};
+  int body_max_turns{5};
+  int scan_max_yaw_deg{45};
+  double scan_move_sec{0.5};
+  double scan_hold_sec{0.5};
+  double scan_return_sec{0.5};
+  int scan_pause_window{4}, scan_pause_hits{2};
+  int scan_verify_window{10}, scan_verify_hits{5};
+  double scan_body_turn_deg{15.0};
+};
+
 struct MissionControllerConfig {
   FeatureConfig line_features;
   double ball_view_line_image_center_u{360.0};
   int ball_view_pitch_tick{1750};
   LineTrackingConfig line;
   LineP2pConfig line_p2p;
+  LineLossRecoveryConfig line_recovery;
   CurveSearchConfig curve_search;
   BallConfig ball;
   HurdleConfig hurdle;
@@ -112,6 +130,7 @@ struct MissionFrameInput {
   CameraFeedback camera_feedback;
   CameraScanFeedback camera_scan;
   std::optional<double> scan_ball_u; // filtered YOLO candidate, independent of FORWARD tracker
+  std::optional<double> scan_backboard_u; // YOLO-only GOAL scan cue, independent of Depth.
   // true이면 controller용 ActionExecutionFeedback을 직전 공통 command와
   // delivery_feedback에서 MissionController가 직접 만든다. 실행기 어댑터는
   // controller 상태를 건드리지 않고 ACK/READY/DONE만 반환하면 된다.
@@ -432,6 +451,17 @@ private:
   };
   std::array<ApproachEvidence,3> approach_evidence_;
   std::uint64_t next_approach_epoch_{1};
+  struct GoalHeadSearch {
+    enum class Phase { kIdle, kPendingLeft, kScanningLeft, kHoldingLeft,
+                       kPendingRight, kScanningRight, kHoldingRight,
+                       kReturnFound, kBodyTurn, kReobserve };
+    Phase phase{Phase::kIdle};
+    bool used{false}, started{false}, turn_left{false};
+    int turns_remaining{0};
+    std::uint64_t body_action_id{0};
+    double reobserve_started_sec{0.0};
+    std::deque<bool> pause_hits, verify_hits;
+  } goal_head_search_;
   bool approach_goal_probe_{false}, approach_return_ball_view_{false};
   int approach_goal_empty_frames_{0}, approach_goal_retry_after_{0};
   int approach_goal_empty_retries_{0};
@@ -454,6 +484,8 @@ private:
     kRecoveryObserve,
     kFinalHold,
     kScoreRecovery, // WALK 31/28 recovery for an excessive valid O/H score.
+    kRecoveryForward, // One of two bounded 32/36 forward-turn probes.
+    kRecoveryHeadScan,
   };
 
   MissionFrameResult StepWithLineImageCenter(
@@ -535,6 +567,7 @@ private:
   int ball_mission_index_{0}, goal_mission_index_{0};
   int course_curve_index_{1};
   bool goal_shot_done_{false};
+  int hurdle_crosses_completed_{0}; // Saturating count of physical HURDLE 16 DONE.
   struct CurveSearchState {
     enum class Phase { kIdle, kConfirm, kDelay, kDrain, kScan, kHold,
       kReturnFound, kReturnMiss, kProbeWalk, kBodyTurn, kBodyForward,
@@ -606,6 +639,18 @@ private:
   std::uint64_t ready_line_action_id_{0};
   bool line_failure_pending_done_{false};
   LineState line_state_{LineState::kNormal};
+  struct LineHeadSearch {
+    enum class Phase { kIdle, kPendingLeft, kScanningLeft, kHoldingLeft,
+                       kPendingRight, kScanningRight, kHoldingRight,
+                       kReturnFound, kAlignBody };
+    Phase phase{Phase::kIdle};
+    bool scan_started{false}, tried{false}, align_left{false};
+    int align_remaining{0};
+    std::uint64_t align_action_id{0};
+    std::deque<bool> pause_hits, verify_hits;
+  } line_head_search_;
+  int line_forward_recovery_issued_{0};
+  bool line_forward_recovery_pending_{false};
   std::optional<double> last_line_score_;
   std::deque<bool> actual_line_stability_history_;
   bool line_recovery_uses_visible_centers_{false};

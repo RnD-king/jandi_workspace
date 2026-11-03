@@ -243,6 +243,10 @@ enum class CameraRequest {
   kScanReturn = 8,
   kBallView = 9, // BALL near, lowered shoulders
   kBallViewLine = 10, // GOAL retry LINE, outward shoulders
+  kLineScanLeft = 11, // Both arms; FORWARD reference.
+  kLineScanRight = 12,
+  kGoalScanLeft = 13, // No arm motion; GOAL reference.
+  kGoalScanRight = 14,
 };
 struct CameraScanFeedback {
   std::uint64_t command_id{0};

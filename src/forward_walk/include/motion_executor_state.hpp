@@ -199,18 +199,23 @@ public:
     ScanPhase ScanState() const { return scan_phase_; }
     bool ScanActive() const { return scan_phase_ != ScanPhase::None; }
     double ScanCommandedYawDeg() const {
-        return (static_cast<double>(current_.yaw)-config_.forward.yaw)*360.0/4096.0;
+        return (static_cast<double>(current_.yaw)-scan_origin_.yaw)*360.0/4096.0;
     }
     void StartScan(bool left, int max_yaw_deg, double move_sec,
                    double hold_sec, double return_sec,
-                   const RawPositions& base, Clock::time_point now) {
+                   const RawPositions& base, Clock::time_point now,
+                   bool goal_view = false) {
         if(active_) throw std::runtime_error("camera already active");
         if(max_yaw_deg<1 || max_yaw_deg>90 || move_sec<=0 || hold_sec<0 || return_sec<=0 ||
             !std::isfinite(move_sec) || !std::isfinite(hold_sec) || !std::isfinite(return_sec))
             throw std::invalid_argument("invalid scan configuration");
+        scan_origin_=goal_view ? config_.goal : config_.forward;
         const int sign=left ? 1 : -1; // Robot-mounted yaw: positive tick delta scans left.
-        scan_far_={std::clamp(config_.forward.yaw + static_cast<int>(
-                      std::lround(sign*max_yaw_deg*4096.0/360.0)),0,4095),config_.forward.pitch};
+        const int proposed=scan_origin_.yaw + static_cast<int>(
+            std::lround(sign*max_yaw_deg*4096.0/360.0));
+        if(proposed<0 || proposed>4095)
+            throw std::invalid_argument("scan yaw target outside 0..4095");
+        scan_far_={proposed,scan_origin_.pitch};
         scan_move_sec_=move_sec;scan_hold_sec_=hold_sec;scan_return_sec_=return_sec;
         paused_was_dwell_=paused_was_returning_=false;
         current_={base.at(config_.yaw_id),base.at(config_.pitch_id)};
@@ -236,12 +241,12 @@ public:
                 std::chrono::duration<double>(scan_hold_sec_));
         } else if(paused_was_returning_) {
             scan_phase_=ScanPhase::Returning;
-            const double full=std::max(1.0,std::abs(double(scan_far_.yaw-config_.forward.yaw)));
-            const double remaining=std::abs(double(current_.yaw-config_.forward.yaw))/full;
-            BeginSegment(config_.forward,std::max(0.02,scan_return_sec_*remaining),now);
+            const double full=std::max(1.0,std::abs(double(scan_far_.yaw-scan_origin_.yaw)));
+            const double remaining=std::abs(double(current_.yaw-scan_origin_.yaw))/full;
+            BeginSegment(scan_origin_,std::max(0.02,scan_return_sec_*remaining),now);
         } else {
             scan_phase_=ScanPhase::Outbound;
-            const double full=std::max(1.0,std::abs(double(scan_far_.yaw-config_.forward.yaw)));
+            const double full=std::max(1.0,std::abs(double(scan_far_.yaw-scan_origin_.yaw)));
             const double remaining=std::abs(double(scan_far_.yaw-current_.yaw))/full;
             BeginSegment(scan_far_,std::max(0.02,scan_move_sec_*remaining),now);
         }
@@ -251,7 +256,7 @@ public:
         if(scan_phase_==ScanPhase::None || scan_phase_==ScanPhase::Returning ||
            scan_phase_==ScanPhase::Verify) return false;
         scan_phase_=ScanPhase::Returning;
-        BeginSegment(config_.forward,scan_return_sec_,now);
+        BeginSegment(scan_origin_,scan_return_sec_,now);
         return true;
     }
     explicit CameraMotion(CameraConfig config = {}) : config_(config) { config_.Validate(); }
@@ -268,7 +273,7 @@ public:
         if (scan_phase_==ScanPhase::Dwell) {
             if(now<dwell_until_) return Result::Running;
             scan_phase_=ScanPhase::Returning;
-            BeginSegment(config_.forward,scan_return_sec_,now);
+            BeginSegment(scan_origin_,scan_return_sec_,now);
         }
         if (scan_phase_==ScanPhase::Verify) return Result::Verify;
         const auto result=UpdateSegment(now);
@@ -348,7 +353,7 @@ private:
         return Result::Command;
     }
     ScanPhase scan_phase_{ScanPhase::None};
-    CameraPose scan_far_{};
+    CameraPose scan_far_{},scan_origin_{};
     double scan_move_sec_{0.5},scan_hold_sec_{0.5},scan_return_sec_{0.5};
     bool paused_was_dwell_{false},paused_was_returning_{false};
     Clock::time_point dwell_until_{};

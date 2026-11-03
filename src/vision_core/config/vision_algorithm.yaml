@@ -30,6 +30,25 @@ vision_algorithm:
       curve_min_v_span_px: 80.0 # 곡률 계산에 세로 분포 폭
       curve_local_fit_points: 4 # 곡률 표시용 부분 직선 계산의 점 개수
 
+    # LINE loss recovery is separate from normal four-point RANSAC + 10/5.
+    recovery:
+      observation_sec: 1.0
+      min_points: 3
+      ransac_enabled: false
+      offset_gain: 0.3
+      heading_gain: 0.3
+      forward_max_turns: 2
+      body_max_turns: 5
+      scan_max_yaw_deg: 45
+      scan_move_sec: 0.5
+      scan_hold_sec: 0.5
+      scan_return_sec: 0.5
+      scan_pause_window: 4
+      scan_pause_hits: 2
+      scan_verify_window: 10
+      scan_verify_hits: 5
+      scan_body_turn_deg: 15.0
+
     # Separate from the unchanged normal LINE RANSAC and O/H steering.
     curve_search:
       enabled: true
@@ -74,6 +93,8 @@ vision_algorithm:
       ready_lead_sec: 0.20 # 비전 관측 계산과 실행기 READY 발행이 함께 읽는 종료 전 여유 시간
       observation_start_ratio: 0.0 # ACK부터 마지막 READY까지 전체 프레임으로 10중 5 판정·유효 가이드 평균
 
+      # Legacy TURN configuration retained for manual/older tests;
+      # AUTO staged recovery below has its own independent parameters.
       # 유실 시 정지 관측·방향 탐색
       failure_observation_sec: 2.0 # 라인 복구 대기
       failure_min_valid_samples: 5 # 정상 LINE 판단에 필요한 최소 유효 O/H 표본 수
@@ -275,6 +296,19 @@ vision_algorithm:
       post_pickup_straight_blocks_required: 2 # 공 픽업 후 LINE 복귀부터 직진 묶음이 이 횟수만큼 DONE이면 GOAL 카메라; 0은 직진 조건 끔
       post_pickup_walk_fallback_actions: 3 # 직진 조건보다 먼저 전체 LINE 묶음이 이 횟수만큼 DONE이면 GOAL 카메라; 0은 즉시 진입
       entry_line_retry_max_attempts: 2 # 첫 GOAL 관측에 백보드가 전혀 없으면 FORWARD → LINE 1블록 DONE → 재관측. 추가 시도 한도, 0: 기존 복구
+
+      # GOAL AUTO search: no arm extension; yaw is relative to GOAL pose.
+      head_scan_max_yaw_deg: 25
+      head_scan_center_half_width_px: 50.0
+      head_scan_pause_window: 4
+      head_scan_pause_hits: 2
+      head_scan_verify_window: 10
+      head_scan_verify_hits: 7
+      head_scan_move_sec: 0.5
+      head_scan_hold_sec: 0.5
+      head_scan_return_sec: 0.5
+      head_scan_body_turn_one_threshold_deg: 10.0
+      head_scan_body_turn_two_threshold_deg: 20.0
 
       # 접근·카메라 전환
       target_u_px: 360.0 # 기존 GOAL controller 기준 유지

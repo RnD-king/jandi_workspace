@@ -7,5 +7,5 @@ uint8 VERIFY=5
 
 uint64 command_id
 uint8 phase
-# Last commanded (not measured) head yaw relative to FORWARD, degrees.
+# Last commanded (not measured) head yaw relative to scan origin (FORWARD or GOAL), degrees.
 float64 commanded_yaw_deg

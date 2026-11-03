@@ -790,7 +790,11 @@ private:
             return;
         }
         const bool scan=req==vision::msg::CameraCommand::SCAN_LEFT ||
-                        req==vision::msg::CameraCommand::SCAN_RIGHT;
+                        req==vision::msg::CameraCommand::SCAN_RIGHT ||
+                        req==vision::msg::CameraCommand::LINE_SCAN_LEFT ||
+                        req==vision::msg::CameraCommand::LINE_SCAN_RIGHT ||
+                        req==vision::msg::CameraCommand::GOAL_SCAN_LEFT ||
+                        req==vision::msg::CameraCommand::GOAL_SCAN_RIGHT;
         if(scan && (message->scan_max_yaw_deg<1 || message->scan_max_yaw_deg>90 ||
                     !std::isfinite(message->scan_move_sec) ||
                     !std::isfinite(message->scan_hold_sec) ||
@@ -831,25 +835,45 @@ private:
             // 추가 encoder 읽기 통신을 하지 않는다. 이 값은 실제 측정 위치가 아니라 목표 위치다.
             const auto now=std::chrono::steady_clock::now();
             if(scan) {
-                // One 90-degree elbow extension (17 left / 18 right) BEFORE yaw.
-                scan_elbow_id_=req==vision::msg::CameraCommand::SCAN_LEFT ? 17 : 18;
-                scan_elbow_home_tick_=last_sent_positions_.at(scan_elbow_id_);
-                const int sign=scan_elbow_id_==17 ? +1 : -1;
-                const int offset=static_cast<int>(std::lround(
-                    curve_scan_elbow_angle_deg_*4096.0/360.0));
-                const int target=scan_elbow_home_tick_+sign*offset;
-                if(target<0 || target>4095)
-                    throw std::invalid_argument("curve scan elbow target outside 0..4095");
-                const double minimum=std::abs(target-scan_elbow_home_tick_)*
-                                     360.0/4096.0/60.0;
-                elbow_tween_.Start(last_sent_positions_,{{scan_elbow_id_,target}},
-                    std::max(curve_scan_elbow_duration_sec_,minimum),now);
-                scan_left_=req==vision::msg::CameraCommand::SCAN_LEFT;
+                const bool line_scan=req==vision::msg::CameraCommand::LINE_SCAN_LEFT ||
+                                     req==vision::msg::CameraCommand::LINE_SCAN_RIGHT;
+                scan_goal_view_=req==vision::msg::CameraCommand::GOAL_SCAN_LEFT ||
+                                req==vision::msg::CameraCommand::GOAL_SCAN_RIGHT;
+                scan_left_=req==vision::msg::CameraCommand::SCAN_LEFT ||
+                           req==vision::msg::CameraCommand::LINE_SCAN_LEFT ||
+                           req==vision::msg::CameraCommand::GOAL_SCAN_LEFT;
                 scan_yaw_deg_=static_cast<int>(message->scan_max_yaw_deg);
                 scan_move_sec_=message->scan_move_sec;
                 scan_hold_sec_=message->scan_hold_sec;
                 scan_return_sec_=message->scan_return_sec;
-                scan_elbow_stage_=ScanElbowStage::kExtending;
+                scan_elbow_home_ticks_.clear();
+                P2PMotionPlayer::RawPositions targets;
+                double minimum=0.0;
+                // BALL: one side; LINE: both sides; GOAL: no elbow movement.
+                for (int id : {17,18}) {
+                    const bool extend=line_scan ||
+                        (!scan_goal_view_ && (scan_left_ ? id==17 : id==18));
+                    if(!extend) continue;
+                    const int home=last_sent_positions_.at(id);
+                    const int sign=id==17 ? +1 : -1;
+                    const int offset=static_cast<int>(std::lround(
+                        curve_scan_elbow_angle_deg_*4096.0/360.0));
+                    const int target=home+sign*offset;
+                    if(target<0 || target>4095)
+                        throw std::invalid_argument("scan elbow target outside 0..4095");
+                    scan_elbow_home_ticks_[id]=home;
+                    targets[id]=target;
+                    minimum=std::max(minimum,std::abs(target-home)*360.0/4096.0/60.0);
+                }
+                if(targets.empty()) {
+                    camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
+                        scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,true);
+                    scan_elbow_stage_=ScanElbowStage::kScanning;
+                } else {
+                    elbow_tween_.Start(last_sent_positions_,targets,
+                        std::max(curve_scan_elbow_duration_sec_,minimum),now);
+                    scan_elbow_stage_=ScanElbowStage::kExtending;
+                }
             } else {
                 camera_motion_->Start(req,last_sent_positions_,now);
                 camera_arm_forward_=req==vision::msg::CameraCommand::FORWARD ||
@@ -1005,7 +1029,7 @@ private:
         if(scan_elbow_stage_==ScanElbowStage::kExtending && !elbow_tween_.Active()) {
             // Start head scan only after the last arm-extension command is ready.
             camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
-                scan_hold_sec_,scan_return_sec_,last_sent_positions_,now);
+                scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_);
             scan_elbow_stage_=ScanElbowStage::kScanning;
         }
         // camera_result: Idle=재생 없음, Running=다음 단계/안정화 대기,
@@ -1076,17 +1100,22 @@ private:
                     dxl_->ReadRawPosition(camera_config_.yaw_id,5.0),
                     dxl_->ReadRawPosition(camera_config_.pitch_id,5.0)};
                 if (camera_motion_->ConfirmArrival(measured)) {
-                    if(scan_elbow_stage_==ScanElbowStage::kScanning) {
-                        // Camera returned physically. Restore elbow first,
-                        // then publish the original camera transaction DONE.
-                        const double minimum=std::abs(
-                            last_sent_positions_.at(scan_elbow_id_)-scan_elbow_home_tick_)*
-                            360.0/4096.0/60.0;
-                        elbow_tween_.Start(last_sent_positions_,
-                            {{scan_elbow_id_,scan_elbow_home_tick_}},
+                    if(scan_elbow_stage_==ScanElbowStage::kScanning &&
+                       !scan_elbow_home_ticks_.empty()) {
+                        P2PMotionPlayer::RawPositions targets;
+                        double minimum=0.0;
+                        for(const auto& pair:scan_elbow_home_ticks_) {
+                            targets[pair.first]=pair.second;
+                            minimum=std::max(minimum,
+                                std::abs(last_sent_positions_.at(pair.first)-pair.second)*
+                                360.0/4096.0/60.0);
+                        }
+                        elbow_tween_.Start(last_sent_positions_,targets,
                             std::max(curve_scan_elbow_duration_sec_,minimum),now);
                         scan_elbow_stage_=ScanElbowStage::kRestoring;
                     } else {
+                    if(scan_elbow_stage_==ScanElbowStage::kScanning)
+                        scan_elbow_stage_=ScanElbowStage::kIdle;
                     RCLCPP_INFO(get_logger(),"[CAMERA] DONE id=%llu target=(%d,%d) measured=(%d,%d)",
                         static_cast<unsigned long long>(camera_transactions_.active_id),
                         target.yaw,target.pitch,measured.yaw,measured.pitch);
@@ -1110,6 +1139,7 @@ private:
                                 vision::msg::CommandStatus::DONE);
             camera_transactions_.CompleteActive();
             scan_elbow_stage_=ScanElbowStage::kIdle;
+            scan_elbow_home_ticks_.clear();
         }
         if (body_result == P2PMotionPlayer::UpdateResult::kFinished) {
             if (startup_pose_in_progress_) {
@@ -1256,7 +1286,9 @@ private:
     bool camera_arm_forward_{true};
     enum class ScanElbowStage { kIdle, kExtending, kScanning, kRestoring };
     ScanElbowStage scan_elbow_stage_{ScanElbowStage::kIdle};
-    int scan_elbow_id_{0},scan_elbow_home_tick_{0},scan_yaw_deg_{0};
+    P2PMotionPlayer::RawPositions scan_elbow_home_ticks_;
+    int scan_yaw_deg_{0};
+    bool scan_goal_view_{false};
     bool scan_left_{true};
     double scan_move_sec_{0.5},scan_hold_sec_{0.5},scan_return_sec_{0.5};
     double curve_scan_elbow_angle_deg_{90.0},curve_scan_elbow_duration_sec_{1.5};

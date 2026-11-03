@@ -8,6 +8,10 @@ uint8 SCAN_RESUME=7
 uint8 SCAN_RETURN=8
 uint8 BALL_VIEW=9
 uint8 BALL_VIEW_LINE=10
+uint8 LINE_SCAN_LEFT=11
+uint8 LINE_SCAN_RIGHT=12
+uint8 GOAL_SCAN_LEFT=13
+uint8 GOAL_SCAN_RIGHT=14
 
 uint64 command_id
 uint8 request

@@ -44,6 +44,7 @@ YAML::Node AlgorithmSections(const YAML::Node &a) {
   if (map(a,"common")["camera"]) sections["camera"] = map(map(a, "common"), "camera");
   sections["line"] = map(line, "stability");
   sections["line_p2p"] = map(line, "walk");
+  if (line["recovery"]) sections["line_recovery"] = line["recovery"];
   if (line["curve_search"]) sections["curve_search"] = line["curve_search"];
   const auto common = map(a, "common");
   sections["command"] = map(common, "command");
@@ -235,6 +236,41 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     NonnegativeInt(c.curve_search.failure_lock_line_blocks,"curve_search.failure_lock_line_blocks");
     NonnegativeInt(c.curve_search.post_goal_rearm_line_blocks,"curve_search.post_goal_rearm_line_blocks");
   }
+  Positive(c.line_recovery.observation_sec, "line_recovery.observation_sec");
+  if(c.line_recovery.min_points!=3 || c.line_recovery.ransac_enabled)
+    throw std::runtime_error("LINE sparse recovery requires min_points=3 and RANSAC disabled");
+  Nonnegative(c.line_recovery.offset_gain, "line_recovery.offset_gain");
+  Nonnegative(c.line_recovery.heading_gain, "line_recovery.heading_gain");
+  PositiveInt(c.line_recovery.forward_max_turns, "line_recovery.forward_max_turns");
+  PositiveInt(c.line_recovery.body_max_turns, "line_recovery.body_max_turns");
+  if (c.line_recovery.scan_max_yaw_deg<1 || c.line_recovery.scan_max_yaw_deg>90)
+    throw std::runtime_error("line_recovery.scan_max_yaw_deg must be [1,90]");
+  Positive(c.line_recovery.scan_move_sec,"line_recovery.scan_move_sec");
+  Nonnegative(c.line_recovery.scan_hold_sec,"line_recovery.scan_hold_sec");
+  Positive(c.line_recovery.scan_return_sec,"line_recovery.scan_return_sec");
+  HitsWithinWindow(c.line_recovery.scan_pause_hits,c.line_recovery.scan_pause_window,
+      "line_recovery.scan_pause_hits","line_recovery.scan_pause_window");
+  HitsWithinWindow(c.line_recovery.scan_verify_hits,c.line_recovery.scan_verify_window,
+      "line_recovery.scan_verify_hits","line_recovery.scan_verify_window");
+  Positive(c.line_recovery.scan_body_turn_deg,"line_recovery.scan_body_turn_deg");
+  if(c.line_recovery.scan_body_turn_deg>180)
+    throw std::runtime_error("line_recovery.scan_body_turn_deg too large");
+  if(c.goal.head_scan_max_yaw_deg<1 || c.goal.head_scan_max_yaw_deg>90)
+    throw std::runtime_error("goal.head_scan_max_yaw_deg must be [1,90]");
+  Positive(c.goal.head_scan_center_half_width_px,"goal.head_scan_center_half_width_px");
+  HitsWithinWindow(c.goal.head_scan_pause_hits,c.goal.head_scan_pause_window,
+      "goal.head_scan_pause_hits","goal.head_scan_pause_window");
+  HitsWithinWindow(c.goal.head_scan_verify_hits,c.goal.head_scan_verify_window,
+      "goal.head_scan_verify_hits","goal.head_scan_verify_window");
+  Positive(c.goal.head_scan_move_sec,"goal.head_scan_move_sec");
+  Nonnegative(c.goal.head_scan_hold_sec,"goal.head_scan_hold_sec");
+  Positive(c.goal.head_scan_return_sec,"goal.head_scan_return_sec");
+  Nonnegative(c.goal.head_scan_body_turn_one_threshold_deg,"goal.head_scan_body_turn_one_threshold_deg");
+  Positive(c.goal.head_scan_body_turn_two_threshold_deg,"goal.head_scan_body_turn_two_threshold_deg");
+  if (c.goal.head_scan_body_turn_one_threshold_deg>=
+      c.goal.head_scan_body_turn_two_threshold_deg ||
+      c.goal.head_scan_body_turn_two_threshold_deg >= c.goal.head_scan_max_yaw_deg)
+    throw std::runtime_error("goal head scan turn thresholds must be ordered");
   PositiveInt(c.line_features.max_centers, "line_features.max_centers");
   if (!std::isfinite(c.ball_view_line_image_center_u) ||
       c.ball_view_line_image_center_u<0 || c.ball_view_line_image_center_u>=640.0)
@@ -567,6 +603,26 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(line, "line_stable_window", c.line.line_stable_window);
   Assign(line, "line_stable_min_hits", c.line.line_stable_min_hits);
 
+  const auto lr = a["line_recovery"];
+  if (lr && lr.IsMap()) {
+    Assign(lr,"observation_sec",c.line_recovery.observation_sec);
+    Assign(lr,"min_points",c.line_recovery.min_points);
+    Assign(lr,"ransac_enabled",c.line_recovery.ransac_enabled);
+    Assign(lr,"offset_gain",c.line_recovery.offset_gain);
+    Assign(lr,"heading_gain",c.line_recovery.heading_gain);
+    Assign(lr,"forward_max_turns",c.line_recovery.forward_max_turns);
+    Assign(lr,"body_max_turns",c.line_recovery.body_max_turns);
+    Assign(lr,"scan_max_yaw_deg",c.line_recovery.scan_max_yaw_deg);
+    Assign(lr,"scan_move_sec",c.line_recovery.scan_move_sec);
+    Assign(lr,"scan_hold_sec",c.line_recovery.scan_hold_sec);
+    Assign(lr,"scan_return_sec",c.line_recovery.scan_return_sec);
+    Assign(lr,"scan_pause_window",c.line_recovery.scan_pause_window);
+    Assign(lr,"scan_pause_hits",c.line_recovery.scan_pause_hits);
+    Assign(lr,"scan_verify_window",c.line_recovery.scan_verify_window);
+    Assign(lr,"scan_verify_hits",c.line_recovery.scan_verify_hits);
+    Assign(lr,"scan_body_turn_deg",c.line_recovery.scan_body_turn_deg);
+  }
+
   const auto lp = a["line_p2p"];
   Assign(lp, "left_repetitions", c.line_p2p.left_repetitions);
   Assign(lp, "straight_repetitions", c.line_p2p.straight_repetitions);
@@ -698,6 +754,19 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "post_pickup_straight_blocks_required", c.goal.post_pickup_straight_blocks_required);
   Assign(g, "post_pickup_walk_fallback_actions", c.goal.post_pickup_walk_fallback_actions);
   Assign(g, "entry_line_retry_max_attempts", c.goal.entry_line_retry_max_attempts);
+  if (g["head_scan_max_yaw_deg"]) {
+    Assign(g,"head_scan_max_yaw_deg",c.goal.head_scan_max_yaw_deg);
+    Assign(g,"head_scan_center_half_width_px",c.goal.head_scan_center_half_width_px);
+    Assign(g,"head_scan_pause_window",c.goal.head_scan_pause_window);
+    Assign(g,"head_scan_pause_hits",c.goal.head_scan_pause_hits);
+    Assign(g,"head_scan_verify_window",c.goal.head_scan_verify_window);
+    Assign(g,"head_scan_verify_hits",c.goal.head_scan_verify_hits);
+    Assign(g,"head_scan_move_sec",c.goal.head_scan_move_sec);
+    Assign(g,"head_scan_hold_sec",c.goal.head_scan_hold_sec);
+    Assign(g,"head_scan_return_sec",c.goal.head_scan_return_sec);
+    Assign(g,"head_scan_body_turn_one_threshold_deg",c.goal.head_scan_body_turn_one_threshold_deg);
+    Assign(g,"head_scan_body_turn_two_threshold_deg",c.goal.head_scan_body_turn_two_threshold_deg);
+  }
   Assign(g, "target_u_px", c.goal.target_u_px);
   Assign(g, "approach_u_deadband_px", c.goal.approach_u_deadband_px);
   if (g["fine_adjust_start_z_m"])
