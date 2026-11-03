@@ -1,9 +1,15 @@
 #include "vision/pixel_inspection.hpp"
 
-#include <cassert>
+#include <stdexcept>
 #include <cmath>
 #include <limits>
 #include <vector>
+
+namespace {
+void Require(bool condition, const char *message) {
+  if (!condition) throw std::runtime_error(message);
+}
+}
 
 int main() {
   const std::vector<vision::Detection> detections = {
@@ -16,19 +22,19 @@ int main() {
   };
   const auto selected =
       vision::SelectHighestConfidenceBall(detections, 1, 0.60f);
-  assert(selected.has_value());
-  assert(selected->confidence == 0.94f);
-  assert((vision::BoxCenter(selected->box) == cv::Point(160, 250)));
+  Require(selected.has_value(), "ball should be selected");
+  Require(selected->confidence == 0.94f, "highest-confidence ball must win");
+  Require(vision::BoxCenter(selected->box) == cv::Point(160, 250), "ball center");
 
   const auto stricter =
       vision::SelectHighestConfidenceBall(detections, 1, 0.95f);
-  assert(!stricter);
+  Require(!stricter, "confidence threshold");
 
   const auto absent =
       vision::SelectHighestConfidenceBall(detections, 2, 0.50f);
-  assert(!absent);
+  Require(!absent, "wrong class");
 
   const auto odd_center = vision::BoxCenter(cv::Rect(5, 7, 3, 5));
-  assert((odd_center == cv::Point(6, 9)));
+  Require(odd_center == cv::Point(6, 9), "odd-size box center");
   return 0;
 }
