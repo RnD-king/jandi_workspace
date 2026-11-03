@@ -367,8 +367,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
                        ActionCategory::kLocomotion,0,false};
       }
     } else if(scan.phase==Phase::kReobserve) {
-      // Wait for fresh settled GOAL RGB after the body turns; subsequent
-      // ordinary GOAL acquisition still requires the original 10/7 + Depth.
+      // Reconfirm the board in a fresh GOAL view after physical body turns.
       if(!idle || !camera.settled || camera.actual_mode!=CameraMode::kGoal ||
          input.now_sec+1e-9<scan.reobserve_started_sec+
              config_.post_motion_observation_sec)
@@ -376,6 +375,16 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       scan.phase=Phase::kIdle;
       approach_goal_empty_frames_=0;
       approach_evidence_={};
+      if(continuous_.mission==MissionType::kGoal && input.backboard_target) {
+        // A successful acquired-object scan starts a fresh approach episode;
+        // the old missing READY block must not force legacy recovery now.
+        continuous_.loss_pending=false;
+        continuous_.missing=0;
+        continuous_.hits.clear();continuous_.near_hits.clear();
+        continuous_.pose_hits.clear();
+        line_plan_.Reset();
+        continuous_.probe_used=false;
+      }
     }
     if(scan.phase!=Phase::kIdle) return result;
     // If a complete scan failed, let the original bounded return-to-LINE
@@ -417,10 +426,10 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   if (goal_view && input.backboard_target) {
     const double z=input.backboard_center_depth_m.value_or(input.goal_pose.valid ? input.goal_pose.z_m : 0);
     goal_depth_usable=std::isfinite(z) && z>0.05;
-    goal_guide=ObjectApproachGuide(*input.backboard_target,false,0,input.intrinsics,{},
-        input.image_width,input.image_height,config_.goal.auto_approach_reference_u_px,
-        line.guide.valid ? line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
-        input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
+    goal_guide=ObjectZoneGuide(*input.backboard_target,
+        config_.goal.auto_approach_center_u_px-config_.goal.auto_approach_half_width_px,
+        config_.goal.auto_approach_center_u_px+config_.goal.auto_approach_half_width_px,
+        cfg.steering_deadband_deg,input.image_width);
   }
   const std::array<MissionType,3> missions{MissionType::kBall,MissionType::kGoal,MissionType::kHurdle};
   const std::array<std::optional<ObjectTarget>,3> targets{input.ball_target,input.backboard_target,input.hurdle_target};
@@ -478,7 +487,10 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       // per-ID LINE admission mean for the single pre-lock loss probe.
       if(i==0) continuous_.last_ready_center=input.ball_entry_mean_center;
       acquired=true;
-      if (i==1) approach_goal_empty_retries_=0;
+      if (i==1) {
+        approach_goal_empty_retries_=0;
+        goal_head_search_.used=false; // Re-arm search for a later acquired GOAL loss.
+      }
       break;
     }
   }
@@ -574,6 +586,31 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
      continuous_.missing>config_.ball_candidate_tracking.missing_frame_limit)
     continuous_.loss_pending=true;
   const bool lost=continuous_.loss_pending;
+  // A GOAL already acquired during approach uses the same head scan as the
+  // first empty GOAL view before falling back to BALL_VIEW_LINE. All issued
+  // locomotion IDs must drain before a scan camera request can start.
+  if (i==1 && !continuous_.near && lost && !target && goal_view &&
+      !goal_head_search_.used && config_.goal.head_scan_enabled) {
+    line_plan_.Abort();
+    result.hold=true;
+    if (idle && !line_plan_.Outstanding()) {
+      goal_head_search_.used=true;
+      goal_head_search_.phase=GoalHeadSearch::Phase::kPendingLeft;
+    }
+    return result;
+  }
+  if (lost && i==1 && !continuous_.near && goal_head_search_.used &&
+      !target && idle && !line_plan_.Outstanding()) {
+    // Completed left/right scan found no board: do not enter a stale
+    // locked-object recovery loop; return to BALL_VIEW_LINE.
+    ReleaseContinuousApproach();
+    approach_return_ball_view_=true;
+    post_pickup_goal_line_gate_active_=true;
+    approach_goal_retry_after_=post_pickup_line_actions_completed_+1;
+    result.hold=true;
+    result.camera=CameraRequest::kBallViewLine;
+    return result;
+  }
   if (lost && !continuous_.locked && !continuous_.near) {
     line_plan_.Abort();result.hold=true;
     if (!idle) return result;
@@ -595,12 +632,16 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       } else {
         auto averaged_target=*continuous_.last;
         averaged_target.center_px=*continuous_.last_ready_center;
-        probe_guide=ObjectApproachGuide(averaged_target,false,0,
-            input.intrinsics,ApproachCameraPose{},input.image_width,input.image_height,
-            (i==1 ? config_.goal.auto_approach_reference_u_px :
-                last_line_image_center_u_),line.guide.valid ?
-                line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
-            input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
+        if(i==1)
+          probe_guide=ObjectZoneGuide(averaged_target,
+              config_.goal.auto_approach_center_u_px-config_.goal.auto_approach_half_width_px,
+              config_.goal.auto_approach_center_u_px+config_.goal.auto_approach_half_width_px,
+              cfg.steering_deadband_deg,input.image_width);
+        else {
+          const auto bounds=config_.ball.ApproachBounds(averaged_target.center_px.v,input.image_height);
+          probe_guide=ObjectZoneGuide(averaged_target,bounds.first,bounds.second,
+              cfg.steering_deadband_deg,input.image_width);
+        }
       }
       const auto direction=SteeringDecision(probe_guide).direction;
       const auto cruise=direction==CruiseDirection::kLeft ? MissionAction::kStepForwardLeft :
@@ -642,18 +683,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       continuous_.near_motion_id=0;
       continuous_.near_motion={};
       if (continuous_.near_actions.empty()) {
-        if (i==0 && continuous_.near_reobserve_after_turns) {
-          // The 1/2-turn group has physically finished. Only fresh pixels
-          // may decide whether the next move is a turn or a forward step.
-          continuous_.near_reobserve_after_turns=false;
-          continuous_.near_observing=false;
-          continuous_.near_qualified=false;
-          continuous_.near_observation_hits.clear();
-          continuous_.near_sum_u=continuous_.near_sum_v=0.0;
-          continuous_.near_valid_count=0;
-          continuous_.near_attempts=0;
-          return result;
-        }
+        // Fixed turn/forward chain is complete; only now change the camera.
         EnterContinuousMission(input,false);result.entered=true;
         return result;
       }
@@ -724,31 +754,31 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     const double v=continuous_.last->center_px.v;
     if (i==0) {
       const auto bounds=config_.ball.ApproachBounds(v,input.image_height);
+      const auto outer=config_.ball.ExtremeApproachBounds(v,input.image_height);
       const double u=continuous_.last->center_px.u;
       const bool left=u<bounds.first, right=u>bounds.second;
       if (left || right) {
-        if (continuous_.near_turn_batches>=3) {
-          // Three 1/2-turn groups in total, regardless of turn direction.
-          ReleaseContinuousApproach();
-          line_state_=LineState::kFinalHold;
-          return result;
-        }
-        ++continuous_.near_turn_batches;
-        continuous_.near_reobserve_after_turns=true;
         const auto turn=left ? MissionAction::kTurnLeftInPlace :
                                MissionAction::kStepForwardRightOneHurdle;
-        const double excess=left ? bounds.first-u : u-bounds.second;
+        const bool extreme=left ? u<outer.first : u>outer.second;
         continuous_.near_actions.push_back(turn);
-        if (excess>=config_.ball.approach_extreme_turn_margin_px)
-          continuous_.near_actions.push_back(turn);
-        // No blind forward after side turns: wait for a fresh observation.
+        if(extreme) continuous_.near_actions.push_back(turn);
+        // Side zones commit turn(s) + two forward steps + DOWN as one chain.
+        continuous_.near_actions.push_back(MissionAction::kStepForwardTwo);
       } else {
+        // Center is split by the lower horizontal line: 2 or 1 step.
         continuous_.near_actions.push_back(
             v<config_.ball.approach_direct_down_v_px ?
                 MissionAction::kStepForwardTwo : MissionAction::kStepForwardOne);
       }
     } else {
+      // HURDLE already had two near steps; add the configured physical steps
+      // before DOWN without inserting a new observation between actions.
       continuous_.near_actions.push_back(MissionAction::kStepForwardTwo);
+      for(int n=0;n<config_.hurdle.pre_down_extra_forward_steps/2;++n)
+        continuous_.near_actions.push_back(MissionAction::kStepForwardTwo);
+      if(config_.hurdle.pre_down_extra_forward_steps%2)
+        continuous_.near_actions.push_back(MissionAction::kStepForwardOne);
     }
     const auto first=continuous_.near_actions.front();
     continuous_.near_actions.pop_front();
@@ -771,12 +801,16 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     if (i!=2 && continuous_.last_ready_center && continuous_.last) {
       auto averaged_target=*continuous_.last;
       averaged_target.center_px=*continuous_.last_ready_center;
-      saved_guide=ObjectApproachGuide(averaged_target,false,0,input.intrinsics,
-          ApproachCameraPose{},input.image_width,input.image_height,
-          (i==1 ? config_.goal.auto_approach_reference_u_px :
-              last_line_image_center_u_),line.guide.valid ?
-              line.guide_reference_v_px : cfg.reference_v_ratio*input.image_height,
-          input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
+      if(i==1)
+        saved_guide=ObjectZoneGuide(averaged_target,
+            config_.goal.auto_approach_center_u_px-config_.goal.auto_approach_half_width_px,
+            config_.goal.auto_approach_center_u_px+config_.goal.auto_approach_half_width_px,
+            cfg.steering_deadband_deg,input.image_width);
+      else {
+        const auto bounds=config_.ball.ApproachBounds(averaged_target.center_px.v,input.image_height);
+        saved_guide=ObjectZoneGuide(averaged_target,bounds.first,bounds.second,
+            cfg.steering_deadband_deg,input.image_width);
+      }
     }
     const LineGuide hurdle_fallback=continuous_.hurdle_last_guide.valid ?
         continuous_.hurdle_last_guide : line.guide;
@@ -793,13 +827,9 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     result.display_guide=goal_guide;
     guide=goal_guide;
   } else if (i==0) {
-    const double reference_u=last_line_image_center_u_;
-    const double reference_v=line.guide.valid ? line.guide_reference_v_px :
-        cfg.reference_v_ratio*input.image_height;
-    guide=ObjectApproachGuide(*target,false,0,
-        input.intrinsics,ApproachCameraPose{},
-        input.image_width,input.image_height,reference_u,reference_v,
-        input.rectify_approach,input.approach_roll_rad,input.approach_pitch_rad);
+    const auto bounds=config_.ball.ApproachBounds(target->center_px.v,input.image_height);
+    guide=ObjectZoneGuide(*target,bounds.first,bounds.second,
+                          cfg.steering_deadband_deg,input.image_width);
   }
   result.guide=guide;
   result.guide_observed=guide.valid;
