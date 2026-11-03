@@ -1314,7 +1314,17 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     output.command =
         command_coordinator_.Compute(active_mission_, 903, pose, camera_request,
                                      input.delivery_feedback, input.now_sec);
-    last_command_ = output.command;
+    // The tuning adapter accepts transport feedback on a 20ms timer while
+    // RGB/YOLO consumes its ACK/DONE events one frame at a time. The
+    // coordinator may therefore be idle before the sensory DONE reaches us.
+    // Preserve the original setup-pose ID through those intermediate empty
+    // commands; otherwise the next frame cannot recognize pose_done and
+    // dispatches DEFAULT_POSE again with a fresh ID.
+    if (output.command.action_id != 0 ||
+        (input.delivery_feedback.done &&
+         input.delivery_feedback.action_id == last_command_.action_id) ||
+        last_command_.action_id == 0)
+      last_command_ = output.command;
     output.active_mission = active_mission_;
     output.has_ball = has_ball_;
     output.ball = ball_result_;

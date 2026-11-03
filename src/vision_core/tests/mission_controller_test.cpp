@@ -1226,6 +1226,45 @@ int main() {
   assert(!stage_probe.TestSetupPending());
   assert(stage_step.command.action_id==0);
 
+  // Regression: the adapter's transport timer may consume BOTH ACK and DONE
+  // before either reaches the slower RGB/YOLO FSM. The first RGB frame sees
+  // ACK with new commands gated; a later frame sees the original DONE.
+  // Never overwrite its matching pose ID or reissue DEFAULT_POSE.
+  MissionController delayed_stage(stage_cfg);
+  auto delayed_input=Frame(0);
+  delayed_input.camera_feedback={CameraMode::kBallView,true};
+  delayed_input.allow_new_body_actions=false;
+  delayed_input.allow_test_setup_body_actions=true;
+  auto delayed_result=delayed_stage.Step(delayed_input);
+  const auto delayed_id=delayed_result.command.action_id;
+  assert(delayed_id!=0 && delayed_result.command.action==MissionAction::kDefaultPoseMode);
+  delayed_stage.AcceptDeliveryFeedback({delayed_id,true,false,false},4.0);
+  delayed_stage.AcceptDeliveryFeedback({delayed_id,true,true,false},4.1);
+  delayed_input=Frame(1);
+  delayed_input.camera_feedback={CameraMode::kBallView,true};
+  delayed_input.allow_new_body_actions=false;
+  delayed_input.allow_test_setup_body_actions=true;
+  delayed_input.allow_new_commands=false; // DONE still queued on adapter
+  delayed_input.delivery_feedback={delayed_id,true,false,false};
+  delayed_result=delayed_stage.Step(delayed_input);
+  assert(delayed_result.command.action_id==0);
+  assert(delayed_stage.TestSetupPending());
+  delayed_input=Frame(1.1);
+  delayed_input.camera_feedback={CameraMode::kBallView,true};
+  delayed_input.allow_new_body_actions=false;
+  delayed_input.allow_test_setup_body_actions=true;
+  delayed_input.delivery_feedback={delayed_id,true,true,false};
+  delayed_result=delayed_stage.Step(delayed_input);
+  assert(!delayed_stage.TestSetupPending());
+  assert(delayed_result.command.action_id==0);
+  // A subsequent frame must stay past setup, not command another pose.
+  delayed_input=Frame(1.2);
+  delayed_input.camera_feedback={CameraMode::kBallView,true};
+  delayed_input.allow_new_body_actions=false;
+  delayed_input.delivery_feedback={};
+  delayed_result=delayed_stage.Step(delayed_input);
+  assert(delayed_result.command.action!=MissionAction::kDefaultPoseMode);
+
   // Without the dedicated stage setup permission manual tuning cannot
   // dispatch its initial pose automatically.
   MissionController gated_stage(stage_cfg);
