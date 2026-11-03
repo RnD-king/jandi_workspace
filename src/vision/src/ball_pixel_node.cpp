@@ -1,6 +1,7 @@
 // Read-only YOLO TensorRT ball pixel inspection. Enter freezes the displayed
 // image AND its inference result, so the reported center belongs to that image.
 #include "vision/yolo_trt_engine.hpp"
+#include "vision/pixel_inspection.hpp"
 #include "vision_core/config_loader.hpp"
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
@@ -63,22 +64,6 @@ std::string DefaultEnginePath() {
               << error.what() << std::endl;
   }
   return {};
-}
-
-std::optional<vision::Detection> BestBall(
-    const std::vector<vision::Detection> &detections,
-    int class_id, float confidence_threshold) {
-  std::optional<vision::Detection> best;
-  for (const auto &d : detections) {
-    if (d.class_id != class_id || d.confidence < confidence_threshold ||
-        d.box.width <= 0 || d.box.height <= 0) continue;
-    if (!best || d.confidence > best->confidence) best = d;
-  }
-  return best;
-}
-
-cv::Point BoxCenter(const cv::Rect &box) {
-  return {box.x + box.width / 2, box.y + box.height / 2};
 }
 
 void PrintLine(cv::Mat &image, const std::string &text, int row) {
@@ -194,7 +179,7 @@ private:
               d.box.width <= 0 || d.box.height <= 0) continue;
           ++count;
           cv::rectangle(view, d.box, cv::Scalar(0, 230, 0), 2);
-          const auto center = BoxCenter(d.box);
+          const auto center = vision::BoxCenter(d.box);
           cv::circle(view, center, 4, cv::Scalar(0, 0, 255), -1, cv::LINE_AA);
           char conf_text[64];
           std::snprintf(conf_text, sizeof(conf_text), "BALL %.2f", d.confidence);
@@ -215,7 +200,7 @@ private:
           PrintLine(view, "Inference unavailable on displayed frame", 2);
         } else if (frozen_) {
           if (selected_ball_) {
-            const auto center = BoxCenter(selected_ball_->box);
+            const auto center = vision::BoxCenter(selected_ball_->box);
             cv::drawMarker(view, center, cv::Scalar(0, 255, 255),
                            cv::MARKER_CROSS, 23, 2, cv::LINE_AA);
             std::snprintf(status, sizeof(status),
@@ -241,9 +226,9 @@ private:
         // Freeze exactly the image/detections just shown, NOT latest_.
         frozen_ = frame;
         selected_ball_ =
-            BestBall(frame->detections, ball_class_id_, ball_confidence_);
+            vision::SelectHighestConfidenceBall(frame->detections, ball_class_id_, ball_confidence_);
         if (selected_ball_) {
-          const auto center = BoxCenter(selected_ball_->box);
+          const auto center = vision::BoxCenter(selected_ball_->box);
           RCLCPP_INFO(get_logger(),
                       "FROZEN BALL center (u,v)=(%d,%d) confidence=%.3f stamp=%.9f bbox=(%d,%d,%d,%d)",
                       center.x, center.y, selected_ball_->confidence,
