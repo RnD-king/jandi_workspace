@@ -699,6 +699,13 @@ bool MissionController::ShouldDeferDone(
     return false;
   if (RepeatScope() != 0)
     return false;
+  // A committed BALL/HURDLE near chain is TURN(s) -> STEP(s) -> camera DOWN.
+  // The fixed successor is independent of intervening pixels. Keep actual
+  // matching DONE synchronization but do not insert a 1s observation after
+  // each intermediate locomotion command (including action 10/21/31/28).
+  if (active_mission_==MissionType::kLine && continuous_.near &&
+      continuous_.near_motion_id==feedback.action_id)
+    return false;
   // DOWN recovery owns its fresh post-DONE window and bounded FINE search.
   // Deliver real DONE now; a second generic window would delay every attempt.
   if (active_mission_==MissionType::kBall && ball_result_.mode==BallMode::kBallRecoveryDown)
