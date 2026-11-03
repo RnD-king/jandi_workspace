@@ -342,7 +342,7 @@ vision_algorithm:
   # COMMON: Depth 표본 → 객체 연결 → 명령 → 미션 공통 동작
   common:
     camera:
-      ball_view_pitch_tick: 1750 # ID22, yaw always follows DOWN
+      ball_view_pitch_tick: 2013 # ID22, yaw always follows DOWN  // 허들 2013 // 공 1750
     depth_roi_size_px: 5 # 공·허들 BBox 중심 Depth 표본의 한 변 길이 (px)
     object_association:
       # 동일 객체로 연결하는 허용 범위
