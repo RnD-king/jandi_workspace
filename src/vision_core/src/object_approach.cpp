@@ -22,6 +22,22 @@ Point2 Project(Vec p,const ApproachCameraPose& c,const Intrinsics& k) {
   return {k.cx+k.fx*x/camera_z,k.cy+k.fy*camera_y/camera_z};
 }
 }
+LineGuide ObjectZoneGuide(const ObjectTarget& t,double left,double right,
+                          double deadband_deg,int width) {
+  LineGuide guide;
+  if(width<=1 || !std::isfinite(t.center_px.u) || !std::isfinite(left) ||
+     !std::isfinite(right) || left>=right || !std::isfinite(deadband_deg) ||
+     deadband_deg<0.0) return guide;
+  const double center=(left+right)*0.5;
+  const double turn_deg=deadband_deg+1.0;
+  const int direction=t.center_px.u<left ? -1 : t.center_px.u>right ? 1 : 0;
+  guide.valid=true;
+  guide.confidence=t.confidence;
+  guide.offset=(t.center_px.u-center)/(0.5*width);
+  guide.heading_rad=direction*turn_deg*kRad;
+  return guide;
+}
+
 LineGuide ImageLineGuide(double slope,double u,double reference_u,int width,double confidence) {
   LineGuide result;
   if (width<=1 || !std::isfinite(slope) || !std::isfinite(u) || !std::isfinite(reference_u)) return result;
