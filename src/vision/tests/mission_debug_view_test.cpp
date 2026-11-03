@@ -187,6 +187,7 @@ int main() {
   const vision_core::CameraFeedback forward{vision_core::CameraMode::kForward,true};
   m.active_mission=vision_core::MissionType::kLine;
   m.approach_mission=vision_core::MissionType::kBall;
+  m.approach_near=true; // A latched near episode suppresses the far 3-zone overlay.
   m.approach_near_observing=true;
   auto observing=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
   // The near guide is drawn from the two-step threshold (v=240) down,
