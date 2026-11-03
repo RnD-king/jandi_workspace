@@ -224,9 +224,8 @@ int main() {
   Check(blue_goal.image.at<cv::Vec3b>(240,400)==cv::Vec3b(255,0,0),
         "GOAL virtual approach path must be blue");
   m.approach_path_guide.reset();
-  // The near-approach grid belongs to the LINE-to-BALL handoff, not the
-  // subsequent active BALL mission. It starts at the two-step row and its
-  // side columns are vertical at ApproachBounds(two_step_v).
+  // The BALL near guide is four diagonals only below v=240, not columns
+  // frozen at the threshold row. The center row remains split at v=355.
   m.active_mission=vision_core::MissionType::kLine;
   m.approach_mission=vision_core::MissionType::kBall;
   m.approach_near_observing=true;
@@ -234,50 +233,52 @@ int main() {
   Check(direct.image.at<cv::Vec3b>(355,380)!=cv::Vec3b(0,0,0) &&
         direct.image.at<cv::Vec3b>(355,250)==cv::Vec3b(0,0,0) &&
         direct.image.at<cv::Vec3b>(350,380)==cv::Vec3b(0,0,0),
-        "direct DOWN threshold must be a bounded horizontal segment");
-
-  // The same guide remains visible during the final near-approach motion.
+        "central 1/2 step threshold must be a bounded horizontal segment");
   c.ball.approach_direct_down_v_px=390;
   m.approach_near_observing=false;
   m.approach_near_final_motion=true;
   direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
   Check(direct.image.at<cv::Vec3b>(355,380)==cv::Vec3b(0,0,0) &&
         direct.image.at<cv::Vec3b>(390,380)!=cv::Vec3b(0,0,0),
-        "direct DOWN threshold did not move to the configured row");
+        "central 1/2 step threshold did not move to the configured row");
 
   c.ball.approach_left_top_u_px=390;c.ball.approach_right_top_u_px=530;
   direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
-  const auto near_bounds=c.ball.ApproachBounds(c.ball.approach_two_step_v_px,480);
-  const int near_left=static_cast<int>(std::lround(near_bounds.first));
-  const int near_right=static_cast<int>(std::lround(near_bounds.second));
-  Check(direct.image.at<cv::Vec3b>(300,near_left)!=cv::Vec3b(0,0,0) &&
-        direct.image.at<cv::Vec3b>(300,near_right)!=cv::Vec3b(0,0,0) &&
-        direct.image.at<cv::Vec3b>(300,290)==cv::Vec3b(0,0,0) &&
-        direct.image.at<cv::Vec3b>(100,390)==cv::Vec3b(0,0,0) &&
-        direct.image.at<cv::Vec3b>(100,530)==cv::Vec3b(0,0,0),
-        "near approach columns must use fixed bounds below the two-step row");
-  Check(direct.image.at<cv::Vec3b>(479,near_left)!=cv::Vec3b(0,0,0) &&
-        direct.image.at<cv::Vec3b>(479,near_right)!=cv::Vec3b(0,0,0),
-        "near approach columns must extend to the bottom unchanged");
+  const auto at300=c.ball.ApproachBounds(300,480);
+  const int left300=static_cast<int>(std::lround(at300.first));
+  const int right300=static_cast<int>(std::lround(at300.second));
+  Check(direct.image.at<cv::Vec3b>(300,left300)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(300,right300)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(100,390)==cv::Vec3b(0,0,0),
+        "near boundaries are not the configured converging diagonals");
+  const int bottom_left=static_cast<int>(std::lround(c.ball.ApproachBounds(479,480).first));
+  const int bottom_right=static_cast<int>(std::lround(c.ball.ApproachBounds(479,480).second));
+  Check(direct.image.at<cv::Vec3b>(479,bottom_left)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(479,bottom_right)!=cv::Vec3b(0,0,0),
+        "near diagonal boundaries did not terminate at configured bottom edges");
+  const auto outer=c.ball.ExtremeApproachBounds(300,480);
+  Check(direct.image.at<cv::Vec3b>(300,static_cast<int>(std::lround(outer.first)))!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(300,static_cast<int>(std::lround(outer.second)))!=cv::Vec3b(0,0,0),
+        "outer near 2-turn diagonal bands are absent");
 
   c.ball.approach_left_top_u_px=450;
   direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
   const int shifted_left=static_cast<int>(std::lround(
-      c.ball.ApproachBounds(c.ball.approach_two_step_v_px,480).first));
+      c.ball.ApproachBounds(300,480).first));
   Check(direct.image.at<cv::Vec3b>(300,shifted_left)!=cv::Vec3b(0,0,0) &&
-        direct.image.at<cv::Vec3b>(300,near_left)==cv::Vec3b(0,0,0) &&
-        direct.image.at<cv::Vec3b>(300,near_right)!=cv::Vec3b(0,0,0),
-        "left top endpoint tuning must shift only the left near column");
+        direct.image.at<cv::Vec3b>(300,left300)==cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(300,right300)!=cv::Vec3b(0,0,0),
+        "left top endpoint tuning did not shift only the left diagonal");
 
-  // DOWN camera and active BALL mission must not retain LINE near-approach guides.
+  // The near guides must disappear in DOWN view and after active BALL starts.
   direct=vision::RenderMissionDebug(image,empty,{},c,{},m,camera,{},state);
   Check(direct.image.at<cv::Vec3b>(390,380)==cv::Vec3b(0,0,0) &&
         direct.image.at<cv::Vec3b>(300,shifted_left)==cv::Vec3b(0,0,0),
-        "near LINE approach guide leaked into DOWN camera");
+        "near approach guide leaked into DOWN camera");
   m.active_mission=vision_core::MissionType::kBall;
   direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
   Check(direct.image.at<cv::Vec3b>(390,380)==cv::Vec3b(0,0,0),
-        "near LINE approach guide leaked into active BALL");
+        "near approach guide leaked into active BALL");
   m.approach_near_final_motion=false;
   m.approach_mission=vision_core::MissionType::kNone;
   m.active_mission=vision_core::MissionType::kGoal;
