@@ -160,6 +160,9 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.hurdle.down_one_step_v_px >= c.hurdle.fine_mode_v_px)
     throw std::runtime_error("hurdle DOWN thresholds must be ordered");
   Nonnegative(c.hurdle.approach_short_v_px, "hurdle.approach_short_v_px");
+  NonnegativeInt(c.hurdle.pre_down_extra_forward_steps, "hurdle.pre_down_extra_forward_steps");
+  if (c.hurdle.pre_down_extra_forward_steps>6)
+    throw std::runtime_error("hurdle.pre_down_extra_forward_steps must be <= 6");
   PositiveInt(c.hurdle.down_search_max_steps, "hurdle.down_search_max_steps");
   Nonnegative(c.hurdle.down_search_inter_action_hold_sec, "hurdle.down_search_inter_action_hold_sec");
   Positive(c.hurdle.recovery_observation_sec, "hurdle.recovery_observation_sec");
@@ -345,6 +348,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     throw std::runtime_error("ball approach top endpoints must be ordered left < right");
   Nonnegative(c.ball.upper_acquire_v_px, "ball.upper_acquire_v_px");
   Nonnegative(c.ball.approach_extreme_turn_margin_px, "ball.approach_extreme_turn_margin_px");
+  Nonnegative(c.ball.approach_extreme_turn_top_margin_px, "ball.approach_extreme_turn_top_margin_px");
   Nonnegative(c.ball.fine_side_two_step_margin_px, "ball.fine_side_two_step_margin_px");
   if (c.ball.fine_motion.max_repetitions<1 || c.ball.fine_motion.max_repetitions>3)
     throw std::runtime_error("ball.fine_motion.max_repetitions must be in [1,3]");
@@ -444,10 +448,25 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   NonnegativeInt(c.goal.entry_line_retry_max_attempts, "goal.entry_line_retry_max_attempts");
   Nonnegative(c.goal.target_u_px, "goal.target_u_px");
   Nonnegative(c.goal.auto_approach_reference_u_px, "goal.auto_approach_reference_u_px");
+  Nonnegative(c.goal.auto_approach_center_u_px, "goal.auto_approach_center_u_px");
+  Nonnegative(c.goal.auto_approach_half_width_px, "goal.auto_approach_half_width_px");
   Nonnegative(c.goal.approach_u_deadband_px, "goal.approach_u_deadband_px");
   Nonnegative(c.goal.hoop_radius_m, "goal.hoop_radius_m");
   Finite(c.goal.throw_landing_x_m, "goal.throw_landing_x_m");
   Positive(c.goal.throw_landing_z_m, "goal.throw_landing_z_m");
+  Finite(c.goal.waist_axis_in_camera_x_m,"goal.waist_axis_in_camera_x_m");
+  Finite(c.goal.waist_axis_in_camera_z_m,"goal.waist_axis_in_camera_z_m");
+  if (c.goal.fine_motion.max_repetitions<1 || c.goal.fine_motion.max_repetitions>3)
+    throw std::runtime_error("goal.fine_motion.max_repetitions must be in [1,3]");
+  const std::array<std::pair<const char*,Point2>,4> goal_fine_effects{{
+      {"forward",c.goal.fine_motion.forward_delta_m},
+      {"backward",c.goal.fine_motion.backward_delta_m},
+      {"left",c.goal.fine_motion.left_delta_m},
+      {"right",c.goal.fine_motion.right_delta_m}}};
+  for(const auto& effect:goal_fine_effects){
+    Finite(effect.second.u,(std::string("goal.fine_motion.")+effect.first+"_delta_x_m").c_str());
+    Finite(effect.second.v,(std::string("goal.fine_motion.")+effect.first+"_delta_z_m").c_str());
+  }
   Nonnegative(c.goal.position_tolerance_m, "goal.position_tolerance_m");
   Nonnegative(c.goal.shoot_yaw_limit_deg, "goal.shoot_yaw_limit_deg");
   Nonnegative(c.goal.recovery_center_tolerance_px,
@@ -691,6 +710,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "upper_acquire_v_px", c.ball.upper_acquire_v_px);
   if (b["approach_extreme_turn_margin_px"])
     Assign(b, "approach_extreme_turn_margin_px", c.ball.approach_extreme_turn_margin_px);
+  if (b["approach_extreme_turn_top_margin_px"])
+    Assign(b,"approach_extreme_turn_top_margin_px",c.ball.approach_extreme_turn_top_margin_px);
   Assign(b, "fine_side_two_step_margin_px", c.ball.fine_side_two_step_margin_px);
   const auto fine_motion=b["fine_motion"];
   Assign(fine_motion,"max_repetitions",c.ball.fine_motion.max_repetitions);
@@ -740,6 +761,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "down_one_step_v_px", c.hurdle.down_one_step_v_px);
   Assign(h, "fine_mode_v_px", c.hurdle.fine_mode_v_px);
   Assign(h, "approach_short_v_px", c.hurdle.approach_short_v_px);
+  if(h["pre_down_extra_forward_steps"])
+    Assign(h,"pre_down_extra_forward_steps",c.hurdle.pre_down_extra_forward_steps);
   Assign(h, "down_search_max_steps", c.hurdle.down_search_max_steps);
   Assign(h, "down_search_inter_action_hold_sec", c.hurdle.down_search_inter_action_hold_sec);
   Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
@@ -778,6 +801,10 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   c.goal.auto_approach_reference_u_px=c.line_features.image_center_u;
   if(g && g["auto_approach_reference_u_px"])
     Assign(g,"auto_approach_reference_u_px",c.goal.auto_approach_reference_u_px);
+  if(g && g["auto_approach_center_u_px"])
+    Assign(g,"auto_approach_center_u_px",c.goal.auto_approach_center_u_px);
+  if(g && g["auto_approach_half_width_px"])
+    Assign(g,"auto_approach_half_width_px",c.goal.auto_approach_half_width_px);
   Assign(g, "edge_margin_px", c.goal.edge_margin_px);
   Assign(g, "trial_start_goal", c.goal_trial_start_goal);
   Assign(g, "test_mission_index", c.test_goal_mission_index);
@@ -822,6 +849,22 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "hoop_radius_m", c.goal.hoop_radius_m);
   Assign(g, "throw_landing_x_m", c.goal.throw_landing_x_m);
   Assign(g, "throw_landing_z_m", c.goal.throw_landing_z_m);
+  if(g["waist_axis_in_camera_x_m"])
+    Assign(g,"waist_axis_in_camera_x_m",c.goal.waist_axis_in_camera_x_m);
+  if(g["waist_axis_in_camera_z_m"])
+    Assign(g,"waist_axis_in_camera_z_m",c.goal.waist_axis_in_camera_z_m);
+  const auto goal_fine=g["fine_motion"];
+  if(goal_fine){
+    Assign(goal_fine,"max_repetitions",c.goal.fine_motion.max_repetitions);
+    Assign(goal_fine,"forward_delta_x_m",c.goal.fine_motion.forward_delta_m.u);
+    Assign(goal_fine,"forward_delta_z_m",c.goal.fine_motion.forward_delta_m.v);
+    Assign(goal_fine,"backward_delta_x_m",c.goal.fine_motion.backward_delta_m.u);
+    Assign(goal_fine,"backward_delta_z_m",c.goal.fine_motion.backward_delta_m.v);
+    Assign(goal_fine,"left_delta_x_m",c.goal.fine_motion.left_delta_m.u);
+    Assign(goal_fine,"left_delta_z_m",c.goal.fine_motion.left_delta_m.v);
+    Assign(goal_fine,"right_delta_x_m",c.goal.fine_motion.right_delta_m.u);
+    Assign(goal_fine,"right_delta_z_m",c.goal.fine_motion.right_delta_m.v);
+  }
   Assign(g, "position_tolerance_m", c.goal.position_tolerance_m);
   Assign(g, "shoot_yaw_limit_deg", c.goal.shoot_yaw_limit_deg);
   Assign(g, "recovery_center_tolerance_px", c.goal.recovery_center_tolerance_px);
