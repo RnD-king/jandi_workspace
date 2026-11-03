@@ -11,6 +11,7 @@
 #include <exception>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 class ClickPixelNode final : public rclcpp::Node {
