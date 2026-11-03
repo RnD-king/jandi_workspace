@@ -596,6 +596,36 @@ int main(int argc, char **argv) {
   catch (const std::runtime_error &) { rejected_straight_gate = true; }
   assert(rejected_straight_gate);
 
+  // New grouped YAML is polygon-first, yet the fixed legacy fixture keeps
+  // working without polygon keys. Parse polygon point sequences and reject
+  // malformed geometry or unsafe shrink percentages.
+  {
+    auto root=GroupedFixture(text.str());
+    auto b=root["vision_algorithm"]["ball"]["control"];
+    for(const auto* field:{"pickup_u1_px","pickup_u2_px","pickup_v1_px",
+                           "pickup_v2_px","pickup_top_inset_px"})
+      b.remove(field);
+    b["pickup_polygon_px"]=YAML::Load(
+        "[[384,338],[370,282],[394,256],[438,254],[450,298],[433,338]]");
+    b["pickup_shrink_percent"]=7.0;
+    const auto poly=LoadText(YAML::Dump(root));
+    assert(poly.ball.pickup_polygon.size()==6);
+    assert(poly.ball.pickup_polygon[0].u==384 &&
+           poly.ball.pickup_polygon[0].v==338);
+    assert(poly.ball.pickup_shrink_percent==7.0);
+    auto invalid=poly;
+    invalid.ball.pickup_shrink_percent=100.0;
+    bool rejected=false;
+    try {vision_core::ValidateAlgorithmConfig(invalid);}
+    catch(const std::runtime_error&) {rejected=true;}
+    assert(rejected);
+    b["pickup_polygon_px"]=YAML::Load(
+        "[[100,100],[200,200],[100,200],[200,100]]");
+    rejected=false;
+    try {(void)LoadText(YAML::Dump(root));}
+    catch(const std::runtime_error&) {rejected=true;}
+    assert(rejected);
+  }
   auto relaxed_association = c;
   relaxed_association.object_association.max_center_distance_norm = 1.2;
   vision_core::ValidateAlgorithmConfig(relaxed_association);

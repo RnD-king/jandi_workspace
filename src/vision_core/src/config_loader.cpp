@@ -362,25 +362,40 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     throw std::runtime_error("ball.approach_direct_down_v_px must exceed ball.approach_two_step_v_px");
   PositiveInt(c.ball.pickup_max_attempts, "ball.pickup_max_attempts");
   Nonnegative(c.ball.pickup_shrink_step_px, "ball.pickup_shrink_step_px");
+  if (!std::isfinite(c.ball.pickup_shrink_percent) || c.ball.pickup_shrink_percent < 0.0 ||
+      c.ball.pickup_shrink_percent >= 100.0)
+    throw std::runtime_error("ball pickup shrink percent must be in [0,100)");
   NonnegativeInt(c.ball.pickup_shrink_max_failures, "ball.pickup_shrink_max_failures");
   HitsWithinWindow(c.ball.pickup_verify_min_hits, c.ball.stable_window,
                    "ball.pickup_verify_min_hits", "ball.stable_window");
-  Nonnegative(c.ball.pickup_u1_px, "ball.pickup_u1_px");
-  Nonnegative(c.ball.pickup_u2_px, "ball.pickup_u2_px");
-  Nonnegative(c.ball.pickup_top_inset_px, "ball.pickup_top_inset_px");
-  Nonnegative(c.ball.pickup_v1_px, "ball.pickup_v1_px");
-  Nonnegative(c.ball.pickup_v2_px, "ball.pickup_v2_px");
-  if (c.ball.pickup_top_inset_px * 2 >= c.ball.pickup_u2_px - c.ball.pickup_u1_px &&
-      c.ball.pickup_top_inset_px > 0.0)
-    throw std::runtime_error("ball pickup top inset must leave positive top width");
-  if (c.ball.pickup_u1_px >= c.ball.pickup_u2_px ||
-      c.ball.pickup_v1_px >= c.ball.pickup_v2_px)
-    throw std::runtime_error("ball pickup edges require u1 < u2 and v1 < v2");
-  if (c.ball.pickup_shrink_enabled) {
-    const auto smallest=c.ball.PickupRegionAfterFailures(c.ball.pickup_shrink_max_failures);
-    if (smallest.pickup_u2_px-smallest.pickup_u1_px <= 2*smallest.pickup_top_inset_px ||
-        smallest.pickup_v1_px >= smallest.pickup_v2_px)
-      throw std::runtime_error("ball pickup shrink must preserve positive trapezoid width and height");
+  if (!c.ball.pickup_polygon.empty()) {
+    try {
+      ValidatePickupPolygon(c.ball.pickup_polygon);
+      if (c.ball.pickup_shrink_enabled && c.ball.pickup_shrink_max_failures>0)
+        ValidatePickupPolygon(c.ball.PickupRegionAfterFailures(
+            c.ball.pickup_shrink_max_failures).pickup_polygon);
+    } catch(const std::exception& error) {
+      throw std::runtime_error(std::string("ball pickup polygon: ")+error.what());
+    }
+  } else {
+    // Older fixture/YAML without pickup_polygon_px retains the trapezoid.
+    Nonnegative(c.ball.pickup_u1_px, "ball.pickup_u1_px");
+    Nonnegative(c.ball.pickup_u2_px, "ball.pickup_u2_px");
+    Nonnegative(c.ball.pickup_top_inset_px, "ball.pickup_top_inset_px");
+    Nonnegative(c.ball.pickup_v1_px, "ball.pickup_v1_px");
+    Nonnegative(c.ball.pickup_v2_px, "ball.pickup_v2_px");
+    if (c.ball.pickup_top_inset_px * 2 >= c.ball.pickup_u2_px - c.ball.pickup_u1_px &&
+        c.ball.pickup_top_inset_px > 0.0)
+      throw std::runtime_error("ball pickup top inset must leave positive top width");
+    if (c.ball.pickup_u1_px >= c.ball.pickup_u2_px ||
+        c.ball.pickup_v1_px >= c.ball.pickup_v2_px)
+      throw std::runtime_error("ball pickup edges require u1 < u2 and v1 < v2");
+    if (c.ball.pickup_shrink_enabled) {
+      const auto smallest=c.ball.PickupRegionAfterFailures(c.ball.pickup_shrink_max_failures);
+      if (smallest.pickup_u2_px-smallest.pickup_u1_px <= 2*smallest.pickup_top_inset_px ||
+          smallest.pickup_v1_px >= smallest.pickup_v2_px)
+        throw std::runtime_error("ball pickup shrink must preserve positive trapezoid width and height");
+    }
   }
   Nonnegative(c.ball.recovery_center_tolerance_px,
        "ball.recovery_center_tolerance_px");
@@ -695,13 +710,30 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     Assign(b,"pickup_shrink_enabled",c.ball.pickup_shrink_enabled);
   if (b["pickup_shrink_step_px"])
     Assign(b,"pickup_shrink_step_px",c.ball.pickup_shrink_step_px);
+  if (b["pickup_shrink_percent"])
+    Assign(b,"pickup_shrink_percent",c.ball.pickup_shrink_percent);
   if (b["pickup_shrink_max_failures"])
     Assign(b,"pickup_shrink_max_failures",c.ball.pickup_shrink_max_failures);
-  Assign(b, "pickup_u1_px", c.ball.pickup_u1_px);
-  Assign(b, "pickup_u2_px", c.ball.pickup_u2_px);
-  if (b["pickup_top_inset_px"]) Assign(b, "pickup_top_inset_px", c.ball.pickup_top_inset_px);
-  Assign(b, "pickup_v1_px", c.ball.pickup_v1_px);
-  Assign(b, "pickup_v2_px", c.ball.pickup_v2_px);
+  if (b["pickup_polygon_px"]) {
+    const auto vertices=b["pickup_polygon_px"];
+    if (!vertices.IsSequence())
+      throw std::runtime_error("ball pickup_polygon_px must be a YAML point sequence");
+    try {
+      for (const auto& xy:vertices) {
+        if (!xy.IsSequence() || xy.size()!=2)
+          throw std::runtime_error("ball pickup_polygon_px entries must be [u,v]");
+        c.ball.pickup_polygon.push_back({xy[0].as<double>(),xy[1].as<double>()});
+      }
+    } catch (const YAML::Exception& error) {
+      throw std::runtime_error(std::string("invalid ball pickup_polygon_px: ")+error.what());
+    }
+  } else {
+    Assign(b, "pickup_u1_px", c.ball.pickup_u1_px);
+    Assign(b, "pickup_u2_px", c.ball.pickup_u2_px);
+    if (b["pickup_top_inset_px"]) Assign(b, "pickup_top_inset_px", c.ball.pickup_top_inset_px);
+    Assign(b, "pickup_v1_px", c.ball.pickup_v1_px);
+    Assign(b, "pickup_v2_px", c.ball.pickup_v2_px);
+  }
   Assign(b, "recovery_center_tolerance_px", c.ball.recovery_center_tolerance_px);
 
   const auto h = a["hurdle"];

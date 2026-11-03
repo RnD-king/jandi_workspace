@@ -1,5 +1,6 @@
 #pragma once
 #include "vision_core/types.hpp"
+#include "vision_core/pickup_polygon.hpp"
 
 namespace vision_core {
 // Measured displacement of the BALL CENTER in the DOWN image after one
@@ -20,4 +21,10 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
     Point2 center,double u1,double u2,double v1,double v2,
     int image_width,int image_height,int repetition_limit=3,
     double top_inset_px=0.0);
+// Calibrated predictions scored against the same arbitrary pickup N-gon
+// used for PICK admission and debug rendering. A candidate must improve
+// every intermediate step; entering the polygon beats merely approaching it.
+BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
+    Point2 center,const PickupPolygon& polygon,
+    int image_width,int image_height,int repetition_limit=3);
 } // namespace vision_core

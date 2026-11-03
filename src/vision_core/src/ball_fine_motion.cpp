@@ -75,4 +75,62 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
   }
   return best;
 }
+
+BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
+    Point2 center,const PickupPolygon& polygon,
+    int image_width,int image_height,int repetition_limit) {
+  BallFineMotionPlan best;
+  if(image_width<=1 || image_height<=1 || polygon.size()<3 ||
+     !std::isfinite(center.u) || !std::isfinite(center.v) ||
+     center.u<0 || center.u>=image_width || center.v<0 || center.v>=image_height ||
+     PickupPolygonContains(polygon,center))
+    return best;
+  const std::array<MissionAction,4> actions{MissionAction::kStepForwardHalf,
+      MissionAction::kStepBack,MissionAction::kLeftSideStep,MissionAction::kRightSideStep};
+  const std::array<Point2,4> deltas{config.forward_delta_px,config.backward_delta_px,
+      config.left_delta_px,config.right_delta_px};
+  const int limit=std::max(0,std::min({3,config.max_repetitions,repetition_limit}));
+  const double initial_distance=PickupPolygonDistance(polygon,center);
+  double best_distance=initial_distance;
+  bool best_inside=false;
+  for(std::size_t i=0;i<actions.size();++i) {
+    if(!Calibrated(deltas[i])) continue;
+    double previous=initial_distance;
+    for(int n=1;n<=limit;++n) {
+      const Point2 predicted{center.u+n*deltas[i].u,center.v+n*deltas[i].v};
+      if(!std::isfinite(predicted.u) || !std::isfinite(predicted.v) ||
+         predicted.u<0 || predicted.u>=image_width ||
+         predicted.v<0 || predicted.v>=image_height) break;
+      const bool inside=PickupPolygonContains(polygon,predicted);
+      // Never select a step which leaps across the whole target and exits
+      // its opposite side even if the endpoint happens to be nearer.
+      if(!inside) {
+        int crossings=0;
+        for(std::size_t edge=0;edge<polygon.size();++edge)
+          if(PickupSegmentsIntersect(center,predicted,polygon[edge],
+                  polygon[(edge+1)%polygon.size()])) ++crossings;
+        if(crossings>=2) break;
+      }
+      const double distance=PickupPolygonDistance(polygon,predicted);
+      if(!inside && distance>=previous-1e-9) break;
+      if(inside) {
+        if(!best_inside || n<best.repetitions) {
+          best={actions[i],n,predicted};
+          best_distance=0.0;
+          best_inside=true;
+        }
+        break; // Do not continue past the first successful prefix.
+      }
+      if(!best_inside &&
+          (distance<best_distance-1e-9 ||
+           (std::abs(distance-best_distance)<=1e-9 &&
+            best.repetitions>0 && n<best.repetitions))) {
+        best={actions[i],n,predicted};
+        best_distance=distance;
+      }
+      previous=distance;
+    }
+  }
+  return best;
+}
 } // namespace vision_core

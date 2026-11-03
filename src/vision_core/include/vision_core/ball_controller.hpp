@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "vision_core/types.hpp"
+#include "vision_core/pickup_polygon.hpp"
 #include "vision_core/ball_fine_motion.hpp"
 #include "vision_core/down_search_walk.hpp"
 #include "vision_core/object_observation_window.hpp"
@@ -81,20 +82,34 @@ struct BallConfig {
   BallFineMotionConfig fine_motion;
   int pickup_max_attempts{};
   int pickup_verify_min_hits{};
-  bool pickup_shrink_enabled{true}; // AUTO default; ball_tuning_node overrides to false.
-  double pickup_shrink_step_px{3.0}; // All four edges per failed PICK.
-  int pickup_shrink_max_failures{2}; // Residual ball votes after PICK DONE; independent of stability.
-  // Inclusive pickup rectangle edges, in input-image pixels.
+  bool pickup_shrink_enabled{true};
+  double pickup_shrink_step_px{3.0}; // Legacy trapezoid compatibility only.
+  double pickup_shrink_percent{7.0}; // Polygon: shrink each dimension 7% per failed PICK.
+  int pickup_shrink_max_failures{2}; // Maximum confirmed residual-ball failures.
+  PickupPolygon pickup_polygon; // Canonical N-gon when configured; coordinates in image pixels.
+  // Legacy trapezoid fields remain for older test fixtures/YAMLs.
   double pickup_u1_px{}, pickup_u2_px{}, pickup_v1_px{}, pickup_v2_px{};
-  double pickup_top_inset_px{0.0}; // Top-only taper; preserve the current outer bounding box.
+  double pickup_top_inset_px{0.0};
+  PickupPolygon PickupVertices() const {
+    if (!pickup_polygon.empty()) return pickup_polygon;
+    return {{PickupLeftAt(pickup_v1_px),pickup_v1_px},
+            {PickupRightAt(pickup_v1_px),pickup_v1_px},
+            {pickup_u2_px,pickup_v2_px},{pickup_u1_px,pickup_v2_px}};
+  }
   BallConfig PickupRegionAfterFailures(int failures) const {
     BallConfig effective=*this;
-    const double shrink=pickup_shrink_enabled
-        ? std::min(std::max(0,failures),pickup_shrink_max_failures)*pickup_shrink_step_px : 0.0;
-    effective.pickup_u1_px+=shrink;
-    effective.pickup_u2_px-=shrink;
-    effective.pickup_v1_px+=shrink;
-    effective.pickup_v2_px-=shrink;
+    const int count=pickup_shrink_enabled
+        ? std::min(std::max(0,failures),pickup_shrink_max_failures) : 0;
+    if (!pickup_polygon.empty()) {
+      const double factor=std::pow(1.0-pickup_shrink_percent/100.0,count);
+      if (count>0) effective.pickup_polygon=ScalePickupPolygon(pickup_polygon,factor);
+    } else {
+      const double shrink=count*pickup_shrink_step_px;
+      effective.pickup_u1_px+=shrink;
+      effective.pickup_u2_px-=shrink;
+      effective.pickup_v1_px+=shrink;
+      effective.pickup_v2_px-=shrink;
+    }
     return effective;
   }
   double PickupLeftAt(double v) const {
@@ -106,6 +121,7 @@ struct BallConfig {
     return pickup_u2_px-(1.0-t)*pickup_top_inset_px;
   }
   bool PickupContains(Point2 p) const {
+    if (!pickup_polygon.empty()) return PickupPolygonContains(pickup_polygon,p);
     return p.v>=pickup_v1_px && p.v<=pickup_v2_px &&
         p.u>=PickupLeftAt(p.v) && p.u<=PickupRightAt(p.v);
   }

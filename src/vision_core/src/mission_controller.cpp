@@ -2984,6 +2984,10 @@ void MissionController::SetLivePerceptionTuning(
   updated.ball.pickup_top_inset_px = candidate.ball.pickup_top_inset_px;
   updated.ball.pickup_v1_px = candidate.ball.pickup_v1_px;
   updated.ball.pickup_v2_px = candidate.ball.pickup_v2_px;
+  updated.ball.pickup_polygon = candidate.ball.pickup_polygon;
+  updated.ball.pickup_shrink_enabled = candidate.ball.pickup_shrink_enabled;
+  updated.ball.pickup_shrink_percent = candidate.ball.pickup_shrink_percent;
+  updated.ball.pickup_shrink_max_failures = candidate.ball.pickup_shrink_max_failures;
   updated.ball.fine_motion = candidate.ball.fine_motion;
   updated.ball.down_search_max_steps = candidate.ball.down_search_max_steps;
   updated.ball.down_search_inter_action_hold_sec =

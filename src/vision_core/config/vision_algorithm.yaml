@@ -167,16 +167,20 @@ vision_algorithm:
         right_delta_v_px: 0.0 # 방향별 (0,0)은 미측정. 모두 미측정이면 기존 단발/옆걸음 2회 유지.
 
       # 픽업
-      pickup_u1_px: 315 # 픽업 영역 왼쪽 경계 (px)
-      pickup_u2_px: 385 # 픽업 영역 오른쪽 경계 (px)
-      pickup_top_inset_px: 5 # 기존 좌우/상하 전체 범위 유지, 상단만 양쪽 5px 좁힌 사다리꼴
-      pickup_v1_px: 95 # 픽업 영역 위쪽 경계 (px)
-      pickup_v2_px: 130 # 픽업 영역 아래쪽 경계 (px)
+      # 실제 픽업 성공 영역. OpenCV 화면 좌표(u:오른쪽+, v:아래쪽+).
+      # 점들을 둘레 순서대로 나열하고 새 꼭짓점은 목록에 [u,v]로 추가.
+      pickup_polygon_px:
+        - [384, 338]
+        - [370, 282]
+        - [394, 256]
+        - [438, 254]
+        - [450, 298]
+        - [433, 338]
       pickup_max_attempts: 100
       pickup_verify_min_hits: 3 # 픽업 DONE 후 stable_window 중 잔존 공 검출 기준; 이상이면 재픽업
-      pickup_shrink_enabled: true # AUTO: 픽업 실패 확정 후에만 경계 축소
-      pickup_shrink_step_px: 3.0 # 실패마다 상하좌우를 각각 3px씩 줄임
-      pickup_shrink_max_failures: 2 # 최대 2회 축소(변당 총 6px), 새 공 미션 시작 시 초기화
+      pickup_shrink_enabled: true # 두 노드 모두 활성화, rqt에서 ON/OFF 조정 가능
+      pickup_shrink_percent: 7.0 # 실패 확정마다 가로/세로 각각 7% 축소(면적 약 13.5%)
+      pickup_shrink_max_failures: 2 # 최대 2회 축소, 새 공 미션 시작 시 초기화
 
       # 픽업 후 복귀
       post_pickup_back_steps: 0 # 0: 픽업 후 후진 없이 카메라를 복귀하고 LINE 재탐색

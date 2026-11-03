@@ -86,6 +86,11 @@ if(BUILD_TESTING)
   add_test(NAME shared_vision_core_ball_fine_motion_test COMMAND shared_vision_core_ball_fine_motion_test)
   set_tests_properties(shared_vision_core_ball_fine_motion_test PROPERTIES ENVIRONMENT
     "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+  add_executable(shared_vision_core_pickup_polygon_test tests/pickup_polygon_test.cpp)
+  target_link_libraries(shared_vision_core_pickup_polygon_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_pickup_polygon_test COMMAND shared_vision_core_pickup_polygon_test)
+  set_tests_properties(shared_vision_core_pickup_polygon_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_ball_approach_grid_test tests/ball_approach_grid_test.cpp)
   target_link_libraries(shared_vision_core_ball_approach_grid_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_ball_approach_grid_test COMMAND shared_vision_core_ball_approach_grid_test)

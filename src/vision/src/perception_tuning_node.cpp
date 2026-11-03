@@ -148,11 +148,6 @@ public:
   ) {
     vision_core::MissionControllerConfig algorithm_defaults =
         LoadSharedAlgorithmDefaults();
-#if defined(VISION_BALL_TUNING_NODE)
-    // Normal AUTO takes the shared YAML (true). Dedicated BALL tuning starts
-    // with a fixed trapezoid but can opt in using the ROS boolean parameter.
-    algorithm_defaults.ball.pickup_shrink_enabled=false;
-#endif
     vision::DeclareMissionParameters(*this,algorithm_defaults);
     declare_parameter<bool>("goal_trial_start_goal",algorithm_defaults.goal_trial_start_goal);
     declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw"); // 입력 이미지 토픽
@@ -210,11 +205,6 @@ public:
     declare_parameter<double>("ball_approach_u_deadband_px", algorithm_defaults.ball.approach_u_deadband_px);
     declare_parameter<double>("ball_upper_acquire_v_px", algorithm_defaults.ball.upper_acquire_v_px);
     declare_parameter<double>("ball_approach_two_step_v_px", algorithm_defaults.ball.approach_two_step_v_px);
-    declare_parameter<double>("ball_pickup_u1_px", algorithm_defaults.ball.pickup_u1_px);
-    declare_parameter<double>("ball_pickup_u2_px", algorithm_defaults.ball.pickup_u2_px);
-    declare_parameter<double>("ball_pickup_top_inset_px", algorithm_defaults.ball.pickup_top_inset_px);
-    declare_parameter<double>("ball_pickup_v1_px", algorithm_defaults.ball.pickup_v1_px);
-    declare_parameter<double>("ball_pickup_v2_px", algorithm_defaults.ball.pickup_v2_px);
     declare_parameter<double>("goal_target_u_px", algorithm_defaults.goal.target_u_px);
     declare_parameter<double>("goal_approach_u_deadband_px", algorithm_defaults.goal.approach_u_deadband_px);
     declare_parameter<double>("hurdle_upper_acquire_v_px", algorithm_defaults.hurdle.upper_acquire_v_px);
@@ -355,11 +345,6 @@ public:
     ball_cmd_cfg.approach_u_deadband_px = get_parameter("ball_approach_u_deadband_px").as_double();
     ball_cmd_cfg.upper_acquire_v_px = get_parameter("ball_upper_acquire_v_px").as_double();
     ball_cmd_cfg.approach_two_step_v_px = get_parameter("ball_approach_two_step_v_px").as_double();
-    ball_cmd_cfg.pickup_u1_px = get_parameter("ball_pickup_u1_px").as_double();
-    ball_cmd_cfg.pickup_u2_px = get_parameter("ball_pickup_u2_px").as_double();
-    ball_cmd_cfg.pickup_top_inset_px = get_parameter("ball_pickup_top_inset_px").as_double();
-    ball_cmd_cfg.pickup_v1_px = get_parameter("ball_pickup_v1_px").as_double();
-    ball_cmd_cfg.pickup_v2_px = get_parameter("ball_pickup_v2_px").as_double();
     goal_cmd_cfg.target_u_px = get_parameter("goal_target_u_px").as_double();
     goal_cmd_cfg.approach_u_deadband_px = get_parameter("goal_approach_u_deadband_px").as_double();
     hurdle_cmd_cfg.upper_acquire_v_px = get_parameter("hurdle_upper_acquire_v_px").as_double();
@@ -921,11 +906,6 @@ private:
       else if (name == "ball_approach_u_deadband_px") target = &candidate.ball.approach_u_deadband_px;
       else if (name == "ball_upper_acquire_v_px") target = &candidate.ball.upper_acquire_v_px;
       else if (name == "ball_approach_two_step_v_px") target = &candidate.ball.approach_two_step_v_px;
-      else if (name == "ball_pickup_u1_px") target = &candidate.ball.pickup_u1_px;
-      else if (name == "ball_pickup_u2_px") target = &candidate.ball.pickup_u2_px;
-      else if (name == "ball_pickup_top_inset_px") target = &candidate.ball.pickup_top_inset_px;
-      else if (name == "ball_pickup_v1_px") target = &candidate.ball.pickup_v1_px;
-      else if (name == "ball_pickup_v2_px") target = &candidate.ball.pickup_v2_px;
       else if (name == "goal_target_u_px") target = &candidate.goal.target_u_px;
       else if (name == "goal_approach_u_deadband_px") target = &candidate.goal.approach_u_deadband_px;
       else if (name == "goal_throw_landing_x_m") target = &candidate.goal.throw_landing_x_m;

@@ -467,23 +467,19 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     vision::DrawHurdleDownGuides(vis,config.hurdle,
         mission_result.foot_pose==vision_core::FootPose::kFine);
 
-  // The pickup region uses the same four pixel edges as FineAction.
-  // Its single decision-center marker is above.
+  // Draw exactly the polygon used for PICK admission and FINE predictions.
+  // Keep the 1px yellow outline subtle enough to see the ball center.
   if (selected_ball && camera.actual_mode==vision_core::CameraMode::kBallView) {
-    const auto c=config.ball.PickupRegionAfterFailures(ball_cmd.pickup_shrink_count);
-    const cv::Rect image_bounds(0, 0, vis.cols, vis.rows);
-    const std::vector<cv::Point> corners{
-        {static_cast<int>(std::lround(c.PickupLeftAt(c.pickup_v1_px))),
-         static_cast<int>(std::lround(c.pickup_v1_px))},
-        {static_cast<int>(std::lround(c.PickupRightAt(c.pickup_v1_px))),
-         static_cast<int>(std::lround(c.pickup_v1_px))},
-        {static_cast<int>(std::lround(c.pickup_u2_px)),
-         static_cast<int>(std::lround(c.pickup_v2_px))},
-        {static_cast<int>(std::lround(c.pickup_u1_px)),
-         static_cast<int>(std::lround(c.pickup_v2_px))}};
-    if (!image_bounds.empty())
+    const auto effective=config.ball.PickupRegionAfterFailures(ball_cmd.pickup_shrink_count);
+    const auto vertices=effective.PickupVertices();
+    std::vector<cv::Point> corners;
+    corners.reserve(vertices.size());
+    for(const auto& point:vertices)
+      corners.emplace_back(static_cast<int>(std::lround(point.u)),
+                           static_cast<int>(std::lround(point.v)));
+    if(!vis.empty() && corners.size()>=3)
       cv::polylines(vis,std::vector<std::vector<cv::Point>>{corners},true,
-                    cv::Scalar(0,255,255),2,cv::LINE_AA);
+                    cv::Scalar(0,255,255),1,cv::LINE_AA);
   }
   // Raw depth-edge points are estimator inputs, not the GOAL
   // fine-control decision coordinate; suppress them here.
@@ -654,16 +650,17 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     add_row(ball_approach_rows,"far u-target: --",ball_color);
   }
   const auto effective_pickup=bc.PickupRegionAfterFailures(ball_cmd.pickup_shrink_count);
-  std::snprintf(buf, sizeof(buf),
-      "PICK u=[%.1f,%.1f] v=[%.1f,%.1f] shrink=%d/%d (%s, %.1fpx/edge)",
-      effective_pickup.pickup_u1_px,effective_pickup.pickup_u2_px,
-      effective_pickup.pickup_v1_px,effective_pickup.pickup_v2_px,
-      ball_cmd.pickup_shrink_count,bc.pickup_shrink_max_failures,
-      bc.pickup_shrink_enabled ? "ON" : "OFF",bc.pickup_shrink_step_px);
+  const auto pickup_vertices=effective_pickup.PickupVertices();
+  std::snprintf(buf,sizeof(buf),
+      "PICK %zu vertices | shrink=%d/%d (%s, %.1f%s per failure)",
+      pickup_vertices.size(),ball_cmd.pickup_shrink_count,
+      bc.pickup_shrink_max_failures,bc.pickup_shrink_enabled ? "ON" : "OFF",
+      bc.pickup_polygon.empty() ? bc.pickup_shrink_step_px : bc.pickup_shrink_percent,
+      bc.pickup_polygon.empty() ? "px/edge" : "%/axis");
   add_row(ball_fine_rows,buf,ball_color);
   if (bc.fine_motion.HasCalibration())
     std::snprintf(buf,sizeof(buf),"FINE SAME-DIR max=%d | measured ball delta ON",bc.fine_motion.max_repetitions);
-  else if (bc.fine_motion.max_repetitions>=2)
+  else if (bc.pickup_polygon.empty() && bc.fine_motion.max_repetitions>=2)
     std::snprintf(buf,sizeof(buf),"FINE uncalibrated | legacy SIDE x2 excess>=%.1fpx | max=%d",
         bc.fine_side_two_step_margin_px,bc.fine_motion.max_repetitions);
   else

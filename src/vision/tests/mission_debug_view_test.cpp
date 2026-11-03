@@ -337,5 +337,31 @@ int main() {
   m.command.action=vision_core::MissionAction::kShoot;
   Check(!vision::ComputeGoalLandingDebug(c.goal,m).valid,
         "previous GOAL landing leaked into a different mission");
+  // The drawn 1px boundary follows the same 6-point polygon and 7% shrink
+  // that the BALL controller uses for PICK decisions.
+  c.ball.pickup_polygon={{384,338},{370,282},{394,256},
+                         {438,254},{450,298},{433,338}};
+  c.ball.pickup_shrink_percent=7.0;
+  c.ball.pickup_shrink_enabled=true;
+  m.ball.pickup_shrink_count=0;
+  const auto full_poly=vision::RenderMissionDebug(
+      image,empty,{},c,{},m,{vision_core::CameraMode::kBallView,true},{},state);
+  m.ball.pickup_shrink_count=1;
+  const auto small_poly=vision::RenderMissionDebug(
+      image,empty,{},c,{},m,{vision_core::CameraMode::kBallView,true},{},state);
+  const cv::Rect polygon_roi(360,240,100,115);
+  Check(cv::norm(full_poly.image(polygon_roi),
+                 small_poly.image(polygon_roi),cv::NORM_INF)>0,
+        "BALL pickup outline did not respond to failed-PICK shrink");
+  const auto yellow_count=[](const cv::Mat& image) {
+    int count=0;
+    for(int y=245;y<350;++y) for(int x=365;x<460;++x) {
+      const auto pixel=image.at<cv::Vec3b>(y,x);
+      if(pixel[0]<70 && pixel[1]>145 && pixel[2]>145) ++count;
+    }
+    return count;
+  };
+  Check(yellow_count(full_poly.image)>50 && yellow_count(full_poly.image)<1000,
+        "BALL polygon 1px yellow boundary missing or too thick");
   Check(cv::norm(image,cv::NORM_INF)==0,"GOAL overlay changed the source RGB frame");
 }

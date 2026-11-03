@@ -55,7 +55,10 @@ inline const CandidateTrackingParameterGroup kAdditionalCandidateTracking[] = {
 inline void DeclareMissionParameters(rclcpp::Node& node,
                                     const vision_core::MissionControllerConfig& c) {
   node.declare_parameter<bool>("ball_pickup_shrink_enabled",c.ball.pickup_shrink_enabled);
-  node.declare_parameter<double>("ball_pickup_shrink_step_px",c.ball.pickup_shrink_step_px);
+  node.declare_parameter<double>("ball_pickup_shrink_percent",c.ball.pickup_shrink_percent);
+  node.declare_parameter<std::string>("ball_pickup_polygon_points",
+      c.ball.pickup_polygon.empty() ? "" :
+      vision_core::FormatPickupPolygonPoints(c.ball.pickup_polygon));
   node.declare_parameter<int>("ball_pickup_shrink_max_failures",c.ball.pickup_shrink_max_failures);
   node.declare_parameter<int>("ball_fine_max_repetitions",c.ball.fine_motion.max_repetitions);
   auto fine_motion=c.ball.fine_motion;
@@ -118,7 +121,10 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
     throw std::invalid_argument("ball_fine_max_repetitions must be an integer in [1,3]");
   c.ball.fine_motion.max_repetitions=static_cast<int>(fine_repetitions);
   c.ball.pickup_shrink_enabled=node.get_parameter("ball_pickup_shrink_enabled").as_bool();
-  c.ball.pickup_shrink_step_px=node.get_parameter("ball_pickup_shrink_step_px").as_double();
+  c.ball.pickup_shrink_percent=node.get_parameter("ball_pickup_shrink_percent").as_double();
+  const auto polygon_text=node.get_parameter("ball_pickup_polygon_points").as_string();
+  if (!polygon_text.empty() || !c.ball.pickup_polygon.empty())
+    c.ball.pickup_polygon=vision_core::ParsePickupPolygonPoints(polygon_text);
   const auto max_shrinks=node.get_parameter("ball_pickup_shrink_max_failures").as_int();
   if (max_shrinks<0 || max_shrinks>std::numeric_limits<int>::max())
     throw std::invalid_argument("ball_pickup_shrink_max_failures must be a nonnegative int");
@@ -216,11 +222,17 @@ inline bool ApplyLivePerceptionParameter(const rclcpp::Parameter& p,
     c.ball.pickup_shrink_enabled=p.as_bool();
     return true;
   }
-  if (name=="ball_pickup_shrink_step_px") {
+  if (name=="ball_pickup_polygon_points") {
+    if (p.get_type()!=rclcpp::ParameterType::PARAMETER_STRING)
+      throw std::invalid_argument(name+" must be a string of u,v;u,v;u,v");
+    c.ball.pickup_polygon=vision_core::ParsePickupPolygonPoints(p.as_string());
+    return true;
+  }
+  if (name=="ball_pickup_shrink_percent") {
     if (p.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
-        !std::isfinite(p.as_double()) || p.as_double()<0.0)
-      throw std::invalid_argument(name+" must be finite nonnegative double");
-    c.ball.pickup_shrink_step_px=p.as_double();
+        !std::isfinite(p.as_double()) || p.as_double()<0.0 || p.as_double()>=100.0)
+      throw std::invalid_argument(name+" must be a finite percent in [0,100)");
+    c.ball.pickup_shrink_percent=p.as_double();
     return true;
   }
   if (name=="ball_pickup_shrink_max_failures") {

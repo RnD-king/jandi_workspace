@@ -1265,6 +1265,30 @@ int main() {
   delayed_result=delayed_stage.Step(delayed_input);
   assert(delayed_result.command.action!=MissionAction::kDefaultPoseMode);
 
+  // Live shared polygon edits must be validated in the same MissionController
+  // path used by line_perception_node's WAIT_START/PAUSED callback.
+  {
+    auto poly_cfg=LoadDefaultAlgorithmConfig();
+    poly_cfg.ball.pickup_polygon={{384,338},{370,282},{394,256},
+                                 {438,254},{450,298},{433,338}};
+    MissionController poly_live(poly_cfg);
+    auto changed=poly_cfg;
+    changed.ball.pickup_polygon.insert(
+        changed.ball.pickup_polygon.begin()+2,{380,265});
+    poly_live.SetLivePerceptionTuning(changed);
+    changed.ball.pickup_polygon={{100,100},{200,200},{100,200},{200,100}};
+    bool rejected=false;
+    try {poly_live.SetLivePerceptionTuning(changed);}
+    catch(const std::runtime_error&) {rejected=true;}
+    assert(rejected);
+    changed=poly_cfg;
+    changed.ball.pickup_shrink_percent=100.0;
+    rejected=false;
+    try {poly_live.SetLivePerceptionTuning(changed);}
+    catch(const std::runtime_error&) {rejected=true;}
+    assert(rejected);
+  }
+
   // Without the dedicated stage setup permission manual tuning cannot
   // dispatch its initial pose automatically.
   MissionController gated_stage(stage_cfg);

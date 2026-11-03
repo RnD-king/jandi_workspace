@@ -189,6 +189,21 @@ ActionRequest BallController::FineAction() const {
 
 ActionRequest BallController::FineActionAt(Point2 center) const {
   const auto pickup=EffectivePickupConfig();
+  if (!pickup.pickup_polygon.empty()) {
+    if (pickup.PickupContains(center))
+      return Mission(MissionAction::kPickBall);
+    // Uncalibrated fallback: move one action toward the nearest point on
+    // the polygon boundary; the next decision requires a fresh observation.
+    const auto nearest=ClosestPickupBoundaryPoint(pickup.pickup_polygon,center);
+    const double du=nearest.u-center.u,dv=nearest.v-center.v;
+    if (std::abs(du)>=std::abs(dv) && std::abs(du)>1e-6)
+      return Locomotion(du>0 ? MissionAction::kLeftSideStep
+                            : MissionAction::kRightSideStep);
+    if (std::abs(dv)>1e-6)
+      return Locomotion(dv>0 ? MissionAction::kStepForwardHalf
+                            : MissionAction::kStepBack);
+    return {};
+  }
   const double u=center.u, v=center.v;
   const double left=pickup.PickupLeftAt(v);
   const double right=pickup.PickupRightAt(v);
@@ -607,10 +622,15 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     result.action = FineAction();
     const auto pickup=EffectivePickupConfig();
     if (result.action.category==ActionCategory::kLocomotion && config_.fine_motion.HasCalibration()) {
-      const auto plan=PlanBallFineMotion(config_.fine_motion,tracked_.center_px,
-          pickup.pickup_u1_px,pickup.pickup_u2_px,pickup.pickup_v1_px,pickup.pickup_v2_px,
-          image_width,image_height,allow_fine_pair ? config_.fine_motion.max_repetitions : 1,
-          pickup.pickup_top_inset_px);
+      const auto plan=!pickup.pickup_polygon.empty()
+          ? PlanBallFineMotion(config_.fine_motion,tracked_.center_px,
+              pickup.pickup_polygon,image_width,image_height,
+              allow_fine_pair ? config_.fine_motion.max_repetitions : 1)
+          : PlanBallFineMotion(config_.fine_motion,tracked_.center_px,
+              pickup.pickup_u1_px,pickup.pickup_u2_px,pickup.pickup_v1_px,pickup.pickup_v2_px,
+              image_width,image_height,
+              allow_fine_pair ? config_.fine_motion.max_repetitions : 1,
+              pickup.pickup_top_inset_px);
       if (plan.action!=MissionAction::kNone) {
         result.action=Locomotion(plan.action);
         if (plan.repetitions>1 && allow_new_body_actions && allow_fine_pair) {
@@ -624,8 +644,9 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       }
       // No valid improving prediction: retain the original single action.
       // Never append unmeasured motions to a partially calibrated plan.
-    } else if (result.action.action == MissionAction::kLeftSideStep ||
-               result.action.action == MissionAction::kRightSideStep) {
+    } else if (pickup.pickup_polygon.empty() &&
+               (result.action.action == MissionAction::kLeftSideStep ||
+                result.action.action == MissionAction::kRightSideStep)) {
       const double excess = result.action.action == MissionAction::kLeftSideStep
           ? pickup.PickupLeftAt(tracked_.center_px.v) - tracked_.center_px.u
           : tracked_.center_px.u - pickup.PickupRightAt(tracked_.center_px.v);

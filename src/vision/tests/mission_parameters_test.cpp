@@ -141,14 +141,30 @@ int main(int argc,char** argv) {
         rclcpp::Parameter("ball_pickup_shrink_enabled",false),applied) &&
         !applied.ball.pickup_shrink_enabled,"BALL shrink enable live override failed");
     Check(vision::ApplyLivePerceptionParameter(
-        rclcpp::Parameter("ball_pickup_shrink_step_px",3.0),applied) &&
-        applied.ball.pickup_shrink_step_px==3.0,"BALL shrink step live override failed");
+        rclcpp::Parameter("ball_pickup_shrink_percent",7.0),applied) &&
+        applied.ball.pickup_shrink_percent==7.0,"BALL shrink percent live override failed");
+    const std::string polygon="384,338;370,282;394,256;438,254;450,298;433,338";
+    Check(vision::ApplyLivePerceptionParameter(
+        rclcpp::Parameter("ball_pickup_polygon_points",polygon),applied) &&
+        applied.ball.pickup_polygon.size()==6 &&
+        applied.ball.pickup_polygon.front().u==384,
+        "BALL polygon string live override failed");
+    Check(vision_core::FormatPickupPolygonPoints(applied.ball.pickup_polygon)==polygon,
+        "BALL polygon string round-trip changed");
+    Check(vision::ApplyLivePerceptionParameter(
+        rclcpp::Parameter("ball_pickup_polygon_points",
+            "384,338;370,282;380,265;394,256;438,254;450,298;433,338"),applied) &&
+        applied.ball.pickup_polygon.size()==7,
+        "BALL polygon vertex addition failed");
     Check(vision::ApplyLivePerceptionParameter(
         rclcpp::Parameter("ball_pickup_shrink_max_failures",2),applied) &&
         applied.ball.pickup_shrink_max_failures==2,"BALL shrink max live override failed");
     for(const auto& wrong:std::vector<rclcpp::Parameter>{
          rclcpp::Parameter("ball_pickup_shrink_enabled",1),
-         rclcpp::Parameter("ball_pickup_shrink_step_px",-1.0),
+         rclcpp::Parameter("ball_pickup_shrink_percent",-1.0),
+         rclcpp::Parameter("ball_pickup_shrink_percent",100.0),
+         rclcpp::Parameter("ball_pickup_polygon_points","not-a-polygon"),
+         rclcpp::Parameter("ball_pickup_polygon_points",4),
          rclcpp::Parameter("ball_pickup_shrink_max_failures",-1)}) {
       bool rejected=false;
       try {vision::ApplyLivePerceptionParameter(wrong,applied);}
