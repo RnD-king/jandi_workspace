@@ -590,7 +590,8 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   // A GOAL already acquired during approach uses the same head scan as the
   // first empty GOAL view before falling back to BALL_VIEW_LINE. All issued
   // locomotion IDs must drain before a scan camera request can start.
-  if (i==1 && !continuous_.near && lost && !target && goal_view &&
+  if (i==1 && !continuous_.near && lost && !target &&
+      !input.backboard_image_without_depth && goal_view &&
       !goal_head_search_.used && config_.goal.head_scan_enabled) {
     line_plan_.Abort();
     result.hold=true;
@@ -601,7 +602,8 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     return result;
   }
   if (lost && i==1 && !continuous_.near && goal_head_search_.used &&
-      !target && idle && !line_plan_.Outstanding()) {
+      !target && !input.backboard_image_without_depth &&
+      idle && !line_plan_.Outstanding()) {
     // Completed left/right scan found no board: do not enter a stale
     // locked-object recovery loop; return to BALL_VIEW_LINE.
     ReleaseContinuousApproach();
