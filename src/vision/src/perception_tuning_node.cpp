@@ -1556,6 +1556,10 @@ private:
     case vision_core::CameraRequest::kDown:
       camera_feedback_ = {vision_core::CameraMode::kDown, true};
       break;
+    case vision_core::CameraRequest::kBallView:
+    case vision_core::CameraRequest::kBallViewLine:
+      camera_feedback_ = {vision_core::CameraMode::kBallView, true};
+      break;
     case vision_core::CameraRequest::kForward:
       camera_feedback_ = {vision_core::CameraMode::kForward, true};
       break;
@@ -1707,6 +1711,10 @@ private:
       switch (request) {
       case vision_core::CameraRequest::kDown:
         camera_feedback_ = {vision_core::CameraMode::kDown, true};
+        break;
+      case vision_core::CameraRequest::kBallView:
+      case vision_core::CameraRequest::kBallViewLine:
+        camera_feedback_ = {vision_core::CameraMode::kBallView, true};
         break;
       case vision_core::CameraRequest::kForward:
         camera_feedback_ = {vision_core::CameraMode::kForward, true};
