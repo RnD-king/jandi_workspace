@@ -212,6 +212,7 @@ public:
     declare_parameter<double>("ball_approach_two_step_v_px", algorithm_defaults.ball.approach_two_step_v_px);
     declare_parameter<double>("ball_pickup_u1_px", algorithm_defaults.ball.pickup_u1_px);
     declare_parameter<double>("ball_pickup_u2_px", algorithm_defaults.ball.pickup_u2_px);
+    declare_parameter<double>("ball_pickup_top_inset_px", algorithm_defaults.ball.pickup_top_inset_px);
     declare_parameter<double>("ball_pickup_v1_px", algorithm_defaults.ball.pickup_v1_px);
     declare_parameter<double>("ball_pickup_v2_px", algorithm_defaults.ball.pickup_v2_px);
     declare_parameter<double>("goal_target_u_px", algorithm_defaults.goal.target_u_px);
@@ -356,6 +357,7 @@ public:
     ball_cmd_cfg.approach_two_step_v_px = get_parameter("ball_approach_two_step_v_px").as_double();
     ball_cmd_cfg.pickup_u1_px = get_parameter("ball_pickup_u1_px").as_double();
     ball_cmd_cfg.pickup_u2_px = get_parameter("ball_pickup_u2_px").as_double();
+    ball_cmd_cfg.pickup_top_inset_px = get_parameter("ball_pickup_top_inset_px").as_double();
     ball_cmd_cfg.pickup_v1_px = get_parameter("ball_pickup_v1_px").as_double();
     ball_cmd_cfg.pickup_v2_px = get_parameter("ball_pickup_v2_px").as_double();
     goal_cmd_cfg.target_u_px = get_parameter("goal_target_u_px").as_double();
@@ -919,6 +921,7 @@ private:
       else if (name == "ball_approach_two_step_v_px") target = &candidate.ball.approach_two_step_v_px;
       else if (name == "ball_pickup_u1_px") target = &candidate.ball.pickup_u1_px;
       else if (name == "ball_pickup_u2_px") target = &candidate.ball.pickup_u2_px;
+      else if (name == "ball_pickup_top_inset_px") target = &candidate.ball.pickup_top_inset_px;
       else if (name == "ball_pickup_v1_px") target = &candidate.ball.pickup_v1_px;
       else if (name == "ball_pickup_v2_px") target = &candidate.ball.pickup_v2_px;
       else if (name == "goal_target_u_px") target = &candidate.goal.target_u_px;
