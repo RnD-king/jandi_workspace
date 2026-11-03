@@ -58,6 +58,7 @@ struct GoalConfig {
   double position_tolerance_m{};
   double shoot_yaw_limit_deg{};
   double recovery_center_tolerance_px{};
+  bool head_scan_enabled{true};
   int head_scan_max_yaw_deg{25};
   double head_scan_center_half_width_px{50.0};
   int head_scan_pause_window{4}, head_scan_pause_hits{2};

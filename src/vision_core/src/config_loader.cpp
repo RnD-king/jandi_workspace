@@ -754,6 +754,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "post_pickup_straight_blocks_required", c.goal.post_pickup_straight_blocks_required);
   Assign(g, "post_pickup_walk_fallback_actions", c.goal.post_pickup_walk_fallback_actions);
   Assign(g, "entry_line_retry_max_attempts", c.goal.entry_line_retry_max_attempts);
+  if (g["head_scan_enabled"])
+    Assign(g,"head_scan_enabled",c.goal.head_scan_enabled);
   if (g["head_scan_max_yaw_deg"]) {
     Assign(g,"head_scan_max_yaw_deg",c.goal.head_scan_max_yaw_deg);
     Assign(g,"head_scan_center_half_width_px",c.goal.head_scan_center_half_width_px);

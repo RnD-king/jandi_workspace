@@ -490,7 +490,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       result.hold=true;
       if (input.backboard_target || input.backboard_image_without_depth) approach_goal_empty_frames_=0;
       else if (++approach_goal_empty_frames_>=config_.goal.lost_frames) {
-        if (!goal_head_search_.used) {
+        if (config_.goal.head_scan_enabled && !goal_head_search_.used) {
           goal_head_search_.used=true;
           goal_head_search_.phase=GoalHeadSearch::Phase::kPendingLeft;
           return result;

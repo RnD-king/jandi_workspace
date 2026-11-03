@@ -382,6 +382,8 @@ void LockAndLoss() {
 void EmptyGoalRetryLimit() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
   c.goal_trial_start_goal=true;c.goal.lost_frames=3;
+  // Preserve the old fallback-budget test separately from the new GOAL scan.
+  c.goal.head_scan_enabled=false;
   c.object_approach.goal_empty_max_retries=3;
   c.goal.post_pickup_walk_fallback_actions=1;
   Driver d(c);d.in.ball_target.reset();d.in.camera_feedback={CameraMode::kGoal,true};
