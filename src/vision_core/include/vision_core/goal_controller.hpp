@@ -30,6 +30,22 @@ enum class GoalMode {
   kEntryRetryCameraForward, // Keep all existing phase IDs unchanged.
   kRecoveryForwardStep,
   kRecoveryExtraTurn,
+  kFineMotionRepeat, // Committed X/Z-calibrated FINE sequence, reobserve only after final DONE.
+};
+
+struct GoalFineMotionConfig {
+  int max_repetitions{3};
+  Point2 forward_delta_m{}, backward_delta_m{}, left_delta_m{}, right_delta_m{};
+  bool HasCalibration() const {
+    const auto nonzero=[](Point2 p){return p.u!=0.0 || p.v!=0.0;};
+    return nonzero(forward_delta_m) || nonzero(backward_delta_m) ||
+           nonzero(left_delta_m) || nonzero(right_delta_m);
+  }
+};
+
+struct GoalFineMotionPlan {
+  MissionAction action{MissionAction::kNone};
+  int repetitions{0};
 };
 
 struct GoalConfig {
@@ -50,11 +66,16 @@ struct GoalConfig {
   int post_pickup_walk_fallback_actions{}; // 0 preserves immediate GOAL entry.
   int entry_line_retry_max_attempts{}; // Extra LINE blocks after an entirely empty first GOAL view; 0 disables.
   double target_u_px{};
-  double auto_approach_reference_u_px{380.0}; // GOAL AUTO virtual path only.
+  double auto_approach_reference_u_px{380.0}; // Legacy virtual-path anchor, retained for compatibility.
+  double auto_approach_center_u_px{280.0}; // GOAL AUTO three vertical-zone center.
+  double auto_approach_half_width_px{100.0};
   double approach_u_deadband_px{};
   double hoop_radius_m{};
   double throw_landing_x_m{};
   double throw_landing_z_m{};
+  double waist_axis_in_camera_x_m{0.0};
+  double waist_axis_in_camera_z_m{0.0};
+  GoalFineMotionConfig fine_motion;
   double position_tolerance_m{};
   double shoot_yaw_limit_deg{};
   double recovery_center_tolerance_px{};
