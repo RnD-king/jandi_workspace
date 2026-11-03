@@ -8,7 +8,6 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
-#include <sstream>
 using namespace vision_core;
 static MissionFrameInput Frame(double now) {
   MissionFrameInput f; f.image_width=640; f.image_height=480; f.now_sec=(now) + 3.0;
@@ -218,19 +217,16 @@ int main() {
   controller.Reset();
   in=Frame(0);in.line_centers.resize(3);r=controller.Step(in);
   bool sparse_forward_issued=false;
-  std::ostringstream sparse_trace;
   for(int i=1;i<=12;++i) {
     in=Frame(.1*i);in.line_centers.resize(3);
     r=controller.Step(in);
-    sparse_forward_issued |= r.command.action==MissionAction::kLineRightUnitTurnFirst &&
-                              r.command.action_id!=0;
-    sparse_trace<<"sample="<<i<<" phase="<<r.line_recovery_phase
-      <<" action="<<static_cast<int>(r.command.action)
-      <<" id="<<r.command.action_id
-      <<" camera="<<static_cast<int>(r.command.camera_request)<<"\n";
+    // Unit action is 34 or 36 according to this fixture's right_unit_action;
+    // the production YAML independently selects 36.
+    sparse_forward_issued |=
+        static_cast<int>(r.command.action)==c.line_p2p.right_unit_action &&
+        r.command.action_id!=0;
   }
-  if (!sparse_forward_issued)
-    throw std::runtime_error("sparse recovery did not issue right forward:\n"+sparse_trace.str());
+  assert(sparse_forward_issued);
   assert(r.line_in_recovery);
   assert(!r.line_features.guide.valid);
 
