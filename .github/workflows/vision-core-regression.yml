@@ -44,6 +44,13 @@ jobs:
             -Wl,-rpath,"$PWD/build/shared_vision_core" \
             -o /tmp/vision_mission_debug_view_test
           /tmp/vision_mission_debug_view_test
+      - name: Build and test raw-ball pixel selection (no ROS/CUDA required)
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -I src/vision/include \
+            src/vision/tests/pixel_inspection_test.cpp \
+            $(pkg-config --cflags --libs opencv4) \
+            -o /tmp/vision_pixel_inspection_test
+          /tmp/vision_pixel_inspection_test
       - name: Test SSH terminal renderer
         run: python3 src/vision/tests/terminal_view_test.py
       - name: Test mock executor protocol
