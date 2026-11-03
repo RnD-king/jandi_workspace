@@ -373,10 +373,10 @@ int main() {
     assert(region.pickup_v1_px==312+3*std::min(failure,2));
     assert(region.pickup_v2_px==360-3*std::min(failure,2));
     if(failure==2) {
-      // x=294 is inside the original trapezoid but outside the 6px-inset
-      // trapezoid: a retry must align, never pick immediately.
+      // x=292 is inside the original trapezoid but strictly outside the
+      // 6px-inset trapezoid even with inclusive pickup boundaries.
       shrinking.ClearObservationHistory();
-      r=fine_window(shrinking,294.0/640.0,.7,shrink_time);
+      r=fine_window(shrinking,292.0/640.0,.7,shrink_time);
       assert(r.action.action!=MissionAction::kPickBall);
     }
     shrinking.ClearObservationHistory();
