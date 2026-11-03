@@ -264,6 +264,12 @@ install(FILES scripts/mock_executor_protocol.py
 )
 
 if(BUILD_TESTING)
+  add_executable(vision_pixel_inspection_test tests/pixel_inspection_test.cpp)
+  target_include_directories(vision_pixel_inspection_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(vision_pixel_inspection_test ${OpenCV_LIBS})
+  add_test(NAME vision_pixel_inspection_test COMMAND vision_pixel_inspection_test)
+  set_tests_properties(vision_pixel_inspection_test PROPERTIES LABELS "logic")
+
   add_executable(vision_terminal_publisher_test tests/terminal_publisher_test.cpp)
   target_include_directories(vision_terminal_publisher_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(vision_terminal_publisher_test shared_vision_core::shared_vision_core
