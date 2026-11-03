@@ -35,6 +35,15 @@ jobs:
         run: |
           g++ -std=c++17 -I src/vision/include src/vision/tests/backboard_depth_regions_test.cpp $(pkg-config --cflags --libs opencv4) -o /tmp/vision_backboard_depth_regions_test
           /tmp/vision_backboard_depth_regions_test
+      - name: Build and test vision mission debug renderer without ROS
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -I src/vision/include -I src/vision_core/include \
+            src/vision/tests/mission_debug_view_test.cpp \
+            -L "$PWD/build/shared_vision_core" -lshared_vision_core \
+            $(pkg-config --cflags --libs opencv4) \
+            -Wl,-rpath,"$PWD/build/shared_vision_core" \
+            -o /tmp/vision_mission_debug_view_test
+          /tmp/vision_mission_debug_view_test
       - name: Test SSH terminal renderer
         run: python3 src/vision/tests/terminal_view_test.py
       - name: Test mock executor protocol

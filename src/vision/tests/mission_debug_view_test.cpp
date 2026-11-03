@@ -80,9 +80,17 @@ int main() {
   const auto ball_line_view=vision::RenderMissionDebug(
       image,raw_objects,{},c,filtered,line_view,
       {vision_core::CameraMode::kBallView,true},{},state);
-  Check(ball_line_view.image.at<cv::Vec3b>(150,360)==cv::Vec3b(255,255,0) &&
+  // The 1px reference is rendered with cv::LINE_AA: on a black background
+  // the center pixel is typically (232,232,0), not the full (255,255,0).
+  // Check the actual cyan line and absent old reference, not exact intensity.
+  const auto is_cyan_reference=[](const cv::Vec3b& pixel) {
+    return pixel[0] >= 200 && pixel[1] >= 200 &&
+           pixel[2] <= 5 && std::abs(int(pixel[0])-int(pixel[1])) <= 5;
+  };
+  Check(is_cyan_reference(ball_line_view.image.at<cv::Vec3b>(150,360)) &&
         ball_line_view.image.at<cv::Vec3b>(150,320)==cv::Vec3b(0,0,0) &&
-        filtered_view.image.at<cv::Vec3b>(150,320)==cv::Vec3b(255,255,0),
+        is_cyan_reference(filtered_view.image.at<cv::Vec3b>(150,320)) &&
+        filtered_view.image.at<cv::Vec3b>(150,360)==cv::Vec3b(0,0,0),
         "BALL_VIEW LINE debug reference did not follow 360px while normal LINE stayed 320px");
   Check(filtered_view.image.at<cv::Vec3b>(300,20)==cv::Vec3b(0,255,0) &&
         filtered_view.image.at<cv::Vec3b>(301,21)==cv::Vec3b(0,0,0),
