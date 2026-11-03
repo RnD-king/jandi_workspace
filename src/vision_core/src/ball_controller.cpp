@@ -592,7 +592,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     }
     result.action = Locomotion(MissionAction::kDefaultPoseMode);
     return result;
-  case BallMode::kFineAdjustForPickup:
+  case BallMode::kFineAdjustForPickup: {
     if (feedback.action_active && !feedback.action_done)
       return result;
     if (feedback.action_done && !verified)
@@ -649,6 +649,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       result.mode = mode_;
     }
     return result;
+  }
   case BallMode::kFineSidePair:
   case BallMode::kFineMotionRepeat:
     if (fine_side_pending_ && feedback.action_done) fine_side_done_ = true;
