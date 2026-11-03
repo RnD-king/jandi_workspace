@@ -17,7 +17,12 @@ struct ObjectApproachConfig {
   double steering_deadband_deg{}, in_place_turn_deg{};
 };
 
-// BALL and GOAL far-approach steering both use the image-path heading.
+// Quantized heading compatible with existing LinePlan READY/steering, but
+// selected by pixel-zone boundaries rather than the singular bottom-anchor H.
+LineGuide ObjectZoneGuide(const ObjectTarget& target,double left_u,double right_u,
+                          double steering_deadband_deg,int image_width);
+
+// Legacy image-path heading remains for diagnostic/experimental use.
 // The optional 3D projection remains available for geometry diagnostics.
 LineGuide ImageLineGuide(double du_dv, double u_at_reference, double reference_u,
                          int image_width, double confidence);
