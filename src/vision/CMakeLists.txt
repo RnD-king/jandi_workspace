@@ -135,6 +135,20 @@ add_executable(line_perception_node
   src/line_perception_node.cpp
 )
 
+# Standalone read-only camera inspection tools. Neither publishes action/camera commands.
+add_executable(click_pixel_node src/click_pixel_node.cpp)
+target_include_directories(click_pixel_node PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(click_pixel_node ${OpenCV_LIBS})
+ament_target_dependencies(click_pixel_node rclcpp sensor_msgs cv_bridge)
+
+add_executable(ball_pixel_node src/ball_pixel_node.cpp)
+target_link_libraries(ball_pixel_node vision_core)
+set_target_properties(ball_pixel_node PROPERTIES
+  BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
+ament_target_dependencies(ball_pixel_node
+  rclcpp ament_index_cpp sensor_msgs cv_bridge)
+
 add_executable(line_p2p_tuning_node
   src/line_p2p_tuning_node.cpp
 )
@@ -214,6 +228,8 @@ ament_target_dependencies(shoot_tuning_node
 
 install(TARGETS
   vision_core
+  click_pixel_node
+  ball_pixel_node
   line_perception_node
   line_p2p_tuning_node
   perception_tuning_node
