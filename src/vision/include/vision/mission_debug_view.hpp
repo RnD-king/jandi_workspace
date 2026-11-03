@@ -456,7 +456,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   if(camera.actual_mode==vision_core::CameraMode::kForward &&
      mission_result.active_mission==vision_core::MissionType::kLine &&
      mission_result.approach_mission==vision_core::MissionType::kBall &&
-     !mission_result.approach_near) {
+     !mission_result.approach_near && !near_ball_guide) {
     // Far BALL: two converging diagonal boundaries, without the old H path.
     const auto& c=config.ball;
     const auto upper=c.ApproachBounds(0,vis.rows);
