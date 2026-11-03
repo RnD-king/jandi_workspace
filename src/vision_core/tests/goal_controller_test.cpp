@@ -239,7 +239,64 @@ static void StatelessShotBench() {
   assert(!controller.HasBall());
   assert(controller.PlanFineAction(Pose(0,1.2)).action==MissionAction::kShoot);
 }
+static void WaistPivotAndCalibratedFine() {
+  auto c=LoadDefaultAlgorithmConfig().goal;
+  c.hoop_radius_m=0;
+  c.throw_landing_x_m=-.08;c.throw_landing_z_m=.62;
+  c.waist_axis_in_camera_x_m=-.02;
+  c.waist_axis_in_camera_z_m=-.08;
+  c.position_tolerance_m=.005;c.shoot_yaw_limit_deg=20;
+  const double radians=20.0*3.14159265358979323846/180.0;
+  const double x=c.waist_axis_in_camera_x_m+
+      std::cos(radians)*(c.throw_landing_x_m-c.waist_axis_in_camera_x_m)-
+      std::sin(radians)*(c.throw_landing_z_m-c.waist_axis_in_camera_z_m);
+  const double z=c.waist_axis_in_camera_z_m+
+      std::sin(radians)*(c.throw_landing_x_m-c.waist_axis_in_camera_x_m)+
+      std::cos(radians)*(c.throw_landing_z_m-c.waist_axis_in_camera_z_m);
+  GoalController pivot(c,3);
+  const auto shot=pivot.PlanFineAction(Pose(x,z));
+  assert(shot.action==MissionAction::kShoot && shot.target_yaw_deg==20);
+  assert(pivot.PlanFineAction(Pose(-.08,.62)).action==MissionAction::kShoot);
+  auto old=c;old.waist_axis_in_camera_x_m=old.waist_axis_in_camera_z_m=0;
+  GoalController legacy(old,3);
+  assert(legacy.PlanFineAction(Pose(x,z)).action!=MissionAction::kShoot);
+
+  c=LoadDefaultAlgorithmConfig().goal;
+  c.hoop_radius_m=0;c.throw_landing_x_m=0;c.throw_landing_z_m=1;
+  c.position_tolerance_m=.01;c.shoot_yaw_limit_deg=0;
+  c.fine_motion.max_repetitions=3;
+  c.fine_motion.forward_delta_m={-.01,-.03};
+  GoalController forward(c,3);
+  auto plan=forward.PlanFineMotion(Pose(.03,1.09));
+  assert(plan.action==MissionAction::kStepForwardHalf && plan.repetitions==3);
+  c.fine_motion.forward_delta_m={};
+  c.fine_motion.right_delta_m={-.03,-.01};
+  GoalController lateral(c,3);
+  plan=lateral.PlanFineMotion(Pose(.09,1.03));
+  assert(plan.action==MissionAction::kRightSideStep && plan.repetitions==3);
+  c.fine_motion.right_delta_m={.03,.01};
+  GoalController worsening(c,3);
+  assert(worsening.PlanFineMotion(Pose(.09,1.03)).repetitions==0);
+
+  c.fine_motion.right_delta_m={-.03,-.01};
+  c.stable_window=c.stable_min_hits=c.near_distance_min_hits=1;
+  c.smooth_alpha=0;
+  GoalController continuous(c,3);continuous.StartTestExecute();
+  auto r=continuous.Compute({},Board(),Pose(.09,1.03),640,480,0,
+      true,{CameraMode::kGoal,true},{});
+  assert(r.mode==GoalMode::kFineMotionRepeat &&
+         r.action.action==MissionAction::kRightSideStep);
+  for(int i=0;i<3;++i) {
+    r=continuous.Compute({},Board(),Pose(.09,1.03),640,480,0.1+i*.1,
+        true,{CameraMode::kGoal,true},{true,true,false});
+    if(i<2) assert(r.mode==GoalMode::kFineMotionRepeat &&
+                    r.action.action==MissionAction::kRightSideStep);
+    else assert(r.mode==GoalMode::kFineAdjust &&
+                r.action.action==MissionAction::kNone);
+  }
+}
 int main() {
+  WaistPivotAndCalibratedFine();
   NearDistanceNeedsThreeValidFrames();
   GoalNearTransitionUsesWindow();
   StatelessShotBench();
