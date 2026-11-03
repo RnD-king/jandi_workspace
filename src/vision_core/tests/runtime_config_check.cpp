@@ -131,10 +131,30 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, approach_short_v_px);
   FIELD(ball, approach_two_step_v_px);
   FIELD(ball, approach_direct_down_v_px);
-  FIELD(ball, pickup_u1_px);
-  FIELD(ball, pickup_u2_px);
-  FIELD(ball, pickup_v1_px);
-  FIELD(ball, pickup_v2_px);
+  // Production YAML uses an arbitrary pickup N-gon, while older scenario
+  // fixtures still provide the historical trapezoid fields.
+  const auto polygon=AlgorithmField(a,"ball","pickup_polygon_px");
+  if (polygon) {
+    if(!polygon.IsSequence() || polygon.size()!=c.ball.pickup_polygon.size())
+      throw std::runtime_error("YAML pickup polygon vertex count mismatch");
+    for(std::size_t i=0;i<polygon.size();++i) {
+      const auto xy=polygon[i];
+      if(!xy.IsSequence() || xy.size()!=2 ||
+         xy[0].as<double>()!=c.ball.pickup_polygon[i].u ||
+         xy[1].as<double>()!=c.ball.pickup_polygon[i].v)
+        throw std::runtime_error("YAML pickup polygon point mismatch");
+    }
+    CheckAlgorithmField(a,"ball","pickup_shrink_percent",c.ball.pickup_shrink_percent);
+  } else {
+    FIELD(ball, pickup_u1_px);
+    FIELD(ball, pickup_u2_px);
+    FIELD(ball, pickup_v1_px);
+    FIELD(ball, pickup_v2_px);
+  }
+  if(AlgorithmField(a,"ball","pickup_shrink_enabled"))
+    FIELD(ball, pickup_shrink_enabled);
+  if(AlgorithmField(a,"ball","pickup_shrink_max_failures"))
+    FIELD(ball, pickup_shrink_max_failures);
   FIELD(ball, pickup_max_attempts);
   FIELD(ball, pickup_verify_min_hits);
   FIELD(ball, recovery_center_tolerance_px);
