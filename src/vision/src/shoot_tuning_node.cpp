@@ -864,6 +864,15 @@ private:
       if (current_action_==MissionAction::kDefaultPoseMode) pose_ready_=true;
       // SHOOT always consumes its prepared pose. Re-prepare before another shot.
       if (current_action_==MissionAction::kShoot) pose_ready_=false;
+      // Previous optical/rim coordinates may be stale after a physical
+      // stance change or SHOOT. Require an explicit fresh observation or
+      // freshly adopted manual target before the next PREVIEW.
+      calculated_target_.reset();
+      clicked_target_.reset();
+      frozen_=Frame();
+      frozen_view_->SetImage({});
+      calculation_text_->setText("자세 이동 DONE — 골대 좌표를 다시 계산하거나 입력해 주세요.");
+      action_text_->setText("PREVIEW가 필요합니다.");
 #endif
       // Never reuse an in-motion frame for the next automatic calculation.
       live_.valid=false;
