@@ -44,6 +44,15 @@ jobs:
             -Wl,-rpath,"$PWD/build/shared_vision_core" \
             -o /tmp/vision_mission_debug_view_test
           /tmp/vision_mission_debug_view_test
+      - name: Build and test GOAL shot PREVIEW planner without ROS
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -I src/vision/include -I src/vision_core/include \
+            src/vision/tests/shoot_tuning_test.cpp \
+            -L "$PWD/build/shared_vision_core" -lshared_vision_core \
+            $(pkg-config --cflags --libs opencv4) \
+            -Wl,-rpath,"$PWD/build/shared_vision_core" \
+            -o /tmp/vision_shoot_tuning_test
+          VISION_CORE_ALGORITHM_CONFIG="$PWD/src/vision_core/tests/fixtures/mission_scenarios.yaml" /tmp/vision_shoot_tuning_test
       - name: Build and test raw-ball pixel selection (no ROS/CUDA required)
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -I src/vision/include \
