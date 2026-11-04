@@ -3,6 +3,9 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+#include <std_srvs/srv/trigger.hpp>
+#endif
 #include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include "vision/msg/action_command.hpp"
@@ -269,6 +272,9 @@ public:
       return result;
     });
     BuildUi();
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    SetupServiceControls();
+#endif
     frame_timer_=create_wall_timer(std::chrono::duration<double>(1.0/hz),
         [this]() { ProcessLatestImage(); });
     transport_timer_=create_wall_timer(std::chrono::milliseconds(100),[this]() {
@@ -283,6 +289,62 @@ public:
   }
 
 private:
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+  void SetupServiceControls() {
+    using Trigger=std_srvs::srv::Trigger;
+    prepare_service_=create_service<Trigger>("~/start",
+        [this](const std::shared_ptr<Trigger::Request>,
+               std::shared_ptr<Trigger::Response> reply) {
+          if (MotionBusy() || pose_pub_->get_subscription_count()==0) {
+            reply->success=false;
+            reply->message="Executor disconnected or another action is awaiting actual DONE";
+            return;
+          }
+          SendAction({MissionAction::kDefaultPoseMode,ActionCategory::kMission,0,false});
+          reply->success=transport_->HasPendingAction();
+          reply->message=reply->success
+              ? "Fixed shoot pose requested; await actual DONE before COMMIT"
+              : "Failed to request fixed shoot pose";
+        });
+    preview_service_=create_service<Trigger>("~/preview",
+        [this](const std::shared_ptr<Trigger::Request>,
+               std::shared_ptr<Trigger::Response> reply) {
+          if (MotionBusy()) {
+            reply->success=false;
+            reply->message="Wait for the currently executing action to finish";
+            return;
+          }
+          // Service PREVIEW uses a fresh camera/YOLO snapshot, identical to
+          // pressing CALCULATE then PREVIEW in the graphical bench.
+          Calculate();
+          if (calculated_target_) PreviewStoredShot();
+          reply->success=preview_.has_value();
+          reply->message=reply->success
+              ? "PREVIEW yaw="+std::to_string(preview_->yaw_deg)+
+                  " deg, predicted error="+std::to_string(preview_->position_error_m)+
+                  " m; COMMIT must be requested separately"
+              : "No valid fresh GOAL RGB/Depth/CameraInfo observation";
+        });
+    commit_service_=create_service<Trigger>("~/commit",
+        [this](const std::shared_ptr<Trigger::Request>,
+               std::shared_ptr<Trigger::Response> reply) {
+          if (MotionBusy() || !pose_ready_ || !preview_ ||
+              action_pub_->get_subscription_count()==0) {
+            reply->success=false;
+            reply->message="COMMIT requires idle executor, fixed pose actual DONE, saved PREVIEW and connected action subscriber";
+            return;
+          }
+          const auto yaw=preview_->yaw_deg;
+          CommitPreviewShot();
+          reply->success=transport_->HasPendingAction();
+          reply->message=reply->success
+              ? "SHOOT(17) yaw="+std::to_string(yaw)+
+                  " deg requested; awaiting real ACK/DONE"
+              : "COMMIT failed to issue SHOOT";
+        });
+  }
+#endif
+
   template<typename T> T ReadOnly(const std::string& name,const T& value) {
     rcl_interfaces::msg::ParameterDescriptor descriptor;
     descriptor.read_only=true;
@@ -907,6 +969,10 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr imu_sub_;
   rclcpp::Subscription<msg::CommandStatus>::SharedPtr status_sub_;
   rclcpp::TimerBase::SharedPtr frame_timer_,transport_timer_;
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr
+      prepare_service_,preview_service_,commit_service_;
+#endif
   OnSetParametersCallbackHandle::SharedPtr parameter_callback_;
 };
 } // namespace vision
