@@ -164,6 +164,11 @@ add_executable(goal_tuning_node src/perception_tuning_node.cpp)
 target_compile_definitions(goal_tuning_node PRIVATE VISION_GOAL_TUNING_NODE=1)
 add_executable(shoot_tuning_node src/shoot_tuning_node.cpp)
 target_compile_definitions(shoot_tuning_node PRIVATE QT_NO_KEYWORDS)
+# Reuses the bench's camera, transport and fixed-pose implementation, but
+# requires an explicit frozen PREVIEW before a single SHOOT COMMIT.
+add_executable(goal_shot_preview_node src/shoot_tuning_node.cpp)
+target_compile_definitions(goal_shot_preview_node PRIVATE
+  QT_NO_KEYWORDS VISION_GOAL_SHOT_PREVIEW_NODE=1)
 
 target_link_libraries(line_perception_node
   vision_core
@@ -219,12 +224,14 @@ set_target_properties(goal_tuning_node PROPERTIES
   INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
 ament_target_dependencies(goal_tuning_node
   rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge)
-target_link_libraries(shoot_tuning_node vision_core "${vision_typesupport_target}" Qt5::Widgets)
-set_target_properties(shoot_tuning_node PROPERTIES
-  BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
-  INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
-ament_target_dependencies(shoot_tuning_node
-  rclcpp ament_index_cpp sensor_msgs geometry_msgs cv_bridge)
+foreach(shoot_bench_target shoot_tuning_node goal_shot_preview_node)
+  target_link_libraries(${shoot_bench_target} vision_core "${vision_typesupport_target}" Qt5::Widgets)
+  set_target_properties(${shoot_bench_target} PROPERTIES
+    BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
+    INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
+  ament_target_dependencies(${shoot_bench_target}
+    rclcpp ament_index_cpp sensor_msgs geometry_msgs cv_bridge)
+endforeach()
 
 install(TARGETS
   vision_core
@@ -235,6 +242,7 @@ install(TARGETS
   perception_tuning_node
   goal_tuning_node
   shoot_tuning_node
+  goal_shot_preview_node
   ball_tuning_node
   hurdle_tuning_node
   DESTINATION lib/${PROJECT_NAME}
