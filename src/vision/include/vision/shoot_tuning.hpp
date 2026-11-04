@@ -56,6 +56,52 @@ inline vision_core::ActionRequest PlanStoredGoalCenter(
   return planner.PlanFineAction(pose);
 }
 
+// An isolated shoot preview never schedules a walking correction. It snapshots
+// a rim-center target and the best *integer* waist angle, using the same
+// physical waist pivot and tie-breaking contract as GOAL FineAction.
+struct GoalShotPreview {
+  int yaw_deg{0};
+  double landing_x_m{0}, landing_z_m{0}, position_error_m{0};
+  bool within_tolerance{false};
+};
+inline std::optional<GoalShotPreview> PreviewGoalShot(
+    const GoalCenterTarget& target,const vision_core::GoalConfig& config) {
+  if (!target.Valid() ||
+      !std::isfinite(config.throw_landing_x_m) ||
+      !std::isfinite(config.throw_landing_z_m) ||
+      !std::isfinite(config.waist_axis_in_camera_x_m) ||
+      !std::isfinite(config.waist_axis_in_camera_z_m) ||
+      !std::isfinite(config.position_tolerance_m) ||
+      !std::isfinite(config.shoot_yaw_limit_deg) ||
+      config.position_tolerance_m<0 || config.shoot_yaw_limit_deg<0)
+    return std::nullopt;
+  const int limit=static_cast<int>(
+      std::floor(std::min(180.0,config.shoot_yaw_limit_deg)));
+  GoalShotPreview best;
+  double error=std::numeric_limits<double>::infinity();
+  const double wx=config.waist_axis_in_camera_x_m;
+  const double wz=config.waist_axis_in_camera_z_m;
+  const double dx=config.throw_landing_x_m-wx;
+  const double dz=config.throw_landing_z_m-wz;
+  for (int deg=-limit;deg<=limit;++deg) {
+    const double rad=deg*kDebugPi/180.0;
+    const double x=wx+std::cos(rad)*dx-std::sin(rad)*dz;
+    const double z=wz+std::sin(rad)*dx+std::cos(rad)*dz;
+    const double candidate=std::hypot(target.x_m-x,target.y_m-z);
+    if (candidate<error-1e-12 ||
+        (std::abs(candidate-error)<=1e-12 && std::abs(deg)<std::abs(best.yaw_deg))) {
+      error=candidate;
+      best.yaw_deg=deg;
+      best.landing_x_m=x;
+      best.landing_z_m=z;
+      best.position_error_m=candidate;
+    }
+  }
+  if (!std::isfinite(error)) return std::nullopt;
+  best.within_tolerance=error<=config.position_tolerance_m;
+  return best;
+}
+
 // Sampling alone does not replace the stored result. The UI explicitly adopts
 // the sampled rim center, with the yaw assumption captured at click time.
 inline ClickedBackboard SampleClickedBackboard(
