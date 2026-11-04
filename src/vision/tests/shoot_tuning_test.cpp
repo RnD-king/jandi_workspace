@@ -126,6 +126,41 @@ void StoredGoalCenters() {
   Check(plan(manual).action==A::kShoot && plan(*clicked).action==A::kShoot,
       "radius edits must not reinterpret stored rim coordinates as a new board measurement");
 }
+void PhysicalPivotShotPreview() {
+  auto config=vision_core::LoadDefaultAlgorithmConfig();
+  config.goal.throw_landing_x_m=-.08;
+  config.goal.throw_landing_z_m=.62;
+  config.goal.waist_axis_in_camera_x_m=.020;
+  config.goal.waist_axis_in_camera_z_m=-.100;
+  config.goal.shoot_yaw_limit_deg=20;
+  config.goal.position_tolerance_m=.05;
+  const auto& c=config.goal;
+  const double rad=20*vision::kDebugPi/180.0;
+  const double dx=c.throw_landing_x_m-c.waist_axis_in_camera_x_m;
+  const double dz=c.throw_landing_z_m-c.waist_axis_in_camera_z_m;
+  const vision::GoalCenterTarget goal{
+      c.waist_axis_in_camera_x_m+std::cos(rad)*dx-std::sin(rad)*dz,
+      c.waist_axis_in_camera_z_m+std::sin(rad)*dx+std::cos(rad)*dz};
+  const auto preview=vision::PreviewGoalShot(goal,c);
+  Check(preview && preview->yaw_deg==20 && Near(preview->position_error_m,0) &&
+      preview->within_tolerance,
+      "PREVIEW must rotate around the measured waist pivot at +20 degrees");
+  Check(Near(preview->landing_x_m,goal.x_m) && Near(preview->landing_z_m,goal.y_m),
+      "preview landing point must match the frozen rim target");
+  const auto production=vision::PlanStoredGoalCenter(goal,c,config.camera_motion_timeout_sec);
+  Check(production.action==vision_core::MissionAction::kShoot && production.target_yaw_deg==preview->yaw_deg,
+      "in-tolerance preview must agree with production SHOOT yaw");
+  const auto far=vision::PreviewGoalShot({0,2},c);
+  Check(far && !far->within_tolerance && far->yaw_deg<=20 && far->yaw_deg>=-20,
+      "out-of-range target must show honest residual, never suggest a walk");
+  Check(!vision::PreviewGoalShot({0,0},c) &&
+      !vision::PreviewGoalShot({std::numeric_limits<double>::quiet_NaN(),1},c),
+      "invalid frozen targets must reject PREVIEW");
+  auto invalid=c;
+  invalid.shoot_yaw_limit_deg=-1;
+  Check(!vision::PreviewGoalShot(goal,invalid),"invalid yaw limits must reject PREVIEW");
+}
+
 void ActualDoneAndExactlyOneAction() {
   using namespace vision_core;
   ControlCommandCoordinator transport({100,2});
@@ -190,6 +225,7 @@ int main() {
   ClickDepthAndProjection();
   StatelessFineDecision();
   StoredGoalCenters();
+  PhysicalPivotShotPreview();
   ActualDoneAndExactlyOneAction();
   UnavailableRequestsDoNotLatchTheBench();
 }
