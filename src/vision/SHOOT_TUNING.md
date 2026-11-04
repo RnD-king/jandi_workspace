@@ -1,5 +1,30 @@
 # shoot_tuning_node
 
+## 전용 PREVIEW / COMMIT: goal_shot_preview_node
+
+기존 `shoot_tuning_node`와 별도로 빌드되는 시험 실행 파일이다.
+고정 슈팅 기본자세(23개 모터)를 실제 DONE까지 완료한 뒤,
+미세보행 없이 허리각을 계산하고 **사용자의 COMMIT에서만** `SHOOT(17)`
+한 동작을 전송한다. 원래 `shoot_tuning_node`의 단발 버튼은 변경하지 않는다.
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/my_cv/install/setup.bash
+ros2 run vision goal_shot_preview_node
+```
+
+- 시작 시 `forward_walk` 연결이 확인되면 고정 슈팅 기본자세를 자동으로 한 번 요청한다. 연결이 늦거나 준비를 다시 하려면 **슈팅 기본자세 준비** 버튼을 사용한다. 실제 `DONE`을 받기 전에는 COMMIT할 수 없다.
+- **계산하기**, **픽셀 클릭 결과 적용**, **직접 입력 좌표 적용**으로 *골대 림 중심* (X,Y)를 저장한다. 모든 좌표는 카메라 기준 m, X는 오른쪽, Y는 전방이다.
+- **PREVIEW — 회전각 계산**은 저장된 골대 중심과 실행 시 YAML/현재 파라미터에서 가장 오차가 작은 정수 허리각(±`goal_shoot_yaw_limit_deg`)을 구해, 보정된 허리축 `waist_axis_in_camera_x_m`, `waist_axis_in_camera_z_m` 중심으로 예상 낙하지점과 거리 오차를 보여준다. 이 버튼은 모터/카메라 명령을 전송하지 않는다.
+- **COMMIT — 실제 투척**은 PREVIEW에 기록한 각도의 `SHOOT(17)`을 **딱 한 번** 보낸다. `READY`는 다음 명령을 예약하지 않으며, 실제 `ACK/DONE`을 기다린다. 보행 보정, 자동 재시도 투척, 후진은 수행하지 않는다.
+- PREVIEW에서 예상 오차가 `position_tolerance_m`를 초과해도 **경고를 보여주고 COMMIT은 가능**하다. 실제 투척 실험용이므로, 명시적으로 COMMIT하는 경우에만 사용자 승인으로 실행한다.
+- 새 계산 좌표 적용, 슛 파라미터 변경, 새 기본자세 모션은 앞선 PREVIEW를 무효화한다. 투척 후에는 기본자세 DONE부터 다시 준비해야 한다. 누락된 ACK를 가짜 DONE으로 처리하지 않는다.
+- 실물 제어 시에는 `forward_walk`를 별도로 실행하고 다른 `vision` 명령 발행 노드는 동시에 실행하지 않는다. 카메라 기반 자동 계산에는 RGB/Depth/CameraInfo와 YOLO 엔진이 필요하다. 직접 좌표 입력은 인식 결과 대신 사용할 수 있다.
+
+`shoot_tuning_node`와 같은 C++ 소스를 컴파일 정의로 분리한 실행 파일이므로
+기존 `vision` 패키지를 재빌드해야 실행할 수 있다.
+
+
 골대 앞에 놓은 로봇으로 인식 좌표, 미세 보행 판단, 슛을 단발 시험한다.
 실행 시 Qt 창 하나에 기존 `line_perception_node`와 같은
 `RenderMissionDebug` 영상, 버튼, 파라미터 조절 영역이 열린다.
