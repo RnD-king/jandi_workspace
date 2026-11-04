@@ -21,6 +21,26 @@ ros2 run vision goal_shot_preview_node
 - 새 계산 좌표 적용, 슛 파라미터 변경, 새 기본자세 모션은 앞선 PREVIEW를 무효화한다. 투척 후에는 기본자세 DONE부터 다시 준비해야 한다. 누락된 ACK를 가짜 DONE으로 처리하지 않는다.
 - 실물 제어 시에는 `forward_walk`를 별도로 실행하고 다른 `vision` 명령 발행 노드는 동시에 실행하지 않는다. 카메라 기반 자동 계산에는 RGB/Depth/CameraInfo와 YOLO 엔진이 필요하다. 직접 좌표 입력은 인식 결과 대신 사용할 수 있다.
 
+터미널에서도 기존 튜닝 노드처럼 명령할 수 있도록 ROS2 서비스 세 개를 제공한다.
+`~/start`는 23모터 슈팅 기본자세를 요청하고, `~/preview`는 **새 카메라 프레임에서 자동 계산한 목표**를 PREVIEW로 고정하고, `~/commit`은 그 PREVIEW의 슛을 실제로 요청한다. 서비스 응답의 success는 요청 수락 여부이지 모터 DONE이 아니다.
+
+```bash
+# Qt 창을 띄울 수 있는 PC 세션에서 노드 실행
+ros2 run vision goal_shot_preview_node
+
+# 다른 터미널 — ROS_DOMAIN_ID 등 ROS 환경을 같은 값으로 설정
+ros2 service call /goal_shot_preview_node/start std_srvs/srv/Trigger "{}"
+ros2 service call /goal_shot_preview_node/preview std_srvs/srv/Trigger "{}"
+ros2 service call /goal_shot_preview_node/commit std_srvs/srv/Trigger "{}"
+```
+
+화면 없는 SSH 환경에서는 Qt offscreen 플랫폼 플러그인이 설치되어 있을 경우
+`QT_QPA_PLATFORM=offscreen ros2 run vision goal_shot_preview_node`로
+실행할 수도 있다. 이 경우 PREVIEW는 현재 카메라의 유효한 RGB/Depth/CameraInfo
+프레임이 있어야 성공하며, 직접 좌표 입력은 GUI에서만 지원된다.
+`~/start`는 연결된 `forward_walk`가 없으면 실패한다. 카메라·팔·허리 모터
+준비를 포함한 실제 DONE을 받은 뒤 COMMIT이 허용된다.
+
 `shoot_tuning_node`와 같은 C++ 소스를 컴파일 정의로 분리한 실행 파일이므로
 기존 `vision` 패키지를 재빌드해야 실행할 수 있다.
 
