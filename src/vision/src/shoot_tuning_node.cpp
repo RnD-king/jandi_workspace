@@ -141,7 +141,13 @@ struct Frame {
 
 class ShootTuningNode final : public rclcpp::Node {
 public:
-  ShootTuningNode() : Node("shoot_tuning_node"),
+  ShootTuningNode() : Node(
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+      "goal_shot_preview_node"
+#else
+      "shoot_tuning_node"
+#endif
+      ),
       config_(vision_core::LoadDefaultAlgorithmConfig()) {
     // Bench mode observes a single frame; it never enters the mission FSM.
     // PreviewPerception works on a disposable copy with command transport off.
@@ -251,6 +257,9 @@ public:
           throw std::invalid_argument("shoot_prepare_duration_sec must be in [0.2,60]");
         auto observer=std::make_unique<vision_core::MissionController>(candidate);
         config_=candidate; click_yaw_deg_=click_yaw;
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+        preview_.reset();  // A changed calibration invalidates any frozen shot plan.
+#endif
         prepare_duration_sec_=prepare_duration;
         yolo_->SetConfidenceThreshold(static_cast<float>(config_.line_detection.confidence));
         observer_=std::move(observer);
@@ -298,7 +307,13 @@ private:
   }
   void BuildUi() {
     window_=std::make_unique<QWidget>();
-    window_->setWindowTitle("Shoot tuning — 단발 슛 테스트");
+    window_->setWindowTitle(
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+      "GOAL shoot — PREVIEW / COMMIT 테스트"
+#else
+      "Shoot tuning — 단발 슛 테스트"
+#endif
+    );
     auto* layout=new QHBoxLayout(window_.get());
     auto* splitter=new QSplitter;
     layout->addWidget(splitter);
@@ -319,10 +334,17 @@ private:
     calculate_button_=new QPushButton("계산하기"); buttons->addWidget(calculate_button_);
     calculation_text_=Text("골대 중심 (X, Y): —",buttons);
     action_text_=Text("다음 동작: —",buttons);
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    Text("PREVIEW: 골대 좌표로 최적 허리 회전각을 계산합니다. 실제 모터 명령은 보내지 않습니다.\nCOMMIT: 고정된 PREVIEW 각도로 SHOOT(17)을 한 번만 전송합니다. 미세보행은 하지 않습니다.",buttons);
+    auto* pose=new QPushButton("슈팅 기본자세 준비"); buttons->addWidget(pose); motion_buttons_.push_back(pose);
+    preview_button_=new QPushButton("PREVIEW — 회전각 계산"); buttons->addWidget(preview_button_);
+    commit_button_=new QPushButton("COMMIT — 실제 투척"); buttons->addWidget(commit_button_);
+#else
     auto* shoot=new QPushButton("슛"); buttons->addWidget(shoot); motion_buttons_.push_back(shoot);
     auto* pose=new QPushButton("기본자세"); buttons->addWidget(pose); motion_buttons_.push_back(pose);
     stored_shoot_button_=new QPushButton("계산된 값에서 슛");
     buttons->addWidget(stored_shoot_button_);
+#endif
     status_text_=Text("대기 — 버튼을 누르면 한 동작만 실행",buttons);
     Text("픽셀 클릭: 해당 프레임의 5×5 유효 깊이 중앙값",buttons);
     click_text_=Text("픽셀 / 깊이 / 가정한 골대 중심: —",buttons);
@@ -353,13 +375,20 @@ private:
     controls_scroll->setMinimumWidth(340);
     splitter->addWidget(controls_scroll);
     QObject::connect(calculate_button_,&QPushButton::clicked,[this]() { Calculate(); });
+#if !defined(VISION_GOAL_SHOT_PREVIEW_NODE)
     QObject::connect(shoot,&QPushButton::clicked,[this]() {
       SendAction({MissionAction::kShoot,ActionCategory::kMission,0,false});
     });
+#endif
     QObject::connect(pose,&QPushButton::clicked,[this]() {
       SendAction({MissionAction::kDefaultPoseMode,ActionCategory::kMission,0,false});
     });
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    QObject::connect(preview_button_,&QPushButton::clicked,[this]() { PreviewStoredShot(); });
+    QObject::connect(commit_button_,&QPushButton::clicked,[this]() { CommitPreviewShot(); });
+#else
     QObject::connect(stored_shoot_button_,&QPushButton::clicked,[this]() { ShootStoredResult(); });
+#endif
     QObject::connect(adopt_click_button_,&QPushButton::clicked,[this]() {
       if (!clicked_target_) return;
       StoreCalculatedTarget(*clicked_target_,"픽셀 클릭",clicked_details_,&clicked_frame_);
@@ -421,7 +450,12 @@ private:
     const bool busy=MotionBusy();
     for (auto* button:motion_buttons_) button->setEnabled(!busy);
     calculate_button_->setEnabled(true);
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    preview_button_->setEnabled(!busy && calculated_target_.has_value());
+    commit_button_->setEnabled(!busy && pose_ready_ && preview_.has_value());
+#else
     stored_shoot_button_->setEnabled(!busy && calculated_target_.has_value());
+#endif
     adopt_click_button_->setEnabled(clicked_target_.has_value());
     for (auto* widget:target_edit_widgets_) widget->setEnabled(true);
     for (const auto& entry:parameter_widgets_) entry.second->setEnabled(!busy);
@@ -528,7 +562,11 @@ private:
   MissionDebugImages Render(const Frame& frame) const {
     MissionDebugContext context;
     context.control_state=MotionBusy() ? "EXECUTING / WAIT DONE" : "SHOOT BENCH / HOLD";
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    context.control_hint="PREPARE / CALCULATE / PREVIEW / COMMIT";
+#else
     context.control_hint="CALCULATE / SHOOT / PREPARE / SHOOT STORED RESULT";
+#endif
     context.waiting_action_id=transport_->PendingActionId();
     context.last_received_done_id=last_done_id_;
     context.last_processed_done_id=last_done_id_;
@@ -560,6 +598,9 @@ private:
     const auto error=MeasurementError();
     if (!error.isEmpty()) {
       calculated_target_.reset();
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+      preview_.reset();
+#endif
       calculation_text_->setText("계산 실패: "+error);
       action_text_->setText("다음 동작: 저장된 계산 결과 없음");
       UpdateUi(); return;
@@ -568,6 +609,9 @@ private:
     const auto target=GoalCenterFromLanding(landing);
     if (!target) {
       calculated_target_.reset();
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+      preview_.reset();
+#endif
       calculation_text_->setText("계산 실패: 골대 중심의 유한한 좌표와 양수 Y가 필요합니다.");
       action_text_->setText("다음 동작: 저장된 계산 결과 없음");
       UpdateUi(); return;
@@ -581,6 +625,9 @@ private:
                              const QString& details,const Frame* frame=nullptr) {
     if (!target.Valid()) return;
     calculated_target_=target;
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    preview_.reset(); // New target requires a new explicit PREVIEW.
+#endif
     calculated_source_=source; calculated_details_=details;
     if (frame) {
       frozen_=*frame;
@@ -591,7 +638,11 @@ private:
       frozen_=Frame();
       frozen_view_->SetImage({});
     }
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    status_text_->setText(source+" 결과 저장 — PREVIEW를 누르면 예상 회전각을 고정합니다.");
+#else
     status_text_->setText(source+" 결과 저장 — 계산된 값에서 슛 버튼으로 한 동작 실행");
+#endif
     UpdateUi();
   }
   void RefreshStoredResult() {
@@ -599,10 +650,64 @@ private:
     calculation_text_->setText(QString("계산 결과 출처: %1\n골대 중심 (X, Y) = (%2, %3) m\n%4")
         .arg(calculated_source_).arg(calculated_target_->x_m,0,'f',4)
         .arg(calculated_target_->y_m,0,'f',4).arg(calculated_details_));
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    if (preview_) {
+      action_text_->setText(QString("PREVIEW 고정됨 — SHOOT(17) / 허리 %1°\n"
+          "예상 낙하지점 (X, Y) = (%2, %3) m\n골대 중심과 예상 오차: %4 mm (%5)\n"
+          "COMMIT에서만 실제 명령이 나갑니다.")
+          .arg(preview_->yaw_deg)
+          .arg(preview_->landing_x_m,0,'f',4)
+          .arg(preview_->landing_z_m,0,'f',4)
+          .arg(preview_->position_error_m*1000,0,'f',1)
+          .arg(preview_->within_tolerance ? "허용오차 이내" : "허용오차 초과"));
+    } else {
+      action_text_->setText("다음 동작: PREVIEW가 필요합니다. 아직 실제 투척은 승인되지 않았습니다.");
+    }
+#else
     const auto request=PlanStoredGoalCenter(*calculated_target_,config_.goal,config_.camera_motion_timeout_sec);
     action_text_->setText(QString("저장 좌표에서 다음 한 동작: %1\n허리 각도: %2°\n현재 슛 파라미터 기준 / 새 영상 계산 없음")
         .arg(DebugActionName(request.action)).arg(request.target_yaw_deg));
+#endif
   }
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+  void PreviewStoredShot() {
+    if (MotionBusy()) return;
+    preview_.reset();
+    if (!calculated_target_) {
+      status_text_->setText("먼저 계산하기 또는 직접 입력 좌표 적용으로 골대 중심을 저장하세요.");
+      UpdateUi();
+      return;
+    }
+    preview_=PreviewGoalShot(*calculated_target_,config_.goal);
+    if (!preview_) {
+      status_text_->setText("허리 회전각 계산 실패 — 저장 좌표 또는 슛 보정값을 확인하세요.");
+    } else if (!preview_->within_tolerance) {
+      status_text_->setText("PREVIEW 고정 — 예상 오차가 허용값을 초과합니다. COMMIT 시에도 한 번의 슛만 실행합니다.");
+    } else {
+      status_text_->setText("PREVIEW 고정 — 실제 명령 없이 회전각과 예상 낙하지점만 계산했습니다.");
+    }
+    if (preview_ && frozen_.valid) {
+      frozen_.result.mission.goal.action={
+          MissionAction::kShoot,ActionCategory::kMission,
+          static_cast<std::int16_t>(preview_->yaw_deg),false};
+      frozen_view_->SetImage(Render(frozen_).image);
+    }
+    UpdateUi();
+  }
+  void CommitPreviewShot() {
+    if (MotionBusy() || !preview_) return;
+    if (!pose_ready_) {
+      status_text_->setText("COMMIT 불가 — 슈팅 기본자세의 실제 DONE을 먼저 확인해야 합니다.");
+      UpdateUi();
+      return;
+    }
+    const int yaw=preview_->yaw_deg;
+    // Explicit approval sends SHOOT only, never a stepping correction.
+    SendAction({MissionAction::kShoot,ActionCategory::kMission,
+                static_cast<std::int16_t>(yaw),false});
+  }
+#endif
+
   void ShootStoredResult() {
     if (MotionBusy()) return;
     if (!calculated_target_) {
@@ -665,6 +770,18 @@ private:
     }
     // READY never queues another command. Unavailable requests are discarded
     // locally without reporting a physical completion or sending STOP.
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    if (request.action==MissionAction::kShoot &&
+        (!pose_ready_ || !preview_ || request.target_yaw_deg!=preview_->yaw_deg)) {
+      status_text_->setText("COMMIT 거부 — 기본자세 DONE 및 동일한 PREVIEW가 필요합니다.");
+      return;
+    }
+    // A physical motion invalidates the preview snapshot and pose readiness.
+    if (request.action==MissionAction::kShoot || request.action==MissionAction::kDefaultPoseMode) {
+      preview_.reset();
+      pose_ready_=false;
+    }
+#endif
     current_action_=request.action;
     active_prepare_duration_sec_=prepare_duration_sec_;
     AdvanceTransport({},request);
@@ -681,6 +798,11 @@ private:
     if (feedback.done && !transport_->HasPendingAction()) {
       last_done_id_=status.command_id;
       last_done_sec_=get_clock()->now().seconds();
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+      if (current_action_==MissionAction::kDefaultPoseMode) pose_ready_=true;
+      // SHOOT always consumes its prepared pose. Re-prepare before another shot.
+      if (current_action_==MissionAction::kShoot) pose_ready_=false;
+#endif
       // Never reuse an in-motion frame for the next automatic calculation.
       live_.valid=false;
       status_text_->setText(QString("%1 완료 (DONE %2) — 다음 버튼 대기")
@@ -755,6 +877,11 @@ private:
   ImageWidget *live_view_{},*frozen_view_{},*state_view_{};
   QLabel *calculation_text_{},*action_text_{},*status_text_{},*click_text_{};
   QPushButton *calculate_button_{},*stored_shoot_button_{},*adopt_click_button_{};
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+  QPushButton *preview_button_{},*commit_button_{};
+  std::optional<GoalShotPreview> preview_;
+  bool pose_ready_{false};
+#endif
   QDoubleSpinBox *manual_x_{},*manual_y_{};
   std::vector<QWidget*> target_edit_widgets_;
   std::vector<QPushButton*> motion_buttons_;
@@ -803,7 +930,11 @@ int main(int argc,char** argv) {
     rclcpp::shutdown();
     return result;
   } catch (const std::exception& error) {
+#if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
+    RCLCPP_FATAL(rclcpp::get_logger("goal_shot_preview_node"),"%s",error.what());
+#else
     RCLCPP_FATAL(rclcpp::get_logger("shoot_tuning_node"),"%s",error.what());
+#endif
     rclcpp::shutdown();
     return 1;
   }
