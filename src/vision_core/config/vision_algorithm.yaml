@@ -334,8 +334,8 @@ vision_algorithm:
       hoop_radius_m: 0.10 # 림 위치 보정에 사용하는 반지름
       throw_landing_x_m: -0.08 # 카메라 기준 허리 0도 공 낙하 X (m)
       throw_landing_z_m: 0.62 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
-      waist_axis_in_camera_x_m: 0.0 # 카메라 기준 허리축 X (+오른쪽); 실측 전 기존 동작 유지
-      waist_axis_in_camera_z_m: 0.0 # 카메라 기준 허리축 Z (+전방); 실측 전 기존 동작 유지
+      waist_axis_in_camera_x_m: 0.020 # 카메라 기준 허리축 X (+오른쪽); 실측 전 기존 동작 유지
+      waist_axis_in_camera_z_m: -0.100 # 카메라 기준 허리축 Z (+전방); 실측 전 기존 동작 유지
       fine_motion:
         max_repetitions: 3
         forward_delta_x_m: 0.0 # action3 후 카메라 관측 GOAL 상대좌표 X 변화
