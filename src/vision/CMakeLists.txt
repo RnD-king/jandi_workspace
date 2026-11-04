@@ -230,7 +230,7 @@ foreach(shoot_bench_target shoot_tuning_node goal_shot_preview_node)
     BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
     INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
   ament_target_dependencies(${shoot_bench_target}
-    rclcpp ament_index_cpp sensor_msgs geometry_msgs cv_bridge)
+    rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge)
 endforeach()
 
 install(TARGETS
