@@ -99,11 +99,13 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
     hurdle_result_.active=true;
     hurdle_target_tracker_.Lock();
   } else {
-    if (route.near)
+    if (route.near) {
+      // A FINE view needs its own fresh edge evidence, not far-WALK votes.
+      goal_edge_guard_ = {};
       goal_controller_.EnterContinuousNear(recovery_target,route.pose,
           lost ? route.good_hits : route.hits,route.pose_hits,route.near_hits,
           input.image_width,input.image_height,input.now_sec,lost);
-    else goal_controller_.EnterContinuousApproach(recovery_target,route.pose,
+    } else goal_controller_.EnterContinuousApproach(recovery_target,route.pose,
           route.good_hits,route.pose_hits,route.near_hits,
           input.image_width,input.image_height,input.now_sec,true);
     goal_result_.mode=route.near ? GoalMode::kWaitFinePose : GoalMode::kApproach;
@@ -378,7 +380,8 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const bool settled=camera.settled && camera.actual_mode!=CameraMode::kTransition;
   const bool goal_view=camera.actual_mode==CameraMode::kGoal;
   // A stationary 10/4 raw-bbox edge guard always precedes Depth recovery.
-  if(goal_view && input.raw_backboard_observation_available && has_ball_) {
+  if(goal_view && input.raw_backboard_observation_available && has_ball_ &&
+     !(continuous_.mission==MissionType::kGoal && continuous_.near)) {
     ActionRequest edge_action;
     if(PrepareGoalEdgeGuard(input,idle,edge_action)) {
       result.hold=true;result.action=edge_action;
@@ -790,15 +793,27 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     return result;
   }
   if (continuous_.near || (lost && continuous_.locked)) {
-    line_plan_.Abort();result.hold=true;
+    // A newly committed HURDLE waits for the executing LINE unit's READY
+    // window; unlike BALL/GOAL, do not abort its O/H accumulator yet.
+    const bool hurdle_ready_tail = i==2 && continuous_.near &&
+        continuous_.near_motion_id==0 &&
+        continuous_.near_motion.action==MissionAction::kNone;
+    if (!hurdle_ready_tail) line_plan_.Abort();
+    result.hold=true;
     if (!continuous_.near) {
       if (idle && input.allow_new_commands && input.allow_new_body_actions) {
         EnterContinuousMission(input,true);result.entered=true;
       }
       return result;
     }
-    // HURDLE: current LINE DONE -> one more 32/33/36 from fresh floor O/H.
+    // HURDLE: commit exactly ONE successor at the current LINE READY.
+    // Direction is chosen from the normal block O/H mean, not from the
+    // near-trigger frame. Without READY, fallback occurs only after DONE.
     if (i==2) {
+      if (!idle && hurdle_ready_tail) {
+        result.hold=false; // Let StepPlannedLine collect and finish at READY.
+        return result;
+      }
       if (!idle) return result;
       if (continuous_.near_motion_id) {
         if (!input.delivery_feedback.done ||
@@ -813,9 +828,10 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         result.action=continuous_.near_motion;result.near_final_action=true;
         return result;
       }
-      const auto guide=line.guide.valid ? line.guide :
-          continuous_.hurdle_last_mean_guide.valid ? continuous_.hurdle_last_mean_guide :
-          continuous_.hurdle_last_guide;
+      const auto guide=continuous_.hurdle_last_mean_guide.valid ?
+          continuous_.hurdle_last_mean_guide :
+          continuous_.hurdle_last_guide.valid ?
+          continuous_.hurdle_last_guide : line.guide;
       if(!guide.valid)return result;
       const auto dir=SteeringDecision(guide).direction;
       const auto unit=dir==CruiseDirection::kLeft ? MissionAction::kLineLeftUnit :
@@ -824,8 +840,17 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
           dir==CruiseDirection::kStraight ? MissionAction::kLineStraightUnit :
                                            MissionAction::kNone;
       if(unit==MissionAction::kNone)return result;
-      continuous_.near_motion={unit,ActionCategory::kLocomotion,0,false};
+      continuous_.near_motion={unit,ActionCategory::kLocomotion,0,true};
       result.action=continuous_.near_motion;result.near_final_action=true;
+      return result;
+    }
+    // GOAL: near is already stable (10/7 + depth votes). Drain the
+    // current WALK and request FINE stance directly, without a pre-FINE
+    // 1s observation. Fresh post-pose samples handle edge and next action.
+    if (i==1) {
+      if (idle && input.allow_new_commands && input.allow_new_body_actions) {
+        EnterContinuousMission(input,false);result.entered=true;
+      }
       return result;
     }
     last_line_score_.reset();
