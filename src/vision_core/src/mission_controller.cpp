@@ -2290,8 +2290,10 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
       const bool ball=detection.class_id==cfg.ball_class_id;
       const bool enabled=ball ? cfg.ball_depth_enabled : cfg.hurdle_depth_enabled;
       const auto mode=input.camera_feedback.actual_mode;
-      if(enabled && (mode==CameraMode::kForward || mode==CameraMode::kDown ||
-                     mode==CameraMode::kBallView)) {
+      // HURDLE DOWN uses RGB pixel bands only; retain Depth gating in FORWARD.
+      if(enabled && (ball || mode!=CameraMode::kDown) &&
+         (mode==CameraMode::kForward || mode==CameraMode::kDown ||
+          mode==CameraMode::kBallView)) {
         const double lo=ball ? (mode==CameraMode::kBallView ? cfg.ball_view_min_depth_m :
             mode==CameraMode::kDown ? cfg.ball_down_min_depth_m : cfg.ball_forward_min_depth_m) : cfg.hurdle_min_depth_m;
         const double hi=ball ? (mode==CameraMode::kBallView ? cfg.ball_view_max_depth_m :
