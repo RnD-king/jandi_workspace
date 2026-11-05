@@ -750,6 +750,46 @@ void FarGoalDepthRecovery(bool found,bool acquired=false) {
         "third failed GOAL Depth probe did not return to LINE");
 }
 
+void GoalEdgeTenInFourRawBBox() {
+  // GOAL is initially image-visible but has no central Depth. The raw edge
+  // guard must win before the first head scan or any blind Depth recovery.
+  for(const auto left_turn:{true,false}) {
+    auto c=Config();c.enable_ball=false;c.enable_goal=true;
+    c.initial_has_ball=c.goal_trial_start_goal=true;
+    c.goal.lost_frames=100;
+    c.goal.edge_stable_window=10;c.goal.edge_stable_min_hits=4;
+    Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
+    d.in.camera_feedback={CameraMode::kGoal,true};
+    d.in.backboard_image_without_depth=true;
+    d.in.raw_backboard_observation_available=true;
+    for(int n=0;n<22;++n){
+      // Four edge frames early in the window and a centered bbox afterwards.
+      d.in.raw_backboard_target=Target(n<4?(left_turn?20:620):320);
+      d.Tick({},.1);
+      if(d.out.command.action==MissionAction::kTurnLeftInPlace ||
+         d.out.command.action==MissionAction::kStepForwardRightOneHurdle)break;
+    }
+    const auto expected=left_turn?MissionAction::kTurnLeftInPlace :
+                                  MissionAction::kStepForwardRightOneHurdle;
+    const auto first=d.out.command.action_id;
+    Check(first && d.out.command.action==expected,
+          "raw bbox 10/4 edge latch did not prioritize the correct WALK turn");
+    d.Tick({first,true,false,false});
+    d.Tick({first,true,true,false});
+    const auto second=d.out.command.action_id;
+    Check(second && second!=first && d.out.command.action==expected,
+          "first edge turn DONE did not request the second matching turn");
+    d.Tick({second,true,false,false});
+    d.Tick({second,true,true,false});
+    for(int n=0;n<9;++n){
+      d.in.raw_backboard_target=Target(320);
+      d.Tick({},.1);
+      Check(d.out.command.action!=expected,
+          "edge guard issued a third turn before fresh stopped observation");
+    }
+  }
+}
+
 void NearLossBeforeLock(MissionType mission) {
   auto c=Config();c.enable_ball=mission==MissionType::kBall;
   c.enable_hurdle=mission==MissionType::kHurdle;c.enable_goal=mission==MissionType::kGoal;
@@ -1155,6 +1195,7 @@ int main() {
   GoalAutoReferenceIsIsolated();
   GoalAutoThreePixelZones();
   AcquiredGoalLossScansBeforeLineReturn();
+  GoalEdgeTenInFourRawBBox();
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
   ReadyCenterAccumulator();InitialLineMeanProbeAfterIdentityExpiry();

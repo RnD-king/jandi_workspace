@@ -331,7 +331,9 @@ vision_algorithm:
       auto_approach_center_u_px: 320.0 # GOAL 전용 수직 3구역 중심
       auto_approach_half_width_px: 100.0 # 180~380px 직진, 밖은 좌/우회전전진
       approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
-      edge_margin_px: 50.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
+      edge_margin_px: 50.0 # GOAL 이미지 경계 보호 구간(px)
+      edge_stable_window: 10 # 연속된 프레임 관측창; 기간 내 한번 충족하면 래치
+      edge_stable_min_hits: 4 # 좌/우 각각 10중4 이상 접촉 시 우선 제자리 2회전
       approach_short_z_m: 0.9 # GOAL 근거리 진입·FINE 자세 전환 기준; FORWARD 뷰에서는 짧은 보행 선택 기준
       camera_goal_start_z_m: 0.9 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
 

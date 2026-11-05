@@ -50,6 +50,8 @@ struct GoalFineMotionPlan {
 
 struct GoalConfig {
   double edge_margin_px{};
+  int edge_stable_window{10};
+  int edge_stable_min_hits{4};
   int recovery_turn_max{3};
   double recovery_observation_sec{};
   int recovery_max_observations{};

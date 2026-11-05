@@ -340,14 +340,14 @@ bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
     if(left&&right)left=right=false; // Ambiguous clipped/oversized box.
   }
   e.left_hits.push_back(left);e.right_hits.push_back(right);
-  const auto window=static_cast<std::size_t>(config_.goal.stable_window);
+  const auto window=static_cast<std::size_t>(config_.goal.edge_stable_window);
   while(e.left_hits.size()>window)e.left_hits.pop_front();
   while(e.right_hits.size()>window)e.right_hits.pop_front();
   // Latch ANY consecutive 10-frame window in this stationary observation.
   if(e.left_hits.size()==window){
-    if(std::count(e.left_hits.begin(),e.left_hits.end(),true)>=4)
+    if(std::count(e.left_hits.begin(),e.left_hits.end(),true)>=config_.goal.edge_stable_min_hits)
       e.left_qualified=true;
-    if(std::count(e.right_hits.begin(),e.right_hits.end(),true)>=4)
+    if(std::count(e.right_hits.begin(),e.right_hits.end(),true)>=config_.goal.edge_stable_min_hits)
       e.right_qualified=true;
   }
   if(input.now_sec+1e-9<e.observation_start_sec+config_.post_motion_observation_sec ||

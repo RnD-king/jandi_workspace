@@ -152,6 +152,10 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.goal.depth_recovery_max_steps, "goal.depth_recovery_max_steps");
   PositiveInt(c.goal.far_depth_probe_max_attempts,"goal.far_depth_probe_max_attempts");
   Nonnegative(c.goal.edge_margin_px, "goal.edge_margin_px");
+  PositiveInt(c.goal.edge_stable_window,"goal.edge_stable_window");
+  PositiveInt(c.goal.edge_stable_min_hits,"goal.edge_stable_min_hits");
+  if(c.goal.edge_stable_min_hits>c.goal.edge_stable_window)
+    throw std::runtime_error("goal.edge_stable_min_hits must not exceed edge_stable_window");
   Nonnegative(c.transition_settle_sec, "mission.transition_settle_sec");
   Nonnegative(c.walk_inter_action_hold_sec, "mission.walk_inter_action_hold_sec");
   Nonnegative(c.fine_motion_settle_sec, "mission.fine_motion_settle_sec");
@@ -816,6 +820,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   if(g && g["auto_approach_half_width_px"])
     Assign(g,"auto_approach_half_width_px",c.goal.auto_approach_half_width_px);
   Assign(g, "edge_margin_px", c.goal.edge_margin_px);
+  if(g && g["edge_stable_window"])Assign(g,"edge_stable_window",c.goal.edge_stable_window);
+  if(g && g["edge_stable_min_hits"])Assign(g,"edge_stable_min_hits",c.goal.edge_stable_min_hits);
   Assign(g, "trial_start_goal", c.goal_trial_start_goal);
   Assign(g, "test_mission_index", c.test_goal_mission_index);
   Assign(g, "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px);
