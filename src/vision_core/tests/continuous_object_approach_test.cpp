@@ -446,7 +446,12 @@ void NearPixelVotesWithGaps(MissionType mission) {
   sample(std::nullopt);Check(!d.out.approach_near,"missing frame counted as near");
   sample(260);Check(!d.out.approach_near,"two near-v votes entered near");
   sample(std::nullopt);Check(!d.out.approach_near,"missing frame completed near vote");
-  sample(260);Check(d.out.approach_near,"three nonconsecutive near-v votes did not latch");
+  sample(260);
+  if(mission==MissionType::kHurdle){
+    Check(!d.out.approach_near,"HURDLE latched before five v>=240 votes");
+    sample(260);sample(260); // Five near votes, seven total valid frames.
+  }
+  Check(d.out.approach_near,"configured nonconsecutive near-v votes did not latch");
 }
 void NearFinalActionSequence(double u,bool left,bool extreme) {
   auto c=Config();c.ball.approach_extreme_turn_margin_px=90.0;
@@ -834,6 +839,16 @@ void NearLossBeforeLock(MissionType mission) {
   Check(d.out.approach_near && d.out.approach_mission==mission,
         "pre-lock near loss was discarded as a far soft candidate");
   d.Tick({d.current,true,true,false});
+  if(mission==MissionType::kHurdle) {
+    // After the triggering walk's DONE, HURDLE has exactly one final
+    // O/H-selected LINE unit. No camera DOWN until that unit's actual DONE.
+    for(int i=0;i<40 && d.out.command.action_id==0;++i)d.Tick({},.1);
+    const auto final_unit=d.out.command.action_id;
+    Check(final_unit && LinePlan::IsUnit(d.out.command.action),
+          "near HURDLE lost its final O/H-selected LINE unit");
+    d.Tick({final_unit,true,false,false});
+    d.Tick({final_unit,true,true,false});
+  }
   for(int i=0;i<120 && d.out.active_mission==MissionType::kLine;++i)d.Tick({},.1);
   Check(d.out.active_mission==mission && !d.out.remembered_line_score,
         "near loss returned to LINE instead of the committed object mission");
