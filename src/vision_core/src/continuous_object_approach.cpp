@@ -360,7 +360,7 @@ bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
   if(!idle)return false;
   ObserveGoalEdgeSample(input);
   if(input.now_sec+1e-9<e.observation_start_sec+config_.post_motion_observation_sec ||
-     e.left_hits.size()<window)return true;
+     e.left_hits.size()<static_cast<std::size_t>(config_.goal.edge_stable_window))return true;
   e.observing=false;e.ready=true;
   if(e.left_qualified!=e.right_qualified){
     e.turn_left=e.left_qualified;
