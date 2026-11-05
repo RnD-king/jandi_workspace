@@ -87,21 +87,25 @@ int main() {
     return all;
   }());
   const auto center=PickupPolygonCentroid(hex);
+  const auto initial=c.PickupRegionAfterFailures(0).PickupVertices();
   const auto once=c.PickupRegionAfterFailures(1).PickupVertices();
   const auto twice=c.PickupRegionAfterFailures(2).PickupVertices();
   const auto clamped=c.PickupRegionAfterFailures(15).PickupVertices();
   const double area=std::abs(PickupSignedArea2(hex));
-  assert(std::abs(std::abs(PickupSignedArea2(once))/area - .93*.93)<1e-9);
-  assert(std::abs(std::abs(PickupSignedArea2(twice))/area - std::pow(.93,4))<1e-9);
+  assert(std::abs(std::abs(PickupSignedArea2(initial))/area - .9*.9)<1e-9);
+  assert(std::abs(std::abs(PickupSignedArea2(once))/area - std::pow(.9*.93,2))<1e-9);
+  assert(std::abs(std::abs(PickupSignedArea2(twice))/area - std::pow(.9*.93*.93,2))<1e-9);
   for(std::size_t i=0;i<hex.size();++i) {
-    assert(std::abs((once[i].u-center.u)-.93*(hex[i].u-center.u))<1e-7);
-    assert(std::abs((twice[i].u-center.u)-.93*.93*(hex[i].u-center.u))<1e-7);
+    assert(std::abs((initial[i].u-center.u)-.9*(hex[i].u-center.u))<1e-7);
+    assert(std::abs((once[i].u-center.u)-.9*.93*(hex[i].u-center.u))<1e-7);
+    assert(std::abs((twice[i].u-center.u)-.9*.93*.93*(hex[i].u-center.u))<1e-7);
     assert(std::abs(twice[i].u-clamped[i].u)<1e-9);
     assert(std::abs(twice[i].v-clamped[i].v)<1e-9);
   }
   c.pickup_shrink_enabled=false;
   const auto no_shrink=c.PickupRegionAfterFailures(2).PickupVertices();
-  assert(no_shrink[0].u==hex[0].u && no_shrink[0].v==hex[0].v);
+  assert(std::abs(no_shrink[0].u-initial[0].u)<1e-9 &&
+         std::abs(no_shrink[0].v-initial[0].v)<1e-9);
   c.pickup_shrink_enabled=true;
 
   // All four uncalibrated directions choose exactly one existing FINE action.
@@ -133,6 +137,12 @@ int main() {
   invalid.ball=c;
   invalid.ball.pickup_shrink_percent=100;
   bool rejected=false;
+  try { ValidateAlgorithmConfig(invalid); }
+  catch(const std::runtime_error&) {rejected=true;}
+  assert(rejected);
+  invalid.ball=c;
+  invalid.ball.pickup_initial_shrink_percent=100.0;
+  rejected=false;
   try { ValidateAlgorithmConfig(invalid); }
   catch(const std::runtime_error&) {rejected=true;}
   assert(rejected);

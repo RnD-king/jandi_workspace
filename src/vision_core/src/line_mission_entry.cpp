@@ -381,6 +381,8 @@ MissionFrameResult MissionController::StepPlannedLine(
       }
       if (sf.finished && scan.scan_started) {
         if(left) scan.phase=Phase::kPendingRight;
+        else if(++scan.completed_pairs<config_.line_recovery.scan_max_pairs)
+          scan.phase=Phase::kPendingLeft;
         else { scan.phase=Phase::kIdle;line_state_=LineState::kFinalHold; }
       }
     } else if (scan.phase==Phase::kReturnFound) {

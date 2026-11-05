@@ -40,6 +40,7 @@ struct LineLossRecoveryConfig {
   int scan_pause_window{4}, scan_pause_hits{2};
   int scan_verify_window{10}, scan_verify_hits{5};
   double scan_body_turn_deg{15.0};
+  int scan_max_pairs{3}; // Alternating LEFT/RIGHT pairs before terminal hold.
 };
 
 struct MissionControllerConfig {
@@ -677,6 +678,7 @@ private:
                        kReturnFound, kAlignBody };
     Phase phase{Phase::kIdle};
     bool scan_started{false}, tried{false}, align_left{false};
+    int completed_pairs{0};
     int align_remaining{0};
     std::uint64_t align_action_id{0};
     std::deque<bool> pause_hits, verify_hits;

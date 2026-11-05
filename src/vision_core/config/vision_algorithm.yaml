@@ -48,6 +48,7 @@ vision_algorithm:
       scan_verify_window: 10
       scan_verify_hits: 5
       scan_body_turn_deg: 15.0
+      scan_max_pairs: 3 # LEFT → RIGHT 반복 3묶음(총 6회), 미발견 시 FINAL HOLD
 
     # Separate from the unchanged normal LINE RANSAC and O/H steering.
     curve_search:
@@ -180,7 +181,8 @@ vision_algorithm:
       pickup_max_attempts: 100
       pickup_verify_min_hits: 3 # 픽업 DONE 후 stable_window 중 잔존 공 검출 기준; 이상이면 재픽업
       pickup_shrink_enabled: true # 두 노드 모두 활성화, rqt에서 ON/OFF 조정 가능
-      pickup_shrink_percent: 7.0 # 실패 확정마다 가로/세로 각각 7% 축소(면적 약 13.5%)
+      pickup_initial_shrink_percent: 10.0 # 원본 꼭짓점 영역에서 시작부터 가로/세로 10% 축소
+      pickup_shrink_percent: 7.0 # 이후 실패 확정마다 기존 7%씩 추가 축소(변경 없음)
       pickup_shrink_max_failures: 2 # 최대 2회 축소, 새 공 미션 시작 시 초기화
 
       # 픽업 후 복귀

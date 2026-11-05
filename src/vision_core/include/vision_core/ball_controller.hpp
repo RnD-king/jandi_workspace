@@ -92,7 +92,8 @@ struct BallConfig {
   int pickup_verify_min_hits{};
   bool pickup_shrink_enabled{true};
   double pickup_shrink_step_px{3.0}; // Legacy trapezoid compatibility only.
-  double pickup_shrink_percent{7.0}; // Polygon: shrink each dimension 7% per failed PICK.
+  double pickup_shrink_percent{7.0}; // Polygon: existing shrink per failed PICK.
+  double pickup_initial_shrink_percent{10.0}; // Initial inset versus the YAML polygon.
   int pickup_shrink_max_failures{2}; // Maximum confirmed residual-ball failures.
   PickupPolygon pickup_polygon; // Canonical N-gon when configured; coordinates in image pixels.
   // Legacy trapezoid fields remain for older test fixtures/YAMLs.
@@ -109,8 +110,9 @@ struct BallConfig {
     const int count=pickup_shrink_enabled
         ? std::min(std::max(0,failures),pickup_shrink_max_failures) : 0;
     if (!pickup_polygon.empty()) {
-      const double factor=std::pow(1.0-pickup_shrink_percent/100.0,count);
-      if (count>0) effective.pickup_polygon=ScalePickupPolygon(pickup_polygon,factor);
+      const double factor=(1.0-pickup_initial_shrink_percent/100.0)*
+          std::pow(1.0-pickup_shrink_percent/100.0,count);
+      if (factor<1.0) effective.pickup_polygon=ScalePickupPolygon(pickup_polygon,factor);
     } else {
       const double shrink=count*pickup_shrink_step_px;
       effective.pickup_u1_px+=shrink;

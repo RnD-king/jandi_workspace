@@ -269,6 +269,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
       "line_recovery.scan_pause_hits","line_recovery.scan_pause_window");
   HitsWithinWindow(c.line_recovery.scan_verify_hits,c.line_recovery.scan_verify_window,
       "line_recovery.scan_verify_hits","line_recovery.scan_verify_window");
+  PositiveInt(c.line_recovery.scan_max_pairs,"line_recovery.scan_max_pairs");
   Positive(c.line_recovery.scan_body_turn_deg,"line_recovery.scan_body_turn_deg");
   if(c.line_recovery.scan_body_turn_deg>180)
     throw std::runtime_error("line_recovery.scan_body_turn_deg too large");
@@ -380,6 +381,10 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     throw std::runtime_error("ball.approach_direct_down_v_px must exceed ball.approach_two_step_v_px");
   PositiveInt(c.ball.pickup_max_attempts, "ball.pickup_max_attempts");
   Nonnegative(c.ball.pickup_shrink_step_px, "ball.pickup_shrink_step_px");
+  if (!std::isfinite(c.ball.pickup_initial_shrink_percent) ||
+      c.ball.pickup_initial_shrink_percent<0.0 ||
+      c.ball.pickup_initial_shrink_percent>=100.0)
+    throw std::runtime_error("ball initial pickup shrink percent must be in [0,100)");
   if (!std::isfinite(c.ball.pickup_shrink_percent) || c.ball.pickup_shrink_percent < 0.0 ||
       c.ball.pickup_shrink_percent >= 100.0)
     throw std::runtime_error("ball pickup shrink percent must be in [0,100)");
@@ -677,6 +682,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     Assign(lr,"scan_verify_window",c.line_recovery.scan_verify_window);
     Assign(lr,"scan_verify_hits",c.line_recovery.scan_verify_hits);
     Assign(lr,"scan_body_turn_deg",c.line_recovery.scan_body_turn_deg);
+    if(lr["scan_max_pairs"])Assign(lr,"scan_max_pairs",c.line_recovery.scan_max_pairs);
   }
 
   const auto lp = a["line_p2p"];
@@ -747,6 +753,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     Assign(b,"pickup_shrink_step_px",c.ball.pickup_shrink_step_px);
   if (b["pickup_shrink_percent"])
     Assign(b,"pickup_shrink_percent",c.ball.pickup_shrink_percent);
+  if (b["pickup_initial_shrink_percent"])
+    Assign(b,"pickup_initial_shrink_percent",c.ball.pickup_initial_shrink_percent);
   if (b["pickup_shrink_max_failures"])
     Assign(b,"pickup_shrink_max_failures",c.ball.pickup_shrink_max_failures);
   if (b["pickup_polygon_px"]) {
