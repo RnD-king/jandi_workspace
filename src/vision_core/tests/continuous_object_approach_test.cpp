@@ -429,6 +429,9 @@ void NearPixelVotesWithGaps(MissionType mission) {
   auto c=Config();
   c.enable_ball=mission==MissionType::kBall;
   c.enable_hurdle=mission==MissionType::kHurdle;
+  // CTest deliberately uses an older fixture with near_v_min_hits=3.
+  // Explicitly exercise the new production 10/5 hurdle near policy.
+  if(mission==MissionType::kHurdle)c.hurdle.near_v_min_hits=5;
   Driver d(c);
   if (mission==MissionType::kHurdle) {
     d.in.ball_target.reset();
@@ -448,11 +451,7 @@ void NearPixelVotesWithGaps(MissionType mission) {
   sample(std::nullopt);Check(!d.out.approach_near,"missing frame completed near vote");
   sample(260);
   if(mission==MissionType::kHurdle){
-    if(d.out.approach_near)
-      throw std::runtime_error("HURDLE prematurely latched near with configured threshold="+
-          std::to_string(c.hurdle.near_v_min_hits)+
-          " stable="+std::to_string(c.hurdle.stable_min_hits)+
-          " valid_before="+std::to_string(d.out.approach_sequence_hits));
+    Check(!d.out.approach_near,"HURDLE latched before five v>=240 votes");
     sample(260);sample(260); // Five near votes, seven total valid frames.
   }
   Check(d.out.approach_near,"configured nonconsecutive near-v votes did not latch");
