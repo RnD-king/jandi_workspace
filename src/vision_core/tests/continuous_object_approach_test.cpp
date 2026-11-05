@@ -582,12 +582,17 @@ void HurdleAndGoal() {
   for(int n=0;n<c.hurdle.near_v_min_hits+4 && !h.out.approach_near;++n)h.Tick();
   Check(h.out.approach_near,"HURDLE failed to latch its configured v>=240 evidence");
   h.Tick({h.current,true,false,true});
-  Check(h.out.command.action_id==h.current,"HURDLE boundary booked another shared unit");
+  // Unlike the legacy near-at-DONE sequence, the one final 32/33/36
+  // must be reserved from the normal LINE READY O/H mean.
+  Check(h.out.command.control_phase==ControlPhase::kWaitingQueuedActionAck &&
+        h.out.command.action_id!=h.current &&
+        LinePlan::IsUnit(h.out.command.action),
+        "HURDLE READY failed to reserve its single O/H-selected unit");
+  const auto hurdle_unit=h.out.command.action_id;
+  h.Tick({hurdle_unit,true,false,false}); // queued ACK is not motion DONE
   h.Tick({h.current,true,true,false});
   Check(h.out.active_mission==MissionType::kLine && h.out.approach_near,
-        "near HURDLE switched before its current physical LINE DONE");
-  for(int n=0;n<30 && h.out.command.action_id==0;++n)h.Tick();
-  const auto hurdle_unit=h.out.command.action_id;
+        "near HURDLE switched before its final unit physically DONE");
   Check(hurdle_unit && h.out.command.action==MissionAction::kLineStraightUnit,
         "HURDLE near did not choose one additional O/H-steered 33 unit");
   h.Tick({hurdle_unit,true,false,false});h.Tick({hurdle_unit,true,true,false});
