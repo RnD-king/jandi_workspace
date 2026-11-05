@@ -485,6 +485,7 @@ private:
   } goal_edge_guard_;
   // Returns true while the protected GOAL observation/turn takes priority.
   bool PrepareGoalEdgeGuard(const MissionFrameInput&,bool idle,ActionRequest&);
+  void ObserveGoalEdgeSample(const MissionFrameInput&);
   void ClearGoalEdgeObservation();
 
   int approach_goal_empty_frames_{0}, approach_goal_retry_after_{0};

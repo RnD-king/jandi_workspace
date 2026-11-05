@@ -32,6 +32,8 @@ public:
   void ObserveExecutionTime(const CommandDeliveryFeedback &feedback, double now_sec);
   double LineExecutionSeconds() const { return line_execution_sec_; }
   bool HasQueuedAction() const { return queued_action_id_ != 0; }
+  std::uint64_t QueuedActionId() const { return queued_action_id_; }
+  MissionAction QueuedAction() const { return queued_request_.action; }
   bool HasPendingAction() const { return pending_action_id_ != 0 || queued_action_id_ != 0; }
   std::uint64_t PendingActionId() const { return pending_action_id_; }
   bool ActionAckTimedOut() const { return action_ack_timed_out_; }

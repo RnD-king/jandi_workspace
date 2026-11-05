@@ -37,6 +37,7 @@ struct HurdleConfig {
   int down_search_max_steps{10};
   double down_search_min_v_px{80.0};
   double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
+  double down_stationary_observation_sec{1.0}; // After a detected v-based WALK.
   double recovery_observation_sec{};
   int recovery_max_observations{};
   int entry_recovery_max_steps{}; // First FORWARD observation loss; exhausted -> LINE.
@@ -163,7 +164,13 @@ public:
   int RecoveryStepsCompleted() const { return recovery_steps_completed_; }
   int RecoveryStepLimit() const { return recovery_step_limit_; }
   bool EntryRecovery() const { return entry_step_recovery_; }
-  bool DownSearchFound() const { return down_search_.Found(); }
+  bool DownSearchFound() const { return down_search_.Found() || down_near_qualified_; }
+  bool ContinuousDownSearch() const {
+    return down_approach_fixed_sequence_ && mode_ == HurdleMode::kDownSearch;
+  }
+  bool ContinuousDownCameraWait() const {
+    return down_approach_fixed_sequence_ && mode_ == HurdleMode::kWaitCameraDown;
+  }
   int LostFrames() const { return lost_count_; }
   bool IgnoringUntil(double now_sec) const { return now_sec < ignore_until_sec_; }
   int DetectionFrames() const { return static_cast<int>(hit_history_.size()); }
@@ -182,6 +189,7 @@ private:
   void ExhaustStepRecovery(double now_sec, HurdleResult &result);
   void ResetToLine(bool clear_ignore);
   void ClearTracking();
+  void ClearDownEvidence();
   void BeginFineLineObservation(double now_sec);
   void FinishFineLineAlign(HurdleResult &result);
 
@@ -212,7 +220,12 @@ private:
   bool down_approach_fixed_sequence_{false};
   bool down_initial_two_pending_{false}, down_initial_two_done_{false};
   bool down_final_one_pending_{false}, down_near_qualified_{false};
-  std::deque<bool> down_near_hits_;
+  std::deque<bool> down_near_hits_; // Legacy diagnostic history.
+  std::deque<std::optional<double>> down_v_samples_;
+  std::optional<double> down_observed_v_px_;
+  bool down_distance_pending_{false}, down_stationary_observing_{false};
+  bool down_search_step_pending_{false};
+  double down_stationary_start_sec_{0.0}, down_search_hold_until_sec_{0.0};
   StationaryObjectRecovery stationary_recovery_;
   int completed_back_steps_{0};
   int completed_contact_steps_{0};

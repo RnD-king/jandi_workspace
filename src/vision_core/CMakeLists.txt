@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(shared_vision_core VERSION 0.1.0 LANGUAGES CXX)
 
+# Production/release builds do not need to compile regression tests.
+# CI opts in explicitly with -DBUILD_TESTING=ON.
+option(BUILD_TESTING "Build shared vision_core regression tests" OFF)
 include(CTest)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -79,8 +82,16 @@ install(FILES
 )
 
 if(BUILD_TESTING)
+  add_executable(shared_vision_core_hurdle_down_sequence_test
+    tests/hurdle_down_sequence_test.cpp)
+  target_link_libraries(shared_vision_core_hurdle_down_sequence_test
+    PRIVATE shared_vision_core)
   # Fixed scenario data keeps logic tests independent of operator tuning.
   set(VISION_CORE_TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
+  add_test(NAME shared_vision_core_hurdle_down_sequence_test
+    COMMAND shared_vision_core_hurdle_down_sequence_test)
+  set_tests_properties(shared_vision_core_hurdle_down_sequence_test PROPERTIES
+    LABELS "logic" ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   add_executable(shared_vision_core_ball_fine_motion_test tests/ball_fine_motion_test.cpp)
   target_link_libraries(shared_vision_core_ball_fine_motion_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_ball_fine_motion_test COMMAND shared_vision_core_ball_fine_motion_test)
