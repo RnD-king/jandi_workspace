@@ -800,6 +800,16 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     return result;
   }
   if (continuous_.near || (lost && continuous_.locked)) {
+    // If normal LINE already reserved B at A's READY before HURDLE near
+    // qualified, B is exactly the required one extra unit. Never reserve C.
+    if (i==2 && continuous_.near && continuous_.near_motion_id==0 &&
+        continuous_.near_motion.action==MissionAction::kNone &&
+        command_coordinator_.HasQueuedAction() &&
+        LinePlan::IsUnit(command_coordinator_.QueuedAction())) {
+      continuous_.near_motion_id=command_coordinator_.QueuedActionId();
+      continuous_.near_motion={command_coordinator_.QueuedAction(),
+                               ActionCategory::kLocomotion,0,true};
+    }
     // A newly committed HURDLE waits for the executing LINE unit's READY
     // window; unlike BALL/GOAL, do not abort its O/H accumulator yet.
     const bool hurdle_ready_tail = i==2 && continuous_.near &&
