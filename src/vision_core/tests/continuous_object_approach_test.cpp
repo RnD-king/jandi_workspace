@@ -573,24 +573,22 @@ void HurdleAndGoal() {
   h.in.hurdle_target=Target(320,260);
   h.Tick();Check(!h.out.approach_near,"HURDLE near entered on one vote");
   h.Tick();Check(!h.out.approach_near,"HURDLE near entered on two votes");
+  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on three votes");
+  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on four votes");
   h.Tick();
   h.Tick({h.current,true,false,true});
   Check(h.out.command.action_id==h.current,"HURDLE boundary booked another shared unit");
   h.Tick({h.current,true,true,false});
   Check(h.out.active_mission==MissionType::kLine && h.out.approach_near,
-        "near HURDLE skipped fresh observation");
+        "near HURDLE switched before its current physical LINE DONE");
   for(int n=0;n<30 && h.out.command.action_id==0;++n)h.Tick();
-  const auto hurdle_step=h.out.command.action_id;
-  Check(hurdle_step && h.out.command.action==MissionAction::kStepForwardTwo,
-        "near HURDLE did not use its original two-step action");
-  h.Tick({hurdle_step,true,false,false});h.Tick({hurdle_step,true,true,false});
-  const auto extra=h.out.command.action_id;
-  Check(extra && extra!=hurdle_step &&
-        h.out.command.action==MissionAction::kStepForwardTwo,
-        "HURDLE did not add the configured second two-step before DOWN");
-  h.Tick({extra,true,false,false});h.Tick({extra,true,true,false});
-  Check(h.out.active_mission==MissionType::kHurdle,
-        "HURDLE did not hand off to DOWN after four real steps");
+  const auto hurdle_unit=h.out.command.action_id;
+  Check(hurdle_unit && h.out.command.action==MissionAction::kLineStraightUnit,
+        "HURDLE near did not choose one additional O/H-steered 33 unit");
+  h.Tick({hurdle_unit,true,false,false});h.Tick({hurdle_unit,true,true,false});
+  Check(h.out.active_mission==MissionType::kHurdle &&
+        h.out.command.camera_request==CameraRequest::kDown,
+        "HURDLE did not hand off to DOWN after its one extra LINE unit");
 
   c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;c.goal_trial_start_goal=true;
   Driver g(c);g.in.ball_target.reset();g.in.camera_feedback={CameraMode::kGoal,true};

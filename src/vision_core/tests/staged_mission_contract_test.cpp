@@ -148,6 +148,14 @@ void NearStageStopsBeforeMission(MissionType mission) {
     t.in.line_centers={{380,450},{380,400},{380,350},{380,300},{380,250}};
   const auto prepare_id=t.PrepareStage(mission,2);
   assert(prepare_id!=0 && t.out.foot_pose==FootPose::kWalk);
+  if(mission==MissionType::kHurdle) {
+    // DOWN stage2 mirrors AUTO: one mandatory 22, then v>=80 10/3,
+    // then exactly one final 10 before FINE stance and line alignment.
+    for(int i=0;i<20 && t.Preview().command.action!=MissionAction::kStepForwardTwo;++i)t.Tick();
+    t.Commit(MissionAction::kStepForwardTwo);t.Done();
+    for(int i=0;i<30 && t.Preview().command.action!=MissionAction::kStepForwardOne;++i)t.Tick();
+    t.Commit(MissionAction::kStepForwardOne);t.Done();
+  }
   for(int i=0;i<20 && t.Preview().command.action!=MissionAction::kDefaultPoseMode;++i)t.Tick();
   t.Commit(MissionAction::kDefaultPoseMode);t.Done();
   assert(t.out.foot_pose==FootPose::kFine);
