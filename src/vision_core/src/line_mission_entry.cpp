@@ -19,6 +19,10 @@ bool SameIssuedAction(MissionAction requested, MissionAction issued) {
 }
 
 void MissionController::ObserveLineFeedback(const CommandDeliveryFeedback& feedback, double now) {
+  if(feedback.done && feedback.action_id!=0 && continuous_.mission==MissionType::kGoal &&
+     line_plan_.ObjectOwned(feedback.action_id,continuous_.epoch) &&
+     !line_plan_.IsProbe(feedback.action_id))
+    goal_approach_walk_done_=true;
   line_plan_.Feedback(feedback, now, config_.walk_inter_action_hold_sec);
   if (feedback.done && feedback.action_id != 0) {
     if (feedback.action_id == candidate_.turn_id) {
@@ -937,6 +941,7 @@ MissionFrameResult MissionController::StepPlannedLine(
       candidate_.turn_is_restore = candidate_.phase == CandidatePhase::kRestore;
     } else if (route.depth_recovery_step) {
       approach_goal_depth_action_id_=command.action_id;
+      far_goal_depth_probe_.phase=FarGoalDepthProbe::Phase::kMotion;
     } else if (line_auxiliary_id_ != command.action_id) {
       line_auxiliary_id_ = command.action_id;
       line_auxiliary_action_ = command.action;

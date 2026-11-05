@@ -362,7 +362,8 @@ vision_algorithm:
       recovery_max_observations: 5
       recovery_center_tolerance_px: 1 # 마지막 안정 위치가 target_u_px ±이 값이면 WALK 1걸음/FINE 미세 1회 전진 후 관측
       recovery_turn_max: 5 # 좌우 탐색 회전 한도. 재발견 뒤 같은 방향 추가 1회전은 별도
-      depth_recovery_max_steps: 3 # 백보드는 보이나 Depth/좌표 실패: WALK 1걸음 또는 FINE 전진→정지 관측, 소진 시 실패
+      depth_recovery_max_steps: 3 # FINE Depth 좌표 실패: 반걸음→정지 관측 최대 횟수
+      far_depth_probe_max_attempts: 3 # 이미 GOAL 접근 DONE한 AUTO만, YOLO 유효/중앙 Depth 무효일 때 위치 보행+관측
 
   # COMMON: Depth 표본 → 객체 연결 → 명령 → 미션 공통 동작
   common:

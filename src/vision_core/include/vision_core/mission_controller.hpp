@@ -135,7 +135,8 @@ struct MissionFrameInput {
   CameraFeedback camera_feedback;
   CameraScanFeedback camera_scan;
   std::optional<double> scan_ball_u; // filtered YOLO candidate, independent of FORWARD tracker
-  std::optional<double> scan_backboard_u; // YOLO-only GOAL scan cue, independent of Depth.
+  std::optional<double> scan_backboard_u; // GOAL scan cue; central Depth must be valid.
+  std::optional<double> raw_backboard_u; // YOLO-only horizontal position for bounded far Depth probing.
   // true이면 controller용 ActionExecutionFeedback을 직전 공통 command와
   // delivery_feedback에서 MissionController가 직접 만든다. 실행기 어댑터는
   // controller 상태를 건드리지 않고 ACK/READY/DONE만 반환하면 된다.
@@ -473,6 +474,15 @@ private:
   bool approach_goal_search_failed_{false};
   bool approach_goal_depth_failed_{false};
   int approach_goal_bad_depth_frames_{0};
+  bool goal_approach_walk_done_{false}; // At least one object-owned GOAL action actually DONE.
+  struct FarGoalDepthProbe {
+    enum class Phase { kIdle, kMotion, kObserve };
+    Phase phase{Phase::kIdle};
+    int attempts{0};
+    double observe_start_sec{0.0};
+    bool qualified{false};
+    std::deque<bool> hits;
+  } far_goal_depth_probe_;
   std::uint64_t approach_goal_depth_action_id_{0};
   double approach_camera_started_{-1.0};
   RouteDecision PrepareContinuousApproach(const MissionFrameInput&,const Features&,bool idle);

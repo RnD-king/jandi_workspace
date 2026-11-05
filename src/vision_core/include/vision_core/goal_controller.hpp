@@ -54,6 +54,7 @@ struct GoalConfig {
   double recovery_observation_sec{};
   int recovery_max_observations{};
   int depth_recovery_max_steps{};
+  int far_depth_probe_max_attempts{3}; // AUTO: one direction-aware walk and observation per attempt.
   double approach_short_z_m{};
   double camera_goal_start_z_m{};
   int post_shoot_back_steps{};

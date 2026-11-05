@@ -48,6 +48,8 @@ void MissionController::ReleaseContinuousApproach() {
     ball_controller_.ClearEntryEvidence();
   } else if (mission==MissionType::kHurdle) hurdle_target_tracker_.Reset();
   else if (mission==MissionType::kGoal) {
+    goal_approach_walk_done_=false;
+    far_goal_depth_probe_={};
     backboard_target_tracker_.Reset();
     goal_controller_.ClearDepthRecovery();
     approach_goal_depth_action_id_=0;
@@ -118,6 +120,7 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
   approach_goal_empty_retries_=0;
   approach_goal_bad_depth_frames_=0;
   approach_goal_depth_action_id_=0;
+  far_goal_depth_probe_={};
   approach_camera_started_=-1;
   line_plan_.Reset();line_ready_handled_id_=line_auxiliary_id_=0;
   line_auxiliary_done_=line_auxiliary_observing_=false;
@@ -205,57 +208,76 @@ bool MissionController::ResumeContinuousApproach(const MissionFrameInput& input)
 
 bool MissionController::PrepareGoalDepthRecovery(const MissionFrameInput& input,
     bool visible,bool usable,bool idle,RouteDecision& result) {
-  if (visible && !usable && continuous_.probe_active) {
-    // Depth loss is a separate GOAL recovery episode. The current motor ID
-    // still drains normally, but an aborted probe must not remain armed.
-    continuous_.probe_active=false;
+  // The FIRST GOAL sighting without usable central Depth is an acquisition
+  // failure. No blind forward step: let the normal left/right head scan run.
+  if(!goal_approach_walk_done_) {
+    approach_goal_bad_depth_frames_=0;
+    far_goal_depth_probe_={};
+    return false;
   }
-  if (usable || !visible) approach_goal_bad_depth_frames_=0;
-  else ++approach_goal_bad_depth_frames_;
-  if (!goal_controller_.DepthRecoveryActive()) {
-    if (!visible || usable) return false;
-    result.hold=true;
-    line_plan_.Abort();
-    if (approach_goal_bad_depth_frames_<config_.goal.lost_frames) return true;
-    if (!idle) return true;
-    goal_controller_.BeginDepthRecovery(false);
-  }
-  result.hold=true;
+  auto& probe=far_goal_depth_probe_;
   const bool done=approach_goal_depth_action_id_ && input.delivery_feedback.done &&
       input.delivery_feedback.action_id==approach_goal_depth_action_id_;
-  const bool can_issue=idle && input.allow_new_commands && input.allow_new_body_actions &&
-      input.allow_new_line_action && !command_coordinator_.ActionAckTimedOut() &&
-      input.now_sec+1e-9>=settle_until_sec_;
-  if (foot_pose_!=FootPose::kWalk && !approach_goal_depth_action_id_) {
-    if (can_issue) result.action={MissionAction::kWalkMode,ActionCategory::kLocomotion,0,false};
+  if(probe.phase==FarGoalDepthProbe::Phase::kMotion) {
+    result.hold=true;
+    if(done) {
+      approach_goal_depth_action_id_=0;
+      ++probe.attempts;
+      probe.phase=FarGoalDepthProbe::Phase::kObserve;
+      probe.observe_start_sec=input.now_sec;
+      probe.hits.clear();probe.qualified=false;
+    }
     return true;
   }
-  const auto recovery=goal_controller_.StepDepthRecovery(visible,usable,input.now_sec,
-      {done,command_coordinator_.HasPendingAction() && !done,false},can_issue);
-  if (done) approach_goal_depth_action_id_=0;
-  if (recovery.failed) {
-    line_plan_.Abort();line_state_=LineState::kFinalHold;approach_goal_depth_failed_=true;
-  } else if (recovery.missing && continuous_.mission==MissionType::kGoal) {
-    if (continuous_.locked) {
-      EnterContinuousMission(input,true);
-      result.entered=true;
-    } else {
+  if(probe.phase==FarGoalDepthProbe::Phase::kObserve) {
+    result.hold=true;
+    probe.hits.push_back(visible&&usable);
+    while(probe.hits.size()>static_cast<std::size_t>(config_.goal.stable_window))
+      probe.hits.pop_front();
+    if(probe.hits.size()==static_cast<std::size_t>(config_.goal.stable_window) &&
+       std::count(probe.hits.begin(),probe.hits.end(),true)>=config_.goal.stable_min_hits)
+      probe.qualified=true;
+    if(input.now_sec+1e-9<probe.observe_start_sec+config_.post_motion_observation_sec ||
+       probe.hits.size()<static_cast<std::size_t>(config_.goal.stable_window))return true;
+    if(probe.qualified) {
+      probe={};approach_goal_bad_depth_frames_=0;
+      return false;
+    }
+    if(!visible) {
+      probe={};
+      if(continuous_.mission==MissionType::kGoal)continuous_.loss_pending=true;
+      return false; // Lost YOLO uses the ordinary GOAL head scan.
+    }
+    if(probe.attempts>=config_.goal.far_depth_probe_max_attempts){
+      // Depth-only failure: no neck scan, no fourth body step.
+      line_plan_.Abort();
       ReleaseContinuousApproach();
       approach_return_ball_view_=true;
       post_pickup_goal_line_gate_active_=true;
       approach_goal_retry_after_=post_pickup_line_actions_completed_+1;
-      if (idle && input.allow_new_commands) result.camera=CameraRequest::kBallViewLine;
+      result.camera=CameraRequest::kBallViewLine;
+      return true;
     }
-  } else if (recovery.recovered) {
-    approach_goal_bad_depth_frames_=0;
-    continuous_.probe_used=false;
-    line_plan_.Reset();line_auxiliary_id_=0;
-    line_auxiliary_done_=line_auxiliary_observing_=false;
-    line_stability_history_.clear();
-    actual_line_stability_history_.clear();
-  } else if (can_issue && recovery.action.action!=MissionAction::kNone) {
-    result.action=recovery.action;result.depth_recovery_step=true;
+    probe.phase=FarGoalDepthProbe::Phase::kIdle;
+    approach_goal_bad_depth_frames_=config_.goal.lost_frames; // next bounded probe
+    return true;
   }
+  if(!visible){approach_goal_bad_depth_frames_=0;return false;}
+  if(usable){approach_goal_bad_depth_frames_=0;probe={};return false;}
+  result.hold=true;line_plan_.Abort();
+  if(++approach_goal_bad_depth_frames_<config_.goal.lost_frames || !idle)return true;
+  if(!input.raw_backboard_u)return true; // Never invent a direction from stale pixels.
+  if(!input.allow_new_commands || !input.allow_new_body_actions ||
+     !input.allow_new_line_action || command_coordinator_.ActionAckTimedOut() ||
+     input.now_sec+1e-9<settle_until_sec_)return true;
+  const double u=*input.raw_backboard_u;
+  const double left=config_.goal.auto_approach_center_u_px-config_.goal.auto_approach_half_width_px;
+  const double right=config_.goal.auto_approach_center_u_px+config_.goal.auto_approach_half_width_px;
+  const auto action=u<left ? MissionAction::kStepForwardLeftOne :
+                    u>right ? MissionAction::kStepForwardRightOne :
+                              MissionAction::kStepForwardOne;
+  result.action={action,ActionCategory::kLocomotion,0,false};
+  result.depth_recovery_step=true;
   return true;
 }
 
@@ -415,6 +437,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     if (!settled || !goal_view) { camera_request(CameraRequest::kGoal);return result; }
     approach_goal_probe_=false;approach_camera_started_=-1;
     approach_goal_empty_frames_=0;approach_evidence_={};
+    goal_approach_walk_done_=false;far_goal_depth_probe_={};
     goal_head_search_={};
     line_stability_history_.clear();
     actual_line_stability_history_.clear();
@@ -497,11 +520,10 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   }
   if (continuous_.mission==MissionType::kNone) {
     if (goal_view) {
-      if (PrepareGoalDepthRecovery(input, input.backboard_target.has_value() ||
-          input.backboard_image_without_depth, goal_depth_usable && goal_guide.valid,
-          idle, result)) return result;
+      // No physical GOAL approach has DONE yet. Image-only sightings are
+      // treated as unseen for head-scan and bounded LINE retry purposes.
       result.hold=true;
-      if (input.backboard_target || input.backboard_image_without_depth) approach_goal_empty_frames_=0;
+      if (input.backboard_target) approach_goal_empty_frames_=0;
       else if (++approach_goal_empty_frames_>=config_.goal.lost_frames) {
         if (config_.goal.head_scan_enabled && !goal_head_search_.used) {
           goal_head_search_.used=true;
@@ -587,6 +609,13 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
      continuous_.missing>config_.ball_candidate_tracking.missing_frame_limit)
     continuous_.loss_pending=true;
   const bool lost=continuous_.loss_pending;
+  // A completed GOAL approach with visible RGB but invalid Depth takes the
+  // direction-aware 3x probe path BEFORE generic object-loss handling.
+  if(i==1 && !continuous_.near && input.backboard_image_without_depth &&
+     PrepareGoalDepthRecovery(input,true,false,idle,result))return result;
+  if(i==1 && !continuous_.near && far_goal_depth_probe_.phase!=FarGoalDepthProbe::Phase::kIdle &&
+     PrepareGoalDepthRecovery(input,input.backboard_target.has_value() || input.backboard_image_without_depth,
+                              input.backboard_target.has_value(),idle,result))return result;
   // A GOAL already acquired during approach uses the same head scan as the
   // first empty GOAL view before falling back to BALL_VIEW_LINE. All issued
   // locomotion IDs must drain before a scan camera request can start.
@@ -791,9 +820,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   }
   // Near commitment and soft-loss release take precedence over coordinate
   // recovery. A visible near board must never issue another WALK search step.
-  if (i == 1 && PrepareGoalDepthRecovery(input, target.has_value() ||
-      input.backboard_image_without_depth,
-      target && goal_depth_usable && goal_guide.valid, idle, result)) return result;
+  // Far-depth retry is handled above, before any LOST/scan transition.
   const bool probe_final_edge=continuous_.probe_active &&
       line_plan_.LastUnit(input.delivery_feedback.action_id) &&
       (input.delivery_feedback.ready || input.delivery_feedback.done);

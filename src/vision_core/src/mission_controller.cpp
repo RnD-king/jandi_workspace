@@ -2651,6 +2651,14 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   if (input.camera_feedback.settled &&
       input.camera_feedback.actual_mode == CameraMode::kGoal)
     goal_controller_.ObserveEntryBackboard(backboard_in_image);
+  prepared.raw_backboard_u.reset();
+  if(input.camera_feedback.settled && backboard_in_image){
+    const auto candidates=ExtractObjectTargetCandidates(image_detections,
+        config_.object_targets.backboard_class_id,
+        config_.object_targets.backboard_confidence,config_.object_targets);
+    if(!candidates.empty())prepared.raw_backboard_u=std::max_element(candidates.begin(),
+        candidates.end(),lower_raw_rank)->target.center_px.u;
+  }
   prepared.backboard_image_without_depth =
       input.camera_feedback.settled && backboard_in_image &&
       ExtractObjectTargetCandidates(
@@ -2671,8 +2679,9 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
     prepared.scan_ball_u=best->target.center_px.u;
   }
   if (input.camera_scan.phase!=0) {
+    // A GOAL neck scan succeeds only with a valid center Depth.
     const auto scan_boards=ExtractObjectTargetCandidates(
-        image_detections,config_.object_targets.backboard_class_id,
+        detections,config_.object_targets.backboard_class_id,
         config_.object_targets.backboard_confidence,config_.object_targets);
     if(!scan_boards.empty()) {
       const auto best=std::max_element(scan_boards.begin(),scan_boards.end(),
@@ -3182,6 +3191,8 @@ void MissionController::Reset(bool preserve_action_ids) {
   approach_goal_search_failed_=false;
   approach_goal_depth_failed_=false;approach_goal_bad_depth_frames_=0;
   approach_goal_depth_action_id_=0;
+  goal_approach_walk_done_=false;
+  far_goal_depth_probe_={};
   approach_camera_started_=-1;
   line_plan_.Reset();
   candidate_ = {};

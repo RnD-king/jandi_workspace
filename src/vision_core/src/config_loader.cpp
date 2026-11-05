@@ -150,6 +150,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.ball.down_recovery_max_actions, "ball.down_recovery_max_actions");
   NonnegativeInt(c.goal.recovery_turn_max, "goal.recovery_turn_max");
   PositiveInt(c.goal.depth_recovery_max_steps, "goal.depth_recovery_max_steps");
+  PositiveInt(c.goal.far_depth_probe_max_attempts,"goal.far_depth_probe_max_attempts");
   Nonnegative(c.goal.edge_margin_px, "goal.edge_margin_px");
   Nonnegative(c.transition_settle_sec, "mission.transition_settle_sec");
   Nonnegative(c.walk_inter_action_hold_sec, "mission.walk_inter_action_hold_sec");
@@ -829,6 +830,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "recovery_observation_sec", c.goal.recovery_observation_sec);
   Assign(g, "recovery_max_observations", c.goal.recovery_max_observations);
   Assign(g, "depth_recovery_max_steps", c.goal.depth_recovery_max_steps);
+  if(g && g["far_depth_probe_max_attempts"])Assign(g,"far_depth_probe_max_attempts",c.goal.far_depth_probe_max_attempts);
   Assign(g, "approach_short_z_m", c.goal.approach_short_z_m);
   Assign(g, "camera_goal_start_z_m", c.goal.camera_goal_start_z_m);
   Assign(g, "post_shoot_back_steps", c.goal.post_shoot_back_steps);
