@@ -49,6 +49,34 @@ int main() {
         "terminal recovery did not display FAILED");
   m.terminal_hold=false;m.line_in_recovery=false;
   m.active_mission=vision_core::MissionType::kHurdle;
+  {
+    // Confirm the exact text and that it appears only for genuine stopped
+    // HURDLE stages; stage 0/3 and other missions must not show the banner.
+    c.test_mission=vision_core::MissionType::kHurdle;
+    m.trial_complete=true;
+    c.test_stage=1;m.hurdle.mode=vision_core::HurdleMode::kWaitCameraDown;
+    Check(vision::HurdleTestBoundaryNotice(c,m).find("CAMERA DOWN REQUIRED - NOT SENT")!=std::string::npos,
+          "stage 1 must explain that camera DOWN was blocked");
+    const auto far_stopped=vision::RenderMissionDebug(
+        image,adapter,{},c,p,m,{vision_core::CameraMode::kForward,true},{},vision::MissionDebugContext{});
+    Check(cv::countNonZero(far_stopped.image(cv::Rect(5,60,630,50)).reshape(1))>0,
+          "stage 1 camera overlay must display a terminal message");
+    c.test_stage=2;m.hurdle.mode=vision_core::HurdleMode::kCross;
+    c.hurdle.contact_steps=3;
+    Check(vision::HurdleTestBoundaryNotice(c,m).find("CONTACT 3/3 DONE - NEXT: HURDLE(16) NOT SENT")!=std::string::npos,
+          "stage 2 must explain that all contact steps are DONE and HURDLE blocked");
+    const auto near_stopped=vision::RenderMissionDebug(
+        image,adapter,{},c,p,m,{vision_core::CameraMode::kDown,true},{},vision::MissionDebugContext{});
+    Check(cv::countNonZero(near_stopped.image(cv::Rect(5,60,630,50)).reshape(1))>0,
+          "stage 2 camera overlay must display a terminal message");
+    c.test_stage=3;
+    Check(vision::HurdleTestBoundaryNotice(c,m).empty(),
+          "stage 3 is a real execution stage, not a stopped preview");
+    m.trial_complete=false;c.test_stage=0;
+    Check(vision::HurdleTestBoundaryNotice(c,m).empty(),
+          "ordinary HURDLE control must not show a stage-complete banner");
+    c.test_mission=vision_core::MissionType::kNone;
+  }
   m.hurdle.tracked.visible=true;m.hurdle.tracked.center_px={300,200};
   m.foot_pose=vision_core::FootPose::kFine;
   const vision_core::CameraFeedback camera{vision_core::CameraMode::kDown,true};

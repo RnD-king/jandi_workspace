@@ -75,7 +75,7 @@ struct Trial {
   }
 };
 // Stage START always executes its own stance before normal preview/COMMIT.
-void FarStageStopsAfterCamera(MissionType mission) {
+void FarStageStopsAtBoundary(MissionType mission) {
   Trial t(mission,1);
   t.TargetNow(mission);
   if(mission==MissionType::kBall)
@@ -96,12 +96,26 @@ void FarStageStopsAfterCamera(MissionType mission) {
     t.in.delivery_feedback={id,true,false,false};t.Tick();
     assert(!t.out.trial_complete); // ACK alone cannot finish
     t.in.delivery_feedback={id,true,true,false};t.Tick();
-    assert(t.out.command.camera_request==(mission==MissionType::kBall ?
-        CameraRequest::kBallView : CameraRequest::kDown));
-    t.in.camera_feedback={mission==MissionType::kBall ?
-        CameraMode::kBallView : CameraMode::kDown,true};
-    for(int n=0;n<10 && !t.out.trial_complete;++n)t.Tick();
-    assert(t.out.trial_complete);
+    if (mission==MissionType::kHurdle) {
+      // Staged HURDLE must finish without actually moving the camera.
+      assert(t.out.trial_complete);
+      assert(t.out.hurdle.mode==HurdleMode::kWaitCameraDown &&
+             t.out.hurdle.camera_request==CameraRequest::kDown);
+      assert(t.out.command.camera_request==CameraRequest::kNone &&
+             t.out.command.action_id==0);
+      assert(t.in.camera_feedback.actual_mode==CameraMode::kForward);
+      for(int n=0;n<5;++n) {
+        t.Tick();
+        assert(t.out.trial_complete &&
+               t.out.command.camera_request==CameraRequest::kNone &&
+               t.out.command.action_id==0);
+      }
+    } else {
+      assert(t.out.command.camera_request==CameraRequest::kBallView);
+      t.in.camera_feedback={CameraMode::kBallView,true};
+      for(int n=0;n<10 && !t.out.trial_complete;++n)t.Tick();
+      assert(t.out.trial_complete);
+    }
   } else {
     t.Tick(); // GOAL camera known and settled, enter search
     for(int n=0;n<12 && t.out.goal.mode!=GoalMode::kApproach;++n)t.Tick();
@@ -130,14 +144,46 @@ void GoalFarStageAlreadyInGoalCamera() {
 }
 void NearStageStopsBeforeMission(MissionType mission) {
   Trial t(mission,2);t.TargetNow(mission);
+  if(mission==MissionType::kHurdle)
+    t.in.line_centers={{380,450},{380,400},{380,350},{380,300},{380,250}};
   const auto prepare_id=t.PrepareStage(mission,2);
   assert(prepare_id!=0 && t.out.foot_pose==FootPose::kWalk);
   for(int i=0;i<20 && t.Preview().command.action!=MissionAction::kDefaultPoseMode;++i)t.Tick();
   t.Commit(MissionAction::kDefaultPoseMode);t.Done();
   assert(t.out.foot_pose==FootPose::kFine);
-  t.in.allow_new_body_actions=true;
-  for(int i=0;i<20 && !t.out.trial_complete;++i)t.Tick();
-  assert(t.out.trial_complete && t.out.command.action_id==0);
+  if(mission==MissionType::kHurdle) {
+    // A valid DOWN line must allow alignment to finish without search steps.
+    for(int i=0;i<35 && t.out.hurdle.mode!=HurdleMode::kFineAdjust;++i)t.Tick();
+    assert(t.out.hurdle.mode==HurdleMode::kFineAdjust);
+    assert(!t.out.trial_complete); // v>=contact is not yet a test boundary.
+    assert(t.Preview().command.action==MissionAction::kStepForwardHalf);
+    t.Commit(MissionAction::kStepForwardHalf);
+    // One explicit COMMIT authorizes the existing contact repeat scope.
+    // All three physical DONE events are required before the terminal hold.
+    t.in.allow_new_body_actions=true;
+    std::uint64_t last_id=0;
+    int contact_done=0;
+    for(int i=0;i<100 && !t.out.trial_complete;++i) {
+      const auto command=t.out.command;
+      if(command.action_id && command.action_id!=last_id) {
+        assert(command.action==MissionAction::kStepForwardHalf);
+        last_id=command.action_id;
+        ++contact_done;
+        t.in.delivery_feedback={last_id,true,true,false};
+      }
+      t.Tick();
+    }
+    assert(contact_done==3 && t.out.trial_complete);
+    assert(t.out.hurdle.mode==HurdleMode::kCross &&
+           t.out.hurdle.action.action==MissionAction::kHurdle);
+    assert(t.out.command.action_id==0 &&
+           t.out.command.camera_request==CameraRequest::kNone &&
+           t.out.command.action!=MissionAction::kHurdle);
+  } else {
+    t.in.allow_new_body_actions=true;
+    for(int i=0;i<20 && !t.out.trial_complete;++i)t.Tick();
+    assert(t.out.trial_complete && t.out.command.action_id==0);
+  }
   assert(t.out.ball.pickup_attempt_count==0);
   // Stage 3 must command its FINE initial stance again after Stage 2.
   t.in.allow_new_body_actions=false;
@@ -370,7 +416,7 @@ void RejectZeroObservation() {
 }
 int main() {
   for(auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {
-    FarStageStopsAfterCamera(mission);NearStageStopsBeforeMission(mission);
+    FarStageStopsAtBoundary(mission);NearStageStopsBeforeMission(mission);
     ExecuteStageNeedsRealPoseAndStableReadiness(mission);
     ExecuteStageCompletesRecovery(mission);
   }

@@ -1786,10 +1786,10 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   }
   case MissionType::kHurdle: {
     const auto before = hurdle_result_.mode;
+    // Stage 2 must complete the physical contact steps before its boundary.
+    // Blocking FineAdjust here would end the test before any contact motion.
     const bool controller_allow =
-        input.allow_new_body_actions && input.allow_new_commands &&
-        !(config_.test_mission != MissionType::kNone &&
-          config_.test_stage == 2 && before == HurdleMode::kFineAdjust);
+        input.allow_new_body_actions && input.allow_new_commands;
     hurdle_result_ = hurdle_controller_.Compute(
         input.hurdle_target, input.image_width, input.image_height,
         input.now_sec, input.camera_feedback, action_feedback,
@@ -1925,15 +1925,12 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     request = {};
     camera_request = CameraRequest::kNone;
   }
-  // Alignment trials must never dispatch the mission primitive, including
-  // while the full observation window is still accumulating.
+  // Stage 2's HURDLE test allows all three contact half-steps, but never
+  // dispatches the actual HURDLE primitive. BALL/GOAL boundaries are unchanged.
   if (config_.test_mission != MissionType::kNone && config_.test_stage == 2 &&
       (request.action == MissionAction::kPickBall ||
        request.action == MissionAction::kShoot ||
-       request.action == MissionAction::kHurdle ||
-       (config_.test_mission == MissionType::kHurdle &&
-        hurdle_result_.mode == HurdleMode::kFineAdjust &&
-        hurdle_result_.tracked.center_px.v >= config_.hurdle.contact_v_px)))
+       request.action == MissionAction::kHurdle))
     request = {};
   if (config_.test_mission != MissionType::kNone && config_.test_stage == 3 &&
       !test_execution_started_ && !TestExecutionReady())
@@ -3412,16 +3409,26 @@ bool MissionController::TestExecutionReady() const {
 }
 bool MissionController::TestBoundaryReached(
     const CameraFeedback &camera) const {
+  if (config_.test_mission == MissionType::kHurdle) {
+    if (config_.test_stage == 1)
+      // Intercept the very first DOWN request, including one produced on a
+      // committed near walk's DONE. The physical camera stays FORWARD.
+      return hurdle_result_.mode == HurdleMode::kWaitCameraDown &&
+             hurdle_result_.camera_request == CameraRequest::kDown;
+    if (config_.test_stage == 2)
+      // Cross is entered only after contact_steps actual DONE events.
+      // Test completion must suppress HURDLE(16) before it reaches the
+      // command coordinator, including while a repeat scope is active.
+      return hurdle_result_.mode == HurdleMode::kCross &&
+             hurdle_result_.action.action == MissionAction::kHurdle;
+  }
   if (config_.test_stage == 2)
-    return TestExecutionReady();
+    return TestExecutionReady(); // BALL/GOAL retain their original contract.
   if (config_.test_stage != 1 || !camera.settled)
     return false;
   if (config_.test_mission == MissionType::kBall)
     return camera.actual_mode == CameraMode::kBallView &&
            ball_result_.mode == BallMode::kDownSearch;
-  if (config_.test_mission == MissionType::kHurdle)
-    return camera.actual_mode == CameraMode::kDown &&
-           hurdle_result_.mode == HurdleMode::kDownSearch;
   return config_.test_mission == MissionType::kGoal &&
          camera.actual_mode == CameraMode::kGoal &&
          goal_result_.mode == GoalMode::kWaitFinePose;

@@ -288,6 +288,25 @@ inline void DrawFilteredDebugDetection(cv::Mat& vis,const DetectionType& det,
     }
   }
 }
+// Return text only for confirmed HURDLE tuning endpoints. A TEST COMPLETE
+// banner is not itself a camera/body command.
+inline std::string HurdleTestBoundaryNotice(
+    const vision_core::MissionControllerConfig& config,
+    const vision_core::MissionFrameResult& result) {
+  if (!result.trial_complete ||
+      config.test_mission != vision_core::MissionType::kHurdle ||
+      result.active_mission != vision_core::MissionType::kHurdle)
+    return {};
+  if (config.test_stage == 1 &&
+      result.hurdle.mode == vision_core::HurdleMode::kWaitCameraDown)
+    return "NEXT: CAMERA DOWN REQUIRED - NOT SENT";
+  if (config.test_stage == 2 &&
+      result.hurdle.mode == vision_core::HurdleMode::kCross)
+    return "CONTACT " + std::to_string(config.hurdle.contact_steps) + "/" +
+        std::to_string(config.hurdle.contact_steps) +
+        " DONE - NEXT: HURDLE(16) NOT SENT";
+  return {};
+}
 template<class DetectionRange>
 inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionRange& dets,
     const cv::Mat& aligned_depth,const vision_core::MissionControllerConfig& config,
@@ -575,6 +594,9 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   }
   add_row(header_rows,"TEST STAGE: "+std::to_string(config.test_stage)+
       (mission_result.trial_complete ? " COMPLETE / SELECT STAGE OR RESET" : mission_result.test_executing ? " EXECUTING / RECOVERY" : mission_result.test_ready ? " READY" : config.test_stage==3 ? " ALIGN IN STAGE 2 FIRST" : ""),text_color);
+  const auto hurdle_test_boundary=HurdleTestBoundaryNotice(config,mission_result);
+  if (!hurdle_test_boundary.empty())
+    add_row(header_rows,hurdle_test_boundary,cv::Scalar(0,255,255));
   add_row(header_rows,view.waiting_action_id
       ? "FEEDBACK: WAIT EXECUTOR DONE id="+std::to_string(view.waiting_action_id)
       : "FEEDBACK: DONE "+std::to_string(view.last_received_done_id)+
@@ -1066,6 +1088,18 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   cv::putText(vis,view.performance,{10,24},cv::FONT_HERSHEY_SIMPLEX,0.7,{0,255,0},2);
   cv::putText(vis,std::string(DebugMissionName(mission_result.active_mission))+": "+DebugCameraActionStatus(mission_result),
       {10,48},cv::FONT_HERSHEY_SIMPLEX,0.55,{0,200,255},2);
+  if (!hurdle_test_boundary.empty() && vis.cols>20 && vis.rows>120) {
+    cv::rectangle(vis,{4,55},{vis.cols-5,113},cv::Scalar(0,0,0),cv::FILLED);
+    const std::string title="HURDLE TEST STAGE "+std::to_string(config.test_stage)+" COMPLETE";
+    for (int i=0;i<2;++i) {
+      const auto& line=i==0 ? title : hurdle_test_boundary;
+      const auto size=cv::getTextSize(line,cv::FONT_HERSHEY_SIMPLEX,0.55,2,nullptr);
+      const double scale=0.55*std::min(1.0,
+          static_cast<double>(vis.cols-20)/std::max(1,size.width));
+      cv::putText(vis,line,{10,78+i*27},cv::FONT_HERSHEY_SIMPLEX,scale,
+                  cv::Scalar(0,255,255),2,cv::LINE_AA);
+    }
+  }
   if (selected_goal) {
     int y=72;
     for (const auto& text:landing_rows) {
