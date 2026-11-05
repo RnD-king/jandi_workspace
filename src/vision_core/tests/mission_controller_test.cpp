@@ -1186,6 +1186,19 @@ int main() {
   assert(ready_result.active_mission==MissionType::kGoal);
   assert(ready_result.command.action==MissionAction::kDefaultPoseMode);
   assert(ready_result.command.action_id && ready_result.command.action_id!=goal_ready_id);
+  // Regression: raw GOAL edge observation MUST NOT swallow DEFAULT_POSE DONE
+  // and repeatedly command stance 2 instead of entering FINE.
+  const auto goal_fine_pose_id=ready_result.command.action_id;
+  ready_frame.now_sec+=.1;
+  ready_frame.delivery_feedback={goal_fine_pose_id,true,false,false};
+  ready_frame.raw_backboard_observation_available=true;
+  ready_frame.raw_backboard_target=Ball(.5,.3);
+  ready_result=goal_ready.Step(ready_frame);
+  ready_frame.now_sec+=.1;
+  ready_frame.delivery_feedback={goal_fine_pose_id,true,true,false};
+  ready_result=goal_ready.Step(ready_frame);
+  assert(ready_result.goal.mode==GoalMode::kFineAdjust &&
+         ready_result.command.action!=MissionAction::kDefaultPoseMode);
   // A physical RESET must publish a fresh camera FORWARD request even when
   // the last software camera feedback already claims FORWARD/settled.
   MissionController reset_probe(c);

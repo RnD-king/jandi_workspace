@@ -1821,9 +1821,17 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                                                &line_reference_valid, &output);
     // The same raw-bbox 10/4 guard covers FINE, with FINE turn assets.
     ActionRequest edge_action;
+    // A raw-bbox guard may observe between commands, but must NEVER
+    // consume a matching DONE owned by GoalController (notably DEFAULT_POSE).
+    // Its own two fixed edge turns are the sole exception.
+    const bool edge_owned_done=goal_edge_guard_.phase==GoalEdgeGuard::Phase::kTurning &&
+        goal_edge_guard_.action_id!=0 &&
+        input.delivery_feedback.done &&
+        input.delivery_feedback.action_id==goal_edge_guard_.action_id;
+    const bool goal_owned_done=action_feedback.action_done && !edge_owned_done;
     const bool guard= config_.test_mission==MissionType::kNone &&
         !input.manual_observation_control &&
-        input.raw_backboard_observation_available &&
+        input.raw_backboard_observation_available && !goal_owned_done &&
         PrepareGoalEdgeGuard(input,!action_feedback.action_active ||
                                   action_feedback.action_done,edge_action);
     if(guard){
