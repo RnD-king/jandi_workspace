@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(shared_vision_core VERSION 0.1.0 LANGUAGES CXX)
 
+# Production/release builds do not need to compile regression tests.
+# CI opts in explicitly with -DBUILD_TESTING=ON.
+option(BUILD_TESTING "Build shared vision_core regression tests" OFF)
 include(CTest)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
