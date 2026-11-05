@@ -192,7 +192,10 @@ void CheckConfiguration(const std::string& path) {
   FIELD(hurdle, recovery_center_tolerance_px);
   FIELD(goal, recovery_turn_max);
   FIELD(goal, depth_recovery_max_steps);
+  FIELD(goal, far_depth_probe_max_attempts);
   FIELD(goal, edge_margin_px);
+  FIELD(goal, edge_stable_window);
+  FIELD(goal, edge_stable_min_hits);
   FIELD(goal, recovery_observation_sec);
   FIELD(goal, recovery_max_observations);
   FIELD(goal, stable_window);
@@ -204,6 +207,8 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, post_pickup_walk_fallback_actions);
   FIELD(goal, entry_line_retry_max_attempts);
   FIELD(goal, target_u_px);
+  FIELD(goal, auto_approach_center_u_px);
+  FIELD(goal, auto_approach_half_width_px);
   if (AlgorithmField(a,"goal","auto_approach_reference_u_px"))
     FIELD(goal, auto_approach_reference_u_px);
   FIELD(goal, approach_u_deadband_px);
@@ -216,6 +221,12 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, shoot_yaw_limit_deg);
   FIELD(goal, post_shoot_back_steps);
   FIELD(goal, recovery_center_tolerance_px);
+  CheckAlgorithmField(a,"goal","backboard_depth_strip_width_px",c.backboard_depth_strip_width_px);
+  CheckAlgorithmField(a,"goal","backboard_depth_center_size_px",c.backboard_depth_center_size_px);
+  CheckAlgorithmField(a,"goal","backboard_depth_strip_step_px",c.backboard_depth_strip_step_px);
+  CheckAlgorithmField(a,"goal","backboard_depth_strip_max_width_px",c.backboard_depth_strip_max_width_px);
+  CheckAlgorithmField(a,"goal","backboard_depth_inner_margin_ratio",c.backboard_depth_inner_margin_ratio);
+  CheckAlgorithmField(a,"goal","backboard_depth_min_valid_ratio",c.backboard_depth_min_valid_ratio);
   FIELD(line_detection, class_id);
   FIELD(line_detection, confidence);
   FIELD(line_detection, min_box_width);
