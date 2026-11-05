@@ -762,6 +762,7 @@ MissionFrameResult MissionController::StepPlannedLine(
               continuous_.near))
           line_failure_pending_done_ = true;
         if (automatic_approach && continuous_.mission!=MissionType::kNone &&
+            !(continuous_.mission==MissionType::kHurdle && continuous_.near) &&
             line_plan_.ObjectOwned(id,continuous_.epoch) &&
             !line_plan_.IsProbe(id) &&
             !line_plan_.ObjectQualified(id)) {
