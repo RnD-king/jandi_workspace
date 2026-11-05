@@ -716,10 +716,12 @@ void FarGoalDepthRecovery(bool found,bool acquired=false) {
         "Depth fixture failed to start a real GOAL approach");
   d.Tick({first,true,false,false});
   for(int n=0;n<12;++n)d.Tick();
-  d.Tick({first,true,true,false});
-  // One real GOAL-owned DONE, not ACK or READY, arms the new far-depth path.
+  // Lose coordinate data while A is still executing; no successor unit may
+  // be reserved from the pre-loss GOAL mean.
   d.in.backboard_target.reset();d.in.backboard_center_depth_m.reset();
   d.in.goal_pose={};d.in.backboard_image_without_depth=true;
+  d.Tick({first,true,true,false});
+  // One real GOAL-owned DONE, not ACK or READY, arms the new far-depth path.
   std::uint64_t last=first;
   for(int n=1;n<=3;++n){
     for(int t=0;t<100 && (d.out.command.action_id==0 ||
