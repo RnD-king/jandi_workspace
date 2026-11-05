@@ -293,6 +293,36 @@ void MissionController::ClearGoalEdgeObservation() {
   e.left_hits.clear();e.right_hits.clear();
 }
 
+// Shared 10/4 raw RGB edge evidence. Reuse the post-FINE DONE window
+// instead of starting a separate 1s timer after the same stationary frame.
+void MissionController::ObserveGoalEdgeSample(const MissionFrameInput& input) {
+  auto& e=goal_edge_guard_;
+  if(!e.observing){
+    e.observing=true;e.observation_start_sec=input.now_sec;
+    e.left_hits.clear();e.right_hits.clear();
+    e.left_qualified=e.right_qualified=false;
+  }
+  bool left=false,right=false;
+  if(input.raw_backboard_target){
+    const auto& box=input.raw_backboard_target->box_px;
+    left=box.width>0&&box.height>0&&box.x<=config_.goal.edge_margin_px;
+    right=box.width>0&&box.height>0&&box.x+box.width>=
+          static_cast<double>(input.image_width)-config_.goal.edge_margin_px;
+    if(left&&right)left=right=false; // Ambiguous clipped/oversized box.
+  }
+  e.left_hits.push_back(left);e.right_hits.push_back(right);
+  const auto window=static_cast<std::size_t>(config_.goal.edge_stable_window);
+  while(e.left_hits.size()>window)e.left_hits.pop_front();
+  while(e.right_hits.size()>window)e.right_hits.pop_front();
+  // Latch ANY consecutive 10-frame window in this stationary observation.
+  if(e.left_hits.size()==window){
+    if(std::count(e.left_hits.begin(),e.left_hits.end(),true)>=config_.goal.edge_stable_min_hits)
+      e.left_qualified=true;
+    if(std::count(e.right_hits.begin(),e.right_hits.end(),true)>=config_.goal.edge_stable_min_hits)
+      e.right_qualified=true;
+  }
+}
+
 bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
     bool idle,ActionRequest& action) {
   auto& e=goal_edge_guard_;
@@ -328,30 +358,7 @@ bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
   }
   if(e.ready)return false;
   if(!idle)return false;
-  if(!e.observing){
-    e.observing=true;e.observation_start_sec=input.now_sec;
-    e.left_hits.clear();e.right_hits.clear();
-    e.left_qualified=e.right_qualified=false;
-  }
-  bool left=false,right=false;
-  if(input.raw_backboard_target){
-    const auto& box=input.raw_backboard_target->box_px;
-    left=box.width>0&&box.height>0&&box.x<=config_.goal.edge_margin_px;
-    right=box.width>0&&box.height>0&&box.x+box.width>=
-          static_cast<double>(input.image_width)-config_.goal.edge_margin_px;
-    if(left&&right)left=right=false; // Ambiguous clipped/oversized box.
-  }
-  e.left_hits.push_back(left);e.right_hits.push_back(right);
-  const auto window=static_cast<std::size_t>(config_.goal.edge_stable_window);
-  while(e.left_hits.size()>window)e.left_hits.pop_front();
-  while(e.right_hits.size()>window)e.right_hits.pop_front();
-  // Latch ANY consecutive 10-frame window in this stationary observation.
-  if(e.left_hits.size()==window){
-    if(std::count(e.left_hits.begin(),e.left_hits.end(),true)>=config_.goal.edge_stable_min_hits)
-      e.left_qualified=true;
-    if(std::count(e.right_hits.begin(),e.right_hits.end(),true)>=config_.goal.edge_stable_min_hits)
-      e.right_qualified=true;
-  }
+  ObserveGoalEdgeSample(input);
   if(input.now_sec+1e-9<e.observation_start_sec+config_.post_motion_observation_sec ||
      e.left_hits.size()<window)return true;
   e.observing=false;e.ready=true;
