@@ -939,6 +939,8 @@ MissionFrameResult MissionController::StepPlannedLine(
     if (!pose_transition && (candidate_.phase == CandidatePhase::kSearch || candidate_.phase == CandidatePhase::kRestore)) {
       candidate_.turn_id = command.action_id;
       candidate_.turn_is_restore = candidate_.phase == CandidatePhase::kRestore;
+    } else if (route.edge_turn_step) {
+      goal_edge_guard_.action_id=command.action_id;
     } else if (route.depth_recovery_step) {
       approach_goal_depth_action_id_=command.action_id;
       far_goal_depth_probe_.phase=FarGoalDepthProbe::Phase::kMotion;
@@ -950,6 +952,10 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   if (input.delivery_feedback.ready && command.control_phase == ControlPhase::kWaitingQueuedActionAck)
     line_ready_handled_id_ = input.delivery_feedback.action_id;
+  if(automatic_approach && input.raw_backboard_observation_available && has_ball_ &&
+     command.command_type==CommandType::kAction && command.action_id!=0 &&
+     !route.edge_turn_step && goal_edge_guard_.phase==GoalEdgeGuard::Phase::kIdle)
+    ClearGoalEdgeObservation();
   last_command_ = command;
   output.active_mission = active_mission_;
   output.has_ball = has_ball_;

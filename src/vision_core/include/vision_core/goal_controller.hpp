@@ -153,6 +153,8 @@ struct GoalResult {
 
 class GoalController {
 public:
+  // AUTO uses a raw-bbox, observation-window edge guard outside this FSM.
+  void SetExternalEdgeGuard(bool enabled) { external_edge_guard_=enabled; }
   struct DepthRecoveryResult {
     ActionRequest action;
     bool recovered{false}, failed{false}, missing{false};
@@ -350,6 +352,7 @@ private:
   } depth_recovery_;
   bool depth_recovery_in_mission_{false};
   GoalMode depth_recovery_resume_mode_{GoalMode::kSearch};
+  bool external_edge_guard_{false};
 };
 
 } // namespace vision_core

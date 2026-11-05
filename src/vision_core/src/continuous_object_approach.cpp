@@ -48,6 +48,7 @@ void MissionController::ReleaseContinuousApproach() {
     ball_controller_.ClearEntryEvidence();
   } else if (mission==MissionType::kHurdle) hurdle_target_tracker_.Reset();
   else if (mission==MissionType::kGoal) {
+    goal_edge_guard_={};
     goal_approach_walk_done_=false;
     far_goal_depth_probe_={};
     backboard_target_tracker_.Reset();
@@ -281,6 +282,89 @@ bool MissionController::PrepareGoalDepthRecovery(const MissionFrameInput& input,
   return true;
 }
 
+
+void MissionController::ClearGoalEdgeObservation() {
+  auto& e=goal_edge_guard_;
+  if(e.phase!=GoalEdgeGuard::Phase::kIdle)return;
+  e.observing=false;e.ready=false;
+  e.left_qualified=e.right_qualified=false;
+  e.left_hits.clear();e.right_hits.clear();
+}
+
+bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
+    bool idle,ActionRequest& action) {
+  auto& e=goal_edge_guard_;
+  if(!input.raw_backboard_observation_available ||
+     !input.camera_feedback.settled ||
+     input.camera_feedback.actual_mode!=CameraMode::kGoal) {
+    if(e.phase==GoalEdgeGuard::Phase::kIdle)e={};
+    return false;
+  }
+  const auto select_turn=[&]() {
+    return e.turn_left ?
+        (foot_pose_==FootPose::kFine ? MissionAction::kTurnLeft :
+                                      MissionAction::kTurnLeftInPlace) :
+        (foot_pose_==FootPose::kFine ? MissionAction::kTurnRight :
+                                      MissionAction::kStepForwardRightOneHurdle);
+  };
+  if(e.phase==GoalEdgeGuard::Phase::kTurning) {
+    if(e.action_id && input.delivery_feedback.done &&
+       input.delivery_feedback.action_id==e.action_id) {
+      e.action_id=0;
+      if(++e.turns_completed>=2){
+        e.phase=GoalEdgeGuard::Phase::kReobserve;
+        e.observing=false;e.ready=false;
+        e.left_qualified=e.right_qualified=false;
+        e.left_hits.clear();e.right_hits.clear();
+      }
+    }
+    if(e.phase==GoalEdgeGuard::Phase::kTurning && e.action_id==0 && idle &&
+       input.allow_new_commands && input.allow_new_body_actions) {
+      action={select_turn(),ActionCategory::kLocomotion,0,false};
+    }
+    return true;
+  }
+  if(e.ready)return false;
+  if(!idle)return false;
+  if(!e.observing){
+    e.observing=true;e.observation_start_sec=input.now_sec;
+    e.left_hits.clear();e.right_hits.clear();
+    e.left_qualified=e.right_qualified=false;
+  }
+  bool left=false,right=false;
+  if(input.raw_backboard_target){
+    const auto& box=input.raw_backboard_target->box_px;
+    left=box.width>0&&box.height>0&&box.x<=config_.goal.edge_margin_px;
+    right=box.width>0&&box.height>0&&box.x+box.width>=
+          static_cast<double>(input.image_width)-config_.goal.edge_margin_px;
+    if(left&&right)left=right=false; // Ambiguous clipped/oversized box.
+  }
+  e.left_hits.push_back(left);e.right_hits.push_back(right);
+  const auto window=static_cast<std::size_t>(config_.goal.stable_window);
+  while(e.left_hits.size()>window)e.left_hits.pop_front();
+  while(e.right_hits.size()>window)e.right_hits.pop_front();
+  // Latch ANY consecutive 10-frame window in this stationary observation.
+  if(e.left_hits.size()==window){
+    if(std::count(e.left_hits.begin(),e.left_hits.end(),true)>=4)
+      e.left_qualified=true;
+    if(std::count(e.right_hits.begin(),e.right_hits.end(),true)>=4)
+      e.right_qualified=true;
+  }
+  if(input.now_sec+1e-9<e.observation_start_sec+config_.post_motion_observation_sec ||
+     e.left_hits.size()<window)return true;
+  e.observing=false;e.ready=true;
+  if(e.left_qualified!=e.right_qualified){
+    e.turn_left=e.left_qualified;
+    e.turns_completed=0;e.action_id=0;
+    e.phase=GoalEdgeGuard::Phase::kTurning;
+    if(input.allow_new_commands && input.allow_new_body_actions)
+      action={select_turn(),ActionCategory::kLocomotion,0,false};
+    return true;
+  }
+  e.phase=GoalEdgeGuard::Phase::kIdle;
+  return false;
+}
+
 MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     const MissionFrameInput& input,const Features& line,bool idle) {
   RouteDecision result;
@@ -293,6 +377,15 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const bool advance=input.advance_line_fsm && input.allow_new_mission_entry;
   const bool settled=camera.settled && camera.actual_mode!=CameraMode::kTransition;
   const bool goal_view=camera.actual_mode==CameraMode::kGoal;
+  // A stationary 10/4 raw-bbox edge guard always precedes Depth recovery.
+  if(goal_view && input.raw_backboard_observation_available && has_ball_) {
+    ActionRequest edge_action;
+    if(PrepareGoalEdgeGuard(input,idle,edge_action)) {
+      result.hold=true;result.action=edge_action;
+      result.edge_turn_step=edge_action.action!=MissionAction::kNone;
+      return result;
+    }
+  }
   const auto camera_request=[&](CameraRequest request) {
     result.hold=true;
     if (!idle || !input.allow_new_commands) return;

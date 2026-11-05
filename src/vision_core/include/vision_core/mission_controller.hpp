@@ -137,6 +137,8 @@ struct MissionFrameInput {
   std::optional<double> scan_ball_u; // filtered YOLO candidate, independent of FORWARD tracker
   std::optional<double> scan_backboard_u; // GOAL scan cue; central Depth must be valid.
   std::optional<double> raw_backboard_u; // YOLO-only horizontal position for bounded far Depth probing.
+  std::optional<ObjectTarget> raw_backboard_target; // Pre-Depth filtered bbox for edge guard.
+  bool raw_backboard_observation_available{false};
   // true이면 controller용 ActionExecutionFeedback을 직전 공통 command와
   // delivery_feedback에서 MissionController가 직접 만든다. 실행기 어댑터는
   // controller 상태를 건드리지 않고 ACK/READY/DONE만 반환하면 된다.
@@ -448,6 +450,7 @@ private:
   struct RouteDecision {
     ActionRequest action;
     bool depth_recovery_step{false};
+    bool edge_turn_step{false};
     std::optional<LineGuide> guide;
     std::optional<LineGuide> display_guide;
     bool guide_observed{false};
@@ -469,6 +472,20 @@ private:
     std::deque<bool> pause_hits, verify_hits;
   } goal_head_search_;
   bool approach_goal_probe_{false}, approach_return_ball_view_{false};
+  struct GoalEdgeGuard {
+    enum class Phase { kIdle, kTurning, kReobserve };
+    Phase phase{Phase::kIdle};
+    bool observing{false}, ready{false}, left_qualified{false}, right_qualified{false};
+    bool turn_left{false};
+    int turns_completed{0};
+    std::uint64_t action_id{0};
+    double observation_start_sec{0.0};
+    std::deque<bool> left_hits,right_hits;
+  } goal_edge_guard_;
+  // Returns true while the protected GOAL observation/turn takes priority.
+  bool PrepareGoalEdgeGuard(const MissionFrameInput&,bool idle,ActionRequest&);
+  void ClearGoalEdgeObservation();
+
   int approach_goal_empty_frames_{0}, approach_goal_retry_after_{0};
   int approach_goal_empty_retries_{0};
   bool approach_goal_search_failed_{false};

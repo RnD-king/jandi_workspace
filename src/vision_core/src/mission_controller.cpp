@@ -1225,6 +1225,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     return pose_result;
   }
   const int incoming_repeat_scope = RepeatScope();
+  bool goal_edge_turn_step=false;
   MissionFrameResult output;
   output.object_ready_mean_used = applied_object_ready_mean;
   if (goal_trial_complete_ || test_failed_) {
@@ -1425,6 +1426,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         !input.camera_scan.finished)
       BeginDecisionObservation(input.now_sec, active_mission_, true, {});
     if (!decision_observation_active_ && !applied_object_ready_mean &&
+        !(goal_edge_guard_.phase==GoalEdgeGuard::Phase::kTurning &&
+          input.delivery_feedback.action_id==goal_edge_guard_.action_id) &&
         ShouldDeferDone(input.delivery_feedback))
       BeginDecisionObservation(input.now_sec, active_mission_, false,
                                input.delivery_feedback);
@@ -1816,12 +1819,25 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     if (before == GoalMode::kHeadingRecovery)
       line_action = ComputeMissionLineRecovery(input, action_feedback,
                                                &line_reference_valid, &output);
-    goal_result_ = goal_controller_.Compute(
-        input.goal_target, input.backboard_target, input.goal_pose,
-        input.image_width, input.image_height, input.now_sec,
-        line_reference_valid, input.camera_feedback, action_feedback,
-        controller_allow, input.backboard_center_depth_m, false,
-        input.backboard_image_without_depth);
+    // The same raw-bbox 10/4 guard covers FINE, with FINE turn assets.
+    ActionRequest edge_action;
+    const bool guard= config_.test_mission==MissionType::kNone &&
+        !input.manual_observation_control &&
+        input.raw_backboard_observation_available &&
+        PrepareGoalEdgeGuard(input,!action_feedback.action_active ||
+                                  action_feedback.action_done,edge_action);
+    if(guard){
+      goal_result_.action=edge_action;
+      goal_result_.camera_request=CameraRequest::kNone;
+      goal_edge_turn_step=edge_action.action!=MissionAction::kNone;
+    } else {
+      goal_result_ = goal_controller_.Compute(
+          input.goal_target, input.backboard_target, input.goal_pose,
+          input.image_width, input.image_height, input.now_sec,
+          line_reference_valid, input.camera_feedback, action_feedback,
+          controller_allow, input.backboard_center_depth_m, false,
+          input.backboard_image_without_depth);
+    }
     // Fixed edge turns share the existing repeat gate. After the second actual
     // DONE, collect one fresh observation before resuming approach decisions.
     if ((before == GoalMode::kEdgeTurn || before == GoalMode::kFineMotionRepeat) &&
@@ -2058,6 +2074,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       output.command.command_type == CommandType::kAction &&
       TestExecutionReady())
     test_execution_started_ = true;
+  if(goal_edge_turn_step && output.command.command_type==CommandType::kAction &&
+     output.command.action_id!=0 && output.command.action==request.action)
+    goal_edge_guard_.action_id=output.command.action_id;
+  else if(active_mission_==MissionType::kGoal && input.raw_backboard_observation_available &&
+          output.command.command_type==CommandType::kAction && output.command.action_id!=0 &&
+          goal_edge_guard_.phase==GoalEdgeGuard::Phase::kIdle)
+    ClearGoalEdgeObservation();
   if (output.command.action_id != 0 && phase == 901 &&
       (output.command.action == MissionAction::kDefaultPoseMode ||
        output.command.action == MissionAction::kWalkMode)) {
@@ -2652,12 +2675,17 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
       input.camera_feedback.actual_mode == CameraMode::kGoal)
     goal_controller_.ObserveEntryBackboard(backboard_in_image);
   prepared.raw_backboard_u.reset();
+  prepared.raw_backboard_target.reset();
+  prepared.raw_backboard_observation_available=true;
   if(input.camera_feedback.settled && backboard_in_image){
     const auto candidates=ExtractObjectTargetCandidates(image_detections,
         config_.object_targets.backboard_class_id,
         config_.object_targets.backboard_confidence,config_.object_targets);
-    if(!candidates.empty())prepared.raw_backboard_u=std::max_element(candidates.begin(),
-        candidates.end(),lower_raw_rank)->target.center_px.u;
+    if(!candidates.empty()){
+      const auto& best=*std::max_element(candidates.begin(),candidates.end(),lower_raw_rank);
+      prepared.raw_backboard_u=best.target.center_px.u;
+      prepared.raw_backboard_target=best.target;
+    }
   }
   prepared.backboard_image_without_depth =
       input.camera_feedback.settled && backboard_in_image &&
@@ -2718,6 +2746,8 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   // Line robot-reference is independent from the camera optical cx.
   std::optional<double> center = input.camera_feedback.actual_mode==CameraMode::kBallView
       ? config_.ball_view_line_image_center_u : config_.line_features.image_center_u;
+  goal_controller_.SetExternalEdgeGuard(config_.test_mission==MissionType::kNone &&
+      !input.manual_observation_control);
   output.mission = StepWithLineImageCenter(prepared, center);
   UpdateWalkDiagnostics(prepared,output.mission);
   if(config_.ball_candidate_tracking.enabled) {
@@ -3191,6 +3221,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   approach_goal_search_failed_=false;
   approach_goal_depth_failed_=false;approach_goal_bad_depth_frames_=0;
   approach_goal_depth_action_id_=0;
+  goal_edge_guard_={};
   goal_approach_walk_done_=false;
   far_goal_depth_probe_={};
   approach_camera_started_=-1;

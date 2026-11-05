@@ -684,7 +684,7 @@ GoalResult GoalController::Compute(
   // The WALK boundary guard precedes ordinary distance/zone selection.
   const bool walk_approach = mode_ == GoalMode::kForwardApproach ||
       mode_ == GoalMode::kSearch || mode_ == GoalMode::kApproach;
-  if (walk_approach && image_width > 1 && camera.settled && backboard &&
+  if (!external_edge_guard_ && walk_approach && image_width > 1 && camera.settled && backboard &&
       backboard->box_px.width > 0 && backboard->box_px.height > 0 && tracked_.stable &&
       !(feedback.action_active && !feedback.action_done)) {
     const auto& box = backboard->box_px;
