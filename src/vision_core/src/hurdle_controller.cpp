@@ -132,14 +132,27 @@ void HurdleController::UpdateTracker(const std::optional<ObjectTarget> &target,
                                      int image_width, int image_height) {
   const bool detected = target && image_width > 1 && image_height > 1;
   hit_history_.push_back(detected);
-  if(mode_==HurdleMode::kDownSearch && down_approach_fixed_sequence_ &&
-     down_initial_two_done_) {
-    down_near_hits_.push_back(detected && target->center_px.v>=config_.down_search_min_v_px);
-    while(down_near_hits_.size()>static_cast<std::size_t>(config_.stable_window))
-      down_near_hits_.pop_front();
-    if(down_near_hits_.size()==static_cast<std::size_t>(config_.stable_window) &&
-       std::count(down_near_hits_.begin(),down_near_hits_.end(),true)>=config_.down_search_min_hits)
-      down_near_qualified_=true;
+  // Only the initial 33 and missing-object 10 search collect moving evidence.
+  // Detected distance-based 33/10 steps use a NEW stationary window after DONE.
+  if (mode_ == HurdleMode::kDownSearch && down_approach_fixed_sequence_ &&
+      !down_distance_pending_ &&
+      (down_initial_two_pending_ || down_initial_two_done_)) {
+    down_v_samples_.push_back(detected ?
+        std::optional<double>(target->center_px.v) : std::nullopt);
+    while (down_v_samples_.size() >
+           static_cast<std::size_t>(config_.stable_window))
+      down_v_samples_.pop_front();
+    if (down_v_samples_.size() ==
+        static_cast<std::size_t>(config_.stable_window)) {
+      int valid = 0;
+      double sum_v = 0.0;
+      for (const auto& v : down_v_samples_)
+        if (v) { ++valid; sum_v += *v; }
+      if (valid >= config_.down_search_min_hits) {
+        down_near_qualified_ = true;
+        down_observed_v_px_ = sum_v / valid;
+      }
+    }
   }
   while (static_cast<int>(hit_history_.size()) >
          std::max(1, config_.stable_window)) hit_history_.pop_front();
@@ -376,7 +389,9 @@ HurdleResult HurdleController::Compute(
       mode_ = HurdleMode::kDownSearch;
       down_search_.Reset();
       down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
-      down_near_qualified_=false;down_near_hits_.clear();
+      ClearDownEvidence();
+      down_distance_pending_=down_stationary_observing_=down_search_step_pending_=false;
+      down_stationary_start_sec_=down_search_hold_until_sec_=0.0;
       result.mode = mode_;
       result.tracked = {};
       result.camera_request = CameraRequest::kNone;
@@ -388,37 +403,85 @@ HurdleResult HurdleController::Compute(
     }
     return result;
   case HurdleMode::kDownSearch: {
-    if(down_approach_fixed_sequence_) {
-      if(!down_initial_two_done_) {
-        if(down_initial_two_pending_) {
-          if(feedback.action_done) {
-            down_initial_two_pending_=false;down_initial_two_done_=true;
-            ClearTracking();down_near_hits_.clear();down_near_qualified_=false;
+    if (down_approach_fixed_sequence_) {
+      if (!down_initial_two_done_) {
+        if (down_initial_two_pending_) {
+          if (feedback.action_done) {
+            down_initial_two_pending_ = false;
+            down_initial_two_done_ = true;
+            // Keep the 10/3 moving samples from the INITIAL 33.
+            // Do not use old pose samples or start an extra 1s observation.
           }
           return result;
         }
-        result.action=Locomotion(MissionAction::kStepForwardTwo);
-        if(allow_new_body_actions)down_initial_two_pending_=true;
+        result.action = Locomotion(MissionAction::kLineStraightUnit); // 33
+        if (allow_new_body_actions) {
+          ClearDownEvidence();
+          down_initial_two_pending_ = true;
+        }
         return result;
       }
-      const auto decision=down_search_.Observe(down_near_qualified_,
+      if (down_distance_pending_) {
+        if (feedback.action_done) {
+          down_distance_pending_ = false;
+          down_stationary_observing_ = true;
+          down_stationary_start_sec_ = now_sec;
+          ClearTracking();
+          ClearDownEvidence(); // No walking frames in the 1s stationary mean.
+        }
+        return result;
+      }
+      if (down_stationary_observing_) {
+        if (now_sec + kEpsilon < down_stationary_start_sec_ +
+                                  config_.down_stationary_observation_sec ||
+            down_v_samples_.size() <
+                static_cast<std::size_t>(config_.stable_window))
+          return result;
+        down_stationary_observing_ = false;
+      }
+      // Missing-object search continuously observes through the 10 step
+      // AND the 0.5s post-DONE hold, exactly unlike distance-based steps.
+      const auto decision = down_search_.Observe(
+          down_near_qualified_,
           down_near_qualified_ ? config_.down_search_min_hits : 0,
-          config_.down_search_min_hits,config_.down_search_max_steps,
-          feedback.action_active,feedback.action_done,
-          now_sec,config_.down_search_inter_action_hold_sec);
-      if(decision==DownSearchWalk::Decision::kMoving ||
-         decision==DownSearchWalk::Decision::kWaiting)return result;
-      if(decision==DownSearchWalk::Decision::kFound) {
-        mode_=HurdleMode::kDownFinalStep;result.mode=mode_;
-        result.action=Locomotion(MissionAction::kStepForwardOne);
-        if(allow_new_body_actions)down_final_one_pending_=true;
+          config_.down_search_min_hits, config_.down_search_max_steps,
+          feedback.action_active, feedback.action_done, now_sec,
+          config_.down_search_inter_action_hold_sec);
+      if (down_search_step_pending_ && feedback.action_done) {
+        down_search_step_pending_ = false;
+        down_search_hold_until_sec_ =
+            now_sec + config_.down_search_inter_action_hold_sec;
+      }
+      if (decision == DownSearchWalk::Decision::kMoving ||
+          now_sec + kEpsilon < down_search_hold_until_sec_ ||
+          decision == DownSearchWalk::Decision::kWaiting)
+        return result;
+      if (decision == DownSearchWalk::Decision::kFound &&
+          down_observed_v_px_) {
+        const double v = *down_observed_v_px_;
+        if (v >= config_.fine_mode_v_px) {
+          mode_ = HurdleMode::kWaitFinePose;
+          result.mode = mode_;
+          result.action = Locomotion(MissionAction::kDefaultPoseMode);
+          return result;
+        }
+        result.action = Locomotion(v < config_.down_one_step_v_px ?
+            MissionAction::kLineStraightUnit : MissionAction::kStepForwardOne);
+        if (allow_new_body_actions) {
+          down_distance_pending_ = true;
+          down_search_.InvalidateDetection();
+          ClearDownEvidence();
+        }
         return result;
       }
-      if(decision==DownSearchWalk::Decision::kExhausted) {
-        mode_=HurdleMode::kFailed;result.mode=mode_;return result;
+      if (decision == DownSearchWalk::Decision::kExhausted) {
+        mode_ = HurdleMode::kFailed; result.mode = mode_; return result;
       }
-      result.action=Locomotion(MissionAction::kStepForwardOne);
-      if(allow_new_body_actions)down_search_.Issued();
+      result.action = Locomotion(MissionAction::kStepForwardOne);
+      if (allow_new_body_actions) {
+        down_search_.Issued();
+        down_search_step_pending_ = true;
+      }
       return result;
     }
     const int hits=static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true));
@@ -755,7 +818,15 @@ void HurdleController::UseVerifiedObservation(
 
 void HurdleController::ClearObservationHistory() {
   ClearTracking();
+  ClearDownEvidence();
   stationary_recovery_.DiscardDetections();
+}
+
+void HurdleController::ClearDownEvidence() {
+  down_near_qualified_ = false;
+  down_near_hits_.clear();
+  down_v_samples_.clear();
+  down_observed_v_px_.reset();
 }
 
 void HurdleController::ClearTracking() {
@@ -779,7 +850,9 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   down_search_.Reset();
   down_approach_fixed_sequence_=false;
   down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
-  down_near_qualified_=false;down_near_hits_.clear();
+  ClearDownEvidence();
+  down_distance_pending_=down_stationary_observing_=down_search_step_pending_=false;
+  down_stationary_start_sec_=down_search_hold_until_sec_=0.0;
   stationary_recovery_.Begin(0.0);
   completed_contact_steps_=0;
   contact_step_pending_=false;
