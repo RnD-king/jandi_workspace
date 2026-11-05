@@ -1298,7 +1298,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                                 : BallMode::kFineAdjustForPickup;
       } else if (config_.test_mission == MissionType::kHurdle) {
         if (config_.test_stage == 2)
-          hurdle_controller_.StartTestNear();
+          hurdle_controller_.StartTestNear(true);
         else
           hurdle_controller_.StartTestExecute();
         hurdle_result_.mode = config_.test_stage == 2
