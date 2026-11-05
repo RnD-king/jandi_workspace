@@ -25,6 +25,7 @@ int main(){
   depth.setTo(0);
   depth.at<float>(150,150)=1.5;
   assert(!MedianRegionMeters(depth,r.center,.10,.1,2.5));
+  depth.setTo(0); // The preceding singleton must not count toward this test.
   // The 10% threshold for 441 pixels requires at least 45 readings.
   for(int i=0;i<44;++i)depth.at<float>(140+i/21,140+i%21)=1.5;
   assert(!MedianRegionMeters(depth,r.center,.10,.1,2.5));
