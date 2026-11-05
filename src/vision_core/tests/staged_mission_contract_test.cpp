@@ -43,7 +43,6 @@ struct Trial {
     if(candidate.command.action!=action)
       throw std::runtime_error("stage COMMIT expected="+std::to_string(static_cast<int>(action))+
           " actual="+std::to_string(static_cast<int>(candidate.command.action))+
-          " stage="+std::to_string(core.Config().test_stage)+
           " mission="+std::to_string(static_cast<int>(candidate.active_mission))+
           " hurdle="+std::to_string(static_cast<int>(candidate.hurdle.mode)));
     assert(candidate.command.command_type==CommandType::kAction);
