@@ -170,6 +170,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     throw std::runtime_error("hurdle.pre_down_extra_forward_steps must be <= 6");
   PositiveInt(c.hurdle.down_search_max_steps, "hurdle.down_search_max_steps");
   Nonnegative(c.hurdle.down_search_inter_action_hold_sec, "hurdle.down_search_inter_action_hold_sec");
+  Positive(c.hurdle.down_stationary_observation_sec, "hurdle.down_stationary_observation_sec");
   Positive(c.hurdle.recovery_observation_sec, "hurdle.recovery_observation_sec");
   PositiveInt(c.hurdle.recovery_max_observations, "hurdle.recovery_max_observations");
   NonnegativeInt(c.hurdle.entry_recovery_max_steps, "hurdle.entry_recovery_max_steps");
@@ -789,6 +790,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "down_search_max_steps", c.hurdle.down_search_max_steps);
   if(h["down_search_min_v_px"])Assign(h,"down_search_min_v_px",c.hurdle.down_search_min_v_px);
   Assign(h, "down_search_inter_action_hold_sec", c.hurdle.down_search_inter_action_hold_sec);
+  if(h["down_stationary_observation_sec"])
+    Assign(h,"down_stationary_observation_sec",c.hurdle.down_stationary_observation_sec);
   Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
   Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);
   Assign(h, "entry_recovery_max_steps", c.hurdle.entry_recovery_max_steps);
