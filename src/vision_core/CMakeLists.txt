@@ -82,6 +82,12 @@ install(FILES
 )
 
 if(BUILD_TESTING)
+  add_executable(shared_vision_core_hurdle_down_sequence_test
+    tests/hurdle_down_sequence_test.cpp)
+  target_link_libraries(shared_vision_core_hurdle_down_sequence_test
+    PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_hurdle_down_sequence_test
+    COMMAND shared_vision_core_hurdle_down_sequence_test)
   # Fixed scenario data keeps logic tests independent of operator tuning.
   set(VISION_CORE_TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
   add_executable(shared_vision_core_ball_fine_motion_test tests/ball_fine_motion_test.cpp)
