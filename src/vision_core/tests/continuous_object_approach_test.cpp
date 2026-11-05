@@ -823,30 +823,41 @@ void NearGoalPreemptsDepthWalk() {
 void SoftGoalLossClearsDepthEpisode() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;
   c.initial_has_ball=c.goal_trial_start_goal=true;c.goal.lost_frames=3;
+  c.line_p2p.straight_repetitions=1;
   Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
   d.in.camera_feedback={CameraMode::kGoal,true};d.in.backboard_target=Target();
   d.in.backboard_track_id=9;d.in.backboard_center_depth_m=2;
-  for(int i=0;i<12;++i)d.Tick();
+  d.in.raw_backboard_u=320;d.in.goal_pose={true,0,2,0,1};
+  for(int n=0;n<12;++n)d.Tick();
   const auto unit=d.out.command.action_id;
-  Check(unit && d.out.approach_mission==MissionType::kGoal,"soft-loss fixture did not acquire GOAL");
-  d.Tick({unit,true,false,false});d.in.backboard_center_depth_m.reset();
-  for(int i=0;i<4;++i)d.Tick();
-  d.Tick({unit,true,true,false});
-  for(int i=0;i<10 && d.out.command.action!=MissionAction::kStepForwardOne;++i)d.Tick();
-  const auto walk=d.out.command.action_id;
-  Check(walk && d.out.command.action==MissionAction::kStepForwardOne,"soft-loss fixture missed Depth WALK");
-  d.Tick({walk,true,false,false});d.in.backboard_target.reset();
-  for(int i=0;i<3;++i)d.Tick();
-  Check(d.out.approach_mission==MissionType::kGoal && d.out.command.action_id==walk,
-        "a few missed frames cancelled the accepted Depth WALK");
-  d.Tick({walk,true,true,false});
-  bool returned=false;
-  for(int i=0;i<40 && !returned;++i) {
+  Check(unit && d.out.approach_mission==MissionType::kGoal,
+        "soft-loss fixture did not acquire GOAL");
+  d.Tick({unit,true,false,false});
+  for(int n=0;n<12;++n)d.Tick();
+  d.in.backboard_target.reset();
+  d.in.backboard_center_depth_m.reset();
+  d.in.goal_pose={};
+  d.in.backboard_image_without_depth=true;
+  d.Tick({unit,true,true,false}); // exactly one physical GOAL walk DONE
+  for(int n=0;n<100 && d.out.command.action!=MissionAction::kStepForwardOne;++n)
     d.Tick({},.1);
-    returned=d.out.command.camera_request==CameraRequest::kBallViewLine;
+  const auto walk=d.out.command.action_id;
+  Check(walk && d.out.command.action==MissionAction::kStepForwardOne,
+        "post-acquisition image-only GOAL did not issue a bounded Depth probe");
+  d.Tick({walk,true,false,false});
+  // YOLO loss during an ACCEPTED Depth WALK cannot cancel its real DONE.
+  d.in.backboard_image_without_depth=false;
+  d.in.raw_backboard_u.reset();
+  for(int n=0;n<3;++n)d.Tick();
+  Check(d.out.command.action_id==walk,
+        "brief YOLO loss cancelled an accepted Depth WALK");
+  d.Tick({walk,true,true,false});
+  bool scan=false;
+  for(int n=0;n<60 && !scan;++n){
+    d.Tick({},.1);
+    scan=d.out.command.camera_request==CameraRequest::kGoalScanLeft;
   }
-  Check(returned && d.out.approach_mission==MissionType::kNone,
-        "soft Depth loss did not restore FORWARD after stopped observation");
+  Check(scan,"YOLO disappeared after Depth WALK but ordinary GOAL head scan did not start");
 }
 
 void HurdleLineLossUsesLineRecovery() {
