@@ -158,8 +158,17 @@ void NearStageStopsBeforeMission(MissionType mission) {
     // then exactly one final 10 before FINE stance and line alignment.
     for(int i=0;i<20 && t.Preview().command.action!=MissionAction::kStepForwardTwo;++i)t.Tick();
     t.Commit(MissionAction::kStepForwardTwo);t.Done();
-    for(int i=0;i<30 && t.Preview().command.action!=MissionAction::kStepForwardOne;++i)t.Tick();
-    t.Commit(MissionAction::kStepForwardOne);t.Done();
+    // At least one search step may be issued before the 10/3 window
+    // qualifies. All real 10 DONEs must finish before the required FINE pose.
+    bool reached_fine=false;
+    for(int motions=0;motions<15 && !reached_fine;++motions) {
+      for(int i=0;i<35 && t.Preview().command.action==MissionAction::kNone;++i)t.Tick();
+      const auto next=t.Preview().command.action;
+      if(next==MissionAction::kDefaultPoseMode) {reached_fine=true;break;}
+      assert(next==MissionAction::kStepForwardOne);
+      t.Commit(MissionAction::kStepForwardOne);t.Done();
+    }
+    assert(reached_fine || t.Preview().command.action==MissionAction::kDefaultPoseMode);
   }
   for(int i=0;i<20 && t.Preview().command.action!=MissionAction::kDefaultPoseMode;++i)t.Tick();
   t.Commit(MissionAction::kDefaultPoseMode);t.Done();

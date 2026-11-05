@@ -816,8 +816,13 @@ void NearLossBeforeLock(MissionType mission) {
     Check(!d.out.approach_near,"two near GOAL depth samples entered FINE early");
     d.Tick();
   }
+  if(mission==MissionType::kHurdle)
+    for(int n=0;n<c.hurdle.near_v_min_hits+4 && !d.out.approach_near;++n)d.Tick();
   Check(d.out.approach_near && !d.out.approach_locked,"pre-lock near boundary was not latched");
-  Check(!d.out.remembered_line_score,"near boundary retained pre-entry LINE steering memory");
+  // HURDLE intentionally retains floor O/H until one additional 32/33/36
+  // finishes; unlike BALL/GOAL it cannot drop LINE steering at near latch.
+  if(mission!=MissionType::kHurdle)
+    Check(!d.out.remembered_line_score,"near boundary retained pre-entry LINE steering memory");
   // Even a visible next frame outside the boundary cannot undo near commitment.
   if(mission==MissionType::kBall)d.in.ball_target=Target();
   else if(mission==MissionType::kHurdle)d.in.hurdle_target=Target();
