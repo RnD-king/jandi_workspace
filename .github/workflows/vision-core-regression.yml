@@ -23,8 +23,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libyaml-cpp-dev libopencv-dev pkg-config
-      - name: Configure standalone vision_core
-        run: cmake -S src/vision_core -B build/shared_vision_core -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug
+      - name: Configure standalone vision_core with tests enabled by default
+        run: |
+          cmake -S src/vision_core -B build/shared_vision_core -DCMAKE_BUILD_TYPE=Debug
+          grep -qx 'BUILD_TESTING:BOOL=ON' build/shared_vision_core/CMakeCache.txt
       - name: Build vision_core and tests
         run: cmake --build build/shared_vision_core --parallel 2
       - name: Run shared vision core regressions
