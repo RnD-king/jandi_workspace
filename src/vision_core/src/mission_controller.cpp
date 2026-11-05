@@ -3112,6 +3112,11 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.mission_recovery_max_turns = candidate.mission_recovery_max_turns;
   updated.backboard_depth_strip_width_px =
       candidate.backboard_depth_strip_width_px;
+  updated.backboard_depth_center_size_px=candidate.backboard_depth_center_size_px;
+  updated.backboard_depth_strip_step_px=candidate.backboard_depth_strip_step_px;
+  updated.backboard_depth_strip_max_width_px=candidate.backboard_depth_strip_max_width_px;
+  updated.backboard_depth_inner_margin_ratio=candidate.backboard_depth_inner_margin_ratio;
+  updated.backboard_depth_min_valid_ratio=candidate.backboard_depth_min_valid_ratio;
   ValidateAlgorithmConfig(updated);
   const bool box_filter_changed =
       !config_.object_targets.SamePerceptionFilters(updated.object_targets) ||

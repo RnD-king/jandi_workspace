@@ -531,6 +531,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     approach_goal_probe_=false;approach_camera_started_=-1;
     approach_goal_empty_frames_=0;approach_evidence_={};
     goal_approach_walk_done_=false;far_goal_depth_probe_={};
+    goal_edge_guard_={}; // A re-entered GOAL view gets fresh edge evidence.
     goal_head_search_={};
     line_stability_history_.clear();
     actual_line_stability_history_.clear();
