@@ -39,8 +39,13 @@ YAML::Node AlgorithmField(const YAML::Node& a,const std::string& section,
     return node["candidate_tracking"][key];
   }
   if (section=="ball" || section=="hurdle" || section=="goal") {
-    if (section=="goal" && key.find("backboard_")==0)
-      return a["goal"]["backboard"]["depth"][key.substr(10)];
+    if (section=="goal" && key.find("backboard_")==0) {
+      const auto depth=a["goal"]["backboard"]["depth"];
+      // Existing min/max/strip settings use short keys, while the new ROI
+      // controls retain their full YAML names inside the Depth section.
+      if(depth[key])return depth[key];
+      return depth[key.substr(10)];
+    }
     return a[section]["control"][key];
   }
   if (section=="mission" && key.find("enable_")==0)
