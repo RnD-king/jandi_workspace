@@ -710,6 +710,12 @@ bool MissionController::ShouldDeferDone(
   // Deliver real DONE now; a second generic window would delay every attempt.
   if (active_mission_==MissionType::kBall && ball_result_.mode==BallMode::kBallRecoveryDown)
     return false;
+  // HURDLE DOWN owns three distinct observation policies: initial moving
+  // 33, missing search 10 + 0.5s hold, and detected WALK + fresh 1s.
+  // The generic 1s DONE gate must not reset or delay these windows.
+  if (active_mission_==MissionType::kHurdle &&
+      hurdle_controller_.ContinuousDownSearch())
+    return false;
   if (active_mission_==MissionType::kGoal && goal_controller_.DepthRecoveryActive())
     return false;
   const MissionAction action = last_command_.action;
@@ -1423,7 +1429,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   } else if (RepeatScope() == 0) {
     if (!decision_observation_active_ &&
         config_.post_motion_observation_sec > 0.0 && camera_settle_edge &&
-        !input.camera_scan.finished)
+        !input.camera_scan.finished &&
+        !(active_mission_==MissionType::kHurdle &&
+          hurdle_controller_.ContinuousDownCameraWait()))
       BeginDecisionObservation(input.now_sec, active_mission_, true, {});
     if (!decision_observation_active_ && !applied_object_ready_mean &&
         !(goal_edge_guard_.phase==GoalEdgeGuard::Phase::kTurning &&
@@ -1832,6 +1840,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     const bool guard= config_.test_mission==MissionType::kNone &&
         !input.manual_observation_control &&
         input.raw_backboard_observation_available && !goal_owned_done &&
+        before!=GoalMode::kWaitFinePose &&
         PrepareGoalEdgeGuard(input,!action_feedback.action_active ||
                                   action_feedback.action_done,edge_action);
     if(guard){
