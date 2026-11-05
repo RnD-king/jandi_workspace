@@ -1177,12 +1177,8 @@ int main() {
   assert(ready_result.command.control_phase!=ControlPhase::kWaitingQueuedActionAck);
   ready_frame.delivery_feedback={goal_ready_id,true,true,false};ready_frame.now_sec+=.1;
   ready_result=goal_ready.Step(ready_frame);
-  assert(ready_result.active_mission==MissionType::kLine);
-  for(int j=1;j<=11 && ready_result.active_mission==MissionType::kLine;++j) {
-    ready_frame.now_sec+=.1;
-    ready_frame.delivery_feedback={};
-    ready_result=goal_ready.Step(ready_frame);
-  }
+  // Near GOAL now transitions immediately after the final WALK DONE,
+  // without an old 1s pre-FINE stationary observation.
   assert(ready_result.active_mission==MissionType::kGoal);
   assert(ready_result.command.action==MissionAction::kDefaultPoseMode);
   assert(ready_result.command.action_id && ready_result.command.action_id!=goal_ready_id);
