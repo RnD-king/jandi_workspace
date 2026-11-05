@@ -431,6 +431,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.hurdle.lost_frames, "hurdle.lost_frames");
   Nonnegative(c.hurdle.upper_acquire_v_px, "hurdle.upper_acquire_v_px");
   Nonnegative(c.hurdle.approach_two_step_v_px, "hurdle.approach_two_step_v_px");
+  Nonnegative(c.hurdle.down_search_min_v_px, "hurdle.down_search_min_v_px");
   Nonnegative(c.hurdle.hurdle_ignore_duration_sec,
               "hurdle.hurdle_ignore_duration_sec");
   Nonnegative(c.hurdle.recovery_center_tolerance_px,
@@ -786,6 +787,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   if(h["pre_down_extra_forward_steps"])
     Assign(h,"pre_down_extra_forward_steps",c.hurdle.pre_down_extra_forward_steps);
   Assign(h, "down_search_max_steps", c.hurdle.down_search_max_steps);
+  if(h["down_search_min_v_px"])Assign(h,"down_search_min_v_px",c.hurdle.down_search_min_v_px);
   Assign(h, "down_search_inter_action_hold_sec", c.hurdle.down_search_inter_action_hold_sec);
   Assign(h, "recovery_observation_sec", c.hurdle.recovery_observation_sec);
   Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);

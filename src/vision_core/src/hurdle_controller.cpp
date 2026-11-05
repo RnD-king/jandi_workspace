@@ -38,6 +38,7 @@ const char *HurdleController::ModeName(HurdleMode mode) {
   case HurdleMode::kRecoveryForward: return "HURDLE_RECOVERY_FORWARD";
   case HurdleMode::kFailed: return "HURDLE_FAILED";
   case HurdleMode::kDownSearch: return "HURDLE_DOWN_SEARCH";
+  case HurdleMode::kDownFinalStep: return "HURDLE_DOWN_FINAL_STEP";
   case HurdleMode::kFineAdjust: return "HURDLE_FINE";
   case HurdleMode::kRecoveryDown: return "HURDLE_RECOVERY_DOWN";
   case HurdleMode::kApproachTwoBeforeDown: return "HURDLE_TWO_THEN_DOWN";
@@ -131,6 +132,15 @@ void HurdleController::UpdateTracker(const std::optional<ObjectTarget> &target,
                                      int image_width, int image_height) {
   const bool detected = target && image_width > 1 && image_height > 1;
   hit_history_.push_back(detected);
+  if(mode_==HurdleMode::kDownSearch && down_approach_fixed_sequence_ &&
+     down_initial_two_done_) {
+    down_near_hits_.push_back(detected && target->center_px.v>=config_.down_search_min_v_px);
+    while(down_near_hits_.size()>static_cast<std::size_t>(config_.stable_window))
+      down_near_hits_.pop_front();
+    if(down_near_hits_.size()==static_cast<std::size_t>(config_.stable_window) &&
+       std::count(down_near_hits_.begin(),down_near_hits_.end(),true)>=config_.down_search_min_hits)
+      down_near_qualified_=true;
+  }
   while (static_cast<int>(hit_history_.size()) >
          std::max(1, config_.stable_window)) hit_history_.pop_front();
   bool acquire = false;
@@ -365,6 +375,8 @@ HurdleResult HurdleController::Compute(
       last_seen_u_px_ = config_.target_u_px;
       mode_ = HurdleMode::kDownSearch;
       down_search_.Reset();
+      down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
+      down_near_qualified_=false;down_near_hits_.clear();
       result.mode = mode_;
       result.tracked = {};
       result.camera_request = CameraRequest::kNone;
@@ -376,6 +388,39 @@ HurdleResult HurdleController::Compute(
     }
     return result;
   case HurdleMode::kDownSearch: {
+    if(down_approach_fixed_sequence_) {
+      if(!down_initial_two_done_) {
+        if(down_initial_two_pending_) {
+          if(feedback.action_done) {
+            down_initial_two_pending_=false;down_initial_two_done_=true;
+            ClearTracking();down_near_hits_.clear();down_near_qualified_=false;
+          }
+          return result;
+        }
+        result.action=Locomotion(MissionAction::kStepForwardTwo);
+        if(allow_new_body_actions)down_initial_two_pending_=true;
+        return result;
+      }
+      const auto decision=down_search_.Observe(down_near_qualified_,
+          down_near_qualified_ ? config_.down_search_min_hits : 0,
+          config_.down_search_min_hits,config_.down_search_max_steps,
+          feedback.action_active,feedback.action_done,
+          now_sec,config_.down_search_inter_action_hold_sec);
+      if(decision==DownSearchWalk::Decision::kMoving ||
+         decision==DownSearchWalk::Decision::kWaiting)return result;
+      if(decision==DownSearchWalk::Decision::kFound) {
+        mode_=HurdleMode::kDownFinalStep;result.mode=mode_;
+        result.action=Locomotion(MissionAction::kStepForwardOne);
+        if(allow_new_body_actions)down_final_one_pending_=true;
+        return result;
+      }
+      if(decision==DownSearchWalk::Decision::kExhausted) {
+        mode_=HurdleMode::kFailed;result.mode=mode_;return result;
+      }
+      result.action=Locomotion(MissionAction::kStepForwardOne);
+      if(allow_new_body_actions)down_search_.Issued();
+      return result;
+    }
     const int hits=static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true));
     const auto decision=down_search_.Observe(tracked_.visible,hits,
         config_.down_search_min_hits,config_.down_search_max_steps,
@@ -398,6 +443,17 @@ HurdleResult HurdleController::Compute(
     if (allow_new_body_actions) down_search_.Issued();
     return result;
   }
+  case HurdleMode::kDownFinalStep:
+    if(down_final_one_pending_) {
+      if(!feedback.action_done)return result;
+      down_final_one_pending_=false;
+      mode_=HurdleMode::kWaitFinePose;result.mode=mode_;
+      result.action=Locomotion(MissionAction::kDefaultPoseMode);
+      return result;
+    }
+    result.action=Locomotion(MissionAction::kStepForwardOne);
+    if(allow_new_body_actions)down_final_one_pending_=true;
+    return result;
   case HurdleMode::kCoarseAdjust:
     if (feedback.action_active && !feedback.action_done) return result;
     if (feedback.action_done && !verified) return result;
@@ -679,6 +735,7 @@ void HurdleController::EnterContinuousRecovery(const ObjectTarget& target,
 void HurdleController::EnterContinuousNear(double now) {
   Reset();entry_recovery_allowed_=false;
   mode_=HurdleMode::kWaitCameraDown;state_enter_sec_=now;
+  down_approach_fixed_sequence_=true;
 }
 
 void HurdleController::UseVerifiedObservation(
@@ -720,6 +777,9 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   recovery_resume_mode_=HurdleMode::kApproach;
   recovery_step_action_=MissionAction::kStepForwardOne;
   down_search_.Reset();
+  down_approach_fixed_sequence_=false;
+  down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
+  down_near_qualified_=false;down_near_hits_.clear();
   stationary_recovery_.Begin(0.0);
   completed_contact_steps_=0;
   contact_step_pending_=false;

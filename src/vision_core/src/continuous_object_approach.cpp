@@ -797,6 +797,37 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       }
       return result;
     }
+    // HURDLE: current LINE DONE -> one more 32/33/36 from fresh floor O/H.
+    if (i==2) {
+      if (!idle) return result;
+      if (continuous_.near_motion_id) {
+        if (!input.delivery_feedback.done ||
+            input.delivery_feedback.action_id!=continuous_.near_motion_id ||
+            !input.allow_new_commands || !input.allow_new_body_actions)return result;
+        continuous_.near_motion_id=0;
+        continuous_.near_motion={};
+        EnterContinuousMission(input,false);result.entered=true;
+        return result;
+      }
+      if (continuous_.near_motion.action!=MissionAction::kNone) {
+        result.action=continuous_.near_motion;result.near_final_action=true;
+        return result;
+      }
+      const auto guide=line.guide.valid ? line.guide :
+          continuous_.hurdle_last_mean_guide.valid ? continuous_.hurdle_last_mean_guide :
+          continuous_.hurdle_last_guide;
+      if(!guide.valid)return result;
+      const auto dir=SteeringDecision(guide).direction;
+      const auto unit=dir==CruiseDirection::kLeft ? MissionAction::kLineLeftUnit :
+          dir==CruiseDirection::kRight ?
+              static_cast<MissionAction>(config_.line_p2p.right_unit_action) :
+          dir==CruiseDirection::kStraight ? MissionAction::kLineStraightUnit :
+                                           MissionAction::kNone;
+      if(unit==MissionAction::kNone)return result;
+      continuous_.near_motion={unit,ActionCategory::kLocomotion,0,false};
+      result.action=continuous_.near_motion;result.near_final_action=true;
+      return result;
+    }
     last_line_score_.reset();
     actual_line_stability_history_.clear();
     if (!idle) return result;

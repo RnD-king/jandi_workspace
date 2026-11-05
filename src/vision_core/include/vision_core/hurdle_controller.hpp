@@ -20,6 +20,7 @@ enum class HurdleMode {
   kRecoveryForward,
   kFailed = 8,
   kDownSearch,
+  kDownFinalStep,
   kFineAdjust,
   kRecoveryDown,
   kApproachTwoBeforeDown,
@@ -34,6 +35,7 @@ struct HurdleConfig {
   double approach_short_v_px{};
   int pre_down_extra_forward_steps{2}; // Additional physical steps after the existing near 2-step.
   int down_search_max_steps{10};
+  double down_search_min_v_px{80.0};
   double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
   double recovery_observation_sec{};
   int recovery_max_observations{};
@@ -148,7 +150,8 @@ public:
     if (fine_line_observation_started_) fine_line_observation_start_sec_+=duration;
   }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
-  void StartTestNear() { Reset(); mode_=HurdleMode::kWaitCameraDown; test_camera_pending_=true; }
+  void StartTestNear() { Reset(); down_approach_fixed_sequence_=true;
+    mode_=HurdleMode::kWaitCameraDown; test_camera_pending_=true; }
   void StartTestExecute() { Reset(); fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; }
   void Reset();
   bool ExecutionObservationReady() const {
@@ -205,6 +208,10 @@ private:
   bool verified_observation_pending_{false};
   ObjectObservationWindow observation_window_;
   DownSearchWalk down_search_;
+  bool down_approach_fixed_sequence_{false};
+  bool down_initial_two_pending_{false}, down_initial_two_done_{false};
+  bool down_final_one_pending_{false}, down_near_qualified_{false};
+  std::deque<bool> down_near_hits_;
   StationaryObjectRecovery stationary_recovery_;
   int completed_back_steps_{0};
   int completed_contact_steps_{0};
