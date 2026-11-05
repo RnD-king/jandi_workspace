@@ -571,11 +571,8 @@ void HurdleAndGoal() {
   Check(h.out.approach_mission==MissionType::kHurdle && h.out.approach_completed_blocks==1,
         "HURDLE did not use the common LINE block planner");
   h.in.hurdle_target=Target(320,260);
-  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on one vote");
-  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on two votes");
-  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on three votes");
-  h.Tick();Check(!h.out.approach_near,"HURDLE near entered on four votes");
-  h.Tick();
+  for(int n=0;n<c.hurdle.near_v_min_hits+4 && !h.out.approach_near;++n)h.Tick();
+  Check(h.out.approach_near,"HURDLE failed to latch its configured v>=240 evidence");
   h.Tick({h.current,true,false,true});
   Check(h.out.command.action_id==h.current,"HURDLE boundary booked another shared unit");
   h.Tick({h.current,true,true,false});

@@ -39,7 +39,13 @@ struct Trial {
   }
   MissionFrameResult Preview() const {auto trial=core;auto input=in;input.allow_new_body_actions=true;input.delivery_feedback={};return trial.Step(input);}
   void Commit(MissionAction action) {
-    const auto candidate=Preview();assert(candidate.command.action==action);
+    const auto candidate=Preview();
+    if(candidate.command.action!=action)
+      throw std::runtime_error("stage COMMIT expected="+std::to_string(static_cast<int>(action))+
+          " actual="+std::to_string(static_cast<int>(candidate.command.action))+
+          " stage="+std::to_string(core.Config().test_stage)+
+          " mission="+std::to_string(static_cast<int>(candidate.active_mission))+
+          " hurdle="+std::to_string(static_cast<int>(candidate.hurdle.mode)));
     assert(candidate.command.command_type==CommandType::kAction);
     const auto old_attempt=out.ball.pickup_attempt_count;
     auto input=in;input.allow_new_body_actions=true;input.delivery_feedback={};
