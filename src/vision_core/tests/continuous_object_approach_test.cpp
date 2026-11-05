@@ -692,49 +692,60 @@ void GoalTurnObservationUsesSelectedPath() {
 
 void FarGoalDepthRecovery(bool found,bool acquired=false) {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
-  c.goal_trial_start_goal=true;c.goal.lost_frames=3;c.goal.depth_recovery_max_steps=3;
+  c.goal_trial_start_goal=true;c.goal.lost_frames=3;
+  c.goal.far_depth_probe_max_attempts=3;c.line_p2p.straight_repetitions=1;
   Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
-  d.in.camera_feedback={CameraMode::kGoal,true};d.in.backboard_image_without_depth=true;
-  if (acquired) {
-    d.in.backboard_target=Target();d.in.backboard_track_id=9;
-    d.in.backboard_center_depth_m=2;
-    for(int i=0;i<12;++i)d.Tick();
-    const auto unit=d.out.command.action_id;
-    Check(unit && d.out.approach_mission==MissionType::kGoal,"Depth fixture did not acquire GOAL");
-    d.Tick({unit,true,false,false});
-    d.in.backboard_target.reset();d.in.backboard_center_depth_m.reset();
-    for(int i=0;i<4;++i)d.Tick();
-    Check(d.out.approach_mission==MissionType::kGoal && !d.out.approach_missing_frames,
-          "visible image/invalid Depth was mistaken for a soft object disappearance");
-    d.Tick({unit,true,true,false});
-  }
-  std::uint64_t completed=0;
-  for(int n=1;n<=3;++n) {
-    for(int i=0;i<40 && (d.out.command.action_id==0 || d.out.command.action_id==completed);++i)d.Tick();
-    const auto id=d.out.command.action_id;
-    const auto expected=MissionAction::kStepForwardOne;
-    Check(id && id!=completed && d.out.command.action==expected,
-          "far GOAL with visible image/invalid Depth did not request one bounded WALK step");
-    d.Tick({id,true,false,false});
-    Check(d.out.goal.depth_recovery_steps==n-1,"Depth recovery ACK consumed a step");
-    d.Tick({id,true,true,false});completed=id;
-    d.Tick({id,true,true,false});
-    Check(d.out.goal.depth_recovery_steps==n,"far GOAL duplicate DONE changed recovery count");
-    if(found) {
-      d.in.backboard_image_without_depth=false;d.in.backboard_target=Target();d.in.backboard_track_id=9;
-      d.in.backboard_center_depth_m=2;d.in.goal_pose={true,0,2,0,1};
+  d.in.camera_feedback={CameraMode::kGoal,true};
+  d.in.backboard_image_without_depth=true;d.in.raw_backboard_u=320;
+  if(!acquired) {
+    // Initial image-only GOAL must not trigger a blind Depth WALK, regardless
+    // of how long its neck scan takes to start.
+    for(int n=0;n<30;++n){
+      d.Tick({},.1);
+      Check(d.out.command.action==MissionAction::kNone,
+          "initial YOLO-only GOAL started a Depth recovery WALK before acquisition");
     }
-    for(int i=0;i<25 && d.out.goal.depth_recovery_active;++i)d.Tick({},.1);
-    if(found) {
-      for(int i=0;i<20;++i)d.Tick();
-      Check(LinePlan::IsUnit(d.out.command.action) && d.out.approach_mission==MissionType::kGoal &&
-          !d.out.approach_goal_depth_failed,"recovered far GOAL coordinates did not resume shared virtual-line approach");
+    return;
+  }
+  d.in.backboard_target=Target();d.in.backboard_track_id=9;
+  d.in.backboard_image_without_depth=false;
+  d.in.backboard_center_depth_m=2;d.in.goal_pose={true,0,2,0,1};
+  for(int n=0;n<15 && !d.out.command.action_id;++n)d.Tick();
+  auto first=d.out.command.action_id;
+  Check(first && d.out.approach_mission==MissionType::kGoal,
+        "Depth fixture failed to start a real GOAL approach");
+  d.Tick({first,true,false,false});
+  for(int n=0;n<12;++n)d.Tick();
+  d.Tick({first,true,true,false});
+  // One real GOAL-owned DONE, not ACK or READY, arms the new far-depth path.
+  d.in.backboard_target.reset();d.in.backboard_center_depth_m.reset();
+  d.in.goal_pose={};d.in.backboard_image_without_depth=true;
+  std::uint64_t last=first;
+  for(int n=1;n<=3;++n){
+    for(int t=0;t<100 && (d.out.command.action_id==0 ||
+         d.out.command.action_id==last);++t)d.Tick({},.1);
+    const auto id=d.out.command.action_id;
+    Check(id && id!=last && d.out.command.action==MissionAction::kStepForwardOne,
+        "acquired image-only GOAL failed to schedule one direction-aware probe");
+    d.Tick({id,true,false,false});
+    d.Tick({id,true,true,false});last=id;
+    if(found){
+      d.in.backboard_target=Target();d.in.backboard_track_id=9;
+      d.in.backboard_center_depth_m=2;d.in.goal_pose={true,0,2,0,1};
+      d.in.backboard_image_without_depth=false;
+    }
+    for(int t=0;t<26;++t)d.Tick({},.1);
+    if(found){
+      Check(!d.out.approach_goal_depth_failed,
+          "successful stopped Depth observation entered terminal failure");
       return;
     }
   }
-  Check(d.out.terminal_hold && d.out.approach_goal_depth_failed &&
-      d.out.goal.depth_recovery_steps==3 && d.out.approach_completed_blocks==0,
-      "far Depth recovery did not terminate after three steps or counted recovery as object LINE blocks");
+  Check(!d.out.terminal_hold && !d.out.approach_goal_depth_failed,
+        "bounded far-depth probe must return to LINE instead of terminal hold");
+  Check(d.out.command.camera_request==CameraRequest::kBallViewLine ||
+        d.out.approach_mission==MissionType::kNone,
+        "third failed GOAL Depth probe did not return to LINE");
 }
 
 void NearLossBeforeLock(MissionType mission) {
@@ -802,26 +813,11 @@ void NearGoalPreemptsDepthWalk() {
   c.initial_has_ball=c.goal_trial_start_goal=true;c.goal.lost_frames=3;
   Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
   d.in.camera_feedback={CameraMode::kGoal,true};d.in.backboard_image_without_depth=true;
-  for(int i=0;i<30 && !d.out.command.action_id;++i)d.Tick();
-  const auto walk=d.out.command.action_id;
-  Check(walk && d.out.command.action==MissionAction::kStepForwardOne,
-        "near preemption fixture did not start a real Depth recovery WALK");
-  d.Tick({walk,true,false,false});
-  d.in.backboard_target=Target();d.in.backboard_track_id=9;
-  d.in.backboard_image_without_depth=false;d.in.backboard_center_depth_m=.5;
-  d.in.goal_pose={}; // A near center depth is sufficient even without edge pose.
-  for(int i=0;i<12;++i) {
+  for(int i=0;i<30;++i){
     d.Tick();
-    Check(d.out.command.action_id==walk,"near sighting canceled an accepted WALK");
+    Check(d.out.command.action==MissionAction::kNone,
+          "first GOAL sighting with invalid Depth must not issue a blind WALK");
   }
-  Check(d.out.approach_near,"near board remained behind coordinate-recovery routing");
-  d.Tick({walk,true,true,false});
-  Check(d.out.active_mission==MissionType::kLine && d.out.approach_near,
-        "near board bypassed its fresh stopped observation");
-  for(int i=0;i<30 && d.out.active_mission==MissionType::kLine;++i)d.Tick();
-  Check(d.out.active_mission==MissionType::kGoal &&
-        d.out.command.action==MissionAction::kDefaultPoseMode && !d.out.goal.depth_recovery_active,
-        "near board issued another Depth WALK instead of FINE feet after real DONE");
 }
 
 void SoftGoalLossClearsDepthEpisode() {

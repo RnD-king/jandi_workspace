@@ -214,7 +214,8 @@ int main(int argc, char **argv) {
   assert(c.UsesObjectReadyMean(vision_core::MissionAction::kStepForwardFour));
   assert(!c.UsesObjectReadyMean(vision_core::MissionAction::kStepForwardLeftTwo));
   assert(c.test_stage==0 && c.test_mission==vision_core::MissionType::kNone);
-  assert(c.backboard_depth_strip_width_px==7);
+  // The fixture is deliberately older than the production YAML.
+  assert(c.backboard_depth_strip_width_px==5);
   assert(c.backboard_depth_center_size_px==21);
   assert(c.backboard_depth_strip_step_px==7 && c.backboard_depth_strip_max_width_px==28);
   assert(c.backboard_depth_inner_margin_ratio==.10 && c.backboard_depth_min_valid_ratio==.10);

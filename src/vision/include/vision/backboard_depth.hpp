@@ -111,7 +111,8 @@ inline void DrawDepthRegions(cv::Mat& image,const cv::Rect& box,int strip_width,
     double min_depth=.10,double max_depth=2.50,bool near=true){
   const auto sample=SampleBackboardDepth(aligned_depth,box,center_size,
       strip_width,strip_step,strip_max,margin,valid_ratio,min_depth,max_depth,near);
-  const auto& r=sample.regions;
+  auto r=sample.regions;
+  if(aligned_depth.empty())r=DepthRegions(box,image.size(),strip_width,center_size,margin);
   if(!r.inner.empty())cv::rectangle(image,r.inner,{100,200,100},1);
   if(!r.center.empty())cv::rectangle(image,r.center,{230,230,230},1);
   if(near && !r.left.empty())cv::rectangle(image,r.left,{255,180,0},1);
