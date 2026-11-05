@@ -757,7 +757,9 @@ MissionFrameResult MissionController::StepPlannedLine(
             continuous_.mission!=MissionType::kNone &&
             line_plan_.ObjectOwned(id,continuous_.epoch) &&
             !line_plan_.IsProbe(id) && !line_plan_.ObjectQualified(id);
-        if (!decision.valid && !idle && !object_loss)
+        if (!decision.valid && !idle && !object_loss &&
+            !(automatic_approach && continuous_.mission==MissionType::kHurdle &&
+              continuous_.near))
           line_failure_pending_done_ = true;
         if (automatic_approach && continuous_.mission!=MissionType::kNone &&
             line_plan_.ObjectOwned(id,continuous_.epoch) &&
@@ -766,6 +768,37 @@ MissionFrameResult MissionController::StepPlannedLine(
           continuous_.loss_pending=true;
           line_plan_.Abort();
           route.hold=true;
+        }
+      }
+      // HURDLE near votes only commit the NUMBER of remaining LINE units.
+      // Keep collecting normal real-floor O/H until this unit's READY; then
+      // reserve ONE final 32/33/36, even inside a multi-unit LINE block.
+      if (automatic_approach && continuous_.mission==MissionType::kHurdle &&
+          continuous_.near && ready &&
+          continuous_.near_motion.action==MissionAction::kNone &&
+          continuous_.near_motion_id==0) {
+        const auto mean=line_plan_.Finish(id,input.now_sec,
+                                         config_.line_p2p.ready_lead_sec);
+        if (mean && mean->valid) {
+          const auto direction=SteeringDecision(*mean).direction;
+          const auto unit=direction==CruiseDirection::kLeft ?
+              MissionAction::kLineLeftUnit :
+              direction==CruiseDirection::kRight ?
+                  static_cast<MissionAction>(config_.line_p2p.right_unit_action) :
+              direction==CruiseDirection::kStraight ?
+                  MissionAction::kLineStraightUnit : MissionAction::kNone;
+          if (unit!=MissionAction::kNone) {
+            continuous_.hurdle_last_mean_guide=*mean;
+            last_ready_line_guide_=mean;
+            decision=*mean;
+            output.line_decision_guide=*mean;
+            continuous_.near_motion={unit,ActionCategory::kLocomotion,0,true};
+            route.action=continuous_.near_motion;
+            route.near_final_action=true;
+            request=route.action;
+            line_plan_.Abort(); // Stop unissued repeats; retain physical IDs.
+            line_failure_pending_done_=false;
+          }
         }
       }
       if (line_auxiliary_id_ && line_auxiliary_done_ && idle) {
@@ -803,7 +836,8 @@ MissionFrameResult MissionController::StepPlannedLine(
           continuous_.mission==MissionType::kNone && ready && final_edge &&
           line_plan_.CruiseFor(id)!=MissionAction::kNone;
       if (!observation_wait && !line_failure_pending_done_ &&
-          !route.hold && line_state_ != LineState::kFinalHold &&
+          !route.hold && !route.near_final_action &&
+          line_state_ != LineState::kFinalHold &&
           !defer_curve_confirm_ready) {
         if (automatic_approach && ready && !line_plan_.Active() && !route.hold &&
             decision.valid && !goal_will_enter && !straight_goal && line_ready_handled_id_!=id) {
