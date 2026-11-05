@@ -891,6 +891,26 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
       decision_pose_cos_sum_ += std::cos(input.goal_pose.yaw_rad);
       ++decision_pose_count_;
     }
+    // The GOAL post-FINE pose/step observation simultaneously judges edge
+    // clipping (raw bbox 10/4). Do not start a second stationary 1s window.
+    if (decision_observation_mission_==MissionType::kGoal &&
+        active_mission_==MissionType::kGoal &&
+        config_.test_mission==MissionType::kNone &&
+        !input.manual_observation_control &&
+        input.raw_backboard_observation_available &&
+        input.camera_feedback.settled &&
+        input.camera_feedback.actual_mode==CameraMode::kGoal &&
+        goal_edge_guard_.phase==GoalEdgeGuard::Phase::kIdle &&
+        !goal_edge_guard_.ready) {
+      auto& edge=goal_edge_guard_;
+      if (!edge.observing) {
+        edge.observing=true;
+        edge.observation_start_sec=decision_observation_start_sec_;
+        edge.left_hits.clear();edge.right_hits.clear();
+        edge.left_qualified=edge.right_qualified=false;
+      }
+      ObserveGoalEdgeSample(input);
+    }
     return;
   }
   const LineGuide guide =
