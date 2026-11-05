@@ -95,6 +95,11 @@ struct MissionControllerConfig {
   MissionType test_mission{MissionType::kNone};
   int test_stage{}; // 0 full, 1 far approach, 2 near alignment, 3 mission execution/recovery
   int backboard_depth_strip_width_px{};
+  int backboard_depth_center_size_px{21};
+  int backboard_depth_strip_step_px{7};
+  int backboard_depth_strip_max_width_px{28};
+  double backboard_depth_inner_margin_ratio{0.10};
+  double backboard_depth_min_valid_ratio{0.10};
 };
 
 enum class FootPose { kWalk, kFine };

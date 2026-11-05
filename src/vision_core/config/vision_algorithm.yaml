@@ -287,7 +287,12 @@ vision_algorithm:
         missing_frame_limit: 15
         max_tracks: 16
       depth:
-        depth_strip_width_px: 5 # 백보드 좌우 표본 폭, 중앙은 3x3
+        depth_strip_width_px: 7 # 좌우 밴드 시작 폭; 양측 동시 확대
+        backboard_depth_center_size_px: 21 # 중앙 ROI 정사각형 한 변
+        backboard_depth_strip_step_px: 7 # 좌우 밴드 동시 확대 증가 폭
+        backboard_depth_strip_max_width_px: 28 # 좌우 밴드 최대 폭
+        backboard_depth_inner_margin_ratio: 0.10 # 바운딩박스 상하좌우 10% 제거
+        backboard_depth_min_valid_ratio: 0.10 # 각 ROI 최소 유효 Depth 픽셀 비율
         min_depth_m: 0.10 # 백보드 최소 거리
         max_depth_m: 2.50 # 백보드 최대 거리
 
@@ -321,9 +326,9 @@ vision_algorithm:
       head_scan_body_turn_two_threshold_deg: 20.0
 
       # 접근·카메라 전환
-      target_u_px: 360.0 # 기존 GOAL controller 기준 유지
+      target_u_px: 320.0 # GOAL WALK 접근 기준 중앙
       auto_approach_reference_u_px: 310.0 # 이전 H 경로 디버그용 기준값 (AUTO 조향 미사용)
-      auto_approach_center_u_px: 280.0 # GOAL 전용 수직 3구역 중심
+      auto_approach_center_u_px: 320.0 # GOAL 전용 수직 3구역 중심
       auto_approach_half_width_px: 100.0 # 180~380px 직진, 밖은 좌/우회전전진
       approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
       edge_margin_px: 50.0 # 이 라인에 백보드 바운딩박스 닿기만 하면 무조건 회전2번
@@ -332,7 +337,7 @@ vision_algorithm:
 
       # 투척 위치·방향
       hoop_radius_m: 0.10 # 림 위치 보정에 사용하는 반지름
-      throw_landing_x_m: -0.08 # 카메라 기준 허리 0도 공 낙하 X (m)
+      throw_landing_x_m: -0.02 # 카메라 기준 허리 0도 공 낙하 X (m)
       throw_landing_z_m: 0.62 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
       waist_axis_in_camera_x_m: 0.020 # 카메라 기준 허리축 X (+오른쪽); 실측 전 기존 동작 유지
       waist_axis_in_camera_z_m: -0.100 # 카메라 기준 허리축 Z (+전방); 실측 전 기존 동작 유지

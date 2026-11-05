@@ -1360,12 +1360,16 @@ private:
       // 모든 backboard 후보에 표본을 붙인다. 최종 후보 선택과 pose 계산은
       // core에서 한 번만 수행한다.
       if (detection.class_id == backboard_class_id_ && !depth.empty()) {
-        const auto region=vision::DepthRegions(detection.box,depth.size(),backboard_depth_strip_width_px_);
-        observation.center_depth_m=vision::MedianRegionMeters(depth,region.center);
-        observation.left_depth_m=vision::MedianRegionMeters(depth,region.left);
-        observation.right_depth_m=vision::MedianRegionMeters(depth,region.right);
-        if (!region.left.empty()) observation.left_depth_u_px=region.left_u;
-        if (!region.right.empty()) observation.right_depth_u_px=region.right_u;
+        const auto sample=vision::SampleBackboardDepth(depth,detection.box,
+            tuning_config_.backboard_depth_center_size_px,backboard_depth_strip_width_px_,
+            tuning_config_.backboard_depth_strip_step_px,tuning_config_.backboard_depth_strip_max_width_px,
+            tuning_config_.backboard_depth_inner_margin_ratio,tuning_config_.backboard_depth_min_valid_ratio,
+            tuning_config_.backboard_min_depth_m,tuning_config_.backboard_max_depth_m);
+        observation.center_depth_m=sample.center;
+        observation.left_depth_m=sample.left;
+        observation.right_depth_m=sample.right;
+        if (!sample.regions.left.empty()) observation.left_depth_u_px=sample.regions.left_u;
+        if (!sample.regions.right.empty()) observation.right_depth_u_px=sample.regions.right_u;
       }
       if ((detection.class_id==ball_class_id_ && tuning_config_.object_targets.ball_depth_enabled) ||
           (detection.class_id==hurdle_class_id_ && tuning_config_.object_targets.hurdle_depth_enabled)) {

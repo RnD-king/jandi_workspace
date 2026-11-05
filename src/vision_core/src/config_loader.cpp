@@ -186,6 +186,15 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if ((tm!=0 && tm!=2 && tm!=3 && tm!=4) || c.test_stage<0 || c.test_stage>3 ||
       (tm==0 && c.test_stage!=0)) throw std::runtime_error("invalid test mission/stage");
   PositiveInt(c.backboard_depth_strip_width_px,"goal.backboard_depth_strip_width_px");
+  PositiveInt(c.backboard_depth_center_size_px,"goal.backboard_depth_center_size_px");
+  if(c.backboard_depth_center_size_px%2!=1)throw std::runtime_error("goal.backboard_depth_center_size_px must be odd");
+  PositiveInt(c.backboard_depth_strip_step_px,"goal.backboard_depth_strip_step_px");
+  if(c.backboard_depth_strip_max_width_px<c.backboard_depth_strip_width_px)throw std::runtime_error("goal backboard maximum strip width must cover minimum");
+  Finite(c.backboard_depth_inner_margin_ratio,"goal.backboard_depth_inner_margin_ratio");
+  Finite(c.backboard_depth_min_valid_ratio,"goal.backboard_depth_min_valid_ratio");
+  if(c.backboard_depth_inner_margin_ratio<0 || c.backboard_depth_inner_margin_ratio>=.5 ||
+     c.backboard_depth_min_valid_ratio<=0 || c.backboard_depth_min_valid_ratio>1)
+    throw std::runtime_error("goal backboard Depth ROI ratios are invalid");
   PositiveInt(c.test_ball_mission_index,"ball.test_mission_index");
   PositiveInt(c.test_goal_mission_index,"goal.test_mission_index");
   PositiveInt(c.mission_recovery_max_turns,"mission.mission_recovery_max_turns");
@@ -809,6 +818,11 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "trial_start_goal", c.goal_trial_start_goal);
   Assign(g, "test_mission_index", c.test_goal_mission_index);
   Assign(g, "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px);
+  if(g && g["backboard_depth_center_size_px"])Assign(g,"backboard_depth_center_size_px",c.backboard_depth_center_size_px);
+  if(g && g["backboard_depth_strip_step_px"])Assign(g,"backboard_depth_strip_step_px",c.backboard_depth_strip_step_px);
+  if(g && g["backboard_depth_strip_max_width_px"])Assign(g,"backboard_depth_strip_max_width_px",c.backboard_depth_strip_max_width_px);
+  if(g && g["backboard_depth_inner_margin_ratio"])Assign(g,"backboard_depth_inner_margin_ratio",c.backboard_depth_inner_margin_ratio);
+  if(g && g["backboard_depth_min_valid_ratio"])Assign(g,"backboard_depth_min_valid_ratio",c.backboard_depth_min_valid_ratio);
   Assign(g, "backboard_min_depth_m", c.backboard_min_depth_m);
   Assign(g, "backboard_max_depth_m", c.backboard_max_depth_m);
   Assign(g, "recovery_turn_max", c.goal.recovery_turn_max);

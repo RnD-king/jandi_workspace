@@ -325,6 +325,18 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   const bool selected_hurdle=mission_result.active_mission==vision_core::MissionType::kHurdle;
   cv::Mat vis = bgr.clone();
   DrawRawDebugDetections(vis,dets,config);
+  // Display the sampled ROIs for raw YOLO boards even when Depth rejects the candidate.
+  if(view.live_object_detections && camera.settled && camera.actual_mode==vision_core::CameraMode::kGoal)
+    for(const auto& detection:dets)if(detection.class_id==config.object_targets.backboard_class_id &&
+        detection.confidence>=config.object_targets.backboard_confidence)
+      vision::DrawDepthRegions(vis,cv::Rect(static_cast<int>(std::lround(detection.box.x)),
+          static_cast<int>(std::lround(detection.box.y)),static_cast<int>(std::lround(detection.box.width)),
+          static_cast<int>(std::lround(detection.box.height))),config.backboard_depth_strip_width_px,
+          aligned_depth,config.backboard_depth_center_size_px,config.backboard_depth_strip_step_px,
+          config.backboard_depth_strip_max_width_px,config.backboard_depth_inner_margin_ratio,
+          config.backboard_depth_min_valid_ratio,config.backboard_min_depth_m,config.backboard_max_depth_m,
+          mission_result.active_mission==vision_core::MissionType::kGoal ||
+          mission_result.approach_near);
   // Colored boxes are the exact pre-vote core filter results. ID labels join
   // original detection indices, never a second visual association algorithm.
   std::size_t detection_index=0;
@@ -351,10 +363,6 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         if (index<prepared.detection_track_ids.size()) id=prepared.detection_track_ids[index];
       }
       const auto& detection=prepared.accepted_object_detections[i];
-      if (detection.class_id==config.object_targets.backboard_class_id)
-        vision::DrawDepthRegions(vis,cv::Rect(static_cast<int>(std::lround(detection.box.x)),
-            static_cast<int>(std::lround(detection.box.y)),static_cast<int>(std::lround(detection.box.width)),
-            static_cast<int>(std::lround(detection.box.height))),config.backboard_depth_strip_width_px,aligned_depth);
       // A qualifying candidate can already be locked while LINE drains and
       // observes. Only the active mission's confirmed identity gets white.
       const bool mission_target=id && (
