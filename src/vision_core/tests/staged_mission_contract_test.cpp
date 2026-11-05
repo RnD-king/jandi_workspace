@@ -154,10 +154,11 @@ void NearStageStopsBeforeMission(MissionType mission) {
   const auto prepare_id=t.PrepareStage(mission,2);
   assert(prepare_id!=0 && t.out.foot_pose==FootPose::kWalk);
   if(mission==MissionType::kHurdle) {
-    // DOWN stage2 mirrors AUTO: one mandatory 22, then v>=80 10/3,
-    // then exactly one final 10 before FINE stance and line alignment.
-    for(int i=0;i<20 && t.Preview().command.action!=MissionAction::kStepForwardTwo;++i)t.Tick();
-    t.Commit(MissionAction::kStepForwardTwo);t.Done();
+    // DOWN stage2 mirrors AUTO: initial motion 33 observes while moving.
+    // If moving evidence is absent, search 10 observes continuously through
+    // the 0.5s hold; qualified v>=240 goes to FINE without a final 10.
+    for(int i=0;i<20 && t.Preview().command.action!=MissionAction::kLineStraightUnit;++i)t.Tick();
+    t.Commit(MissionAction::kLineStraightUnit);t.Done();
     // At least one search step may be issued before the 10/3 window
     // qualifies. All real 10 DONEs must finish before the required FINE pose.
     bool reached_fine=false;
