@@ -235,7 +235,8 @@ vision_algorithm:
       down_search_min_hits: 3 # DOWN: 10프레임 중 허들 검출 3회 (v 하한 없음)
       down_search_min_v_px: 80.0 # Legacy, AUTO DOWN에서는 적용하지 않음
       down_search_max_steps: 10 # 미검출 10번 탐색 한도, 최초 33번/거리별 접근은 제외
-      down_search_inter_action_hold_sec: 0.5 # 탐색 1걸음 DONE 후 추가 0.5초 대기
+      down_search_inter_action_hold_sec: 0.5 # 미검출 탐색 10번: 이동 중+DONE 후 0.5초 연속 관측
+      down_stationary_observation_sec: 1.0 # 검출 후 33/10번: DONE 후 신규 정지 관측
 
       # DOWN 접근·미세조정
       down_one_step_v_px: 120.0 # DOWN 검출 v<120: 직진 2걸음 (33번)
