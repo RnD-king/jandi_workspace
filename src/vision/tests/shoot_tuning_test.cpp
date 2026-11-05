@@ -45,6 +45,10 @@ void StatelessFineDecision() {
   auto config=vision_core::LoadDefaultAlgorithmConfig();
   config.goal.hoop_radius_m=.2;
   config.goal.throw_landing_x_m=0; config.goal.throw_landing_z_m=1;
+  // Pin a nonzero physical waist pivot so this test does not depend on the
+  // currently installed YAML and cannot regress to camera-origin rotation.
+  config.goal.waist_axis_in_camera_x_m=.020;
+  config.goal.waist_axis_in_camera_z_m=-.100;
   config.goal.position_tolerance_m=.02; config.goal.shoot_yaw_limit_deg=20;
   const vision_core::GoalController planner(config.goal,config.camera_motion_timeout_sec);
   using A=vision_core::MissionAction;
@@ -53,9 +57,21 @@ void StatelessFineDecision() {
   Check(shot.action==A::kShoot && shot.target_yaw_deg==0,"reachable rim must shoot");
   Check(planner.PlanFineAction({true,0,2,0,1}).action==A::kStepForwardHalf,"far rim needs one fine step");
   Check(planner.PlanFineAction({true,0,.6,0,1}).action==A::kStepBack,"near rim needs one back step");
-  const double angle=10*vision::kDebugPi/180;
-  const auto angled=planner.PlanFineAction({true,std::sin(angle),.2+std::cos(angle),0,1});
-  Check(angled.action==A::kShoot && angled.target_yaw_deg==-10,"right rim needs negative waist yaw");
+  // Build the exact rim from the same physical waist-pivot rotation that
+  // GOAL uses. The old sin/cos target incorrectly rotated about the camera
+  // origin and asserted a yaw that was no longer optimal after calibration.
+  const double angle=-10*vision::kDebugPi/180;
+  const double wx=config.goal.waist_axis_in_camera_x_m;
+  const double wz=config.goal.waist_axis_in_camera_z_m;
+  const double dx=config.goal.throw_landing_x_m-wx;
+  const double dz=config.goal.throw_landing_z_m-wz;
+  const double rim_x=wx+std::cos(angle)*dx-std::sin(angle)*dz;
+  const double rim_z=wz+std::sin(angle)*dx+std::cos(angle)*dz;
+  Check(rim_x>0,"negative waist yaw must target a rim to camera right");
+  const auto angled=planner.PlanFineAction({
+      true,rim_x,config.goal.hoop_radius_m+rim_z,0,1});
+  Check(angled.action==A::kShoot && angled.target_yaw_deg==-10,
+      "right rim needs negative waist yaw about the physical pivot");
   Check(planner.PlanFineAction({true,0,1.2,0,1}).action==A::kShoot && !planner.HasBall(),
       "bench planning must neither consume nor require mission ball state");
 
