@@ -1,5 +1,6 @@
 #include "vision_core/hurdle_controller.hpp"
 #include "vision_core/config_loader.hpp"
+#include "vision_core/mission_controller.hpp"
 #include <stdexcept>
 #include <optional>
 #include <string>
@@ -131,6 +132,32 @@ void MissingSearchContinuouslyObservesAndHoldsHalfSecond() {
   Require(r.action.action==MissionAction::kStepForwardOne,
           "moving search missed a qualified 120<=v<240 target after hold");
 }
+void DownIgnoresOutOfRangeDepthButForwardDoesNot() {
+  auto c=LoadDefaultAlgorithmConfig();
+  c.enable_hurdle=true; c.enable_ball=c.enable_goal=false;
+  c.object_targets.hurdle_depth_enabled=true;
+  c.object_targets.hurdle_min_depth_m=.25;
+  c.object_targets.hurdle_max_depth_m=2.0;
+  MissionController controller(c);
+  PerceptionFrameInput f; f.image_width=640; f.image_height=480;
+  f.manual_observation_control=true; f.advance_line_fsm=false;
+  PerceptionDetection d;
+  d.detection.class_id=c.object_targets.hurdle_class_id;
+  d.detection.confidence=.95;
+  d.detection.box={130,180,240,30};
+  d.center_depth_m=.10; // Rejected by FORWARD [0.25,2m].
+  f.detections={d};
+  f.camera_feedback={CameraMode::kForward,true};f.now_sec=.1;
+  auto out=controller.StepPerception(f);
+  Require(!out.perception.object_filter_diagnostics.back().depth_passed &&
+          out.perception.accepted_object_detections.empty(),
+          "FORWARD accidentally stopped enforcing HURDLE Depth range");
+  f.camera_feedback={CameraMode::kDown,true};f.now_sec=.2;
+  out=controller.StepPerception(f);
+  Require(out.perception.object_filter_diagnostics.back().depth_passed &&
+          out.perception.accepted_object_detections.size()==1,
+          "DOWN should accept HURDLE pixels regardless of Depth range");
+}
 } // namespace
 
 int main() {
@@ -139,4 +166,5 @@ int main() {
   FirstTwoMovingVotes(240,MissionAction::kDefaultPoseMode);
   DistanceStepsOnlyReobserveAfterDone();
   MissingSearchContinuouslyObservesAndHoldsHalfSecond();
+  DownIgnoresOutOfRangeDepthButForwardDoesNot();
 }
