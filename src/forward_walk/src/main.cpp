@@ -44,1297 +44,1230 @@ static_assert(vision::msg::ActionCommand::LINE_LEFT_UNIT == 32 &&
               vision::msg::ActionCommand::LINE_STRAIGHT_UNIT == 33 &&
               vision::msg::ActionCommand::LINE_RIGHT_UNIT == 34 &&
               vision::msg::ActionCommand::STEP_FORWARD_ONE_ALTERNATE == 35 &&
-               vision::msg::ActionCommand::LINE_RIGHT_UNIT_TURN_FIRST == 36);
-static_assert(vision::msg::CommandStatus::READY == 3 &&
-              vision::msg::CameraCommand::DOWN == 1 &&
-              vision::msg::CameraCommand::FORWARD == 2 &&
-              vision::msg::CameraCommand::GOAL == 3 &&
-              vision::msg::CameraCommand::BALL_VIEW == 9 &&
-              vision::msg::CameraCommand::BALL_VIEW_LINE == 10);
+              vision::msg::ActionCommand::LINE_RIGHT_UNIT_TURN_FIRST == 36);
+static_assert(vision::msg::CommandStatus::READY == 3 && vision::msg::CameraCommand::DOWN == 1 &&
+              vision::msg::CameraCommand::FORWARD == 2 && vision::msg::CameraCommand::GOAL == 3 &&
+              vision::msg::CameraCommand::BALL_VIEW == 9 && vision::msg::CameraCommand::BALL_VIEW_LINE == 10);
 
-class MainNode : public rclcpp::Node
-{
+class MainNode : public rclcpp::Node {
 public:
-    MainNode() : Node("main_node")
-    {
-        // ==================== P2P 전체 실행 흐름 ====================
-        // 1) 시작 자세로 이동한 뒤 몸 동작/카메라 명령 구독을 연다.
-        // 2) action(동작 종류)을 JSON 경로로 바꾸고, action_id(명령 식별자)로 중복을 확인한다.
-        // 3) PrepareProgram()으로 JSON 전체를 검증한 뒤 즉시 시작하거나 대기열에 저장한다.
-        // 4) 명령 접수가 성공하면 같은 ID로 ACK(접수됨)를 Vision에 보낸다.
-        // 5) MotionLoop()가 몸/카메라 목표 tick을 합쳐 20 ms 간격으로 한 패킷씩 전송한다.
-        // 6) 모든 미션의 11/12/13 및 21~25에 READY를 전송한다. 선예약 접수는 현재 A의 READY와 빈 큐로만 결정한다.
-        // 7) 마지막 이동/유지가 끝나면 DONE(재생 완료)을 보내고 대기 동작을 이어 시작한다.
-        // 몸 DONE은 시간표 완료, 카메라 DONE은 이동 후 두 encoder의 목표 오차 확인을 뜻한다.
+  MainNode() : Node("main_node") {
+    // ==================== P2P 전체 실행 흐름 ====================
+    // 1) 시작 자세로 이동한 뒤 몸 동작/카메라 명령 구독을 연다.
+    // 2) action(동작 종류)을 JSON 경로로 바꾸고, action_id(명령 식별자)로 중복을 확인한다.
+    // 3) PrepareProgram()으로 JSON 전체를 검증한 뒤 즉시 시작하거나 대기열에 저장한다.
+    // 4) 명령 접수가 성공하면 같은 ID로 ACK(접수됨)를 Vision에 보낸다.
+    // 5) MotionLoop()가 몸/카메라 목표 tick을 합쳐 20 ms 간격으로 한 패킷씩 전송한다.
+    // 6) 모든 미션의 11/12/13 및 21~25에 READY를 전송한다. 선예약 접수는 현재 A의 READY와 빈 큐로만 결정한다.
+    // 7) 마지막 이동/유지가 끝나면 DONE(재생 완료)을 보내고 대기 동작을 이어 시작한다.
+    // 몸 DONE은 시간표 완료, 카메라 DONE은 이동 후 두 encoder의 목표 오차 확인을 뜻한다.
 
-        // motions/와 missions/를 포함한 패키지 share 루트다.
-        declare_parameter<std::string>(
-            "p2p_asset_directory",
-            ament_index_cpp::get_package_share_directory("forward_walk"));
-        asset_directory_ = get_parameter("p2p_asset_directory").as_string();
-        // 공_재그립의 마지막 키프레임에서 집게손 19번 기준을 읽는다. 모터 초기화 전에 검증한다.
-        gripper_tick_=P2PMotionPlayer::FinalMotorTick(
-            (std::filesystem::path(asset_directory_)/"motions/공_재그립.json").string(),19);
-        RCLCPP_INFO(get_logger(),"Default gripper target: ID19=%d (last RECATCH keyframe)",gripper_tick_);
+    // motions/와 missions/를 포함한 패키지 share 루트다.
+    declare_parameter<std::string>("p2p_asset_directory", ament_index_cpp::get_package_share_directory("forward_walk"));
+    asset_directory_ = get_parameter("p2p_asset_directory").as_string();
+    // 공_재그립의 마지막 키프레임에서 집게손 19번 기준을 읽는다. 모터 초기화 전에 검증한다.
+    gripper_tick_ = P2PMotionPlayer::FinalMotorTick(
+        (std::filesystem::path(asset_directory_) / "motions/공_재그립.json").string(), 19);
+    RCLCPP_INFO(get_logger(), "Default gripper target: ID19=%d (last RECATCH keyframe)", gripper_tick_);
 
-        // 회전 JSON 한 번의 예상 회전각과 최대 반복 횟수(도 단위 → 반복 횟수 변환용).
-        turn_step_deg_ = declare_parameter<double>("turn_step_deg", 15.0);
-        max_turn_repetitions_ =
-            declare_parameter<int>("max_turn_repetitions", 12);
-        // 던지기(SHOOT) 때 허리 관절에 적용할 각도 제한, tick 환산값, 회전 부호.
-        waist_motor_id_ = declare_parameter<int>("waist_motor_id", 12);
-        waist_max_yaw_deg_ =
-            declare_parameter<double>("waist_max_yaw_deg", 30.0);
-        waist_ticks_per_revolution_ =
-            declare_parameter<double>("waist_ticks_per_revolution", 4096.0);
-        waist_yaw_direction_ =
-            declare_parameter<int>("waist_yaw_direction", 1);
-        waist_restore_after_shoot_ =
-            declare_parameter<bool>("waist_restore_after_shoot", true);
-        // 프로그램 시작 시 WALK_MODE의 마지막 자세로 이동하는 시간(초).
-        startup_pose_duration_sec_ =
-            declare_parameter<double>("startup_pose_duration_sec", 3.0);
+    // 회전 JSON 한 번의 예상 회전각과 최대 반복 횟수(도 단위 → 반복 횟수 변환용).
+    turn_step_deg_ = declare_parameter<double>("turn_step_deg", 15.0);
+    max_turn_repetitions_ = declare_parameter<int>("max_turn_repetitions", 12);
+    // 던지기(SHOOT) 때 허리 관절에 적용할 각도 제한, tick 환산값, 회전 부호.
+    waist_motor_id_ = declare_parameter<int>("waist_motor_id", 12);
+    waist_max_yaw_deg_ = declare_parameter<double>("waist_max_yaw_deg", 30.0);
+    waist_ticks_per_revolution_ = declare_parameter<double>("waist_ticks_per_revolution", 4096.0);
+    waist_yaw_direction_ = declare_parameter<int>("waist_yaw_direction", 1);
+    waist_restore_after_shoot_ = declare_parameter<bool>("waist_restore_after_shoot", true);
+    // 프로그램 시작 시 WALK_MODE의 마지막 자세로 이동하는 시간(초).
+    startup_pose_duration_sec_ = declare_parameter<double>("startup_pose_duration_sec", 3.0);
 
-        // 미션과 관계없이 14/15/16/17/29/30 외의 action에서 15·16번 팔을 벌린다.
-        // 15번 측정 각도를 양쪽에 대칭 적용한다.
-        // 기준 tick과 바깥 부호는 실제 로봇 측정값이다(15:1071→1379, 16 기준:3073).
-        line_arm_config_.enabled = declare_parameter<bool>("line_arm_override_enabled", true);
-        line_arm_config_.angle_deg = declare_parameter<double>("line_arm_outward_angle_deg", 308.0 * 360.0 / 4096.0);
-        line_arm_config_.reference_15 = declare_parameter<int>("line_arm_reference_tick_15", 1071);
-        line_arm_config_.reference_16 = declare_parameter<int>("line_arm_reference_tick_16", 3073);
-        line_arm_config_.direction_15 = declare_parameter<int>("line_arm_outward_direction_15", 1);
-        line_arm_config_.direction_16 = declare_parameter<int>("line_arm_outward_direction_16", -1);
-        line_arm_config_.Validate();
-        arm_transition_sec_=declare_parameter<double>("mission_arm_transition_duration_sec",1.0);
-        if (!std::isfinite(arm_transition_sec_) || arm_transition_sec_<=0 || arm_transition_sec_>60)
-            throw std::invalid_argument("invalid mission arm transition duration");
+    // 미션과 관계없이 14/15/16/17/29/30 외의 action에서 15·16번 팔을 벌린다.
+    // 15번 측정 각도를 양쪽에 대칭 적용한다.
+    // 기준 tick과 바깥 부호는 실제 로봇 측정값이다(15:1071→1379, 16 기준:3073).
+    line_arm_config_.enabled = declare_parameter<bool>("line_arm_override_enabled", true);
+    line_arm_config_.angle_deg = declare_parameter<double>("line_arm_outward_angle_deg", 308.0 * 360.0 / 4096.0);
+    line_arm_config_.reference_15 = declare_parameter<int>("line_arm_reference_tick_15", 1071);
+    line_arm_config_.reference_16 = declare_parameter<int>("line_arm_reference_tick_16", 3073);
+    line_arm_config_.direction_15 = declare_parameter<int>("line_arm_outward_direction_15", 1);
+    line_arm_config_.direction_16 = declare_parameter<int>("line_arm_outward_direction_16", -1);
+    line_arm_config_.Validate();
+    arm_transition_sec_ = declare_parameter<double>("mission_arm_transition_duration_sec", 1.0);
+    if (!std::isfinite(arm_transition_sec_) || arm_transition_sec_ <= 0 || arm_transition_sec_ > 60)
+      throw std::invalid_argument("invalid mission arm transition duration");
 
-        const auto algorithm = vision_core::LoadDefaultAlgorithmConfig();
-        const double walk_hold = declare_parameter<double>("walk_inter_action_hold_sec", algorithm.walk_inter_action_hold_sec);
-        walk_hold_.SetDuration(walk_hold);
-        timing_parameter_callback_ = add_on_set_parameters_callback(
-            [this](const std::vector<rclcpp::Parameter>& parameters) {
-                rcl_interfaces::msg::SetParametersResult result;
-                result.successful = true;
-                for (const auto& p : parameters) if (p.get_name() == "walk_inter_action_hold_sec") {
-                    if (p.get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE ||
-                        !std::isfinite(p.as_double()) || p.as_double() < 0 ||
-                        motion_in_progress_ || queued_action_) {
-                        result.successful=false;
-                        result.reason="walk hold must be finite/nonnegative and changed while idle";
-                        return result;
-                    }
-                }
-                for (const auto& p : parameters) if (p.get_name() == "walk_inter_action_hold_sec")
-                    walk_hold_.SetDuration(p.as_double());
+    const auto algorithm = vision_core::LoadDefaultAlgorithmConfig();
+    const double walk_hold =
+        declare_parameter<double>("walk_inter_action_hold_sec", algorithm.walk_inter_action_hold_sec);
+    walk_hold_.SetDuration(walk_hold);
+    timing_parameter_callback_ =
+        add_on_set_parameters_callback([this](const std::vector<rclcpp::Parameter> &parameters) {
+          rcl_interfaces::msg::SetParametersResult result;
+          result.successful = true;
+          for (const auto &p : parameters)
+            if (p.get_name() == "walk_inter_action_hold_sec") {
+              if (p.get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE || !std::isfinite(p.as_double()) ||
+                  p.as_double() < 0 || motion_in_progress_ || queued_action_) {
+                result.successful = false;
+                result.reason = "walk hold must be finite/nonnegative and changed while idle";
                 return result;
-            });
+              }
+            }
+          for (const auto &p : parameters)
+            if (p.get_name() == "walk_inter_action_hold_sec")
+              walk_hold_.SetDuration(p.as_double());
+          return result;
+        });
 
-        // READY를 보낼 종료 전 여유 시간(초). 실제 통신 지연을 예측하는 값은 아니다.
-        // Share the installed algorithm YAML with vision. A ROS override must
-        // agree with it so READY emission and the observation estimate match.
-        rcl_interfaces::msg::ParameterDescriptor ready_descriptor;
-        ready_descriptor.read_only = true;
-        ready_lead_sec_ = declare_parameter<double>(
-            "ready_lead_sec", algorithm.line_p2p.ready_lead_sec, ready_descriptor);
-        if (ready_lead_sec_ != algorithm.line_p2p.ready_lead_sec)
-            throw std::invalid_argument("ready_lead_sec must match line.walk.ready_lead_sec in vision_algorithm.yaml");
-        // 카메라 yaw=좌우 회전, pitch=상하 회전. 자세 값은 각도가 아니라 encoder tick이다.
-        camera_config_.yaw_id = declare_parameter<int>("camera_yaw_motor_id", 21);
-        camera_config_.pitch_id = declare_parameter<int>("camera_pitch_motor_id", 22);
-        camera_config_.forward.yaw = declare_parameter<int>("camera_forward_yaw_tick", 2077);
-        camera_config_.forward.pitch = declare_parameter<int>("camera_forward_pitch_tick", 1537);
-        camera_config_.down.yaw = declare_parameter<int>("camera_down_yaw_tick", 2036);
-        camera_config_.down.pitch = declare_parameter<int>("camera_down_pitch_tick", 2013);
-        // Shared algorithm YAML controls BALL_VIEW pitch only; yaw reuses DOWN.
-        camera_config_.ball_view={camera_config_.down.yaw,algorithm.ball_view_pitch_tick};
-        camera_config_.goal.yaw = declare_parameter<int>("camera_goal_yaw_tick", 2054);
-        camera_config_.goal.pitch = declare_parameter<int>("camera_goal_pitch_tick", 966);
-        // The core owns transition settling after camera DONE; no default extra executor wait.
-        camera_config_.move_sec = declare_parameter<double>("camera_move_duration_sec", 0.5);
-        const double legacy_camera_settle=declare_parameter<double>("camera_settle_sec",0.0);
-        if (legacy_camera_settle != 0.0)
-            throw std::invalid_argument("camera_settle_sec is replaced by mission.transition_settle_sec; leave it at zero");
-        camera_config_.settle_sec=0.0;
-        camera_config_.position_tolerance_ratio = declare_parameter<double>("camera_position_tolerance_ratio",0.10);
-        camera_config_.Validate();
-        camera_motion_ = std::make_unique<motion_executor::CameraMotion>(camera_config_);
-        curve_scan_elbow_angle_deg_=declare_parameter<double>("curve_scan_elbow_angle_deg",90.0);
-        curve_scan_elbow_duration_sec_=declare_parameter<double>("curve_scan_elbow_duration_sec",1.5);
-        if (!std::isfinite(curve_scan_elbow_angle_deg_) ||
-            curve_scan_elbow_angle_deg_<=0.0 || curve_scan_elbow_angle_deg_>90.0 ||
-            !std::isfinite(curve_scan_elbow_duration_sec_) ||
-            curve_scan_elbow_duration_sec_<=0.0)
-            throw std::invalid_argument("invalid curve scan elbow configuration");
+    // READY를 보낼 종료 전 여유 시간(초). 실제 통신 지연을 예측하는 값은 아니다.
+    // Share the installed algorithm YAML with vision. A ROS override must
+    // agree with it so READY emission and the observation estimate match.
+    rcl_interfaces::msg::ParameterDescriptor ready_descriptor;
+    ready_descriptor.read_only = true;
+    ready_lead_sec_ = declare_parameter<double>("ready_lead_sec", algorithm.line_p2p.ready_lead_sec, ready_descriptor);
+    if (ready_lead_sec_ != algorithm.line_p2p.ready_lead_sec)
+      throw std::invalid_argument("ready_lead_sec must match line.walk.ready_lead_sec in vision_algorithm.yaml");
+    // 카메라 yaw=좌우 회전, pitch=상하 회전. 자세 값은 각도가 아니라 encoder tick이다.
+    camera_config_.yaw_id = declare_parameter<int>("camera_yaw_motor_id", 21);
+    camera_config_.pitch_id = declare_parameter<int>("camera_pitch_motor_id", 22);
+    camera_config_.forward.yaw = declare_parameter<int>("camera_forward_yaw_tick", 2077);
+    camera_config_.forward.pitch = declare_parameter<int>("camera_forward_pitch_tick", 1537);
+    camera_config_.down.yaw = declare_parameter<int>("camera_down_yaw_tick", 2036);
+    camera_config_.down.pitch = declare_parameter<int>("camera_down_pitch_tick", 2013);
+    // Shared algorithm YAML controls BALL_VIEW pitch only; yaw reuses DOWN.
+    camera_config_.ball_view = {camera_config_.down.yaw, algorithm.ball_view_pitch_tick};
+    camera_config_.goal.yaw = declare_parameter<int>("camera_goal_yaw_tick", 2054);
+    camera_config_.goal.pitch = declare_parameter<int>("camera_goal_pitch_tick", 966);
+    // The core owns transition settling after camera DONE; no default extra executor wait.
+    camera_config_.move_sec = declare_parameter<double>("camera_move_duration_sec", 0.5);
+    const double legacy_camera_settle = declare_parameter<double>("camera_settle_sec", 0.0);
+    if (legacy_camera_settle != 0.0)
+      throw std::invalid_argument("camera_settle_sec is replaced by mission.transition_settle_sec; leave it at zero");
+    camera_config_.settle_sec = 0.0;
+    camera_config_.position_tolerance_ratio = declare_parameter<double>("camera_position_tolerance_ratio", 0.10);
+    camera_config_.Validate();
+    camera_motion_ = std::make_unique<motion_executor::CameraMotion>(camera_config_);
+    curve_scan_elbow_angle_deg_ = declare_parameter<double>("curve_scan_elbow_angle_deg", 90.0);
+    curve_scan_elbow_duration_sec_ = declare_parameter<double>("curve_scan_elbow_duration_sec", 1.5);
+    if (!std::isfinite(curve_scan_elbow_angle_deg_) || curve_scan_elbow_angle_deg_ <= 0.0 ||
+        curve_scan_elbow_angle_deg_ > 90.0 || !std::isfinite(curve_scan_elbow_duration_sec_) ||
+        curve_scan_elbow_duration_sec_ <= 0.0)
+      throw std::invalid_argument("invalid curve scan elbow configuration");
 
-        if (!std::isfinite(ready_lead_sec_) || ready_lead_sec_ < 0.0 ||
-            !std::isfinite(startup_pose_duration_sec_) || turn_step_deg_ <= 0.0 || max_turn_repetitions_ <= 0 ||
-            waist_max_yaw_deg_ <= 0.0 || waist_ticks_per_revolution_ <= 0.0 ||
-            startup_pose_duration_sec_ <= 0.0 ||
-            (waist_yaw_direction_ != 1 && waist_yaw_direction_ != -1)) {
-            throw std::invalid_argument("invalid P2P parameter");
-        }
-
-        // P2P는 JSON에 완성된 관절 raw tick이 있으므로 Trajectory/IK/Callback이
-        // 필요 없다. Dxl과 JSON player만 생성하고 첫 ActionCommand를 기다린다.
-        // USB latency_timer는 프로그램 안에서 sudo를 실행하지 않고 udev 규칙으로
-        // 설정해야 한다(설정 방법은 README/실행 환경에서 별도로 관리).
-        // 측정 도구에서도 같은 main 시작 자세를 사용한다. 기본 udev 장치 이름은 그대로 유지한다.
-        const auto device = declare_parameter<std::string>("dynamixel_device", "/dev/jandi_dxl");
-        dxl_ = std::make_shared<Dxl>(device);
-        p2p_player_ = std::make_unique<P2PMotionPlayer>(dxl_.get());
-
-        OpenTorqueLogFile();
-
-        // Vision 프로토콜의 ACK/READY/DONE을 기존 action_status에 전송한다.
-        action_status_pub_ = create_publisher<vision::msg::CommandStatus>(
-            "/jandi_vision/action_status", 10);
-        // Camera status는 별도 ID 공간과 토픽을 사용하므로 publisher도 분리한다.
-        camera_status_pub_ = create_publisher<vision::msg::CommandStatus>(
-            "/jandi_vision/camera_status", 10);
-        camera_scan_status_pub_ = create_publisher<vision::msg::CameraScanStatus>(
-            "/jandi_vision/camera_scan_status", 10);
-
-        // 1 ms마다 상태를 확인하고, 실제 전송은 MotionLoop의 공통 마감 시각으로 50 Hz 제한한다.
-        // polling과 전송 주기를 같게 두면 timer jitter로 한 주기를 더 쉴 수 있다.
-        motion_loop_timer_ = create_wall_timer(
-            1ms, std::bind(&MainNode::MotionLoop, this));
-        motion_loop_timer_->cancel();
-
-        // 별도 스레드/포트를 열지 않고 같은 executor에서 모터 진단을 직렬화한다.
-        health_timeout_ms_ = declare_parameter<double>("motor_health_timeout_ms", 5.0);
-        const double health_period = declare_parameter<double>("motor_health_poll_interval_sec", 0.05);
-        const bool health_enabled = declare_parameter<bool>("motor_health_monitor_enabled", true);
-        if (!std::isfinite(health_timeout_ms_) || health_timeout_ms_<=0 || health_timeout_ms_>10 ||
-            !std::isfinite(health_period) || health_period<0.02) {
-            throw std::invalid_argument("invalid motor health timing parameters");
-        }
-        if (health_enabled) {
-            // 빌드한 forward_walk 소스 패키지의 log 폴더. 실행한 터미널의 위치와 무관하다.
-            const auto log_directory=declare_parameter<std::string>(
-                "motor_health_log_directory", std::string(FORWARD_WALK_SOURCE_DIR)+"/log");
-            const auto stamp=std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            const auto path=(std::filesystem::path(log_directory)/
-                ("motor_health_"+std::to_string(stamp)+".log")).string();
-            health_log_path_=path;
-            std::error_code directory_error;
-            std::filesystem::create_directories(log_directory,directory_error);
-            if (!directory_error) health_log_.open(path);
-            RCLCPP_INFO(get_logger(), "Motor health monitor: one ID per %.3fs, timeout=%.1fms, log=%s",
-                        health_period, health_timeout_ms_,path.c_str());
-            if (!health_log_) RCLCPP_WARN(get_logger(), "Motor health file unavailable; console logging remains enabled");
-            health_timer_=create_wall_timer(std::chrono::duration<double>(health_period),
-                                           std::bind(&MainNode::MotorHealthLoop,this));
-        }
-
-        // WALK_MODE 마지막 자세에 도착하기 전에는 명령 topic을 구독하지 않는다.
-        StartStartupPose();
+    if (!std::isfinite(ready_lead_sec_) || ready_lead_sec_ < 0.0 || !std::isfinite(startup_pose_duration_sec_) ||
+        turn_step_deg_ <= 0.0 || max_turn_repetitions_ <= 0 || waist_max_yaw_deg_ <= 0.0 ||
+        waist_ticks_per_revolution_ <= 0.0 || startup_pose_duration_sec_ <= 0.0 ||
+        (waist_yaw_direction_ != 1 && waist_yaw_direction_ != -1)) {
+      throw std::invalid_argument("invalid P2P parameter");
     }
+
+    // P2P는 JSON에 완성된 관절 raw tick이 있으므로 Trajectory/IK/Callback이
+    // 필요 없다. Dxl과 JSON player만 생성하고 첫 ActionCommand를 기다린다.
+    // USB latency_timer는 프로그램 안에서 sudo를 실행하지 않고 udev 규칙으로
+    // 설정해야 한다(설정 방법은 README/실행 환경에서 별도로 관리).
+    // 측정 도구에서도 같은 main 시작 자세를 사용한다. 기본 udev 장치 이름은 그대로 유지한다.
+    const auto device = declare_parameter<std::string>("dynamixel_device", "/dev/jandi_dxl");
+    dxl_ = std::make_shared<Dxl>(device);
+    p2p_player_ = std::make_unique<P2PMotionPlayer>(dxl_.get());
+
+    OpenTorqueLogFile();
+
+    // Vision 프로토콜의 ACK/READY/DONE을 기존 action_status에 전송한다.
+    action_status_pub_ = create_publisher<vision::msg::CommandStatus>("/jandi_vision/action_status", 10);
+    // Camera status는 별도 ID 공간과 토픽을 사용하므로 publisher도 분리한다.
+    camera_status_pub_ = create_publisher<vision::msg::CommandStatus>("/jandi_vision/camera_status", 10);
+    camera_scan_status_pub_ = create_publisher<vision::msg::CameraScanStatus>("/jandi_vision/camera_scan_status", 10);
+
+    // 1 ms마다 상태를 확인하고, 실제 전송은 MotionLoop의 공통 마감 시각으로 50 Hz 제한한다.
+    // polling과 전송 주기를 같게 두면 timer jitter로 한 주기를 더 쉴 수 있다.
+    motion_loop_timer_ = create_wall_timer(1ms, std::bind(&MainNode::MotionLoop, this));
+    motion_loop_timer_->cancel();
+
+    // 별도 스레드/포트를 열지 않고 같은 executor에서 모터 진단을 직렬화한다.
+    health_timeout_ms_ = declare_parameter<double>("motor_health_timeout_ms", 5.0);
+    const double health_period = declare_parameter<double>("motor_health_poll_interval_sec", 0.05);
+    const bool health_enabled = declare_parameter<bool>("motor_health_monitor_enabled", true);
+    if (!std::isfinite(health_timeout_ms_) || health_timeout_ms_ <= 0 || health_timeout_ms_ > 10 ||
+        !std::isfinite(health_period) || health_period < 0.02) {
+      throw std::invalid_argument("invalid motor health timing parameters");
+    }
+    if (health_enabled) {
+      // 빌드한 forward_walk 소스 패키지의 log 폴더. 실행한 터미널의 위치와 무관하다.
+      const auto log_directory =
+          declare_parameter<std::string>("motor_health_log_directory", std::string(FORWARD_WALK_SOURCE_DIR) + "/log");
+      const auto stamp =
+          std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch())
+              .count();
+      const auto path =
+          (std::filesystem::path(log_directory) / ("motor_health_" + std::to_string(stamp) + ".log")).string();
+      health_log_path_ = path;
+      std::error_code directory_error;
+      std::filesystem::create_directories(log_directory, directory_error);
+      if (!directory_error)
+        health_log_.open(path);
+      RCLCPP_INFO(get_logger(), "Motor health monitor: one ID per %.3fs, timeout=%.1fms, log=%s", health_period,
+                  health_timeout_ms_, path.c_str());
+      if (!health_log_)
+        RCLCPP_WARN(get_logger(), "Motor health file unavailable; console logging remains enabled");
+      health_timer_ =
+          create_wall_timer(std::chrono::duration<double>(health_period), std::bind(&MainNode::MotorHealthLoop, this));
+    }
+
+    // WALK_MODE 마지막 자세에 도착하기 전에는 명령 topic을 구독하지 않는다.
+    StartStartupPose();
+  }
 
 private:
-    // Smoothstep interpolation for selected arm joints, using the same
-    // 50Hz SyncWrite packet as body and camera targets. No second player.
-    struct ArmTween {
-        using Clock=std::chrono::steady_clock;
-        using Positions=P2PMotionPlayer::RawPositions;
-        Positions source,target;
-        Clock::time_point started{};
-        double duration_sec{0.5};
-        bool active{false};
-        void Start(const Positions& base,Positions goals,double duration,Clock::time_point now) {
-            if (!std::isfinite(duration) || duration<=0.0)
-                throw std::invalid_argument("invalid arm tween duration");
-            source.clear();
-            for(const auto& item:goals) source[item.first]=base.at(item.first);
-            target=std::move(goals);
-            started=now;duration_sec=duration;active=true;
-        }
-        bool Sample(Positions& output,Clock::time_point now) {
-            if(!active) return false;
-            const double t=std::clamp(
-                std::chrono::duration<double>(now-started).count()/duration_sec,0.0,1.0);
-            const double alpha=t*t*(3.0-2.0*t);
-            for(const auto& item:target)
-                output[item.first]=static_cast<int32_t>(std::lround(
-                    source.at(item.first)+alpha*(item.second-source.at(item.first))));
-            if(t>=1.0) active=false;
-            return true;
-        }
-        void Cancel(){active=false;}
-        bool Active() const {return active;}
-    };
+  // Smoothstep interpolation for selected arm joints, using the same
+  // 50Hz SyncWrite packet as body and camera targets. No second player.
+  struct ArmTween {
+    using Clock = std::chrono::steady_clock;
+    using Positions = P2PMotionPlayer::RawPositions;
+    Positions source, target;
+    Clock::time_point started{};
+    double duration_sec{0.5};
+    bool active{false};
+    void Start(const Positions &base, Positions goals, double duration, Clock::time_point now) {
+      if (!std::isfinite(duration) || duration <= 0.0)
+        throw std::invalid_argument("invalid arm tween duration");
+      source.clear();
+      for (const auto &item : goals)
+        source[item.first] = base.at(item.first);
+      target = std::move(goals);
+      started = now;
+      duration_sec = duration;
+      active = true;
+    }
+    bool Sample(Positions &output, Clock::time_point now) {
+      if (!active)
+        return false;
+      const double t = std::clamp(std::chrono::duration<double>(now - started).count() / duration_sec, 0.0, 1.0);
+      const double alpha = t * t * (3.0 - 2.0 * t);
+      for (const auto &item : target)
+        output[item.first] =
+            static_cast<int32_t>(std::lround(source.at(item.first) + alpha * (item.second - source.at(item.first))));
+      if (t >= 1.0)
+        active = false;
+      return true;
+    }
+    void Cancel() {
+      active = false;
+    }
+    bool Active() const {
+      return active;
+    }
+  };
 
-    // 전류/추정 토크 로그에서 사용하는 다리 관절 수(오른쪽 6개 + 왼쪽 6개).
-    static constexpr int kLegJointCount = 12;
-    // 모터 전류(mA)를 추정 토크(N·m)로 바꾸는 계수. 직접 측정한 토크는 아니다.
-    static constexpr double kTorquePerMilliAmp =
-        1.0 / (TORQUE_TO_VALUE_MX_106 * 3.36);
-    static constexpr const char* kTorqueLogDir = "/tmp/forward_walk_logs";
+  // 전류/추정 토크 로그에서 사용하는 다리 관절 수(오른쪽 6개 + 왼쪽 6개).
+  static constexpr int kLegJointCount = 12;
+  // 모터 전류(mA)를 추정 토크(N·m)로 바꾸는 계수. 직접 측정한 토크는 아니다.
+  static constexpr double kTorquePerMilliAmp = 1.0 / (TORQUE_TO_VALUE_MX_106 * 3.36);
+  static constexpr const char *kTorqueLogDir = "/tmp/forward_walk_logs";
 
-    // 시작 자세 재생이 끝난 뒤 호출한다. 이후 들어오는 Vision 명령을 콜백으로 받는다.
-    void CreateCommandSubscriptions()
-    {
-        action_cmd_sub_ = create_subscription<vision::msg::ActionCommand>(
-            "/jandi_vision/action_cmd", 10,
-            std::bind(&MainNode::ActionCommandCallback, this,
-                      std::placeholders::_1));
-        camera_cmd_sub_ = create_subscription<vision::msg::CameraCommand>(
-            "/jandi_vision/camera_cmd", 10,
-            std::bind(&MainNode::CameraCommandCallback, this,
-                      std::placeholders::_1));
-        shoot_pose_sub_=create_subscription<vision::msg::ShootTuningPose>(
-            "/jandi_vision/shoot_tuning_pose",10,
-            std::bind(&MainNode::ShootTuningPoseCallback,this,std::placeholders::_1));
-        RCLCPP_INFO(
-            get_logger(),
-            "Startup WALK_MODE pose reached and held; ready for command topics");
+  // 시작 자세 재생이 끝난 뒤 호출한다. 이후 들어오는 Vision 명령을 콜백으로 받는다.
+  void CreateCommandSubscriptions() {
+    action_cmd_sub_ = create_subscription<vision::msg::ActionCommand>(
+        "/jandi_vision/action_cmd", 10, std::bind(&MainNode::ActionCommandCallback, this, std::placeholders::_1));
+    camera_cmd_sub_ = create_subscription<vision::msg::CameraCommand>(
+        "/jandi_vision/camera_cmd", 10, std::bind(&MainNode::CameraCommandCallback, this, std::placeholders::_1));
+    shoot_pose_sub_ = create_subscription<vision::msg::ShootTuningPose>(
+        "/jandi_vision/shoot_tuning_pose", 10,
+        std::bind(&MainNode::ShootTuningPoseCallback, this, std::placeholders::_1));
+    RCLCPP_INFO(get_logger(), "Startup WALK_MODE pose reached and held; ready for command topics");
+  }
+
+  // WALK_MODE JSON의 마지막 키프레임만 선택해 시작 자세로 이동한다.
+  void StartStartupPose() {
+    const std::filesystem::path asset_root(asset_directory_); // 모션 파일 기준 폴더
+    const std::filesystem::path path = asset_root / ProgramFileForAction(vision::msg::ActionCommand::WALK_MODE);
+
+    P2PMotionPlayer::StartOptions options; // 시작 자세에만 적용할 재생 옵션
+    options.final_keyframe_only = true;
+    options.duration_override_sec = startup_pose_duration_sec_;
+    // 시작 자세도 보행에서 사용할 대칭 팔 목표로 이동한다. 기존 P2P 보간을 유지한다.
+    if (line_arm_config_.enabled) {
+      options.position_overrides = line_arm_config_.Targets();
+    }
+    options.position_overrides[19] = gripper_tick_;
+    if (!p2p_player_->Start(path.string(), (asset_root / "motions").string(), options)) {
+      RCLCPP_FATAL(get_logger(), "Startup WALK_MODE pose failed; command topics will not be enabled: %s",
+                   p2p_player_->Error().c_str());
+      return;
     }
 
-    // WALK_MODE JSON의 마지막 키프레임만 선택해 시작 자세로 이동한다.
-    void StartStartupPose()
-    {
-        const std::filesystem::path asset_root(asset_directory_);  // 모션 파일 기준 폴더
-        const std::filesystem::path path =
-            asset_root /
-            ProgramFileForAction(vision::msg::ActionCommand::WALK_MODE);
+    startup_pose_in_progress_ = true;
+    current_action_ = vision::msg::ActionCommand::WALK_MODE;
+    last_motion_tick_at_ = std::chrono::steady_clock::now();
+    motion_loop_timer_->reset();
+    RCLCPP_INFO(get_logger(), "Moving to final WALK_MODE pose over %.2f seconds before accepting commands",
+                startup_pose_duration_sec_);
+  }
 
-        P2PMotionPlayer::StartOptions options;  // 시작 자세에만 적용할 재생 옵션
-        options.final_keyframe_only = true;
-        options.duration_override_sec = startup_pose_duration_sec_;
-        // 시작 자세도 보행에서 사용할 대칭 팔 목표로 이동한다. 기존 P2P 보간을 유지한다.
-        if (line_arm_config_.enabled) {
-            options.position_overrides = line_arm_config_.Targets();
-        }
-        options.position_overrides[19]=gripper_tick_;
-        if (!p2p_player_->Start(path.string(),
-                                (asset_root / "motions").string(), options)) {
-            RCLCPP_FATAL(get_logger(),
-                         "Startup WALK_MODE pose failed; command topics will not be enabled: %s",
-                         p2p_player_->Error().c_str());
-            return;
-        }
+  // 이 함수는 action의 의미와 실제 JSON 파일을 연결하는 유일한 표다.
+  // action_id는 명령 인스턴스 ID이므로 절대 이 switch에 사용하지 않는다.
+  // 새 JSON을 추가할 때 action 번호와 파일의 대응은 여기만 수정하면 된다.
+  std::string ProgramFileForAction(std::uint16_t action) const {
+    switch (action) {
+    // TODO: 실제 로봇에서 검증한 action과 JSON 파일만 추가한다.
+    // 예시:
+    case vision::msg::ActionCommand::DEFAULT_POSITION:
+      return "motions/초기자세_다소곳_.json";
 
-        startup_pose_in_progress_ = true;
-        current_action_ = vision::msg::ActionCommand::WALK_MODE;
-        last_motion_tick_at_ = std::chrono::steady_clock::now();
-        motion_loop_timer_->reset();
-        RCLCPP_INFO(
-            get_logger(),
-            "Moving to final WALK_MODE pose over %.2f seconds before accepting commands",
-            startup_pose_duration_sec_);
+    case vision::msg::ActionCommand::DEFAULT_POSE_MODE:
+      return "motions/미세보행_초기자세가기_수정2.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_HALF:
+      return "motions/미세보행_미세전진_수정.json";
+
+    case vision::msg::ActionCommand::STEP_BACK:
+      return "motions/미세보행_후진__찐.json";
+
+    case vision::msg::ActionCommand::LEFT_SIDE_STEP:
+      return "motions/미세보행_좌로이동_초기X.json";
+
+    case vision::msg::ActionCommand::RIGHT_SIDE_STEP:
+      return "motions/미세보행_우로이동_초기X.json";
+
+    case vision::msg::ActionCommand::TURN_LEFT:
+      return "motions/미세보행_좌회전_초기X.json";
+
+    case vision::msg::ActionCommand::TURN_RIGHT:
+      return "motions/미세보행_우회전_초기X.json";
+
+    case vision::msg::ActionCommand::TURN_LEFT_AND_STEP:
+      return "motions/미세보행_좌회전_초기X.json";
+
+    case vision::msg::ActionCommand::TURN_RIGHT_AND_STEP:
+      return "motions/미세보행_우회전_초기X.json";
+
+    case vision::msg::ActionCommand::WALK_MODE:
+      return "motions/보행_왼발만앞에.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_ONE:
+      return "motions/보행_1걸음_초기X_수정5.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_ONE_ALTERNATE:
+      return "motions/보행_1걸음_초기X_수정5.json";
+
+    case vision::msg::ActionCommand::LINE_LEFT_UNIT:
+      return "motions/보행_좌회전전진_20도_최종_초기X_수정.json";
+
+    case vision::msg::ActionCommand::LINE_STRAIGHT_UNIT:
+      return "missions/2걸음_1차찐.json";
+
+    case vision::msg::ActionCommand::LINE_RIGHT_UNIT:
+      return "missions/직진후우회전_2걸음.json";
+    case vision::msg::ActionCommand::LINE_RIGHT_UNIT_TURN_FIRST:
+      return "missions/직진후우회전_2걸음_우회전먼저.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_LEFT_THREE:
+      return "missions/좌회전전진_3회.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_THREE:
+      return "missions/우회전전진_3회.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_LEFT_TWO:
+      return "missions/좌회전전진_2회.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_TWO:
+      return "missions/우회전전진_2회.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE:
+      return "missions/우회전전진_1회.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_LEFT_ONE:
+      return "missions/좌회전전진_1회.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE_HUDDLE:
+      return "motions/우회전_최종.json";
+
+    // A dedicated WALK-stance motion, played once without yaw repetition.
+    // Missing/invalid assets are rejected by PrepareProgram before ACK.
+    case vision::msg::ActionCommand::TURN_LEFT_IN_PLACE:
+      return "motions/좌회전_최종__.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_FIVE:
+      return "missions/연속걷기.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_TWO:
+      return "missions/2걸음_1차찐.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_THREE:
+      return "missions/직진_3걸음_수정.json";
+
+    case vision::msg::ActionCommand::STEP_FORWARD_FOUR:
+      return "missions/직진_4걸음_수정.json";
+
+    case vision::msg::ActionCommand::PICK_BALL:
+      return "motions/공_줍고일어나기_최종_찐.json";
+
+    case vision::msg::ActionCommand::PICK_BALL_RE:
+      return "motions/공_줍고일어나기_최종_재그립제외.json";
+
+    case vision::msg::ActionCommand::PICK_BALL_RE_STAND:
+      return "motions/공_줍고일어나기_최종_재그립제외_일어나기.json";
+
+    case vision::msg::ActionCommand::RECATCH:
+      return "motions/공_재그립.json";
+
+    case vision::msg::ActionCommand::HUDDLE:
+      return "missions/허들넘기_real_real.json";
+
+    case vision::msg::ActionCommand::SHOOT:
+      return "motions/공_던지기_초기X.json";
+
+    default:
+      return {};
+    }
+  }
+
+  bool IsLeftTurnAction(std::uint16_t action) const {
+    return action == vision::msg::ActionCommand::TURN_LEFT || action == vision::msg::ActionCommand::TURN_LEFT_AND_STEP;
+  }
+
+  bool IsRightTurnAction(std::uint16_t action) const {
+    return action == vision::msg::ActionCommand::TURN_RIGHT ||
+           action == vision::msg::ActionCommand::TURN_RIGHT_AND_STEP;
+  }
+
+  bool IsTurnAction(std::uint16_t action) const {
+    return IsLeftTurnAction(action) || IsRightTurnAction(action);
+  }
+
+  bool IsTurnAndStepAction(std::uint16_t action) const {
+    return action == vision::msg::ActionCommand::TURN_LEFT_AND_STEP ||
+           action == vision::msg::ActionCommand::TURN_RIGHT_AND_STEP;
+  }
+
+  // mission과 관계없이 팔을 벌린다. 공 줍기/재그립/허들/슈팅은 JSON 팔 자세를 사용한다.
+  static bool UsesOutwardArmPose(std::uint16_t action) {
+    using Command = vision::msg::ActionCommand;
+    switch (action) {
+    case Command::PICK_BALL:          // 14
+    case Command::RECATCH:            // 15
+    case Command::HUDDLE:             // 16
+    case Command::SHOOT:              // 17
+    case Command::PICK_BALL_RE:       // 29
+    case Command::PICK_BALL_RE_STAND: // 30
+      return false;
+    default:
+      return true;
+    }
+  }
+
+  // 집게손 덮어쓰기는 mission과 관계없이 이 여섯 action만 제외한다.
+  static bool UsesFixedGripperPose(std::uint16_t action) {
+    using Command = vision::msg::ActionCommand;
+    switch (action) {
+    case Command::PICK_BALL:
+    case Command::PICK_BALL_RE:
+    case Command::PICK_BALL_RE_STAND:
+    case Command::RECATCH:
+    case Command::HUDDLE:
+    case Command::SHOOT:
+      return false;
+    default:
+      return true;
+    }
+  }
+
+  // The selected camera pose controls normal shoulder targets: ID15/16.
+  // Special actions (PICK/HURDLE/SHOOT) own their original JSON arm poses.
+  P2PMotionPlayer::RawPositions CameraArmTargets() const {
+    return camera_arm_forward_ ? line_arm_config_.Targets()
+                               : P2PMotionPlayer::RawPositions{{15, line_arm_config_.reference_15},
+                                                               {16, line_arm_config_.reference_16}};
+  }
+  bool NeedsArmTransition(std::uint16_t) const {
+    return false;
+  }
+  bool StartMissionProgram(const std::optional<P2PMotionPlayer::PreparedProgram> &program, std::uint8_t,
+                           std::uint16_t action) {
+    if (!program)
+      return false;
+    if (!UsesOutwardArmPose(action))
+      camera_arm_tween_.Cancel();
+    return p2p_player_->StartPrepared(*program);
+  }
+
+  // 요청 각도를 회전 JSON 반복 횟수로 반올림하고 0~최대 반복 횟수로 제한한다.
+  // 요청 각도를 회전 JSON 반복 횟수로 반올림하고 0~최대 반복 횟수로 제한한다.
+  int CalculateTurnCount(int target_yaw_deg) const {
+    const int requested = static_cast<int>(std::lround( // 제한 전 계산된 반복 횟수
+        target_yaw_deg / turn_step_deg_));
+    return std::clamp(requested, 0, max_turn_repetitions_);
+  }
+
+  void PublishActionStatus(std::uint64_t command_id, std::uint8_t status) {
+    // ActionCommand.action_id를 CommandStatus.command_id에 그대로 돌려줘야
+    // Vision이 어느 명령의 ACK/DONE인지 대응시킬 수 있다.
+    vision::msg::CommandStatus message;
+    message.command_id = command_id;
+    message.status = status;
+    action_status_pub_->publish(message);
+  }
+
+  // 몸 동작 명령 수신: 중복/접수 가능 여부 확인 → 모션 준비 → ACK → 실행 또는 대기.
+  void ActionCommandCallback(const vision::msg::ActionCommand::SharedPtr message) {
+    RCLCPP_INFO(get_logger(), "Action received: id=%llu mission=%u action=%u target_yaw_deg=%d",
+                static_cast<unsigned long long>(message->action_id), static_cast<unsigned int>(message->mission),
+                static_cast<unsigned int>(message->action), static_cast<int>(message->target_yaw_deg));
+
+    // admission은 접수 판정이다. Start=즉시 실행, Queue=다음 동작으로 저장,
+    // *Duplicate=같은 ID 재전송, Reject=접수 불가. Evaluate 자체는 상태를 바꾸지 않는다.
+    const auto admission = action_transactions_.Evaluate(message->action_id, message->mission, message->action);
+    using motion_executor::Admission;
+    if (admission == Admission::ActiveDuplicate || admission == Admission::QueuedDuplicate) {
+      if (admission == Admission::QueuedDuplicate && !queued_action_acknowledged_)
+        return;
+      PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
+      return;
+    }
+    if (admission == Admission::CompletedDuplicate) {
+      PublishActionStatus(message->action_id, vision::msg::CommandStatus::DONE);
+      return;
+    }
+    if (admission == Admission::Reject) {
+      RCLCPP_WARN(get_logger(), "Action rejected (zero ID, busy before READY, or queue full): id=%llu",
+                  static_cast<unsigned long long>(message->action_id));
+      return;
     }
 
-    // 이 함수는 action의 의미와 실제 JSON 파일을 연결하는 유일한 표다.
-    // action_id는 명령 인스턴스 ID이므로 절대 이 switch에 사용하지 않는다.
-    // 새 JSON을 추가할 때 action 번호와 파일의 대응은 여기만 수정하면 된다.
-    std::string ProgramFileForAction(std::uint16_t action) const
-    {
-        switch (action) {
-        // TODO: 실제 로봇에서 검증한 action과 JSON 파일만 추가한다.
-        // 예시:
-        case vision::msg::ActionCommand::DEFAULT_POSITION:
-            return "motions/초기자세_다소곳_.json";
-
-        case vision::msg::ActionCommand::DEFAULT_POSE_MODE:
-            return "motions/미세보행_초기자세가기_수정2.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_HALF:
-            return "motions/미세보행_미세전진_수정.json";
-
-        case vision::msg::ActionCommand::STEP_BACK:
-            return "motions/미세보행_후진__찐.json";
-
-        case vision::msg::ActionCommand::LEFT_SIDE_STEP:
-            return "motions/미세보행_좌로이동_초기X.json";
-
-        case vision::msg::ActionCommand::RIGHT_SIDE_STEP:
-            return "motions/미세보행_우로이동_초기X.json";
-
-        case vision::msg::ActionCommand::TURN_LEFT:
-            return "motions/미세보행_좌회전_초기X.json";
-
-        case vision::msg::ActionCommand::TURN_RIGHT:
-            return "motions/미세보행_우회전_초기X.json";
-
-        case vision::msg::ActionCommand::TURN_LEFT_AND_STEP:
-            return "motions/미세보행_좌회전_초기X.json";
-
-        case vision::msg::ActionCommand::TURN_RIGHT_AND_STEP:
-            return "motions/미세보행_우회전_초기X.json";
-
-        case vision::msg::ActionCommand::WALK_MODE:
-            return "motions/보행_왼발만앞에.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_ONE:
-            return "motions/보행_1걸음_초기X_수정5.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_ONE_ALTERNATE:
-            return "motions/보행_1걸음_초기X_수정5.json";
-
-        case vision::msg::ActionCommand::LINE_LEFT_UNIT:
-            return "motions/보행_좌회전전진_20도_최종_초기X_수정.json";
-
-        case vision::msg::ActionCommand::LINE_STRAIGHT_UNIT:
-            return "missions/2걸음_1차찐.json";
-
-        case vision::msg::ActionCommand::LINE_RIGHT_UNIT:
-            return "missions/직진후우회전_2걸음.json";
-        case vision::msg::ActionCommand::LINE_RIGHT_UNIT_TURN_FIRST:
-            return "missions/직진후우회전_2걸음_우회전먼저.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_LEFT_THREE:
-            return "missions/좌회전전진_3회.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_THREE:
-            return "missions/우회전전진_3회.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_LEFT_TWO:
-            return "missions/좌회전전진_2회.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_TWO:
-            return "missions/우회전전진_2회.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE:
-            return "missions/우회전전진_1회.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_LEFT_ONE:
-            return "missions/좌회전전진_1회.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_RIGHT_ONE_HUDDLE:
-            return "motions/우회전_최종.json";
-
-        // A dedicated WALK-stance motion, played once without yaw repetition.
-        // Missing/invalid assets are rejected by PrepareProgram before ACK.
-        case vision::msg::ActionCommand::TURN_LEFT_IN_PLACE:
-            return "motions/좌회전_최종__.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_FIVE:
-            return "missions/연속걷기.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_TWO:
-            return "missions/2걸음_1차찐.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_THREE:
-            return "missions/직진_3걸음_수정.json";
-
-        case vision::msg::ActionCommand::STEP_FORWARD_FOUR:
-            return "missions/직진_4걸음_수정.json";
-            
-        case vision::msg::ActionCommand::PICK_BALL:
-            return "motions/공_줍고일어나기_최종.json";
-
-        case vision::msg::ActionCommand::PICK_BALL_RE:
-            return "motions/공_줍고일어나기_최종_재그립제외.json";
-
-        case vision::msg::ActionCommand::PICK_BALL_RE_STAND:
-            return "motions/공_줍고일어나기_최종_재그립제외_일어나기.json";
-
-        case vision::msg::ActionCommand::RECATCH:
-            return "motions/공_재그립.json";
-
-        case vision::msg::ActionCommand::HUDDLE:
-            return "missions/허들넘기_real.json";
-            
-        case vision::msg::ActionCommand::SHOOT:
-            return "motions/공_던지기_초기X.json";
-        
-        default:
-            return {};
+    const std::string filename = ProgramFileForAction(message->action); // 동작 종류의 JSON 경로
+    if (filename.empty()) {
+      RCLCPP_ERROR(get_logger(), "No JSON mapping for action=%u", static_cast<unsigned int>(message->action));
+      return;
+    }
+    // requested는 Vision 요청 각도, effective는 반복/각도 제한을 반영한 계획상 각도다.
+    // effective는 센서로 측정한 실제 회전각이 아니다. 회전 action이 좌우 방향을 정한다.
+    const int requested_target_yaw_deg = static_cast<int>(message->target_yaw_deg);
+    int effective_target_yaw_deg = 0;
+    bool zero_turn = false;
+    P2PMotionPlayer::StartOptions start_options; // 반복, 관절 offset, 뒤에 붙일 모션 등의 옵션
+    if (IsTurnAction(message->action)) {
+      // 회전 방향은 TURN_LEFT/TURN_RIGHT action으로만 정한다.
+      // Vision이 전달한 양수 회전량은 별도 부호 변환 없이 그대로 사용한다.
+      const int turn_count = CalculateTurnCount(requested_target_yaw_deg);
+      if (turn_count == 0 && !IsTurnAndStepAction(message->action)) {
+        // QUEUE의 0도 회전은 A DONE 이전에 완료시킬 수 없다.
+        // A가 끝나기 전에는 준비/ACK만 하고, 이후 실제 팔 상태로 판정한다.
+        zero_turn = true;
+        if (!NeedsArmTransition(message->action) && admission != Admission::Queue &&
+            !walk_hold_.Waiting(std::chrono::steady_clock::now())) {
+          // 유휴 실행에서의 0도 회전은 기존 즉시 ACK/DONE 유지.
+          PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
+          action_transactions_.completed.Remember(message->action_id);
+          PublishActionStatus(message->action_id, vision::msg::CommandStatus::DONE);
+          RCLCPP_INFO(get_logger(), "Turn rounded to zero: target_yaw_deg=%d", requested_target_yaw_deg);
+          return;
         }
+      }
+
+      start_options.repeat_count = static_cast<std::size_t>(turn_count);
+      const int direction = IsLeftTurnAction(message->action) ? 1 : -1;
+      effective_target_yaw_deg = static_cast<int>(std::lround(direction * turn_count * turn_step_deg_));
+      RCLCPP_INFO(get_logger(), "Turn plan: requested=%d deg step=%.2f deg count=%d estimated=%d deg",
+                  requested_target_yaw_deg, turn_step_deg_, turn_count, effective_target_yaw_deg);
+    } else if (message->action == vision::msg::ActionCommand::SHOOT) {
+      const double clamped_yaw_deg = std::clamp( // 허리 허용 범위 안으로 제한한 각도
+          static_cast<double>(requested_target_yaw_deg), -waist_max_yaw_deg_, waist_max_yaw_deg_);
+      effective_target_yaw_deg = static_cast<int>(std::lround(clamped_yaw_deg));
+      if (effective_target_yaw_deg != requested_target_yaw_deg) {
+        RCLCPP_WARN(get_logger(), "Shoot waist yaw clamped: requested=%d deg applied=%d deg", requested_target_yaw_deg,
+                    effective_target_yaw_deg);
+      }
+
+      // 허리 목표 각도를 JSON의 허리 목표 tick에 더할 offset으로 환산한다.
+      const int32_t waist_offset_ticks = static_cast<int32_t>(
+          std::lround(effective_target_yaw_deg * waist_ticks_per_revolution_ / 360.0 * waist_yaw_direction_));
+      if (waist_offset_ticks != 0) {
+        start_options.position_offsets.emplace(waist_motor_id_, waist_offset_ticks);
+        start_options.restore_offsets = waist_restore_after_shoot_;
+      }
+      RCLCPP_INFO(get_logger(), "Shoot waist plan: yaw=%d deg motor_id=%d offset=%d ticks", effective_target_yaw_deg,
+                  waist_motor_id_, waist_offset_ticks);
+    } else if (requested_target_yaw_deg != 0) {
+      RCLCPP_WARN(get_logger(), "target_yaw_deg=%d ignored for action=%u", requested_target_yaw_deg,
+                  static_cast<unsigned int>(message->action));
     }
 
-    bool IsLeftTurnAction(std::uint16_t action) const
-    {
-        return action == vision::msg::ActionCommand::TURN_LEFT ||
-               action == vision::msg::ActionCommand::TURN_LEFT_AND_STEP;
+    std::filesystem::path relative_path(filename); // 패키지 폴더 기준 상대 경로
+    // 기존 매핑처럼 파일명만 있으면 motion으로 간주한다. 신규 매핑은
+    // motions/... 또는 missions/... 경로를 명시한다.
+    if (!relative_path.has_parent_path()) {
+      relative_path = std::filesystem::path("motions") / relative_path;
     }
-
-    bool IsRightTurnAction(std::uint16_t action) const
-    {
-        return action == vision::msg::ActionCommand::TURN_RIGHT ||
-               action == vision::msg::ActionCommand::TURN_RIGHT_AND_STEP;
+    const std::filesystem::path asset_root(asset_directory_);
+    if (IsTurnAndStepAction(message->action) && start_options.repeat_count == 0) {
+      start_options.repeat_count = 1;
+      relative_path = "missions/연속걷기.json";
     }
-
-    bool IsTurnAction(std::uint16_t action) const
-    {
-        return IsLeftTurnAction(action) || IsRightTurnAction(action);
+    if (IsTurnAndStepAction(message->action) && relative_path == std::filesystem::path(filename)) {
+      start_options.trailing_program_paths.push_back((asset_root / "missions" / "연속걷기.json").string());
+      RCLCPP_INFO(get_logger(), "Turn-and-step sequence: turn_count=%zu then continuous walk",
+                  start_options.repeat_count);
     }
-
-    bool IsTurnAndStepAction(std::uint16_t action) const
-    {
-        return action == vision::msg::ActionCommand::TURN_LEFT_AND_STEP ||
-               action == vision::msg::ActionCommand::TURN_RIGHT_AND_STEP;
+    const std::filesystem::path path = asset_root / relative_path; // 실제로 읽을 전체 경로
+    // Normal action arms follow the current CAMERA mode. Preserve
+    // PICK/HURDLE/SHOOT JSON without arm overrides.
+    if (line_arm_config_.enabled && UsesOutwardArmPose(message->action)) {
+      start_options.position_overrides = CameraArmTargets();
     }
-
-    // mission과 관계없이 팔을 벌린다. 공 줍기/재그립/허들/슈팅은 JSON 팔 자세를 사용한다.
-    static bool UsesOutwardArmPose(std::uint16_t action)
-    {
-        using Command=vision::msg::ActionCommand;
-        switch(action) {
-        case Command::PICK_BALL:          // 14
-        case Command::RECATCH:            // 15
-        case Command::HUDDLE:             // 16
-        case Command::SHOOT:              // 17
-        case Command::PICK_BALL_RE:       // 29
-        case Command::PICK_BALL_RE_STAND:  // 30
-            return false;
-        default:
-            return true;
-        }
-    }
-
-    // 집게손 덮어쓰기는 mission과 관계없이 이 여섯 action만 제외한다.
-    static bool UsesFixedGripperPose(std::uint16_t action)
-    {
-        using Command=vision::msg::ActionCommand;
-        switch(action) {
-        case Command::PICK_BALL:
-        case Command::PICK_BALL_RE:
-        case Command::PICK_BALL_RE_STAND:
-        case Command::RECATCH:
-        case Command::HUDDLE:
-        case Command::SHOOT:
-            return false;
-        default:
-            return true;
-        }
-    }
-
-    // The selected camera pose controls normal shoulder targets: ID15/16.
-    // Special actions (PICK/HURDLE/SHOOT) own their original JSON arm poses.
-    P2PMotionPlayer::RawPositions CameraArmTargets() const
-    {
-        return camera_arm_forward_
-            ? line_arm_config_.Targets()
-            : P2PMotionPlayer::RawPositions{{15,line_arm_config_.reference_15},
-                                            {16,line_arm_config_.reference_16}};
-    }
-    bool NeedsArmTransition(std::uint16_t) const { return false; }
-    bool StartMissionProgram(const std::optional<P2PMotionPlayer::PreparedProgram>& program,
-                             std::uint8_t, std::uint16_t action)
-    {
-        if(!program) return false;
-        if(!UsesOutwardArmPose(action)) camera_arm_tween_.Cancel();
-        return p2p_player_->StartPrepared(*program);
-    }
-
-    // 요청 각도를 회전 JSON 반복 횟수로 반올림하고 0~최대 반복 횟수로 제한한다.
-    // 요청 각도를 회전 JSON 반복 횟수로 반올림하고 0~최대 반복 횟수로 제한한다.
-    int CalculateTurnCount(int target_yaw_deg) const
-    {
-        const int requested = static_cast<int>(std::lround(  // 제한 전 계산된 반복 횟수
-            target_yaw_deg / turn_step_deg_));
-        return std::clamp(requested, 0, max_turn_repetitions_);
-    }
-
-    void PublishActionStatus(std::uint64_t command_id, std::uint8_t status)
-    {
-        // ActionCommand.action_id를 CommandStatus.command_id에 그대로 돌려줘야
-        // Vision이 어느 명령의 ACK/DONE인지 대응시킬 수 있다.
-        vision::msg::CommandStatus message;
-        message.command_id = command_id;
-        message.status = status;
-        action_status_pub_->publish(message);
-    }
-
-    // 몸 동작 명령 수신: 중복/접수 가능 여부 확인 → 모션 준비 → ACK → 실행 또는 대기.
-    void ActionCommandCallback(
-        const vision::msg::ActionCommand::SharedPtr message)
-    {
-        RCLCPP_INFO(get_logger(),
-                    "Action received: id=%llu mission=%u action=%u target_yaw_deg=%d",
-                    static_cast<unsigned long long>(message->action_id),
-                    static_cast<unsigned int>(message->mission),
-                    static_cast<unsigned int>(message->action),
-                    static_cast<int>(message->target_yaw_deg));
-
-        // admission은 접수 판정이다. Start=즉시 실행, Queue=다음 동작으로 저장,
-        // *Duplicate=같은 ID 재전송, Reject=접수 불가. Evaluate 자체는 상태를 바꾸지 않는다.
-        const auto admission = action_transactions_.Evaluate(
-            message->action_id, message->mission, message->action);
-        using motion_executor::Admission;
-        if (admission == Admission::ActiveDuplicate || admission == Admission::QueuedDuplicate) {
-            if (admission == Admission::QueuedDuplicate && !queued_action_acknowledged_) return;
-            PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
-            return;
-        }
-        if (admission == Admission::CompletedDuplicate) {
-            PublishActionStatus(message->action_id, vision::msg::CommandStatus::DONE);
-            return;
-        }
-        if (admission == Admission::Reject) {
-            RCLCPP_WARN(get_logger(), "Action rejected (zero ID, busy before READY, or queue full): id=%llu",
-                        static_cast<unsigned long long>(message->action_id));
-            return;
-        }
-
-        const std::string filename = ProgramFileForAction(message->action);  // 동작 종류의 JSON 경로
-        if (filename.empty()) {
-            RCLCPP_ERROR(get_logger(), "No JSON mapping for action=%u",
-                         static_cast<unsigned int>(message->action));
-            return;
-        }
-        // requested는 Vision 요청 각도, effective는 반복/각도 제한을 반영한 계획상 각도다.
-        // effective는 센서로 측정한 실제 회전각이 아니다. 회전 action이 좌우 방향을 정한다.
-        const int requested_target_yaw_deg =
-            static_cast<int>(message->target_yaw_deg);
-        int effective_target_yaw_deg = 0;
-        bool zero_turn=false;
-        P2PMotionPlayer::StartOptions start_options;  // 반복, 관절 offset, 뒤에 붙일 모션 등의 옵션
-        if (IsTurnAction(message->action)) {
-            // 회전 방향은 TURN_LEFT/TURN_RIGHT action으로만 정한다.
-            // Vision이 전달한 양수 회전량은 별도 부호 변환 없이 그대로 사용한다.
-            const int turn_count =
-                CalculateTurnCount(requested_target_yaw_deg);
-            if (turn_count == 0 &&
-                !IsTurnAndStepAction(message->action)) {
-                // QUEUE의 0도 회전은 A DONE 이전에 완료시킬 수 없다.
-                // A가 끝나기 전에는 준비/ACK만 하고, 이후 실제 팔 상태로 판정한다.
-                zero_turn=true;
-                if (!NeedsArmTransition(message->action) &&
-                    admission != Admission::Queue &&
-                    !walk_hold_.Waiting(std::chrono::steady_clock::now())) {
-                    // 유휴 실행에서의 0도 회전은 기존 즉시 ACK/DONE 유지.
-                    PublishActionStatus(message->action_id,
-                                        vision::msg::CommandStatus::ACK);
-                    action_transactions_.completed.Remember(message->action_id);
-                    PublishActionStatus(message->action_id,
-                                        vision::msg::CommandStatus::DONE);
-                    RCLCPP_INFO(get_logger(),
-                                "Turn rounded to zero: target_yaw_deg=%d",
-                                requested_target_yaw_deg);
-                    return;
-                }
-            }
-
-            start_options.repeat_count = static_cast<std::size_t>(turn_count);
-            const int direction = IsLeftTurnAction(message->action) ? 1 : -1;
-            effective_target_yaw_deg = static_cast<int>(std::lround(
-                direction * turn_count * turn_step_deg_));
-            RCLCPP_INFO(
-                get_logger(),
-                "Turn plan: requested=%d deg step=%.2f deg count=%d estimated=%d deg",
-                requested_target_yaw_deg, turn_step_deg_, turn_count,
-                effective_target_yaw_deg);
-        } else if (message->action == vision::msg::ActionCommand::SHOOT) {
-            const double clamped_yaw_deg = std::clamp(  // 허리 허용 범위 안으로 제한한 각도
-                static_cast<double>(requested_target_yaw_deg),
-                -waist_max_yaw_deg_, waist_max_yaw_deg_);
-            effective_target_yaw_deg =
-                static_cast<int>(std::lround(clamped_yaw_deg));
-            if (effective_target_yaw_deg != requested_target_yaw_deg) {
-                RCLCPP_WARN(
-                    get_logger(),
-                    "Shoot waist yaw clamped: requested=%d deg applied=%d deg",
-                    requested_target_yaw_deg, effective_target_yaw_deg);
-            }
-
-            // 허리 목표 각도를 JSON의 허리 목표 tick에 더할 offset으로 환산한다.
-            const int32_t waist_offset_ticks = static_cast<int32_t>(
-                std::lround(
-                    effective_target_yaw_deg * waist_ticks_per_revolution_ /
-                    360.0 * waist_yaw_direction_));
-            if (waist_offset_ticks != 0) {
-                start_options.position_offsets.emplace(
-                    waist_motor_id_, waist_offset_ticks);
-                start_options.restore_offsets = waist_restore_after_shoot_;
-            }
-            RCLCPP_INFO(
-                get_logger(),
-                "Shoot waist plan: yaw=%d deg motor_id=%d offset=%d ticks",
-                effective_target_yaw_deg, waist_motor_id_, waist_offset_ticks);
-        } else if (requested_target_yaw_deg != 0) {
-            RCLCPP_WARN(
-                get_logger(),
-                "target_yaw_deg=%d ignored for action=%u",
-                requested_target_yaw_deg,
-                static_cast<unsigned int>(message->action));
-        }
-
-        std::filesystem::path relative_path(filename);  // 패키지 폴더 기준 상대 경로
-        // 기존 매핑처럼 파일명만 있으면 motion으로 간주한다. 신규 매핑은
-        // motions/... 또는 missions/... 경로를 명시한다.
-        if (!relative_path.has_parent_path()) {
-            relative_path = std::filesystem::path("motions") / relative_path;
-        }
-        const std::filesystem::path asset_root(asset_directory_);
-        if (IsTurnAndStepAction(message->action) && start_options.repeat_count == 0) {
-            start_options.repeat_count = 1;
-            relative_path = "missions/연속걷기.json";
-        }
-        if (IsTurnAndStepAction(message->action) && relative_path == std::filesystem::path(filename)) {
-            start_options.trailing_program_paths.push_back(
-                (asset_root / "missions" / "연속걷기.json").string());
-            RCLCPP_INFO(
-                get_logger(),
-                "Turn-and-step sequence: turn_count=%zu then continuous walk",
-                start_options.repeat_count);
-        }
-        const std::filesystem::path path = asset_root / relative_path;  // 실제로 읽을 전체 경로
-        // Normal action arms follow the current CAMERA mode. Preserve
-        // PICK/HURDLE/SHOOT JSON without arm overrides.
-        if (line_arm_config_.enabled && UsesOutwardArmPose(message->action)) {
-            start_options.position_overrides = CameraArmTargets();
-        }
-        if (UsesFixedGripperPose(message->action)) start_options.position_overrides[19]=gripper_tick_;
-        try {
-            // program은 검증을 마친 모션 데이터다. 준비만 할 때는 현재 모션/모터를 바꾸지 않는다.
-            std::optional<P2PMotionPlayer::PreparedProgram> program;
-            if (!zero_turn) program=p2p_player_->PrepareProgram(
-                path.string(), (asset_root / "motions").string(), start_options);
-            if (admission == Admission::Queue || walk_hold_.Waiting(std::chrono::steady_clock::now())) {
-                // 대기열은 한 칸이다. 검증된 데이터까지 저장한 뒤 ACK하므로 나중에 다시 읽지 않는다.
-                queued_action_.emplace(QueuedAction{message->action_id, message->mission,
-                    message->action, effective_target_yaw_deg, std::move(program)});
-                action_transactions_.queued_id = message->action_id;
-                queued_action_acknowledged_ = admission == Admission::Queue;
-                if (queued_action_acknowledged_)
-                    PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
-                EnsureMotionLoop();
-                return;
-            }
-            if (!StartMissionProgram(program,message->mission,message->action)) {
-                RCLCPP_ERROR(get_logger(), "P2P start failed: %s", p2p_player_->Error().c_str());
-                return;
-            }
-        } catch (const std::exception& e) {
-            RCLCPP_ERROR(get_logger(), "Action preparation failed, no ACK: %s", e.what());
-            return;
-        }
-        // 실제 시작 성공 뒤 활성 ID를 등록한다. 실패한 명령에는 ACK를 보내지 않는다.
-        action_transactions_.Activate(message->action_id, message->mission, message->action);
-        current_action_ = message->action;
-        active_target_yaw_deg_ = effective_target_yaw_deg;
-        motion_in_progress_ = true;
-        PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
+    if (UsesFixedGripperPose(message->action))
+      start_options.position_overrides[19] = gripper_tick_;
+    try {
+      // program은 검증을 마친 모션 데이터다. 준비만 할 때는 현재 모션/모터를 바꾸지 않는다.
+      std::optional<P2PMotionPlayer::PreparedProgram> program;
+      if (!zero_turn)
+        program = p2p_player_->PrepareProgram(path.string(), (asset_root / "motions").string(), start_options);
+      if (admission == Admission::Queue || walk_hold_.Waiting(std::chrono::steady_clock::now())) {
+        // 대기열은 한 칸이다. 검증된 데이터까지 저장한 뒤 ACK하므로 나중에 다시 읽지 않는다.
+        queued_action_.emplace(QueuedAction{message->action_id, message->mission, message->action,
+                                            effective_target_yaw_deg, std::move(program)});
+        action_transactions_.queued_id = message->action_id;
+        queued_action_acknowledged_ = admission == Admission::Queue;
+        if (queued_action_acknowledged_)
+          PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
         EnsureMotionLoop();
+        return;
+      }
+      if (!StartMissionProgram(program, message->mission, message->action)) {
+        RCLCPP_ERROR(get_logger(), "P2P start failed: %s", p2p_player_->Error().c_str());
+        return;
+      }
+    } catch (const std::exception &e) {
+      RCLCPP_ERROR(get_logger(), "Action preparation failed, no ACK: %s", e.what());
+      return;
     }
+    // 실제 시작 성공 뒤 활성 ID를 등록한다. 실패한 명령에는 ACK를 보내지 않는다.
+    action_transactions_.Activate(message->action_id, message->mission, message->action);
+    current_action_ = message->action;
+    active_target_yaw_deg_ = effective_target_yaw_deg;
+    motion_in_progress_ = true;
+    PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
+    EnsureMotionLoop();
+  }
 
-    // Fixed full-body shooting pose: one interpolation, no JSON or action-level
-    // arm/gripper overrides. It shares the normal action ID/ACK/DONE history.
-    void ShootTuningPoseCallback(const vision::msg::ShootTuningPose::SharedPtr request)
-    {
-        if (!std::isfinite(request->duration_sec) || request->duration_sec<0.2 || request->duration_sec>60) {
-            RCLCPP_WARN(get_logger(),"Shoot tuning pose rejected: duration must be in [0.2,60] seconds");
-            return;
-        }
-        using Command=vision::msg::ActionCommand;
-        using motion_executor::Admission;
-        const auto admission=action_transactions_.Evaluate(
-            request->action_id,Command::MISSION_GOAL,Command::DEFAULT_POSE_MODE);
-        if (admission==Admission::ActiveDuplicate || admission==Admission::QueuedDuplicate) {
-            if (admission==Admission::QueuedDuplicate && !queued_action_acknowledged_) return;
-            PublishActionStatus(request->action_id,vision::msg::CommandStatus::ACK);
-            return;
-        }
-        if (admission==Admission::CompletedDuplicate) {
-            PublishActionStatus(request->action_id,vision::msg::CommandStatus::DONE);
-            return;
-        }
-        // The bench never queues this full-body/head pose behind locomotion.
-        if (admission!=Admission::Start || startup_pose_in_progress_ || camera_motion_->Active()) {
-            RCLCPP_WARN(get_logger(),"Shoot tuning pose rejected: executor busy (id=%llu)",
-                        static_cast<unsigned long long>(request->action_id));
-            return;
-        }
-        try {
-            const auto initial=dxl_->GetRawPositions();
-            const auto program=P2PMotionPlayer::PreparePoseTransition(
-                initial,motion_executor::ShootTuningPoseTargets(),request->duration_sec);
-            if (!p2p_player_->StartPrepared(program,initial,std::chrono::steady_clock::now())) {
-                RCLCPP_ERROR(get_logger(),"Shoot tuning pose start failed, no ACK: %s",p2p_player_->Error().c_str());
-                return;
-            }
-        } catch (const std::exception& e) {
-            RCLCPP_ERROR(get_logger(),"Shoot tuning pose preparation failed, no ACK: %s",e.what());
-            return;
-        }
-        action_transactions_.Activate(request->action_id,Command::MISSION_GOAL,Command::DEFAULT_POSE_MODE);
-        current_action_=Command::DEFAULT_POSE_MODE;
-        active_target_yaw_deg_=0;
-        shoot_pose_in_progress_=true;
-        motion_in_progress_=true;
-        RCLCPP_INFO(get_logger(),"[SHOOT POSE] ACK id=%llu duration=%.2fs head=(2054,966)",
-                    static_cast<unsigned long long>(request->action_id),request->duration_sec);
-        PublishActionStatus(request->action_id,vision::msg::CommandStatus::ACK);
+  // Fixed full-body shooting pose: one interpolation, no JSON or action-level
+  // arm/gripper overrides. It shares the normal action ID/ACK/DONE history.
+  void ShootTuningPoseCallback(const vision::msg::ShootTuningPose::SharedPtr request) {
+    if (!std::isfinite(request->duration_sec) || request->duration_sec < 0.2 || request->duration_sec > 60) {
+      RCLCPP_WARN(get_logger(), "Shoot tuning pose rejected: duration must be in [0.2,60] seconds");
+      return;
+    }
+    using Command = vision::msg::ActionCommand;
+    using motion_executor::Admission;
+    const auto admission =
+        action_transactions_.Evaluate(request->action_id, Command::MISSION_GOAL, Command::DEFAULT_POSE_MODE);
+    if (admission == Admission::ActiveDuplicate || admission == Admission::QueuedDuplicate) {
+      if (admission == Admission::QueuedDuplicate && !queued_action_acknowledged_)
+        return;
+      PublishActionStatus(request->action_id, vision::msg::CommandStatus::ACK);
+      return;
+    }
+    if (admission == Admission::CompletedDuplicate) {
+      PublishActionStatus(request->action_id, vision::msg::CommandStatus::DONE);
+      return;
+    }
+    // The bench never queues this full-body/head pose behind locomotion.
+    if (admission != Admission::Start || startup_pose_in_progress_ || camera_motion_->Active()) {
+      RCLCPP_WARN(get_logger(), "Shoot tuning pose rejected: executor busy (id=%llu)",
+                  static_cast<unsigned long long>(request->action_id));
+      return;
+    }
+    try {
+      const auto initial = dxl_->GetRawPositions();
+      const auto program = P2PMotionPlayer::PreparePoseTransition(initial, motion_executor::ShootTuningPoseTargets(),
+                                                                  request->duration_sec);
+      if (!p2p_player_->StartPrepared(program, initial, std::chrono::steady_clock::now())) {
+        RCLCPP_ERROR(get_logger(), "Shoot tuning pose start failed, no ACK: %s", p2p_player_->Error().c_str());
+        return;
+      }
+    } catch (const std::exception &e) {
+      RCLCPP_ERROR(get_logger(), "Shoot tuning pose preparation failed, no ACK: %s", e.what());
+      return;
+    }
+    action_transactions_.Activate(request->action_id, Command::MISSION_GOAL, Command::DEFAULT_POSE_MODE);
+    current_action_ = Command::DEFAULT_POSE_MODE;
+    active_target_yaw_deg_ = 0;
+    shoot_pose_in_progress_ = true;
+    motion_in_progress_ = true;
+    RCLCPP_INFO(get_logger(), "[SHOOT POSE] ACK id=%llu duration=%.2fs head=(2054,966)",
+                static_cast<unsigned long long>(request->action_id), request->duration_sec);
+    PublishActionStatus(request->action_id, vision::msg::CommandStatus::ACK);
+    EnsureMotionLoop();
+  }
+
+  // 몸 동작과 별도인 카메라 command_id에 ACK/DONE을 대응시켜 전송한다.
+  void PublishCameraStatus(std::uint64_t id, std::uint8_t status) {
+    vision::msg::CommandStatus message;
+    message.command_id = id;
+    message.status = status;
+    camera_status_pub_->publish(message);
+  }
+
+  // DOWN/FORWARD/GOAL 요청을 머리 관절 모션으로 만든다. 몸 동작과 동시에 실행할 수 있다.
+  void CameraCommandCallback(const vision::msg::CameraCommand::SharedPtr message) {
+    const auto req = message->request;
+    // Scan controls keep the original START command ID: only the scan
+    // itself receives one ACK and one DONE on its physical return.
+    if (req == vision::msg::CameraCommand::SCAN_HOLD || req == vision::msg::CameraCommand::SCAN_RESUME ||
+        req == vision::msg::CameraCommand::SCAN_RETURN) {
+      if (message->command_id == camera_transactions_.active_id && camera_motion_->ScanActive()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (req == vision::msg::CameraCommand::SCAN_HOLD)
+          camera_motion_->HoldScan();
+        else if (req == vision::msg::CameraCommand::SCAN_RESUME)
+          camera_motion_->ResumeScan(now);
+        else
+          camera_motion_->ReturnScan(now);
         EnsureMotionLoop();
+      }
+      return;
     }
-
-    // 몸 동작과 별도인 카메라 command_id에 ACK/DONE을 대응시켜 전송한다.
-    void PublishCameraStatus(std::uint64_t id, std::uint8_t status)
-    {
-        vision::msg::CommandStatus message;
-        message.command_id = id;
-        message.status = status;
-        camera_status_pub_->publish(message);
+    const bool scan =
+        req == vision::msg::CameraCommand::SCAN_LEFT || req == vision::msg::CameraCommand::SCAN_RIGHT ||
+        req == vision::msg::CameraCommand::LINE_SCAN_LEFT || req == vision::msg::CameraCommand::LINE_SCAN_RIGHT ||
+        req == vision::msg::CameraCommand::GOAL_SCAN_LEFT || req == vision::msg::CameraCommand::GOAL_SCAN_RIGHT;
+    if (scan &&
+        (message->scan_max_yaw_deg < 1 || message->scan_max_yaw_deg > 90 || !std::isfinite(message->scan_move_sec) ||
+         !std::isfinite(message->scan_hold_sec) || !std::isfinite(message->scan_return_sec) ||
+         message->scan_move_sec <= 0.0 || message->scan_hold_sec < 0.0 || message->scan_return_sec <= 0.0)) {
+      RCLCPP_WARN(get_logger(), "Invalid curve scan timing/angle");
+      return;
     }
+    if (!scan)
+      try {
+        camera_config_.Target(req);
+      } catch (const std::exception &e) {
+        RCLCPP_WARN(get_logger(), "Camera request rejected: %s", e.what());
+        return;
+      }
+    using motion_executor::Admission;
+    // 카메라는 별도 중복 기록을 사용하며, 이동 중인 새 ID를 대기열에 넣거나 선점하지 않는다.
+    const auto admission = camera_transactions_.Evaluate(message->command_id);
+    if (admission == Admission::ActiveDuplicate) {
+      PublishCameraStatus(message->command_id, vision::msg::CommandStatus::ACK);
+      return;
+    }
+    if (admission == Admission::CompletedDuplicate) {
+      PublishCameraStatus(message->command_id, vision::msg::CommandStatus::DONE);
+      return;
+    }
+    if (scan_elbow_stage_ != ScanElbowStage::kIdle || (scan && (motion_in_progress_ || queued_action_))) {
+      RCLCPP_WARN(get_logger(), "Camera command rejected while scan arms/body busy");
+      return;
+    }
+    if (admission != Admission::Start || shoot_pose_in_progress_) {
+      RCLCPP_WARN(get_logger(), "Camera command rejected (zero ID or busy): id=%llu",
+                  static_cast<unsigned long long>(message->command_id));
+      return;
+    }
+    try {
+      // 시작 자세 이동 때 저장한 마지막 전송 목표를 카메라의 출발점으로 사용한다.
+      // 추가 encoder 읽기 통신을 하지 않는다. 이 값은 실제 측정 위치가 아니라 목표 위치다.
+      const auto now = std::chrono::steady_clock::now();
+      if (scan) {
+        const bool line_scan =
+            req == vision::msg::CameraCommand::LINE_SCAN_LEFT || req == vision::msg::CameraCommand::LINE_SCAN_RIGHT;
+        scan_goal_view_ =
+            req == vision::msg::CameraCommand::GOAL_SCAN_LEFT || req == vision::msg::CameraCommand::GOAL_SCAN_RIGHT;
+        scan_left_ = req == vision::msg::CameraCommand::SCAN_LEFT ||
+                     req == vision::msg::CameraCommand::LINE_SCAN_LEFT ||
+                     req == vision::msg::CameraCommand::GOAL_SCAN_LEFT;
+        scan_yaw_deg_ = static_cast<int>(message->scan_max_yaw_deg);
+        scan_move_sec_ = message->scan_move_sec;
+        scan_hold_sec_ = message->scan_hold_sec;
+        scan_return_sec_ = message->scan_return_sec;
+        scan_elbow_home_ticks_.clear();
+        P2PMotionPlayer::RawPositions targets;
+        double minimum = 0.0;
+        // BALL: one side; LINE: both sides; GOAL: no elbow movement.
+        for (int id : {17, 18}) {
+          const bool extend = line_scan || (!scan_goal_view_ && (scan_left_ ? id == 17 : id == 18));
+          if (!extend)
+            continue;
+          const int home = last_sent_positions_.at(id);
+          const int sign = id == 17 ? +1 : -1;
+          const int offset = static_cast<int>(std::lround(curve_scan_elbow_angle_deg_ * 4096.0 / 360.0));
+          const int target = home + sign * offset;
+          if (target < 0 || target > 4095)
+            throw std::invalid_argument("scan elbow target outside 0..4095");
+          scan_elbow_home_ticks_[id] = home;
+          targets[id] = target;
+          minimum = std::max(minimum, std::abs(target - home) * 360.0 / 4096.0 / 60.0);
+        }
+        if (targets.empty()) {
+          camera_motion_->StartScan(scan_left_, scan_yaw_deg_, scan_move_sec_, scan_hold_sec_, scan_return_sec_,
+                                    last_sent_positions_, now, true);
+          scan_elbow_stage_ = ScanElbowStage::kScanning;
+        } else {
+          elbow_tween_.Start(last_sent_positions_, targets, std::max(curve_scan_elbow_duration_sec_, minimum), now);
+          scan_elbow_stage_ = ScanElbowStage::kExtending;
+        }
+      } else {
+        camera_motion_->Start(req, last_sent_positions_, now);
+        camera_arm_forward_ =
+            req == vision::msg::CameraCommand::FORWARD || req == vision::msg::CameraCommand::BALL_VIEW_LINE;
+        const bool special = motion_in_progress_ && (!UsesOutwardArmPose(current_action_) || shoot_pose_in_progress_);
+        if (line_arm_config_.enabled && !special) {
+          const auto targets = CameraArmTargets();
+          double minimum = 0.0;
+          for (const auto &item : targets)
+            minimum =
+                std::max(minimum, std::abs(item.second - last_sent_positions_.at(item.first)) * 360.0 / 4096.0 / 60.0);
+          camera_arm_tween_.Start(last_sent_positions_, targets, std::max(camera_config_.move_sec, minimum), now);
+        }
+      }
+    } catch (const std::exception &e) {
+      RCLCPP_ERROR(get_logger(), "Camera start failed, no ACK: %s", e.what());
+      return;
+    }
+    camera_transactions_.active_id = message->command_id;
+    next_camera_verify_at_ = {};
+    const auto target = camera_motion_->TargetPose();
+    RCLCPP_INFO(get_logger(), "[CAMERA] ACK id=%llu request=%u target=(%d,%d) tolerance=%.1f%%",
+                static_cast<unsigned long long>(message->command_id), unsigned(req), target.yaw, target.pitch,
+                100 * camera_config_.position_tolerance_ratio);
+    PublishCameraStatus(message->command_id, vision::msg::CommandStatus::ACK);
+    EnsureMotionLoop();
+  }
 
-    // DOWN/FORWARD/GOAL 요청을 머리 관절 모션으로 만든다. 몸 동작과 동시에 실행할 수 있다.
-    void CameraCommandCallback(const vision::msg::CameraCommand::SharedPtr message)
-    {
-        const auto req=message->request;
-        // Scan controls keep the original START command ID: only the scan
-        // itself receives one ACK and one DONE on its physical return.
-        if (req==vision::msg::CameraCommand::SCAN_HOLD ||
-            req==vision::msg::CameraCommand::SCAN_RESUME ||
-            req==vision::msg::CameraCommand::SCAN_RETURN) {
-            if (message->command_id==camera_transactions_.active_id &&
-                camera_motion_->ScanActive()) {
-                const auto now=std::chrono::steady_clock::now();
-                if(req==vision::msg::CameraCommand::SCAN_HOLD) camera_motion_->HoldScan();
-                else if(req==vision::msg::CameraCommand::SCAN_RESUME) camera_motion_->ResumeScan(now);
-                else camera_motion_->ReturnScan(now);
-                EnsureMotionLoop();
+  // 유휴 상태에서 꺼져 있던 타이머를 다시 켠다. 이미 동작 중이면 주기를 재시작하지 않는다.
+  void EnsureMotionLoop() {
+    if (motion_loop_timer_->is_canceled()) {
+      last_motion_tick_at_ = std::chrono::steady_clock::now();
+      motion_loop_timer_->reset();
+    }
+  }
+
+  // 준비/전송 오류 시 몸·카메라 재생과 대기열을 정리한다. 완료되지 않았으므로 DONE은 보내지 않는다.
+  // 이 함수는 재생 상태를 중단하는 것이며 모터 Torque OFF를 수행하지 않는다.
+  void AbortPlayback(const std::string &reason) {
+    // 상태를 지우기 전에 실패한 활성/예약/카메라 ID와 시작 자세 여부를 남긴다.
+    RCLCPP_ERROR(
+        get_logger(),
+        "Playback stopped without DONE: action_id=%llu queued_id=%llu camera_id=%llu action=%u startup=%d reason=%s",
+        static_cast<unsigned long long>(action_transactions_.active_id),
+        static_cast<unsigned long long>(action_transactions_.queued_id),
+        static_cast<unsigned long long>(camera_transactions_.active_id), static_cast<unsigned int>(current_action_),
+        static_cast<int>(startup_pose_in_progress_), reason.c_str());
+    p2p_player_->Stop();
+    camera_motion_->Abort(last_sent_positions_);
+    // BALL_VIEW and BALL_VIEW_LINE share identical head targets but
+    // intentionally use DIFFERENT shoulder poses. Infer the recovered
+    // arm policy from the last successful shoulder goals, never from
+    // head pitch (which cannot distinguish the two views).
+    if (last_sent_positions_.count(15) && last_sent_positions_.count(16)) {
+      const auto distance_squared = [&](int target_15, int target_16) {
+        const double d15 = static_cast<double>(last_sent_positions_.at(15)) - target_15;
+        const double d16 = static_cast<double>(last_sent_positions_.at(16)) - target_16;
+        return d15 * d15 + d16 * d16;
+      };
+      const auto outward = line_arm_config_.Targets();
+      camera_arm_forward_ = distance_squared(outward.at(15), outward.at(16)) <=
+                            distance_squared(line_arm_config_.reference_15, line_arm_config_.reference_16);
+    }
+    camera_arm_tween_.Cancel();
+    elbow_tween_.Cancel();
+    scan_elbow_stage_ = ScanElbowStage::kIdle;
+    action_transactions_.Abort();
+    queued_action_.reset();
+    queued_action_acknowledged_ = false;
+    walk_hold_.Reset();
+    camera_transactions_.active_id = 0;
+    startup_pose_in_progress_ = false;
+    shoot_pose_in_progress_ = false;
+    motion_in_progress_ = false;
+    current_action_ = 0;
+    active_target_yaw_deg_ = 0;
+    motion_loop_timer_->cancel();
+  }
+
+  void StartQueuedAction(std::chrono::steady_clock::time_point now) {
+    if (!queued_action_ || action_transactions_.active_id != 0 || walk_hold_.Waiting(now))
+      return;
+    auto queued = std::move(*queued_action_);
+    queued_action_.reset();
+    const bool already_acknowledged = queued_action_acknowledged_;
+    queued_action_acknowledged_ = false;
+    action_transactions_.Activate(queued.id, queued.mission, queued.action);
+    current_action_ = queued.action;
+    active_target_yaw_deg_ = queued.effective_target_yaw_deg;
+    try {
+      if (!queued.program && !NeedsArmTransition(queued.action)) {
+        if (!already_acknowledged)
+          PublishActionStatus(queued.id, vision::msg::CommandStatus::ACK);
+        PublishActionStatus(queued.id, vision::msg::CommandStatus::DONE);
+        action_transactions_.CompleteActive();
+        current_action_ = 0;
+        active_target_yaw_deg_ = 0;
+      } else {
+        if (!StartMissionProgram(queued.program, queued.mission, queued.action)) {
+          AbortPlayback("Queued action start failed: " + p2p_player_->Error());
+          return;
+        }
+        if (!already_acknowledged)
+          PublishActionStatus(queued.id, vision::msg::CommandStatus::ACK);
+      }
+    } catch (const std::exception &e) {
+      AbortPlayback("Queued action transition failed: " + std::string(e.what()));
+      return;
+    }
+    motion_in_progress_ = action_transactions_.active_id != 0;
+  }
+
+  // 몸 목표 계산 → 카메라 목표 계산 → 한 패킷으로 합쳐 전송 → READY/DONE 처리 순서.
+  void MotionLoop() {
+    if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ && !camera_motion_->Active() &&
+        !camera_arm_tween_.Active() && !elbow_tween_.Active() && scan_elbow_stage_ == ScanElbowStage::kIdle)
+      return;
+    const auto now = std::chrono::steady_clock::now();
+    StartQueuedAction(now); // 시스템 시각 변경의 영향을 받지 않는 주기 기준
+    // gap_ms는 타이머 콜백 사이의 간격이다. 모터 패킷 사이의 간격을 직접 측정한 값은 아니다.
+    const double gap_ms = std::chrono::duration<double, std::milli>(now - last_motion_tick_at_).count();
+    last_motion_tick_at_ = now;
+    if (gap_ms > 40.0) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "Motion update delayed by %.1f ms; preserving interpolation steps", gap_ms);
+    }
+    // next_write_at_ 이전에는 전송하지 않는다. 몸/카메라가 공통으로 20 ms 간격을 지킨다.
+    if (now < next_write_at_)
+      return;
+    // body_command: player가 이번 호출에서 만든 전체 모터의 목표 tick(ID → tick).
+    // 비어 있으면 이번 호출에서는 몸 목표 패킷을 새로 만들지 않았다는 뜻이다.
+    P2PMotionPlayer::RawPositions body_command;
+    // body_result: 몸 모션의 재생 상태이며, 목표 위치 데이터인 body_command와 구분한다.
+    // kIdle=재생 없음, kRunning=이동/유지 진행 중(새 목표가 없을 수도 있음),
+    // kFinished=마지막 이동/유지 완료, kError=오류로 중단해야 함.
+    // Update()는 목표를 계산하고, 실제 모터 전송은 아래 SyncWriteRawPositions()가 담당한다.
+    const auto body_result = (startup_pose_in_progress_ || motion_in_progress_)
+                                 ? p2p_player_->Update(&body_command, now)
+                                 : P2PMotionPlayer::UpdateResult::kIdle;
+    if (body_result == P2PMotionPlayer::UpdateResult::kError) {
+      AbortPlayback(p2p_player_->Error());
+      return;
+    }
+    const bool startup_completed = startup_pose_in_progress_ && body_result == P2PMotionPlayer::UpdateResult::kFinished;
+    // 시작 자세가 끝나면 FORWARD를 전송·유지한 뒤 구독을 연다.
+    // 이후 몸 JSON에 머리 tick이 있어도 Merge()가 이 기본 자세로 덮어쓴다.
+    if (startup_completed)
+      camera_motion_->HoldForward();
+    P2PMotionPlayer::RawPositions arm_command;
+    if (camera_arm_tween_.Active())
+      camera_arm_tween_.Sample(arm_command, now);
+    if (elbow_tween_.Active())
+      elbow_tween_.Sample(arm_command, now);
+    if (scan_elbow_stage_ == ScanElbowStage::kExtending && !elbow_tween_.Active()) {
+      // Start head scan only after the last arm-extension command is ready.
+      camera_motion_->StartScan(scan_left_, scan_yaw_deg_, scan_move_sec_, scan_hold_sec_, scan_return_sec_,
+                                last_sent_positions_, now, scan_goal_view_);
+      scan_elbow_stage_ = ScanElbowStage::kScanning;
+    }
+    // camera_result: Idle=재생 없음, Running=다음 단계/안정화 대기,
+    // Command=새 카메라 목표 계산됨, Verify=encoder 도착 확인 대기.
+    const auto camera_result = camera_motion_->Update(now);
+    if (camera_motion_->ScanActive() && camera_transactions_.active_id != 0) {
+      vision::msg::CameraScanStatus scan;
+      scan.command_id = camera_transactions_.active_id;
+      scan.phase = static_cast<std::uint8_t>(camera_motion_->ScanState());
+      scan.commanded_yaw_deg = camera_motion_->ScanCommandedYawDeg();
+      camera_scan_status_pub_->publish(scan);
+    }
+    // camera_command는 위치 데이터가 아니라 "카메라 목표를 전송해야 하는가"라는 bool이다.
+    // 시작 자세 완료 시 FORWARD 유지 목표도 이 경로로 한 번 전송한다.
+    const bool camera_command = startup_completed || camera_result == motion_executor::CameraMotion::Result::Command;
+    if (!body_command.empty() || camera_command || !arm_command.empty()) {
+      // command는 최종 전송용 전체 목표다. 몸 목표가 없으면 마지막 전체 목표를 복사해
+      // 몸 자세를 유지하면서 카메라 관절만 바꾼다.
+      auto command = body_command.empty() ? last_sent_positions_ : body_command;
+      try {
+        // 시작 시 FORWARD 또는 이후 카메라 명령의 yaw/pitch 목표를 덮어쓴다.
+        // 카메라 DONE 뒤에도 그 자세를 유지한다.
+        if (!shoot_pose_in_progress_)
+          camera_motion_->Merge(command);
+        const bool special = motion_in_progress_ && (!UsesOutwardArmPose(current_action_) || shoot_pose_in_progress_);
+        if (line_arm_config_.enabled && !special && !startup_pose_in_progress_) {
+          const auto targets = CameraArmTargets();
+          for (const auto &item : targets)
+            command[item.first] = item.second;
+        }
+        // Tween samples override regular JSON while moving. Never
+        // override the arms in special PICK/HURDLE/SHOOT motions.
+        if (!special)
+          for (const auto &item : arm_command)
+            command[item.first] = item.second;
+        // write_started/written_at: SDK 전송 호출의 시작/반환 시각. 실제 관절 도착 시각은 아니다.
+        const auto write_started = std::chrono::steady_clock::now();
+        // 몸과 카메라 Goal Position을 쓰는 단일 전송 지점.
+        dxl_->SyncWriteRawPositions(command);
+        const auto written_at = std::chrono::steady_clock::now();
+        // 전송 호출 성공 뒤에만 캐시를 갱신한다. 다음 카메라 이동/몸 유지의 기준이 된다.
+        last_sent_positions_ = std::move(command);
+        // 전송 시작 + 20 ms와 전송 종료 중 늦은 시각까지 기다려 몰아서 전송하지 않는다.
+        next_write_at_ = std::max(write_started + motion_executor::kPeriod, written_at);
+        // 실제 전송 시각을 각 재생기에 알려 다음 보간 단계의 마감 시각을 맞춘다.
+        if (!body_command.empty())
+          p2p_player_->OnCommandWritten(write_started, written_at);
+        if (camera_command)
+          camera_motion_->OnCommandWritten(write_started, written_at);
+      } catch (const std::exception &e) {
+        AbortPlayback(e.what());
+        return;
+      }
+    }
+    // Legacy 11/12/13, 21..25 and LINE units 32..34 send READY.
+    // Existing 10/26/27 remain non-READY actions.
+    // Queue admission depends only on the currently executing READY action.
+    if (motion_in_progress_ && !action_transactions_.ready_sent &&
+        p2p_player_->IsNearCompletion(ready_lead_sec_, std::chrono::steady_clock::now()) &&
+        action_transactions_.MarkReady()) {
+      PublishActionStatus(action_transactions_.active_id, vision::msg::CommandStatus::READY);
+    }
+    // End-of-playback is not arrival. Read only the two camera encoders,
+    // at most every 100 ms with a bounded 5 ms timeout per motor.
+    if (camera_result == motion_executor::CameraMotion::Result::Verify && !camera_arm_tween_.Active() &&
+        now >= next_camera_verify_at_) {
+      next_camera_verify_at_ = now + 100ms;
+      const auto target = camera_motion_->TargetPose();
+      try {
+        const motion_executor::CameraPose measured{dxl_->ReadRawPosition(camera_config_.yaw_id, 5.0),
+                                                   dxl_->ReadRawPosition(camera_config_.pitch_id, 5.0)};
+        if (camera_motion_->ConfirmArrival(measured)) {
+          if (scan_elbow_stage_ == ScanElbowStage::kScanning && !scan_elbow_home_ticks_.empty()) {
+            P2PMotionPlayer::RawPositions targets;
+            double minimum = 0.0;
+            for (const auto &pair : scan_elbow_home_ticks_) {
+              targets[pair.first] = pair.second;
+              minimum = std::max(minimum,
+                                 std::abs(last_sent_positions_.at(pair.first) - pair.second) * 360.0 / 4096.0 / 60.0);
             }
-            return;
+            elbow_tween_.Start(last_sent_positions_, targets, std::max(curve_scan_elbow_duration_sec_, minimum), now);
+            scan_elbow_stage_ = ScanElbowStage::kRestoring;
+          } else {
+            if (scan_elbow_stage_ == ScanElbowStage::kScanning)
+              scan_elbow_stage_ = ScanElbowStage::kIdle;
+            RCLCPP_INFO(get_logger(), "[CAMERA] DONE id=%llu target=(%d,%d) measured=(%d,%d)",
+                        static_cast<unsigned long long>(camera_transactions_.active_id), target.yaw, target.pitch,
+                        measured.yaw, measured.pitch);
+            PublishCameraStatus(camera_transactions_.active_id, vision::msg::CommandStatus::DONE);
+            camera_transactions_.CompleteActive();
+          }
+        } else {
+          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+                               "[CAMERA] waiting for encoder arrival id=%llu target=(%d,%d) measured=(%d,%d); no DONE",
+                               static_cast<unsigned long long>(camera_transactions_.active_id), target.yaw,
+                               target.pitch, measured.yaw, measured.pitch);
         }
-        const bool scan=req==vision::msg::CameraCommand::SCAN_LEFT ||
-                        req==vision::msg::CameraCommand::SCAN_RIGHT ||
-                        req==vision::msg::CameraCommand::LINE_SCAN_LEFT ||
-                        req==vision::msg::CameraCommand::LINE_SCAN_RIGHT ||
-                        req==vision::msg::CameraCommand::GOAL_SCAN_LEFT ||
-                        req==vision::msg::CameraCommand::GOAL_SCAN_RIGHT;
-        if(scan && (message->scan_max_yaw_deg<1 || message->scan_max_yaw_deg>90 ||
-                    !std::isfinite(message->scan_move_sec) ||
-                    !std::isfinite(message->scan_hold_sec) ||
-                    !std::isfinite(message->scan_return_sec) ||
-                    message->scan_move_sec<=0.0 || message->scan_hold_sec<0.0 ||
-                    message->scan_return_sec<=0.0)) {
-            RCLCPP_WARN(get_logger(),"Invalid curve scan timing/angle");
-            return;
-        }
-        if (!scan) try { camera_config_.Target(req); }
-        catch (const std::exception& e) {
-            RCLCPP_WARN(get_logger(), "Camera request rejected: %s", e.what());
-            return;
-        }
-        using motion_executor::Admission;
-        // 카메라는 별도 중복 기록을 사용하며, 이동 중인 새 ID를 대기열에 넣거나 선점하지 않는다.
-        const auto admission = camera_transactions_.Evaluate(message->command_id);
-        if (admission == Admission::ActiveDuplicate) {
-            PublishCameraStatus(message->command_id, vision::msg::CommandStatus::ACK);
-            return;
-        }
-        if (admission == Admission::CompletedDuplicate) {
-            PublishCameraStatus(message->command_id, vision::msg::CommandStatus::DONE);
-            return;
-        }
-        if (scan_elbow_stage_!=ScanElbowStage::kIdle ||
-            (scan && (motion_in_progress_ || queued_action_))) {
-            RCLCPP_WARN(get_logger(),"Camera command rejected while scan arms/body busy");
-            return;
-        }
-        if (admission != Admission::Start || shoot_pose_in_progress_) {
-            RCLCPP_WARN(get_logger(), "Camera command rejected (zero ID or busy): id=%llu",
-                        static_cast<unsigned long long>(message->command_id));
-            return;
-        }
-        try {
-            // 시작 자세 이동 때 저장한 마지막 전송 목표를 카메라의 출발점으로 사용한다.
-            // 추가 encoder 읽기 통신을 하지 않는다. 이 값은 실제 측정 위치가 아니라 목표 위치다.
-            const auto now=std::chrono::steady_clock::now();
-            if(scan) {
-                const bool line_scan=req==vision::msg::CameraCommand::LINE_SCAN_LEFT ||
-                                     req==vision::msg::CameraCommand::LINE_SCAN_RIGHT;
-                scan_goal_view_=req==vision::msg::CameraCommand::GOAL_SCAN_LEFT ||
-                                req==vision::msg::CameraCommand::GOAL_SCAN_RIGHT;
-                scan_left_=req==vision::msg::CameraCommand::SCAN_LEFT ||
-                           req==vision::msg::CameraCommand::LINE_SCAN_LEFT ||
-                           req==vision::msg::CameraCommand::GOAL_SCAN_LEFT;
-                scan_yaw_deg_=static_cast<int>(message->scan_max_yaw_deg);
-                scan_move_sec_=message->scan_move_sec;
-                scan_hold_sec_=message->scan_hold_sec;
-                scan_return_sec_=message->scan_return_sec;
-                scan_elbow_home_ticks_.clear();
-                P2PMotionPlayer::RawPositions targets;
-                double minimum=0.0;
-                // BALL: one side; LINE: both sides; GOAL: no elbow movement.
-                for (int id : {17,18}) {
-                    const bool extend=line_scan ||
-                        (!scan_goal_view_ && (scan_left_ ? id==17 : id==18));
-                    if(!extend) continue;
-                    const int home=last_sent_positions_.at(id);
-                    const int sign=id==17 ? +1 : -1;
-                    const int offset=static_cast<int>(std::lround(
-                        curve_scan_elbow_angle_deg_*4096.0/360.0));
-                    const int target=home+sign*offset;
-                    if(target<0 || target>4095)
-                        throw std::invalid_argument("scan elbow target outside 0..4095");
-                    scan_elbow_home_ticks_[id]=home;
-                    targets[id]=target;
-                    minimum=std::max(minimum,std::abs(target-home)*360.0/4096.0/60.0);
-                }
-                if(targets.empty()) {
-                    camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
-                        scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,true);
-                    scan_elbow_stage_=ScanElbowStage::kScanning;
-                } else {
-                    elbow_tween_.Start(last_sent_positions_,targets,
-                        std::max(curve_scan_elbow_duration_sec_,minimum),now);
-                    scan_elbow_stage_=ScanElbowStage::kExtending;
-                }
-            } else {
-                camera_motion_->Start(req,last_sent_positions_,now);
-                camera_arm_forward_=req==vision::msg::CameraCommand::FORWARD ||
-                    req==vision::msg::CameraCommand::BALL_VIEW_LINE;
-                const bool special=motion_in_progress_ &&
-                    (!UsesOutwardArmPose(current_action_) || shoot_pose_in_progress_);
-                if(line_arm_config_.enabled && !special) {
-                    const auto targets=CameraArmTargets();
-                    double minimum=0.0;
-                    for(const auto& item:targets) minimum=std::max(minimum,
-                        std::abs(item.second-last_sent_positions_.at(item.first))*
-                        360.0/4096.0/60.0);
-                    camera_arm_tween_.Start(last_sent_positions_,targets,
-                        std::max(camera_config_.move_sec,minimum),now);
-                }
-            }
-        } catch (const std::exception& e) {
-            RCLCPP_ERROR(get_logger(), "Camera start failed, no ACK: %s", e.what());
-            return;
-        }
-        camera_transactions_.active_id = message->command_id;
-        next_camera_verify_at_={};
-        const auto target=camera_motion_->TargetPose();
-        RCLCPP_INFO(get_logger(),"[CAMERA] ACK id=%llu request=%u target=(%d,%d) tolerance=%.1f%%",
-            static_cast<unsigned long long>(message->command_id),unsigned(req),
-            target.yaw,target.pitch,100*camera_config_.position_tolerance_ratio);
-        PublishCameraStatus(message->command_id, vision::msg::CommandStatus::ACK);
-        EnsureMotionLoop();
+      } catch (const std::exception &e) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "[CAMERA] encoder read failed id=%llu: %s; no DONE",
+                             static_cast<unsigned long long>(camera_transactions_.active_id), e.what());
+      }
     }
-
-    // 유휴 상태에서 꺼져 있던 타이머를 다시 켠다. 이미 동작 중이면 주기를 재시작하지 않는다.
-    void EnsureMotionLoop()
-    {
-        if (motion_loop_timer_->is_canceled()) {
-            last_motion_tick_at_ = std::chrono::steady_clock::now();
-            motion_loop_timer_->reset();
-        }
+    if (scan_elbow_stage_ == ScanElbowStage::kRestoring && !elbow_tween_.Active()) {
+      PublishCameraStatus(camera_transactions_.active_id, vision::msg::CommandStatus::DONE);
+      camera_transactions_.CompleteActive();
+      scan_elbow_stage_ = ScanElbowStage::kIdle;
+      scan_elbow_home_ticks_.clear();
     }
-
-    // 준비/전송 오류 시 몸·카메라 재생과 대기열을 정리한다. 완료되지 않았으므로 DONE은 보내지 않는다.
-    // 이 함수는 재생 상태를 중단하는 것이며 모터 Torque OFF를 수행하지 않는다.
-    void AbortPlayback(const std::string& reason)
-    {
-        // 상태를 지우기 전에 실패한 활성/예약/카메라 ID와 시작 자세 여부를 남긴다.
-        RCLCPP_ERROR(get_logger(),
-            "Playback stopped without DONE: action_id=%llu queued_id=%llu camera_id=%llu action=%u startup=%d reason=%s",
-            static_cast<unsigned long long>(action_transactions_.active_id),
-            static_cast<unsigned long long>(action_transactions_.queued_id),
-            static_cast<unsigned long long>(camera_transactions_.active_id),
-            static_cast<unsigned int>(current_action_),
-            static_cast<int>(startup_pose_in_progress_), reason.c_str());
-        p2p_player_->Stop();
-        camera_motion_->Abort(last_sent_positions_);
-        // BALL_VIEW and BALL_VIEW_LINE share identical head targets but
-        // intentionally use DIFFERENT shoulder poses. Infer the recovered
-        // arm policy from the last successful shoulder goals, never from
-        // head pitch (which cannot distinguish the two views).
-        if (last_sent_positions_.count(15) && last_sent_positions_.count(16)) {
-            const auto distance_squared=[&](int target_15,int target_16) {
-                const double d15=static_cast<double>(last_sent_positions_.at(15))-target_15;
-                const double d16=static_cast<double>(last_sent_positions_.at(16))-target_16;
-                return d15*d15+d16*d16;
-            };
-            const auto outward=line_arm_config_.Targets();
-            camera_arm_forward_=
-                distance_squared(outward.at(15),outward.at(16)) <=
-                distance_squared(line_arm_config_.reference_15,line_arm_config_.reference_16);
-        }
-        camera_arm_tween_.Cancel();
-        elbow_tween_.Cancel();
-        scan_elbow_stage_=ScanElbowStage::kIdle;
-        action_transactions_.Abort();
-        queued_action_.reset();
-        queued_action_acknowledged_=false;
-        walk_hold_.Reset();
-         camera_transactions_.active_id = 0;
+    if (body_result == P2PMotionPlayer::UpdateResult::kFinished) {
+      if (startup_pose_in_progress_) {
         startup_pose_in_progress_ = false;
-        shoot_pose_in_progress_ = false;
+        current_action_ = 0;
+        CreateCommandSubscriptions();
+      } else {
+        if (shoot_pose_in_progress_) {
+          shoot_pose_in_progress_ = false;
+          // Keep the head ticks reached by the combined interpolation;
+          // later body JSON must not restore the previous FORWARD hold.
+          camera_motion_->HoldPose(
+              {last_sent_positions_.at(camera_config_.yaw_id), last_sent_positions_.at(camera_config_.pitch_id)});
+        }
+        const auto completed_id = action_transactions_.active_id; // 방금 끝난 몸 명령의 ID
+        // A의 DONE을 먼저 보낸 뒤, 이미 ACK한 대기 동작 B를 활성 동작으로 올린다.
+        PublishActionStatus(completed_id, vision::msg::CommandStatus::DONE);
+        walk_hold_.Complete(current_action_, now);
+        action_transactions_.CompleteActive();
         motion_in_progress_ = false;
         current_action_ = 0;
         active_target_yaw_deg_ = 0;
-        motion_loop_timer_->cancel();
+        StartQueuedAction(now);
+      }
     }
-
-    void StartQueuedAction(std::chrono::steady_clock::time_point now) {
-        if (!queued_action_ || action_transactions_.active_id != 0 || walk_hold_.Waiting(now)) return;
-        auto queued = std::move(*queued_action_);
-        queued_action_.reset();
-        const bool already_acknowledged = queued_action_acknowledged_;
-        queued_action_acknowledged_ = false;
-        action_transactions_.Activate(queued.id, queued.mission, queued.action);
-        current_action_ = queued.action;
-        active_target_yaw_deg_ = queued.effective_target_yaw_deg;
-        try {
-            if (!queued.program && !NeedsArmTransition(queued.action)) {
-                if (!already_acknowledged) PublishActionStatus(queued.id, vision::msg::CommandStatus::ACK);
-                PublishActionStatus(queued.id, vision::msg::CommandStatus::DONE);
-                action_transactions_.CompleteActive();
-                current_action_ = 0;
-                active_target_yaw_deg_ = 0;
-            } else {
-                if (!StartMissionProgram(queued.program,queued.mission,queued.action)) {
-                    AbortPlayback("Queued action start failed: " + p2p_player_->Error());
-                    return;
-                }
-                if (!already_acknowledged) PublishActionStatus(queued.id, vision::msg::CommandStatus::ACK);
-            }
-        } catch (const std::exception& e) {
-            AbortPlayback("Queued action transition failed: " + std::string(e.what()));
-            return;
-        }
-        motion_in_progress_ = action_transactions_.active_id != 0;
+    // 시작 자세/몸/카메라가 모두 유휴 상태일 때만 타이머를 끈다.
+    if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ && !camera_motion_->Active() &&
+        !camera_arm_tween_.Active() && !elbow_tween_.Active() && scan_elbow_stage_ == ScanElbowStage::kIdle) {
+      motion_loop_timer_->cancel();
     }
+  }
 
-    // 몸 목표 계산 → 카메라 목표 계산 → 한 패킷으로 합쳐 전송 → READY/DONE 처리 순서.
-    void MotionLoop()
-    {
-        if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ &&
-            !camera_motion_->Active() && !camera_arm_tween_.Active() &&
-            !elbow_tween_.Active() && scan_elbow_stage_==ScanElbowStage::kIdle) return;
-        const auto now = std::chrono::steady_clock::now();
-        StartQueuedAction(now);  // 시스템 시각 변경의 영향을 받지 않는 주기 기준
-        // gap_ms는 타이머 콜백 사이의 간격이다. 모터 패킷 사이의 간격을 직접 측정한 값은 아니다.
-        const double gap_ms = std::chrono::duration<double, std::milli>(now - last_motion_tick_at_).count();
-        last_motion_tick_at_ = now;
-        if (gap_ms > 40.0) {
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                "Motion update delayed by %.1f ms; preserving interpolation steps", gap_ms);
-        }
-        // next_write_at_ 이전에는 전송하지 않는다. 몸/카메라가 공통으로 20 ms 간격을 지킨다.
-        if (now < next_write_at_) return;
-        // body_command: player가 이번 호출에서 만든 전체 모터의 목표 tick(ID → tick).
-        // 비어 있으면 이번 호출에서는 몸 목표 패킷을 새로 만들지 않았다는 뜻이다.
-        P2PMotionPlayer::RawPositions body_command;
-        // body_result: 몸 모션의 재생 상태이며, 목표 위치 데이터인 body_command와 구분한다.
-        // kIdle=재생 없음, kRunning=이동/유지 진행 중(새 목표가 없을 수도 있음),
-        // kFinished=마지막 이동/유지 완료, kError=오류로 중단해야 함.
-        // Update()는 목표를 계산하고, 실제 모터 전송은 아래 SyncWriteRawPositions()가 담당한다.
-        const auto body_result = (startup_pose_in_progress_ || motion_in_progress_)
-            ? p2p_player_->Update(&body_command, now) : P2PMotionPlayer::UpdateResult::kIdle;
-        if (body_result == P2PMotionPlayer::UpdateResult::kError) {
-            AbortPlayback(p2p_player_->Error());
-            return;
-        }
-        const bool startup_completed = startup_pose_in_progress_ &&
-            body_result == P2PMotionPlayer::UpdateResult::kFinished;
-        // 시작 자세가 끝나면 FORWARD를 전송·유지한 뒤 구독을 연다.
-        // 이후 몸 JSON에 머리 tick이 있어도 Merge()가 이 기본 자세로 덮어쓴다.
-        if (startup_completed) camera_motion_->HoldForward();
-        P2PMotionPlayer::RawPositions arm_command;
-        if(camera_arm_tween_.Active()) camera_arm_tween_.Sample(arm_command,now);
-        if(elbow_tween_.Active()) elbow_tween_.Sample(arm_command,now);
-        if(scan_elbow_stage_==ScanElbowStage::kExtending && !elbow_tween_.Active()) {
-            // Start head scan only after the last arm-extension command is ready.
-            camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
-                scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_);
-            scan_elbow_stage_=ScanElbowStage::kScanning;
-        }
-        // camera_result: Idle=재생 없음, Running=다음 단계/안정화 대기,
-        // Command=새 카메라 목표 계산됨, Verify=encoder 도착 확인 대기.
-        const auto camera_result = camera_motion_->Update(now);
-        if(camera_motion_->ScanActive() && camera_transactions_.active_id!=0) {
-            vision::msg::CameraScanStatus scan;
-            scan.command_id=camera_transactions_.active_id;
-            scan.phase=static_cast<std::uint8_t>(camera_motion_->ScanState());
-            scan.commanded_yaw_deg=camera_motion_->ScanCommandedYawDeg();
-            camera_scan_status_pub_->publish(scan);
-        }
-        // camera_command는 위치 데이터가 아니라 "카메라 목표를 전송해야 하는가"라는 bool이다.
-        // 시작 자세 완료 시 FORWARD 유지 목표도 이 경로로 한 번 전송한다.
-        const bool camera_command = startup_completed ||
-            camera_result == motion_executor::CameraMotion::Result::Command;
-        if (!body_command.empty() || camera_command || !arm_command.empty()) {
-            // command는 최종 전송용 전체 목표다. 몸 목표가 없으면 마지막 전체 목표를 복사해
-            // 몸 자세를 유지하면서 카메라 관절만 바꾼다.
-            auto command = body_command.empty() ? last_sent_positions_ : body_command;
-            try {
-                // 시작 시 FORWARD 또는 이후 카메라 명령의 yaw/pitch 목표를 덮어쓴다.
-                // 카메라 DONE 뒤에도 그 자세를 유지한다.
-                if (!shoot_pose_in_progress_) camera_motion_->Merge(command);
-                const bool special=motion_in_progress_ &&
-                    (!UsesOutwardArmPose(current_action_) || shoot_pose_in_progress_);
-                if(line_arm_config_.enabled && !special && !startup_pose_in_progress_) {
-                    const auto targets=CameraArmTargets();
-                    for(const auto& item:targets) command[item.first]=item.second;
-                }
-                // Tween samples override regular JSON while moving. Never
-                // override the arms in special PICK/HURDLE/SHOOT motions.
-                if(!special)
-                    for(const auto& item:arm_command) command[item.first]=item.second;
-                // write_started/written_at: SDK 전송 호출의 시작/반환 시각. 실제 관절 도착 시각은 아니다.
-                const auto write_started = std::chrono::steady_clock::now();
-                // 몸과 카메라 Goal Position을 쓰는 단일 전송 지점.
-                dxl_->SyncWriteRawPositions(command);
-                const auto written_at = std::chrono::steady_clock::now();
-                // 전송 호출 성공 뒤에만 캐시를 갱신한다. 다음 카메라 이동/몸 유지의 기준이 된다.
-                last_sent_positions_ = std::move(command);
-                // 전송 시작 + 20 ms와 전송 종료 중 늦은 시각까지 기다려 몰아서 전송하지 않는다.
-                next_write_at_ = std::max(write_started + motion_executor::kPeriod, written_at);
-                // 실제 전송 시각을 각 재생기에 알려 다음 보간 단계의 마감 시각을 맞춘다.
-                if (!body_command.empty()) p2p_player_->OnCommandWritten(write_started, written_at);
-                if (camera_command) camera_motion_->OnCommandWritten(write_started, written_at);
-            } catch (const std::exception& e) {
-                AbortPlayback(e.what());
-                return;
-            }
-        }
-        // Legacy 11/12/13, 21..25 and LINE units 32..34 send READY.
-        // Existing 10/26/27 remain non-READY actions.
-        // Queue admission depends only on the currently executing READY action.
-        if (motion_in_progress_ && !action_transactions_.ready_sent &&
-            p2p_player_->IsNearCompletion(ready_lead_sec_, std::chrono::steady_clock::now()) &&
-            action_transactions_.MarkReady()) {
-            PublishActionStatus(action_transactions_.active_id, vision::msg::CommandStatus::READY);
-        }
-        // End-of-playback is not arrival. Read only the two camera encoders,
-        // at most every 100 ms with a bounded 5 ms timeout per motor.
-        if (camera_result == motion_executor::CameraMotion::Result::Verify &&
-            !camera_arm_tween_.Active() && now>=next_camera_verify_at_) {
-            next_camera_verify_at_=now+100ms;
-            const auto target=camera_motion_->TargetPose();
-            try {
-                const motion_executor::CameraPose measured{
-                    dxl_->ReadRawPosition(camera_config_.yaw_id,5.0),
-                    dxl_->ReadRawPosition(camera_config_.pitch_id,5.0)};
-                if (camera_motion_->ConfirmArrival(measured)) {
-                    if(scan_elbow_stage_==ScanElbowStage::kScanning &&
-                       !scan_elbow_home_ticks_.empty()) {
-                        P2PMotionPlayer::RawPositions targets;
-                        double minimum=0.0;
-                        for(const auto& pair:scan_elbow_home_ticks_) {
-                            targets[pair.first]=pair.second;
-                            minimum=std::max(minimum,
-                                std::abs(last_sent_positions_.at(pair.first)-pair.second)*
-                                360.0/4096.0/60.0);
-                        }
-                        elbow_tween_.Start(last_sent_positions_,targets,
-                            std::max(curve_scan_elbow_duration_sec_,minimum),now);
-                        scan_elbow_stage_=ScanElbowStage::kRestoring;
-                    } else {
-                    if(scan_elbow_stage_==ScanElbowStage::kScanning)
-                        scan_elbow_stage_=ScanElbowStage::kIdle;
-                    RCLCPP_INFO(get_logger(),"[CAMERA] DONE id=%llu target=(%d,%d) measured=(%d,%d)",
-                        static_cast<unsigned long long>(camera_transactions_.active_id),
-                        target.yaw,target.pitch,measured.yaw,measured.pitch);
-                    PublishCameraStatus(camera_transactions_.active_id, vision::msg::CommandStatus::DONE);
-                    camera_transactions_.CompleteActive();
-                    }
-                } else {
-                    RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),1000,
-                        "[CAMERA] waiting for encoder arrival id=%llu target=(%d,%d) measured=(%d,%d); no DONE",
-                        static_cast<unsigned long long>(camera_transactions_.active_id),
-                        target.yaw,target.pitch,measured.yaw,measured.pitch);
-                }
-            } catch (const std::exception& e) {
-                RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),1000,
-                    "[CAMERA] encoder read failed id=%llu: %s; no DONE",
-                    static_cast<unsigned long long>(camera_transactions_.active_id),e.what());
-            }
-        }
-        if (scan_elbow_stage_==ScanElbowStage::kRestoring && !elbow_tween_.Active()) {
-            PublishCameraStatus(camera_transactions_.active_id,
-                                vision::msg::CommandStatus::DONE);
-            camera_transactions_.CompleteActive();
-            scan_elbow_stage_=ScanElbowStage::kIdle;
-            scan_elbow_home_ticks_.clear();
-        }
-        if (body_result == P2PMotionPlayer::UpdateResult::kFinished) {
-            if (startup_pose_in_progress_) {
-                startup_pose_in_progress_ = false;
-                current_action_ = 0;
-                CreateCommandSubscriptions();
-            } else {
-                 if (shoot_pose_in_progress_) {
-                    shoot_pose_in_progress_=false;
-                    // Keep the head ticks reached by the combined interpolation;
-                    // later body JSON must not restore the previous FORWARD hold.
-                    camera_motion_->HoldPose({last_sent_positions_.at(camera_config_.yaw_id),
-                                              last_sent_positions_.at(camera_config_.pitch_id)});
-                 }
-                const auto completed_id = action_transactions_.active_id;  // 방금 끝난 몸 명령의 ID
-                // A의 DONE을 먼저 보낸 뒤, 이미 ACK한 대기 동작 B를 활성 동작으로 올린다.
-                PublishActionStatus(completed_id, vision::msg::CommandStatus::DONE);
-                walk_hold_.Complete(current_action_, now);
-                action_transactions_.CompleteActive();
-                motion_in_progress_ = false;
-                current_action_ = 0;
-                active_target_yaw_deg_ = 0;
-                StartQueuedAction(now);
-            }
-        }
-        // 시작 자세/몸/카메라가 모두 유휴 상태일 때만 타이머를 끈다.
-        if (!startup_pose_in_progress_ && !motion_in_progress_ && !queued_action_ &&
-            !camera_motion_->Active() && !camera_arm_tween_.Active() &&
-            !elbow_tween_.Active() && scan_elbow_stage_==ScanElbowStage::kIdle) {
-            motion_loop_timer_->cancel();
-        }
+  // 모터가 응답하지 않아도 재부팅/토크 ON을 자동으로 시도하지 않는다. 읽기와 기록만 수행한다.
+  void MotorHealthLoop() {
+    const auto now = std::chrono::steady_clock::now();
+    const bool moving = startup_pose_in_progress_ || motion_in_progress_ || camera_motion_->Active() ||
+                        camera_arm_tween_.Active() || elbow_tween_.Active();
+    // 다음 목표 전송 직전에는 진단을 미룬다. 전송 주기보다 짧은 timeout 예산을 확보한다.
+    if (moving && next_write_at_ - now < std::chrono::duration<double, std::milli>(health_timeout_ms_ + 2.0))
+      return;
+    const int id = Dxl::MotorIds()[health_index_++ % Dxl::MotorIds().size()];
+    MotorHealth health;
+    try {
+      health = dxl_->ReadMotorHealth(id, health_timeout_ms_);
+    } catch (const std::exception &e) {
+      health.id = id;
+      health.communication_error = e.what();
     }
-
-    // 모터가 응답하지 않아도 재부팅/토크 ON을 자동으로 시도하지 않는다. 읽기와 기록만 수행한다.
-    void MotorHealthLoop()
-    {
-        const auto now=std::chrono::steady_clock::now();
-        const bool moving=startup_pose_in_progress_ || motion_in_progress_ ||
-            camera_motion_->Active() || camera_arm_tween_.Active() || elbow_tween_.Active();
-        // 다음 목표 전송 직전에는 진단을 미룬다. 전송 주기보다 짧은 timeout 예산을 확보한다.
-        if (moving && next_write_at_-now < std::chrono::duration<double,std::milli>(health_timeout_ms_+2.0)) return;
-        const int id=Dxl::MotorIds()[health_index_++ % Dxl::MotorIds().size()];
-        MotorHealth health;
-        try { health=dxl_->ReadMotorHealth(id,health_timeout_ms_); }
-        catch (const std::exception& e) { health.id=id; health.communication_error=e.what(); }
-        const auto reason=health.Reason();
-        auto& state=health_states_[id];
-        state.failures=health.valid ? 0 : state.failures+1;
-        const bool recovered=reason.empty() && !state.reason.empty();
-        const bool changed=reason!=state.reason;
-        if (recovered || (!reason.empty() && (changed || now-state.last_logged>=5s))) {
-            std::ostringstream event;
-            const char* phase=startup_pose_in_progress_ ? "startup" : motion_in_progress_ ? "action" :
-                              camera_motion_->Active() ? "camera" : "idle";
-            const bool active=action_transactions_.active_id!=0;
-            event << std::fixed << std::setprecision(3) << "ros_time=" << get_clock()->now().seconds()
-                  << " event=" << (recovered ? "RECOVERED" : "FAULT") << " motor_id=" << id
-                  << " phase=" << phase << " mission=" << (active ? int(action_transactions_.active_mission) : 0)
-                  << " action=" << current_action_ << " action_id=" << action_transactions_.active_id
-                  << " last_mission=" << int(action_transactions_.active_mission)
-                  << " last_action=" << action_transactions_.active_action
-                  << " queued_id=" << action_transactions_.queued_id
-                  << " camera_id=" << camera_transactions_.active_id
-                  << " torque=" << health.torque << " hardware_error=" << health.hardware_error
-                  << " packet_error=" << health.packet_error
-                  << " voltage_V=" << (health.valid ? health.voltage_raw*0.1 : -1.0)
-                  << " temperature_C=" << health.temperature << " read_failures=" << state.failures
-                  << " reason=" << (recovered ? "진단 정상 복구" : reason);
-            if (recovered) RCLCPP_INFO(get_logger(), "%s",event.str().c_str());
-            else RCLCPP_ERROR(get_logger(), "%s",event.str().c_str());
-            if (health_log_) { health_log_ << event.str() << '\n'; health_log_.flush(); }
-            state.last_logged=now;
-        }
-        state.reason=reason;
-        const double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-now).count();
-        if (elapsed>health_timeout_ms_+2.0)
-            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-                                "Motor health read delayed %.1fms (ID %d)",elapsed,id);
+    const auto reason = health.Reason();
+    auto &state = health_states_[id];
+    state.failures = health.valid ? 0 : state.failures + 1;
+    const bool recovered = reason.empty() && !state.reason.empty();
+    const bool changed = reason != state.reason;
+    if (recovered || (!reason.empty() && (changed || now - state.last_logged >= 5s))) {
+      std::ostringstream event;
+      const char *phase = startup_pose_in_progress_  ? "startup"
+                          : motion_in_progress_      ? "action"
+                          : camera_motion_->Active() ? "camera"
+                                                     : "idle";
+      const bool active = action_transactions_.active_id != 0;
+      event << std::fixed << std::setprecision(3) << "ros_time=" << get_clock()->now().seconds()
+            << " event=" << (recovered ? "RECOVERED" : "FAULT") << " motor_id=" << id << " phase=" << phase
+            << " mission=" << (active ? int(action_transactions_.active_mission) : 0) << " action=" << current_action_
+            << " action_id=" << action_transactions_.active_id
+            << " last_mission=" << int(action_transactions_.active_mission)
+            << " last_action=" << action_transactions_.active_action << " queued_id=" << action_transactions_.queued_id
+            << " camera_id=" << camera_transactions_.active_id << " torque=" << health.torque
+            << " hardware_error=" << health.hardware_error << " packet_error=" << health.packet_error
+            << " voltage_V=" << (health.valid ? health.voltage_raw * 0.1 : -1.0)
+            << " temperature_C=" << health.temperature << " read_failures=" << state.failures
+            << " reason=" << (recovered ? "진단 정상 복구" : reason);
+      if (recovered)
+        RCLCPP_INFO(get_logger(), "%s", event.str().c_str());
+      else
+        RCLCPP_ERROR(get_logger(), "%s", event.str().c_str());
+      if (health_log_) {
+        health_log_ << event.str() << '\n';
+        health_log_.flush();
+      }
+      state.last_logged = now;
     }
+    state.reason = reason;
+    const double elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - now).count();
+    if (elapsed > health_timeout_ms_ + 2.0)
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "Motor health read delayed %.1fms (ID %d)", elapsed, id);
+  }
 
-    // 로그를 저장할 폴더와 CSV 파일을 준비하는 것
-    void OpenTorqueLogFile()
-    {
-        namespace fs = std::filesystem;
-        fs::create_directories(kTorqueLogDir);
-        const auto now = std::chrono::system_clock::now();  // 파일명에 넣을 실제 날짜/시각
-        const std::time_t now_c = std::chrono::system_clock::to_time_t(now);
-        std::tm tm_now = *std::localtime(&now_c);
-        std::ostringstream filename;
-        filename << kTorqueLogDir << "/leg_torque_"
-                 << std::put_time(&tm_now, "%Y%m%d_%H%M%S") << ".csv";
-        torque_log_stream_.open(filename.str(), std::ios::out | std::ios::trunc);
-        if (!torque_log_stream_.is_open()) return;
-        torque_log_stream_ << std::fixed << std::setprecision(6)
-            << "ros_time_sec,command,"
-            << "R0_torque_nm,R1_torque_nm,R2_torque_nm,R3_torque_nm,R4_torque_nm,R5_torque_nm,"
-            << "L0_torque_nm,L1_torque_nm,L2_torque_nm,L3_torque_nm,L4_torque_nm,L5_torque_nm,"
-            << "R0_current_mA,R1_current_mA,R2_current_mA,R3_current_mA,R4_current_mA,R5_current_mA,"
-            << "L0_current_mA,L1_current_mA,L2_current_mA,L3_current_mA,L4_current_mA,L5_current_mA\n";
-    }
+  // 로그를 저장할 폴더와 CSV 파일을 준비하는 것
+  void OpenTorqueLogFile() {
+    namespace fs = std::filesystem;
+    fs::create_directories(kTorqueLogDir);
+    const auto now = std::chrono::system_clock::now(); // 파일명에 넣을 실제 날짜/시각
+    const std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_now = *std::localtime(&now_c);
+    std::ostringstream filename;
+    filename << kTorqueLogDir << "/leg_torque_" << std::put_time(&tm_now, "%Y%m%d_%H%M%S") << ".csv";
+    torque_log_stream_.open(filename.str(), std::ios::out | std::ios::trunc);
+    if (!torque_log_stream_.is_open())
+      return;
+    torque_log_stream_ << std::fixed << std::setprecision(6) << "ros_time_sec,command,"
+                       << "R0_torque_nm,R1_torque_nm,R2_torque_nm,R3_torque_nm,R4_torque_nm,R5_torque_nm,"
+                       << "L0_torque_nm,L1_torque_nm,L2_torque_nm,L3_torque_nm,L4_torque_nm,L5_torque_nm,"
+                       << "R0_current_mA,R1_current_mA,R2_current_mA,R3_current_mA,R4_current_mA,R5_current_mA,"
+                       << "L0_current_mA,L1_current_mA,L2_current_mA,L3_current_mA,L4_current_mA,L5_current_mA\n";
+  }
 
-    // 전류를 읽고 추정 토크와 함께 CSV에 기록하는 보조 함수.
-    // 현재 main.cpp에는 이 함수의 호출이 없으므로 CSV는 헤더만 생성되고 주기 기록은 하지 않는다.
-    void LogLegJointTorqueStep()
-    {
-        if (!torque_log_stream_.is_open()) return;
-        const Eigen::VectorXd current_mA = dxl_->GetCurrent();  // 모터별 읽은 전류, 단위 mA
-        torque_log_stream_ << get_clock()->now().seconds() << "," << current_action_;
-        for (int i = 0; i < kLegJointCount; ++i)
-            torque_log_stream_ << "," << current_mA[i] * kTorquePerMilliAmp;
-        for (int i = 0; i < kLegJointCount; ++i)
-            torque_log_stream_ << "," << current_mA[i];
-        torque_log_stream_ << "\n";
-    }
+  // 전류를 읽고 추정 토크와 함께 CSV에 기록하는 보조 함수.
+  // 현재 main.cpp에는 이 함수의 호출이 없으므로 CSV는 헤더만 생성되고 주기 기록은 하지 않는다.
+  void LogLegJointTorqueStep() {
+    if (!torque_log_stream_.is_open())
+      return;
+    const Eigen::VectorXd current_mA = dxl_->GetCurrent(); // 모터별 읽은 전류, 단위 mA
+    torque_log_stream_ << get_clock()->now().seconds() << "," << current_action_;
+    for (int i = 0; i < kLegJointCount; ++i)
+      torque_log_stream_ << "," << current_mA[i] * kTorquePerMilliAmp;
+    for (int i = 0; i < kLegJointCount; ++i)
+      torque_log_stream_ << "," << current_mA[i];
+    torque_log_stream_ << "\n";
+  }
 
-    // 이름 끝의 '_'는 콜백 호출 사이에도 이 노드가 계속 보관하는 멤버 변수라는 표기다.
-    struct HealthState {
-        std::string reason;
-        unsigned int failures{0};
-        std::chrono::steady_clock::time_point last_logged{};
-    };
-    std::unordered_map<int,HealthState> health_states_;
-    std::size_t health_index_{0};
-    double health_timeout_ms_{5.0};
-    std::ofstream health_log_;
-    std::string health_log_path_;
-    rclcpp::TimerBase::SharedPtr health_timer_;
-    std::shared_ptr<Dxl> dxl_;                         // 모터 통신 객체: encoder 읽기와 목표 tick 쓰기
-    std::unique_ptr<P2PMotionPlayer> p2p_player_;      // 몸 JSON의 키프레임·보간·유지 시간을 관리하는 재생기
-    rclcpp::Publisher<vision::msg::CommandStatus>::SharedPtr action_status_pub_;  // 몸 ACK/READY/DONE 송신
-    rclcpp::Publisher<vision::msg::CommandStatus>::SharedPtr camera_status_pub_;
-    rclcpp::Publisher<vision::msg::CameraScanStatus>::SharedPtr camera_scan_status_pub_;  // 카메라 ACK/DONE 송신
-    rclcpp::Subscription<vision::msg::ActionCommand>::SharedPtr action_cmd_sub_; // 몸 명령 수신 연결
-    rclcpp::Subscription<vision::msg::ShootTuningPose>::SharedPtr shoot_pose_sub_;
-    rclcpp::Subscription<vision::msg::CameraCommand>::SharedPtr camera_cmd_sub_; // 카메라 명령 수신 연결
-    rclcpp::TimerBase::SharedPtr motion_loop_timer_;   // 1 ms마다 MotionLoop를 호출하는 ROS 타이머
-    std::chrono::steady_clock::time_point last_motion_tick_at_{}; // 직전 유효 콜백 시각: 지연 경고 계산용
-    std::ofstream torque_log_stream_;                 // 전류/추정 토크 CSV 출력 스트림
-    std::string asset_directory_;                     // motions/와 missions/가 들어 있는 기준 폴더
-    int32_t gripper_tick_{0}; // RECATCH 마지막 키프레임의 19번 목표
-    motion_executor::LineArmConfig line_arm_config_;   // 제외 action 외에 유지할 팔 목표 (기존 파라미터명 유지)
-    double arm_transition_sec_{1.0}; // Legacy declared parameter; no separate pre-action phase.
-    ArmTween camera_arm_tween_,elbow_tween_;
-    bool camera_arm_forward_{true};
-    enum class ScanElbowStage { kIdle, kExtending, kScanning, kRestoring };
-    ScanElbowStage scan_elbow_stage_{ScanElbowStage::kIdle};
-    P2PMotionPlayer::RawPositions scan_elbow_home_ticks_;
-    int scan_yaw_deg_{0};
-    bool scan_goal_view_{false};
-    bool scan_left_{true};
-    double scan_move_sec_{0.5},scan_hold_sec_{0.5},scan_return_sec_{0.5};
-    double curve_scan_elbow_angle_deg_{90.0},curve_scan_elbow_duration_sec_{1.5};
-    double turn_step_deg_{15.0};                      // 회전 JSON 1회당 계획상 회전각(도)
-    int max_turn_repetitions_{12};                     // 한 회전 요청의 최대 JSON 반복 횟수
-    int waist_motor_id_{12};                          // SHOOT 각도 offset을 적용할 허리 모터 ID
-    double waist_max_yaw_deg_{30.0};                   // 허리 회전 요청 제한: -이 값 ~ +이 값(도)
-    double waist_ticks_per_revolution_{4096.0};        // 허리 360도 회전에 대응하는 tick 수
-    int waist_yaw_direction_{1};                       // 허리 각도 → tick 변환 부호(+1 또는 -1)
-    bool waist_restore_after_shoot_{true};            // 던지기 후 적용한 허리 offset을 복원할지 여부
-    double startup_pose_duration_sec_{3.0};           // 시작 자세 이동 시간(초)
-    bool startup_pose_in_progress_{false};            // 명령 구독을 열기 전 시작 자세를 재생 중인지
-    bool motion_in_progress_{false};                  // Vision에서 받은 몸 모션을 실행 중인지(시작 자세와 구분)
-    bool shoot_pose_in_progress_{false};              // 고정 슈팅 자세가 머리까지 함께 보간하는 동안 카메라 덮어쓰기 금지
-    // READY 뒤 미리 ACK한 다음 몸 동작 한 개. 모터를 아직 움직이지 않고 준비 데이터를 보관한다.
-    struct QueuedAction {
-        std::uint64_t id;                             // 원래 ActionCommand.action_id: ACK/DONE 대응용
-        std::uint8_t mission;                         // 미션 종류: LINE 등 접수 조건 판단용
-        std::uint16_t action;                         // 동작 종류: JSON 매핑과 READY 지원 여부 판단용
-        int effective_target_yaw_deg;                 // 제한/반복 계산 뒤 계획한 각도(도)
-        std::optional<P2PMotionPlayer::PreparedProgram> program; // 0도 회전은 null, 실제 모션은 검증된 JSON
-    };
-    // 몸의 활성 ID, 대기 ID, READY 전송 여부, 최근 완료 ID 32개를 관리한다.
-    // ID 중복이면 재실행하지 않고 진행 중 명령에는 ACK, 완료 명령에는 DONE을 다시 보낸다.
-    motion_executor::ActionTransactions action_transactions_;
-    bool queued_action_acknowledged_{false};
-    motion_executor::WalkInterActionHold walk_hold_;
-    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr timing_parameter_callback_;
-    std::optional<QueuedAction> queued_action_;        // 비어 있으면 다음 동작 없음, 값이 있으면 1개 대기
-    motion_executor::CameraTransactions camera_transactions_; // 몸과 독립인 카메라 활성/완료 ID 기록
-    motion_executor::CameraConfig camera_config_;     // 카메라 모터 ID, 네 자세 tick, 이동/안정화 시간
-    std::chrono::steady_clock::time_point next_camera_verify_at_{};
-    std::unique_ptr<motion_executor::CameraMotion> camera_motion_; // 머리 보간 및 완료 후 자세 유지 상태
-    // 마지막으로 전송 호출에 성공한 전체 목표 tick. 실제 encoder 측정값과 구분해야 한다.
-    P2PMotionPlayer::RawPositions last_sent_positions_;
-    std::chrono::steady_clock::time_point next_write_at_{}; // 몸/카메라 공통으로 다음 전송이 허용되는 시각
-    double ready_lead_sec_{};                          // Shared YAML: line.walk.ready_lead_sec
-    std::uint16_t current_action_{0};                  // 현재 동작 종류(명령 고유 ID 아님), 0은 유휴 상태
-    int active_target_yaw_deg_{0};                     // 현재 계획한 각도 저장용; 이 값 자체가 모터를 제어하진 않음
+  // 이름 끝의 '_'는 콜백 호출 사이에도 이 노드가 계속 보관하는 멤버 변수라는 표기다.
+  struct HealthState {
+    std::string reason;
+    unsigned int failures{0};
+    std::chrono::steady_clock::time_point last_logged{};
+  };
+  std::unordered_map<int, HealthState> health_states_;
+  std::size_t health_index_{0};
+  double health_timeout_ms_{5.0};
+  std::ofstream health_log_;
+  std::string health_log_path_;
+  rclcpp::TimerBase::SharedPtr health_timer_;
+  std::shared_ptr<Dxl> dxl_;                    // 모터 통신 객체: encoder 읽기와 목표 tick 쓰기
+  std::unique_ptr<P2PMotionPlayer> p2p_player_; // 몸 JSON의 키프레임·보간·유지 시간을 관리하는 재생기
+  rclcpp::Publisher<vision::msg::CommandStatus>::SharedPtr action_status_pub_; // 몸 ACK/READY/DONE 송신
+  rclcpp::Publisher<vision::msg::CommandStatus>::SharedPtr camera_status_pub_;
+  rclcpp::Publisher<vision::msg::CameraScanStatus>::SharedPtr camera_scan_status_pub_; // 카메라 ACK/DONE 송신
+  rclcpp::Subscription<vision::msg::ActionCommand>::SharedPtr action_cmd_sub_;         // 몸 명령 수신 연결
+  rclcpp::Subscription<vision::msg::ShootTuningPose>::SharedPtr shoot_pose_sub_;
+  rclcpp::Subscription<vision::msg::CameraCommand>::SharedPtr camera_cmd_sub_; // 카메라 명령 수신 연결
+  rclcpp::TimerBase::SharedPtr motion_loop_timer_;              // 1 ms마다 MotionLoop를 호출하는 ROS 타이머
+  std::chrono::steady_clock::time_point last_motion_tick_at_{}; // 직전 유효 콜백 시각: 지연 경고 계산용
+  std::ofstream torque_log_stream_;                             // 전류/추정 토크 CSV 출력 스트림
+  std::string asset_directory_;                                 // motions/와 missions/가 들어 있는 기준 폴더
+  int32_t gripper_tick_{0};                                     // RECATCH 마지막 키프레임의 19번 목표
+  motion_executor::LineArmConfig line_arm_config_; // 제외 action 외에 유지할 팔 목표 (기존 파라미터명 유지)
+  double arm_transition_sec_{1.0};                 // Legacy declared parameter; no separate pre-action phase.
+  ArmTween camera_arm_tween_, elbow_tween_;
+  bool camera_arm_forward_{true};
+  enum class ScanElbowStage { kIdle, kExtending, kScanning, kRestoring };
+  ScanElbowStage scan_elbow_stage_{ScanElbowStage::kIdle};
+  P2PMotionPlayer::RawPositions scan_elbow_home_ticks_;
+  int scan_yaw_deg_{0};
+  bool scan_goal_view_{false};
+  bool scan_left_{true};
+  double scan_move_sec_{0.5}, scan_hold_sec_{0.5}, scan_return_sec_{0.5};
+  double curve_scan_elbow_angle_deg_{90.0}, curve_scan_elbow_duration_sec_{1.5};
+  double turn_step_deg_{15.0};                // 회전 JSON 1회당 계획상 회전각(도)
+  int max_turn_repetitions_{12};              // 한 회전 요청의 최대 JSON 반복 횟수
+  int waist_motor_id_{12};                    // SHOOT 각도 offset을 적용할 허리 모터 ID
+  double waist_max_yaw_deg_{30.0};            // 허리 회전 요청 제한: -이 값 ~ +이 값(도)
+  double waist_ticks_per_revolution_{4096.0}; // 허리 360도 회전에 대응하는 tick 수
+  int waist_yaw_direction_{1};                // 허리 각도 → tick 변환 부호(+1 또는 -1)
+  bool waist_restore_after_shoot_{true};      // 던지기 후 적용한 허리 offset을 복원할지 여부
+  double startup_pose_duration_sec_{3.0};     // 시작 자세 이동 시간(초)
+  bool startup_pose_in_progress_{false};      // 명령 구독을 열기 전 시작 자세를 재생 중인지
+  bool motion_in_progress_{false}; // Vision에서 받은 몸 모션을 실행 중인지(시작 자세와 구분)
+  bool shoot_pose_in_progress_{false}; // 고정 슈팅 자세가 머리까지 함께 보간하는 동안 카메라 덮어쓰기 금지
+  // READY 뒤 미리 ACK한 다음 몸 동작 한 개. 모터를 아직 움직이지 않고 준비 데이터를 보관한다.
+  struct QueuedAction {
+    std::uint64_t id;             // 원래 ActionCommand.action_id: ACK/DONE 대응용
+    std::uint8_t mission;         // 미션 종류: LINE 등 접수 조건 판단용
+    std::uint16_t action;         // 동작 종류: JSON 매핑과 READY 지원 여부 판단용
+    int effective_target_yaw_deg; // 제한/반복 계산 뒤 계획한 각도(도)
+    std::optional<P2PMotionPlayer::PreparedProgram> program; // 0도 회전은 null, 실제 모션은 검증된 JSON
+  };
+  // 몸의 활성 ID, 대기 ID, READY 전송 여부, 최근 완료 ID 32개를 관리한다.
+  // ID 중복이면 재실행하지 않고 진행 중 명령에는 ACK, 완료 명령에는 DONE을 다시 보낸다.
+  motion_executor::ActionTransactions action_transactions_;
+  bool queued_action_acknowledged_{false};
+  motion_executor::WalkInterActionHold walk_hold_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr timing_parameter_callback_;
+  std::optional<QueuedAction> queued_action_; // 비어 있으면 다음 동작 없음, 값이 있으면 1개 대기
+  motion_executor::CameraTransactions camera_transactions_; // 몸과 독립인 카메라 활성/완료 ID 기록
+  motion_executor::CameraConfig camera_config_; // 카메라 모터 ID, 네 자세 tick, 이동/안정화 시간
+  std::chrono::steady_clock::time_point next_camera_verify_at_{};
+  std::unique_ptr<motion_executor::CameraMotion> camera_motion_; // 머리 보간 및 완료 후 자세 유지 상태
+  // 마지막으로 전송 호출에 성공한 전체 목표 tick. 실제 encoder 측정값과 구분해야 한다.
+  P2PMotionPlayer::RawPositions last_sent_positions_;
+  std::chrono::steady_clock::time_point next_write_at_{}; // 몸/카메라 공통으로 다음 전송이 허용되는 시각
+  double ready_lead_sec_{};                               // Shared YAML: line.walk.ready_lead_sec
+  std::uint16_t current_action_{0}; // 현재 동작 종류(명령 고유 ID 아님), 0은 유휴 상태
+  int active_target_yaw_deg_{0}; // 현재 계획한 각도 저장용; 이 값 자체가 모터를 제어하진 않음
 };
 
-int main(int argc, char** argv)
-{
-    // ROS 초기화 → 노드 생성/시작 자세 재생 → 콜백·타이머 처리 → 종료 순서.
-    rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<MainNode>());
-    rclcpp::shutdown();
-    return 0;
+int main(int argc, char **argv) {
+  // ROS 초기화 → 노드 생성/시작 자세 재생 → 콜백·타이머 처리 → 종료 순서.
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<MainNode>());
+  rclcpp::shutdown();
+  return 0;
 }

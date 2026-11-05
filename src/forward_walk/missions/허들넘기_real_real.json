@@ -1,0 +1,20 @@
+{
+  "name": "허들넘기_real_real",
+  "motions": [
+    {
+      "filename": "허들_왼발만_수정4_초기X.json",
+      "keyframe_count": 6,
+      "name": "허들_왼발만_수정4_초기X",
+      "nominal_sec": 3,
+      "saved_at": "2026-11-06T00:42:18"
+    },
+    {
+      "filename": "허들_오른발만_수정_3_초기X.json",
+      "keyframe_count": 6,
+      "name": "허들_오른발만_수정_3_초기X",
+      "nominal_sec": 4,
+      "saved_at": "2026-11-06T00:43:58"
+    }
+  ],
+  "saved_at": "2026-11-06T00:44:25"
+}

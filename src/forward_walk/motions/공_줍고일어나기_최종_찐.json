@@ -1,5 +1,5 @@
 {
-  "name": "공_줍고일어나기_최종",
+  "name": "공_줍고일어나기_최종_찐",
   "motor_ids": [
     0,
     1,
@@ -29,10 +29,10 @@
   "baudrate": 4000000,
   "keyframes": [
     {
-      "duration_sec": 0.7,
+      "duration_sec": 1.5,
       "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 30,
+      "max_speed_deg_s": 100,
       "name": "앉기(real)",
       "positions": {
         "0": 2076,
@@ -93,10 +93,10 @@
       }
     },
     {
-      "duration_sec": 0.7,
+      "duration_sec": 0.3,
       "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 400,
+      "max_speed_deg_s": 500,
       "name": "잡기_최종전1",
       "positions": {
         "0": 2076,
@@ -125,7 +125,7 @@
       }
     },
     {
-      "duration_sec": 0.7,
+      "duration_sec": 0.5,
       "hold_sec": 0,
       "interpolation": "smoothstep",
       "max_speed_deg_s": 200,
@@ -157,7 +157,7 @@
       }
     },
     {
-      "duration_sec": 0.7,
+      "duration_sec": 0.5,
       "hold_sec": 0,
       "interpolation": "smoothstep",
       "max_speed_deg_s": 200,
@@ -189,7 +189,7 @@
       }
     },
     {
-      "duration_sec": 0.7,
+      "duration_sec": 0.3,
       "hold_sec": 0,
       "interpolation": "smoothstep",
       "max_speed_deg_s": 200,
@@ -221,7 +221,7 @@
       }
     },
     {
-      "duration_sec": 0.7,
+      "duration_sec": 0.3,
       "hold_sec": 0,
       "interpolation": "smoothstep",
       "max_speed_deg_s": 400,
@@ -253,10 +253,10 @@
       }
     },
     {
-      "duration_sec": 0.1,
+      "duration_sec": 0.3,
       "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 80,
+      "max_speed_deg_s": 400,
       "name": "재그립_벌리기",
       "positions": {
         "0": 2076,
@@ -288,7 +288,7 @@
       "duration_sec": 0.1,
       "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 200,
+      "max_speed_deg_s": 400,
       "name": "재그립_닫기",
       "positions": {
         "0": 2076,
@@ -349,10 +349,10 @@
       }
     },
     {
-      "duration_sec": 1,
-      "hold_sec": 0.2,
+      "duration_sec": 1.5,
+      "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 30,
+      "max_speed_deg_s": 100,
       "name": "pose_9",
       "positions": {
         "0": 2080,
@@ -381,5 +381,5 @@
       }
     }
   ],
-  "saved_at": "2026-10-14T00:21:44"
+  "saved_at": "2026-11-06T00:16:46"
 }
