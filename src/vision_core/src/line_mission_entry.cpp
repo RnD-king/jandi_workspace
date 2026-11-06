@@ -395,6 +395,7 @@ MissionFrameResult MissionController::StepPlannedLine(
           // Restore elbows ONCE at the end of all left/right scan pairs.
           scan.phase=Phase::kReleaseArms;
           scan.release_requested=false;
+          scan.release_seen_transition=false;
           scan.release_align_body=false;
         }
       }
