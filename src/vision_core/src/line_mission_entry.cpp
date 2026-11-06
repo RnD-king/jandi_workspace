@@ -404,6 +404,7 @@ MissionFrameResult MissionController::StepPlannedLine(
           input.camera_feedback.actual_mode==CameraMode::kForward) {
         scan.phase=Phase::kReleaseArms;
         scan.release_requested=false;
+        scan.release_seen_transition=false;
         scan.release_align_body=true;
       }
     } else if (scan.phase==Phase::kReleaseArms) {
@@ -416,7 +417,10 @@ MissionFrameResult MissionController::StepPlannedLine(
           camera=CameraRequest::kForward;
           scan.release_requested=true;
         }
-      } else if (input.camera_feedback.settled &&
+      } else if (!input.camera_feedback.settled ||
+                 input.camera_feedback.actual_mode==CameraMode::kTransition) {
+        scan.release_seen_transition=true;
+      } else if (scan.release_seen_transition && input.camera_feedback.settled &&
                  input.camera_feedback.actual_mode==CameraMode::kForward) {
         if (scan.release_align_body) scan.phase=Phase::kAlignBody;
         else { scan.phase=Phase::kIdle;line_state_=LineState::kFinalHold; }
