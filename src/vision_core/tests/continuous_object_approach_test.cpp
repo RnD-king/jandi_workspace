@@ -886,6 +886,59 @@ void NearLossBeforeLock(MissionType mission) {
   Check(d.out.active_mission==mission,"near recovery escaped to LINE after camera/observation changes");
 }
 
+// Initial near qualification is stationary; when its fresh 10-frame window
+// fails, only an off-center remembered BALL READY may trigger TWO walk-stance
+// turns. Both must DONE before any new stationary observation or camera change.
+void BallNearMissingReadyTurnsAndCentralFallback(bool side) {
+  auto c=Config();
+  c.ball.recovery_max_observations=5;
+  Driver d(c);
+  const double u=side ? 500.0 : 320.0;
+  d.in.ball_target=Target(u,100);
+  d.Warm();d.Block();d.Block();
+  d.in.ball_target=Target(u,260);
+  for(int n=0;n<3;++n)d.Tick();
+  Check(d.out.approach_near,"near loss turn fixture failed to latch near");
+  d.Tick({d.current,true,false,true});
+  d.Tick({d.current,true,true,false});
+  d.in.ball_target.reset();
+  bool saw_turn=false;
+  for(int n=0;n<25 && !saw_turn;++n) {
+    d.Tick({},.1);
+    if(d.out.command.action_id &&
+       d.out.command.action==MissionAction::kStepForwardRightOneHurdle)
+      saw_turn=true;
+  }
+  if(!side) {
+    Check(!saw_turn,"central remembered BALL READY caused a loss turn");
+  } else {
+    Check(saw_turn,"off-center remembered BALL READY did not cause first recovery turn");
+    const auto first=d.out.command.action_id;
+    d.Tick({first,true,false,false});
+    d.Tick({first,true,true,false});
+    Check(d.out.command.action==MissionAction::kStepForwardRightOneHurdle &&
+          d.out.command.action_id!=first,
+          "near loss turn sequence did not issue its second walk-stance turn");
+    const auto second=d.out.command.action_id;
+    d.Tick({second,true,false,false});
+    d.Tick({second,true,true,false});
+    Check(d.out.command.camera_request==CameraRequest::kNone,
+          "BALL near loss lowered camera before post-turn stationary observation");
+    for(int n=0;n<17;++n) {
+      d.Tick({},.1);
+      Check(d.out.command.action!=MissionAction::kStepForwardRightOneHurdle,
+            "BALL near loss repeated turns beyond exactly two");
+    }
+  }
+  bool down=false;
+  for(int n=0;n<100 && !down;++n) {
+    d.Tick({},.1);
+    down=d.out.active_mission==MissionType::kBall &&
+        d.out.command.camera_request==CameraRequest::kBallView;
+  }
+  Check(down,"near loss retries failed to enter the ordinary BALL_VIEW path");
+}
+
 void NearGoalPreemptsDepthWalk() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;
   c.initial_has_ball=c.goal_trial_start_goal=true;c.goal.lost_frames=3;
@@ -1233,6 +1286,8 @@ int main() {
   AcquiredGoalLossScansBeforeLineReturn();
   GoalEdgeTenInFourRawBBox();
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
+  BallNearMissingReadyTurnsAndCentralFallback(false);
+  BallNearMissingReadyTurnsAndCentralFallback(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
   ReadyCenterAccumulator();InitialLineMeanProbeAfterIdentityExpiry();
   NearFinalActionSequence(150,true,true); NearFinalActionSequence(240,true,false);
