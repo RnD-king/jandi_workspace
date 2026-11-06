@@ -1094,8 +1094,15 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     result.display_guide=goal_guide;
     guide=goal_guide;
   } else if (i==0) {
-    const auto bounds=config_.ball.ApproachBounds(target->center_px.v,input.image_height);
-    guide=ObjectZoneGuide(*target,bounds.first,bounds.second,
+    // On the FIRST admission, use the weighted candidate history rather than
+    // a single last YOLO frame to select the initial 32/33/36 zone. Once an
+    // object-owned READY exists, that later measured mean takes priority.
+    auto steering_target=*target;
+    if(continuous_.blocks==0 && continuous_.last_ready_center)
+      steering_target.center_px=*continuous_.last_ready_center;
+    const auto bounds=config_.ball.ApproachBounds(
+        steering_target.center_px.v,input.image_height);
+    guide=ObjectZoneGuide(steering_target,bounds.first,bounds.second,
                           cfg.steering_deadband_deg,input.image_width);
   }
   result.guide=guide;
