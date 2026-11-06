@@ -208,8 +208,19 @@ void FinishProbe(Driver& d) {
   d.Tick({d.current,true,true,false});d.current=second;
   for(int i=0;i<12;++i)d.Tick();
   d.Tick({d.current,true,false,true});
-  Check(d.out.command.action_id==d.current,
-        "probe reserved a successor before its actual DONE");
+  const bool return_to_line=d.out.approach_mission==MissionType::kBall &&
+      d.out.remembered_line_score.has_value();
+  if(return_to_line) {
+    // BALL's failed recovery unit must reserve exactly one FLOOR-LINE unit
+    // at READY; the successor is not allowed to count toward BALL lock.
+    const auto next=d.out.command.action_id;
+    Check(next && next!=d.current && LinePlan::IsUnit(d.out.command.action),
+          "BALL probe failed to reserve remembered floor LINE at READY");
+    d.Tick({next,true,false,false}); // Queue ACK, not physical motion DONE.
+  } else {
+    Check(d.out.command.action_id==d.current,
+          "HURDLE/GOAL probe unexpectedly reserved a successor at READY");
+  }
   d.Tick({d.current,true,true,false});
 }
 void SoftLoss(int blocks) {
