@@ -593,6 +593,7 @@ void NearAndIdentity() {
         " action="+std::to_string(static_cast<int>(d.out.command.action))+
         " action_id="+std::to_string(d.out.command.action_id)+
         " phase="+std::to_string(static_cast<int>(d.out.command.control_phase))+
+        " mission_phase="+std::to_string(d.out.command.mission_phase)+
         " mission="+std::to_string(static_cast<int>(d.out.active_mission))+
         " observing="+std::to_string(d.out.post_motion_observing)+
         " camera_request="+std::to_string(static_cast<int>(d.out.command.camera_request))+
