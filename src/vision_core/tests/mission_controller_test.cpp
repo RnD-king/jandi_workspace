@@ -37,6 +37,96 @@ static ObjectTarget Ball(double u_norm, double v_norm) {
   target.confidence = 1.0;
   return target;
 }
+// LINE recovery must scan LEFT then RIGHT without an intervening elbow
+// restoration. After both scans, an explicit FORWARD request waits for the
+// camera/arm transport transition and real DONE before FINAL_HOLD.
+static void TestLineScanReleaseAfterBothDirections() {
+  auto config=LoadDefaultAlgorithmConfig();
+  config.enable_ball=config.enable_goal=config.enable_hurdle=false;
+  config.curve_search.enabled=false;
+  config.transition_settle_sec=0.0;
+  config.post_motion_observation_sec=.1; // Strictly positive per config validation.
+  config.line_recovery.observation_sec=.2;
+  config.line_recovery.scan_max_pairs=1;
+  MissionController controller(config);
+  double now=0;
+  auto frame=[&]() {
+    auto input=Frame(now+=.1);
+    input.line_centers.clear();
+    return input;
+  };
+  auto result=controller.Step(frame());
+  bool left=false;
+  for(int i=0;i<30 && !left;++i) {
+    result=controller.Step(frame());
+    left=result.command.camera_request==CameraRequest::kLineScanLeft;
+  }
+  assert(left);
+  {
+    auto input=frame();
+    input.camera_feedback={CameraMode::kTransition,false};
+    input.camera_scan.phase=1;
+    result=controller.Step(input);
+    assert(result.command.action==MissionAction::kNone);
+  }
+  {
+    auto input=frame();
+    input.camera_feedback={CameraMode::kForward,true};
+    input.camera_scan.phase=4;
+    input.camera_scan.finished=true;
+    result=controller.Step(input);
+    assert(result.command.camera_request!=CameraRequest::kForward);
+  }
+  bool right=false;
+  for(int i=0;i<15 && !right;++i) {
+    result=controller.Step(frame());
+    right=result.command.camera_request==CameraRequest::kLineScanRight;
+    assert(result.command.camera_request!=CameraRequest::kForward);
+  }
+  assert(right);
+  {
+    auto input=frame();
+    input.camera_feedback={CameraMode::kTransition,false};
+    input.camera_scan.phase=1;
+    result=controller.Step(input);
+    assert(result.command.action==MissionAction::kNone);
+  }
+  {
+    auto input=frame();
+    input.camera_feedback={CameraMode::kForward,true};
+    input.camera_scan.phase=4;
+    input.camera_scan.finished=true;
+    result=controller.Step(input);
+    assert(result.command.camera_request!=CameraRequest::kForward);
+  }
+  // No additional LINE_SCAN: an explicit FORWARD request now releases arms.
+  bool release=false;
+  for(int i=0;i<10 && !release;++i) {
+    result=controller.Step(frame());
+    release=result.command.camera_request==CameraRequest::kForward;
+    assert(result.command.camera_request!=CameraRequest::kLineScanLeft);
+  }
+  assert(release);
+  // Do not accept the stale FORWARD feedback from the preceding LINE scan.
+  result=controller.Step(frame());
+  assert(result.command.action==MissionAction::kNone && result.line_in_recovery);
+  {
+    auto input=frame();input.camera_feedback={CameraMode::kTransition,false};
+    result=controller.Step(input);
+    assert(result.command.action==MissionAction::kNone);
+  }
+  {
+    auto input=frame();input.camera_feedback={CameraMode::kForward,true};
+    result=controller.Step(input);
+    assert(result.line_in_recovery && result.command.action==MissionAction::kNone);
+  }
+  for(int i=0;i<3;++i) {
+    result=controller.Step(frame());
+    assert(result.command.action==MissionAction::kNone &&
+           result.command.camera_request!=CameraRequest::kForward);
+  }
+}
+
 static void TestNearBallTurnThenDown() {
   auto config=LoadDefaultAlgorithmConfig(); config.transition_settle_sec=0;
   config.enable_ball=true;
@@ -145,6 +235,7 @@ static void TestLiveBallPickupTrapezoidTuning() {
 }
 
 int main() {
+  TestLineScanReleaseAfterBothDirections();
   TestLiveBallPickupTrapezoidTuning();
   TestNearBallTurnThenDown();
   auto c=LoadDefaultAlgorithmConfig(); c.transition_settle_sec=0;

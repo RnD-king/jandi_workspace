@@ -58,6 +58,19 @@ void MissionController::ReleaseContinuousApproach() {
   }
 }
 
+// The failed pre-lock BALL probe may have already reserved a floor-LINE
+// successor at READY. Preserve its action ID and LinePlan block on DONE.
+void MissionController::FinishPrelockProbeToLine() {
+  if (continuous_.mission!=MissionType::kBall) return;
+  continuous_={};approach_evidence_={};
+  ball_candidate_tracker_.Reset();ball_association_tracker_.Reset();
+  ball_target_id_=0;ball_target_locked_=ball_reacquiring_=false;
+  ball_controller_.ClearEntryEvidence();
+  last_ready_line_guide_.reset();
+  line_stability_history_.clear();
+  // Keep actual floor-LINE direction, queued LINE block and transport IDs.
+}
+
 void MissionController::EnterContinuousMission(const MissionFrameInput& input,bool lost) {
   const auto route=continuous_;
   // Retain the raw last target only for identity/metadata; recovery direction
@@ -680,7 +693,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         GoalNearDistanceSample(input.backboard_center_depth_m,input.goal_pose,
                                config_.goal.approach_short_z_m),windows[i]);
     if (continuous_.probe_active)
-      line_plan_.Abort(); // Issued IDs drain; only unissued probe repeats stop.
+      line_plan_.TruncateUnissuedProbeRepeats(continuous_.epoch); // Retain this unit's READY.
     continuous_.missing=0;continuous_.loss_pending=false;
     continuous_.probe_active=false;continuous_.probe_used=false;
   }
@@ -882,6 +895,17 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       continuous_.near_motion_id=0;
       continuous_.near_motion={};
       if (continuous_.near_actions.empty()) {
+        if (continuous_.near_reobserve_after_turns) {
+          // LOST near BALL: both in-place turns have physically DONE.
+          // Reacquire fresh stationary samples; never lower the camera yet.
+          continuous_.near_reobserve_after_turns=false;
+          continuous_.near_observing=false;
+          continuous_.near_qualified=false;
+          continuous_.near_observation_hits.clear();
+          continuous_.near_sum_u=continuous_.near_sum_v=0.0;
+          continuous_.near_valid_count=0;
+          return result;
+        }
         // Fixed turn/forward chain is complete; only now change the camera.
         EnterContinuousMission(input,false);result.entered=true;
         return result;
@@ -922,14 +946,39 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       return result;
     if (!continuous_.near_qualified) {
       ++continuous_.near_attempts;
+      // Use the existing, already time-weighted last qualified BALL READY
+      // center WITHOUT averaging the partially failed stationary window.
+      // Recover at most once: two same-direction WALK turns, each real DONE,
+      // followed by one fresh 1-second observation. A central remembered
+      // center retains the original stationary retry path.
+      if (i==0 && continuous_.near_turn_batches==0 &&
+          continuous_.last_ready_center && continuous_.last &&
+          input.allow_new_commands && input.allow_new_body_actions) {
+        const auto center=*continuous_.last_ready_center;
+        const auto bounds=config_.ball.ApproachBounds(center.v,input.image_height);
+        const MissionAction turn=center.u<bounds.first ? MissionAction::kTurnLeftInPlace :
+            center.u>bounds.second ? MissionAction::kStepForwardRightOneHurdle :
+            MissionAction::kNone;
+        if (turn!=MissionAction::kNone) {
+          continuous_.near_turn_batches=1;
+          continuous_.near_reobserve_after_turns=true;
+          continuous_.near_actions.clear();
+          continuous_.near_actions.push_back(turn);
+          continuous_.near_motion={turn,ActionCategory::kLocomotion,0,false};
+          result.action=continuous_.near_motion;
+          result.near_final_action=true;
+          continuous_.near_observation_hits.clear();
+          continuous_.near_sum_u=continuous_.near_sum_v=0.0;
+          continuous_.near_valid_count=0;
+          return result;
+        }
+      }
       const int limit=i==0 ? config_.ball.recovery_max_observations :
           i==1 ? config_.goal.recovery_max_observations : config_.hurdle.recovery_max_observations;
       if (continuous_.near_attempts>=limit) {
-        if (i==0 && continuous_.near_turn_batches>0) {
-          // Never lower the camera after a failed post-turn observation.
-          ReleaseContinuousApproach();
-          line_state_=LineState::kFinalHold;
-        } else if (input.allow_new_commands && input.allow_new_body_actions) {
+        if (input.allow_new_commands && input.allow_new_body_actions) {
+          // A completed turn recovery uses the same final path as center
+          // loss: enter BALL_VIEW; do not FINAL_HOLD merely for turning.
           EnterContinuousMission(input,true);result.entered=true;
         }
       } else {
@@ -992,6 +1041,27 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       line_plan_.LastUnit(input.delivery_feedback.action_id) &&
       (input.delivery_feedback.ready || input.delivery_feedback.done);
   if (!target) {
+    if (i==0 && probe_final_edge && !continuous_.locked &&
+        continuous_.probe_active && !continuous_.probe_return_to_line) {
+      // The sole recovery unit is at READY. Return to the last known
+      // REAL floor LINE direction without waiting for its physical DONE.
+      // Virtual BALL steering is never used as the floor fallback.
+      std::optional<double> remembered=last_line_score_;
+      if (!remembered && line.guide.valid) {
+        const auto floor=line_p2p_controller_.Compute(line.guide);
+        if (floor.direction!=CruiseDirection::kNone) remembered=floor.error;
+      }
+      if (remembered && std::isfinite(*remembered)) {
+        const auto deadband=config_.line_p2p.steering_deadband;
+        const MissionAction cruise=*remembered < -deadband ? MissionAction::kStepForwardLeft :
+            *remembered > deadband ? MissionAction::kStepForwardRight :
+            MissionAction::kStepForwardFour;
+        result.action={cruise,ActionCategory::kLocomotion,0,false};
+        result.resume_line_at_ready=true;
+        result.hold=false;
+        return result;
+      }
+    }
     // Missing frames inside a walking block retain the last path. Only that
     // block's READY evidence may declare loss and stop its successor.
     LineGuide saved_guide;
@@ -1024,8 +1094,15 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     result.display_guide=goal_guide;
     guide=goal_guide;
   } else if (i==0) {
-    const auto bounds=config_.ball.ApproachBounds(target->center_px.v,input.image_height);
-    guide=ObjectZoneGuide(*target,bounds.first,bounds.second,
+    // On the FIRST admission, use the weighted candidate history rather than
+    // a single last YOLO frame to select the initial 32/33/36 zone. Once an
+    // object-owned READY exists, that later measured mean takes priority.
+    auto steering_target=*target;
+    if(continuous_.blocks==0 && continuous_.last_ready_center)
+      steering_target.center_px=*continuous_.last_ready_center;
+    const auto bounds=config_.ball.ApproachBounds(
+        steering_target.center_px.v,input.image_height);
+    guide=ObjectZoneGuide(steering_target,bounds.first,bounds.second,
                           cfg.steering_deadband_deg,input.image_width);
   }
   result.guide=guide;

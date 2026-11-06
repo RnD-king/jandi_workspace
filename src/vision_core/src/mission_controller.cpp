@@ -1,4 +1,5 @@
 #include "vision_core/mission_controller.hpp"
+#include <cstdio>
 
 #include <algorithm>
 #include <cmath>
@@ -1397,7 +1398,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       (input.camera_feedback.actual_mode == CameraMode::kDown ||
        input.camera_feedback.actual_mode == CameraMode::kBallView ||
        input.camera_feedback.actual_mode == CameraMode::kGoal);
-  if (camera_settle_edge)
+  // BALL_VIEW ends with an encoder-confirmed camera DONE. Its DOWN search
+  // begins moving immediately; unlike GOAL and HURDLE, do not add another
+  // transition-settle period (nor the generic 1s camera observation).
+  const bool immediate_ball_down = camera_settle_edge &&
+      active_mission_ == MissionType::kBall &&
+      input.camera_feedback.actual_mode == CameraMode::kBallView &&
+      ball_result_.mode == BallMode::kWaitCameraDown;
+  if (camera_settle_edge && !immediate_ball_down)
     settle_until_sec_ = std::max(settle_until_sec_,
                                  input.now_sec + config_.transition_settle_sec);
   previous_camera_settled_ = input.camera_feedback.settled;
@@ -1451,7 +1459,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         config_.post_motion_observation_sec > 0.0 && camera_settle_edge &&
         !input.camera_scan.finished &&
         !(active_mission_==MissionType::kHurdle &&
-          hurdle_controller_.ContinuousDownCameraWait()))
+          hurdle_controller_.ContinuousDownCameraWait()) &&
+        !(active_mission_==MissionType::kBall &&
+          ball_result_.mode==BallMode::kWaitCameraDown))
       BeginDecisionObservation(input.now_sec, active_mission_, true, {});
     if (!decision_observation_active_ && !applied_object_ready_mean &&
         !(goal_edge_guard_.phase==GoalEdgeGuard::Phase::kTurning &&
@@ -1596,6 +1606,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         matching_feedback && input.delivery_feedback.done;
     action_feedback.action_active =
         last_command_.action_id != 0 && !action_feedback.action_done;
+    // In the CAMERA-DONE -> first BALL_DOWN_SEARCH frame, last_command_
+    // can still retain the predecessor's sensory ID even though the
+    // transport has already consumed its real DONE. That stale ID is NOT
+    // an active walking action and must not suppress the first search step.
+    if(active_mission_==MissionType::kBall &&
+       ball_result_.mode==BallMode::kDownSearch &&
+       !command_coordinator_.HasPendingAction())
+      action_feedback.action_active=false;
   }
   action_feedback.observation_complete =
       observation_finished || applied_object_ready_mean;
@@ -2671,12 +2689,28 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
     if(entry_track) {
       prepared.ball_entry_center_u=entry_track->MeanU();
       if(entry_track->detection_index) {
+        // The robot may still be walking during first admission. Match the
+        // READY policy: recent valid detections receive weights from 1 to 3.
         Point2 sum{};
-        int valid=0;
-        for(const auto& point:entry_track->positions) if(point) {
-          sum.u+=point->u;sum.v+=point->v;++valid;
+        double weight_sum=0.0;
+        const auto size=entry_track->positions.size();
+        for(std::size_t index=0;index<size;++index) {
+          const auto& point=entry_track->positions[index];
+          if(!point)continue;
+          // FIRST admission can also occur while the executor is stationary.
+          // Use time-biased weights only for a physically ongoing LINE unit;
+          // stopped candidate observations keep the ordinary arithmetic mean.
+          const bool moving_line=command_coordinator_.HasPendingAction() &&
+              LinePlan::IsUnit(last_command_.action) &&
+              !input.delivery_feedback.done;
+          const double weight=moving_line ?
+              1.0+2.0*static_cast<double>(index)/
+                  static_cast<double>(std::max<std::size_t>(1,size-1)) : 1.0;
+          sum.u+=weight*point->u;sum.v+=weight*point->v;
+          weight_sum+=weight;
         }
-        if(valid>0) prepared.ball_entry_mean_center=Point2{sum.u/valid,sum.v/valid};
+        if(weight_sum>0.0)
+          prepared.ball_entry_mean_center=Point2{sum.u/weight_sum,sum.v/weight_sum};
       }
     }
   } else if(config_.ball_candidate_tracking.enabled && candidate_.mission==MissionType::kBall) {

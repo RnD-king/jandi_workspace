@@ -55,12 +55,12 @@ for action, filename in {
     'STEP_FORWARD_LEFT_ONE': 'missions/좌회전전진_1회.json',
     'STEP_FORWARD_RIGHT_ONE_HUDDLE': 'motions/우회전_최종.json',
     'TURN_LEFT_IN_PLACE': 'motions/좌회전_최종__.json',
-    'PICK_BALL': 'motions/공_줍고일어나기_최종.json',
+    'PICK_BALL': 'motions/공_줍고일어나기_최종_찐.json',
     'PICK_BALL_RE': 'motions/공_줍고일어나기_최종_재그립제외.json',
     'PICK_BALL_RE_STAND': 'motions/공_줍고일어나기_최종_재그립제외_일어나기.json',
     'STEP_FORWARD_FIVE': 'missions/연속걷기.json',
     'DEFAULT_POSE_MODE': 'motions/미세보행_초기자세가기_수정2.json',
-    'HUDDLE': 'missions/허들넘기_real.json',
+    'HUDDLE': 'missions/허들넘기_real_real.json',
     'DEFAULT_POSITION': 'motions/초기자세_다소곳_.json',
 }.items():
     match = re.search(r'case vision::msg::ActionCommand::'+action+r':\s*return "([^"]+)";', main)
@@ -97,14 +97,14 @@ checks['active multi-step missions retain the original one-step'] = all(
         json.loads((root / 'missions' / mission).read_text())['motions'])
     for mission in ('직진_3걸음_수정.json', '직진_4걸음_수정.json', '연속걷기.json')
 )
-hurdle = json.loads((root / 'missions/허들넘기_real.json').read_text())
+hurdle = json.loads((root / 'missions/허들넘기_real_real.json').read_text())
 checks['hurdle replaces only left-foot motion'] = [
     motion['filename'] for motion in hurdle['motions']
-] == ['허들_왼발만_수정2.json', '허들_오른발만_수정_2.json']
+] == ['허들_왼발만_수정4_초기X.json', '허들_오른발만_수정_3_초기X.json']
 checks['new motion assets exist'] = all(
     (root / 'motions' / name).is_file() for name in (
-        one_step, solo_step, '허들_왼발만_수정2.json',
-        '미세보행_초기자세가기_수정2.json', '허들_오른발만_수정_2.json')
+        one_step, solo_step, '허들_왼발만_수정4_초기X.json',
+        '미세보행_초기자세가기_수정2.json', '허들_오른발만_수정_3_초기X.json')
 )
 # Installed JSON contents/references are also validated by motion_assets_check.
 gripper_switch = main.split('static bool UsesFixedGripperPose', 1)[1].split('default:', 1)[0]
@@ -135,6 +135,20 @@ checks['preserved camera calibration'] = all(
         '"camera_goal_yaw_tick", 2054', '"camera_goal_pitch_tick", 966'
     )
 )
+# LINE loss head scan: LEFT/RIGHT scans keep elbows extended across pairs.
+# Only the explicit FORWARD request restores elbows, and camera DONE waits
+# for both the physical head encoders and the elbow interpolation to finish.
+checks['LINE scan elbows persist across LEFT/RIGHT'] = all((
+    'line_scan_elbows_held_=true;' in main,
+    'if (line_scan_elbows_held_ && !line_scan)' in main,
+    '&& !line_scan_elbows_held_' in main,
+    'scan_elbow_home_ticks_.clear();' in main,
+))
+checks['LINE scan FORWARD restores elbows before camera DONE'] = all((
+    'if (line_scan_elbows_held_) {' in main,
+    'elbow_tween_.Start(last_sent_positions_,restore,' in main,
+    '!camera_arm_tween_.Active() && !elbow_tween_.Active()' in main,
+))
 for label, passed in checks.items():
     print(('PASS ' if passed else 'FAIL ')+label)
 if not all(checks.values()):

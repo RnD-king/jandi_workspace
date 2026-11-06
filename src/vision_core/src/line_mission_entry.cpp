@@ -140,8 +140,16 @@ MissionFrameResult MissionController::StepPlannedLine(
     }
     if (automatic_approach && block.owner && block.owner==continuous_.epoch) {
       if (block.probe) {
-        continuous_.probe_active=false;
-        continuous_.loss_pending=true;
+        if (continuous_.mission==MissionType::kBall &&
+            continuous_.probe_return_to_line) {
+          FinishPrelockProbeToLine(); // Keep the already-ACKed LINE successor.
+        } else if (continuous_.probe_active) {
+          // The probe finished with no rediscovery and no LINE successor.
+          continuous_.probe_active=false;
+          continuous_.loss_pending=true;
+        }
+        // A rediscovered BALL turned the probe into its final issued unit.
+        // It is NOT a lock-qualified normal approach block.
         continue;
       } else if (block.object_qualified) {
         ++continuous_.blocks;
@@ -383,12 +391,39 @@ MissionFrameResult MissionController::StepPlannedLine(
         if(left) scan.phase=Phase::kPendingRight;
         else if(++scan.completed_pairs<config_.line_recovery.scan_max_pairs)
           scan.phase=Phase::kPendingLeft;
-        else { scan.phase=Phase::kIdle;line_state_=LineState::kFinalHold; }
+        else {
+          // Restore elbows ONCE at the end of all left/right scan pairs.
+          scan.phase=Phase::kReleaseArms;
+          scan.release_requested=false;
+          scan.release_seen_transition=false;
+          scan.release_align_body=false;
+        }
       }
     } else if (scan.phase==Phase::kReturnFound) {
       if (sf.finished && input.camera_feedback.settled &&
           input.camera_feedback.actual_mode==CameraMode::kForward) {
-        scan.phase=Phase::kAlignBody;
+        scan.phase=Phase::kReleaseArms;
+        scan.release_requested=false;
+        scan.release_seen_transition=false;
+        scan.release_align_body=true;
+      }
+    } else if (scan.phase==Phase::kReleaseArms) {
+      if (!scan.release_requested) {
+        // The executor retains both elbows between LINE_SCAN commands.
+        // FORWARD returns the head and explicitly restores both elbows;
+        // its DONE is delayed until the elbow interpolation is finished.
+        if (idle && commands_allowed && input.camera_feedback.settled &&
+            input.camera_feedback.actual_mode==CameraMode::kForward) {
+          camera=CameraRequest::kForward;
+          scan.release_requested=true;
+        }
+      } else if (!input.camera_feedback.settled ||
+                 input.camera_feedback.actual_mode==CameraMode::kTransition) {
+        scan.release_seen_transition=true;
+      } else if (scan.release_seen_transition && input.camera_feedback.settled &&
+                 input.camera_feedback.actual_mode==CameraMode::kForward) {
+        if (scan.release_align_body) scan.phase=Phase::kAlignBody;
+        else { scan.phase=Phase::kIdle;line_state_=LineState::kFinalHold; }
       }
     } else if (scan.phase==Phase::kAlignBody) {
       if (scan.align_action_id!=0 && input.delivery_feedback.done &&
@@ -712,9 +747,13 @@ MissionFrameResult MissionController::StepPlannedLine(
         std::optional<LineGuide> mean;
         if (pixel_owner) {
           const bool ball_owner=continuous_.mission==MissionType::kBall;
+          const bool rediscovered_ball_probe=ball_owner &&
+              line_plan_.IsProbe(id) && route.object_visible &&
+              !continuous_.probe_active;
           averaged_center=line_plan_.FinishObjectCenter(
               id,input.now_sec,ready_remaining,
-              !ball_owner, !ball_owner || line_plan_.ObjectQualified(id));
+              !ball_owner, !ball_owner || line_plan_.ObjectQualified(id) ||
+                  rediscovered_ball_probe);
           if (averaged_center && continuous_.last) {
             auto averaged_target=*continuous_.last;
             averaged_target.center_px=*averaged_center;
@@ -739,7 +778,9 @@ MissionFrameResult MissionController::StepPlannedLine(
         decision=mean.value_or(LineGuide{});
         if (automatic_approach && continuous_.mission!=MissionType::kNone) {
           if (line_plan_.ObjectOwned(id,continuous_.epoch)) {
-            if (!line_plan_.IsProbe(id) && line_plan_.ObjectQualified(id) &&
+            if (((!line_plan_.IsProbe(id) && line_plan_.ObjectQualified(id)) ||
+                 (line_plan_.IsProbe(id) && continuous_.mission==MissionType::kBall &&
+                  route.object_visible && !continuous_.probe_active)) &&
                 mean && mean->valid) {
               if (pixel_owner)
                 continuous_.last_ready_center=averaged_center;
@@ -753,11 +794,31 @@ MissionFrameResult MissionController::StepPlannedLine(
           }
         }
         output.line_decision_guide = decision;
+        if (automatic_approach && ready && pixel_owner &&
+            continuous_.mission==MissionType::kBall &&
+            line_plan_.IsProbe(id) && !continuous_.probe_active &&
+            route.object_visible && averaged_center && decision.valid) {
+          // A previously lost BALL was rediscovered during the one permitted
+          // probe. Its CURRENT, real-READY weighted mean selects the next
+          // 32/33/36 block. Do not force the generic floor LINE failure FSM
+          // to process a virtual BALL guide or delay this READY handoff.
+          const auto direction=SteeringDecision(decision).direction;
+          const MissionAction cruise=direction==CruiseDirection::kLeft ? MissionAction::kStepForwardLeft :
+              direction==CruiseDirection::kStraight ? MissionAction::kStepForwardFour :
+              direction==CruiseDirection::kRight ? MissionAction::kStepForwardRight :
+              MissionAction::kNone;
+          if(cruise!=MissionAction::kNone) {
+            route.action={cruise,ActionCategory::kLocomotion,0,false};
+            line_failure_pending_done_=false;
+            line_state_=LineState::kNormal;
+          }
+        }
         const bool object_loss=automatic_approach &&
             continuous_.mission!=MissionType::kNone &&
             line_plan_.ObjectOwned(id,continuous_.epoch) &&
             !line_plan_.IsProbe(id) && !line_plan_.ObjectQualified(id);
         if (!decision.valid && !idle && !object_loss &&
+            !route.resume_line_at_ready &&
             !(automatic_approach && continuous_.mission==MissionType::kHurdle &&
               continuous_.near))
           line_failure_pending_done_ = true;
@@ -767,8 +828,32 @@ MissionFrameResult MissionController::StepPlannedLine(
             !line_plan_.IsProbe(id) &&
             !line_plan_.ObjectQualified(id)) {
           continuous_.loss_pending=true;
-          line_plan_.Abort();
+          line_plan_.Abort(); // Real DONE still belongs to the original block.
           route.hold=true;
+          if (continuous_.mission==MissionType::kBall && ready &&
+              !continuous_.locked && !continuous_.near &&
+              !continuous_.probe_used &&
+              config_.object_approach.prelock_loss_extra_blocks>0 &&
+              continuous_.last_ready_center && continuous_.last) {
+            // A failed first BALL approach can queue exactly ONE 32/33/36
+            // search unit at A's READY rather than waiting idle after DONE.
+            auto remembered=*continuous_.last;
+            remembered.center_px=*continuous_.last_ready_center;
+            const auto bounds=config_.ball.ApproachBounds(
+                remembered.center_px.v,input.image_height);
+            const auto guide=ObjectZoneGuide(remembered,bounds.first,bounds.second,
+                config_.object_approach.steering_deadband_deg,input.image_width);
+            const auto dir=SteeringDecision(guide).direction;
+            const MissionAction cruise=dir==CruiseDirection::kLeft ? MissionAction::kStepForwardLeft :
+                dir==CruiseDirection::kStraight ? MissionAction::kStepForwardFour :
+                dir==CruiseDirection::kRight ? MissionAction::kStepForwardRight :
+                MissionAction::kNone;
+            if (cruise!=MissionAction::kNone) {
+              route.action={cruise,ActionCategory::kLocomotion,0,false};
+              route.probe_start=true;
+              route.hold=false;
+            }
+          }
         }
       }
       // HURDLE near votes only commit the NUMBER of remaining LINE units.
@@ -903,7 +988,8 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   if (LinePlan::IsCruise(request.action)) {
     if (input.allow_new_line_plan) request = line_plan_.Begin(request.action,
-        automatic_approach ? continuous_.epoch : 0,route.probe_start);
+        automatic_approach && !route.resume_line_at_ready ? continuous_.epoch : 0,
+        route.probe_start);
     else request = {};
   }
   if (!input.allow_new_commands) camera = CameraRequest::kNone;
@@ -953,6 +1039,9 @@ MissionFrameResult MissionController::StepPlannedLine(
             ? output.line_features.guide_reference_v_px
             : config_.object_approach.reference_v_ratio * input.image_height};
   }
+  if (route.resume_line_at_ready && command.command_type==CommandType::kAction &&
+      command.action_id && LinePlan::IsUnit(command.action))
+    continuous_.probe_return_to_line=true;
   if (route.probe_start) {
     if (command.command_type==CommandType::kAction && command.action_id &&
         LinePlan::IsUnit(command.action)) {

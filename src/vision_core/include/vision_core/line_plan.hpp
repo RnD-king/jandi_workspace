@@ -58,6 +58,9 @@ public:
   struct CompletedBlock { MissionAction cruise; std::uint64_t owner; bool object_qualified; bool probe; };
   std::vector<CompletedBlock> TakeCompletedBlocks();
   void Abort();
+  // On rediscovery during a pre-lock probe, retain the running unit and
+  // its READY edge but cancel only repeats not yet issued.
+  void TruncateUnissuedProbeRepeats(std::uint64_t owner);
   void ClearEvidence();
   void Reset();
   // Initial ACK is a start estimate. A queued first unit starts at its

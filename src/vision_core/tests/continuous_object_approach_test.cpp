@@ -79,8 +79,10 @@ struct Driver {
     Tick({current,true,true,false});current=second;
     for(int i=0;i<12;++i) Tick();
     Tick({current,true,false,true});
-    Check(out.command.action_id==current && !out.approach_sequence_qualified,
-          "unqualified object block queued a successor at final READY");
+    // An unqualified BALL block may now reserve exactly one remembered-direction
+    // pre-lock probe at final READY. Qualification must remain false.
+    Check(!out.approach_sequence_qualified,
+          "unqualified object block was incorrectly marked qualified");
     Tick({current,true,true,false});
   }
 };
@@ -206,8 +208,19 @@ void FinishProbe(Driver& d) {
   d.Tick({d.current,true,true,false});d.current=second;
   for(int i=0;i<12;++i)d.Tick();
   d.Tick({d.current,true,false,true});
-  Check(d.out.command.action_id==d.current,
-        "probe reserved a successor before its actual DONE");
+  const bool return_to_line=d.out.approach_mission==MissionType::kBall &&
+      d.out.remembered_line_score.has_value();
+  if(return_to_line) {
+    // BALL's failed recovery unit must reserve exactly one FLOOR-LINE unit
+    // at READY; the successor is not allowed to count toward BALL lock.
+    const auto next=d.out.command.action_id;
+    Check(next && next!=d.current && LinePlan::IsUnit(d.out.command.action),
+          "BALL probe failed to reserve remembered floor LINE at READY");
+    d.Tick({next,true,false,false}); // Queue ACK, not physical motion DONE.
+  } else {
+    Check(d.out.command.action_id==d.current,
+          "HURDLE/GOAL probe unexpectedly reserved a successor at READY");
+  }
   d.Tick({d.current,true,true,false});
 }
 void SoftLoss(int blocks) {
@@ -284,7 +297,16 @@ void ProbeRediscoveryAndLineMemory() {
     throw std::runtime_error("rediscovery did not replace an unissued probe repeat with normal approach: action="+
         std::to_string(static_cast<int>(recovered.out.command.action))+" id="+
         std::to_string(next)+" current="+std::to_string(recovered.current)+
-        " line_recovery="+std::to_string(recovered.out.line_in_recovery));
+        " line_recovery="+std::to_string(recovered.out.line_in_recovery)+
+        " probe_active="+std::to_string(recovered.out.approach_probe_active)+
+        " probe_used="+std::to_string(recovered.out.approach_probe_used)+
+        " loss_pending="+std::to_string(recovered.out.approach_loss_pending)+
+        " frames="+std::to_string(recovered.out.approach_sequence_frames)+
+        " hits="+std::to_string(recovered.out.approach_sequence_hits)+
+        " qualified="+std::to_string(recovered.out.approach_sequence_qualified)+
+        " blocks="+std::to_string(recovered.out.approach_completed_blocks)+
+        " guide="+std::to_string(recovered.out.line_decision_guide && recovered.out.line_decision_guide->valid)+
+        " mode="+std::to_string(static_cast<int>(recovered.out.command.control_phase)));
   recovered.Tick({next,true,false,false});
   recovered.Tick({recovered.current,true,true,false});
   Check(recovered.out.approach_completed_blocks==completed &&
@@ -557,6 +579,28 @@ void NearAndIdentity() {
   Check(d.out.active_mission==MissionType::kBall,"near object did not use the original near BALL controller");
   Check(d.out.ball.mode==BallMode::kWaitCameraDown && d.out.command.camera_request==CameraRequest::kBallView &&
       !d.out.remembered_line_score,"near BALL did not discard LINE memory and enter DOWN immediately");
+  // BALL_VIEW physical DONE must NOT introduce a generic extra 1s window.
+  // The first 10-step moving search should issue within the next two frames.
+  d.in.camera_feedback={CameraMode::kTransition,false};
+  d.Tick();
+  d.in.camera_feedback={CameraMode::kBallView,true};
+  d.in.ball_target.reset();
+  for(int n=0;n<3 && d.out.command.action!=MissionAction::kStepForwardOne;++n)d.Tick();
+  if (!(d.out.command.action==MissionAction::kStepForwardOne &&
+        !d.out.post_motion_observing))
+    throw std::runtime_error("BALL_VIEW camera DONE inserted a stationary 1s window before moving DOWN search: mode="+
+        std::to_string(static_cast<int>(d.out.ball.mode))+
+        " action="+std::to_string(static_cast<int>(d.out.command.action))+
+        " action_id="+std::to_string(d.out.command.action_id)+
+        " phase="+std::to_string(static_cast<int>(d.out.command.control_phase))+
+        " mission_phase="+std::to_string(d.out.command.mission_phase)+
+        " mission="+std::to_string(static_cast<int>(d.out.active_mission))+
+        " observing="+std::to_string(d.out.post_motion_observing)+
+        " camera_request="+std::to_string(static_cast<int>(d.out.command.camera_request))+
+        " planned_ball_action="+std::to_string(static_cast<int>(d.out.ball.action.action))+
+        " repeat_scope="+std::to_string(d.out.repeat_scope)+
+        " ball_active="+std::to_string(d.out.ball.active)+
+        " approach_missing="+std::to_string(d.out.approach_missing_frames));
   Driver replacement(Config());replacement.Warm();replacement.Block();replacement.Block();
   replacement.in.ball_track_id=99;
   for(int i=0;i<3;++i) replacement.Tick();
@@ -871,6 +915,59 @@ void NearLossBeforeLock(MissionType mission) {
   d.in.allow_new_body_actions=false;
   for(int i=0;i<30;++i)d.Tick();
   Check(d.out.active_mission==mission,"near recovery escaped to LINE after camera/observation changes");
+}
+
+// Initial near qualification is stationary; when its fresh 10-frame window
+// fails, only an off-center remembered BALL READY may trigger TWO walk-stance
+// turns. Both must DONE before any new stationary observation or camera change.
+void BallNearMissingReadyTurnsAndCentralFallback(bool side) {
+  auto c=Config();
+  c.ball.recovery_max_observations=5;
+  Driver d(c);
+  const double u=side ? 500.0 : 320.0;
+  d.in.ball_target=Target(u,100);
+  d.Warm();d.Block();d.Block();
+  d.in.ball_target=Target(u,260);
+  for(int n=0;n<3;++n)d.Tick();
+  Check(d.out.approach_near,"near loss turn fixture failed to latch near");
+  d.Tick({d.current,true,false,true});
+  d.Tick({d.current,true,true,false});
+  d.in.ball_target.reset();
+  bool saw_turn=false;
+  for(int n=0;n<25 && !saw_turn;++n) {
+    d.Tick({},.1);
+    if(d.out.command.action_id &&
+       d.out.command.action==MissionAction::kStepForwardRightOneHurdle)
+      saw_turn=true;
+  }
+  if(!side) {
+    Check(!saw_turn,"central remembered BALL READY caused a loss turn");
+  } else {
+    Check(saw_turn,"off-center remembered BALL READY did not cause first recovery turn");
+    const auto first=d.out.command.action_id;
+    d.Tick({first,true,false,false});
+    d.Tick({first,true,true,false});
+    Check(d.out.command.action==MissionAction::kStepForwardRightOneHurdle &&
+          d.out.command.action_id!=first,
+          "near loss turn sequence did not issue its second walk-stance turn");
+    const auto second=d.out.command.action_id;
+    d.Tick({second,true,false,false});
+    d.Tick({second,true,true,false});
+    Check(d.out.command.camera_request==CameraRequest::kNone,
+          "BALL near loss lowered camera before post-turn stationary observation");
+    for(int n=0;n<17;++n) {
+      d.Tick({},.1);
+      Check(d.out.command.action!=MissionAction::kStepForwardRightOneHurdle,
+            "BALL near loss repeated turns beyond exactly two");
+    }
+  }
+  bool down=false;
+  for(int n=0;n<100 && !down;++n) {
+    d.Tick({},.1);
+    down=d.out.active_mission==MissionType::kBall &&
+        d.out.command.camera_request==CameraRequest::kBallView;
+  }
+  Check(down,"near loss retries failed to enter the ordinary BALL_VIEW path");
 }
 
 void NearGoalPreemptsDepthWalk() {
@@ -1220,6 +1317,8 @@ int main() {
   AcquiredGoalLossScansBeforeLineReturn();
   GoalEdgeTenInFourRawBBox();
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
+  BallNearMissingReadyTurnsAndCentralFallback(false);
+  BallNearMissingReadyTurnsAndCentralFallback(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
   ReadyCenterAccumulator();InitialLineMeanProbeAfterIdentityExpiry();
   NearFinalActionSequence(150,true,true); NearFinalActionSequence(240,true,false);
