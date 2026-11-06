@@ -58,6 +58,19 @@ void MissionController::ReleaseContinuousApproach() {
   }
 }
 
+// The failed pre-lock BALL probe may have already reserved a floor-LINE
+// successor at READY. Preserve its action ID and LinePlan block on DONE.
+void MissionController::FinishPrelockProbeToLine() {
+  if (continuous_.mission!=MissionType::kBall) return;
+  continuous_={};approach_evidence_={};
+  ball_candidate_tracker_.Reset();ball_association_tracker_.Reset();
+  ball_target_id_=0;ball_target_locked_=ball_reacquiring_=false;
+  ball_controller_.ClearEntryEvidence();
+  last_ready_line_guide_.reset();
+  line_stability_history_.clear();
+  // Keep actual floor-LINE direction, queued LINE block and transport IDs.
+}
+
 void MissionController::EnterContinuousMission(const MissionFrameInput& input,bool lost) {
   const auto route=continuous_;
   // Retain the raw last target only for identity/metadata; recovery direction
@@ -1028,6 +1041,27 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       line_plan_.LastUnit(input.delivery_feedback.action_id) &&
       (input.delivery_feedback.ready || input.delivery_feedback.done);
   if (!target) {
+    if (i==0 && probe_final_edge && !continuous_.locked &&
+        continuous_.probe_active && !continuous_.probe_return_to_line) {
+      // The sole recovery unit is at READY. Return to the last known
+      // REAL floor LINE direction without waiting for its physical DONE.
+      // Virtual BALL steering is never used as the floor fallback.
+      std::optional<double> remembered=last_line_score_;
+      if (!remembered && line.guide.valid) {
+        const auto floor=line_p2p_controller_.Compute(line.guide);
+        if (floor.direction!=CruiseDirection::kNone) remembered=floor.error;
+      }
+      if (remembered && std::isfinite(*remembered)) {
+        const auto deadband=config_.line_p2p.steering_deadband;
+        const MissionAction cruise=*remembered < -deadband ? MissionAction::kStepForwardLeft :
+            *remembered > deadband ? MissionAction::kStepForwardRight :
+            MissionAction::kStepForwardFour;
+        result.action={cruise,ActionCategory::kLocomotion,0,false};
+        result.resume_line_at_ready=true;
+        result.hold=false;
+        return result;
+      }
+    }
     // Missing frames inside a walking block retain the last path. Only that
     // block's READY evidence may declare loss and stop its successor.
     LineGuide saved_guide;
