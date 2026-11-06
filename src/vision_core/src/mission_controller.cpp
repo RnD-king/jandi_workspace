@@ -2681,8 +2681,15 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
         for(std::size_t index=0;index<size;++index) {
           const auto& point=entry_track->positions[index];
           if(!point)continue;
-          const double weight=1.0+2.0*static_cast<double>(index)/
-              static_cast<double>(std::max<std::size_t>(1,size-1));
+          // FIRST admission can also occur while the executor is stationary.
+          // Use time-biased weights only for a physically ongoing LINE unit;
+          // stopped candidate observations keep the ordinary arithmetic mean.
+          const bool moving_line=command_coordinator_.HasPendingAction() &&
+              LinePlan::IsUnit(last_command_.action) &&
+              !input.delivery_feedback.done;
+          const double weight=moving_line ?
+              1.0+2.0*static_cast<double>(index)/
+                  static_cast<double>(std::max<std::size_t>(1,size-1)) : 1.0;
           sum.u+=weight*point->u;sum.v+=weight*point->v;
           weight_sum+=weight;
         }
