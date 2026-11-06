@@ -882,6 +882,17 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       continuous_.near_motion_id=0;
       continuous_.near_motion={};
       if (continuous_.near_actions.empty()) {
+        if (continuous_.near_reobserve_after_turns) {
+          // LOST near BALL: both in-place turns have physically DONE.
+          // Reacquire fresh stationary samples; never lower the camera yet.
+          continuous_.near_reobserve_after_turns=false;
+          continuous_.near_observing=false;
+          continuous_.near_qualified=false;
+          continuous_.near_observation_hits.clear();
+          continuous_.near_sum_u=continuous_.near_sum_v=0.0;
+          continuous_.near_valid_count=0;
+          return result;
+        }
         // Fixed turn/forward chain is complete; only now change the camera.
         EnterContinuousMission(input,false);result.entered=true;
         return result;
@@ -922,14 +933,39 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       return result;
     if (!continuous_.near_qualified) {
       ++continuous_.near_attempts;
+      // Use the existing, already time-weighted last qualified BALL READY
+      // center WITHOUT averaging the partially failed stationary window.
+      // Recover at most once: two same-direction WALK turns, each real DONE,
+      // followed by one fresh 1-second observation. A central remembered
+      // center retains the original stationary retry path.
+      if (i==0 && continuous_.near_turn_batches==0 &&
+          continuous_.last_ready_center && continuous_.last &&
+          input.allow_new_commands && input.allow_new_body_actions) {
+        const auto center=*continuous_.last_ready_center;
+        const auto bounds=config_.ball.ApproachBounds(center.v,input.image_height);
+        const MissionAction turn=center.u<bounds.first ? MissionAction::kTurnLeftInPlace :
+            center.u>bounds.second ? MissionAction::kStepForwardRightOneHurdle :
+            MissionAction::kNone;
+        if (turn!=MissionAction::kNone) {
+          continuous_.near_turn_batches=1;
+          continuous_.near_reobserve_after_turns=true;
+          continuous_.near_actions.clear();
+          continuous_.near_actions.push_back(turn);
+          continuous_.near_motion={turn,ActionCategory::kLocomotion,0,false};
+          result.action=continuous_.near_motion;
+          result.near_final_action=true;
+          continuous_.near_observation_hits.clear();
+          continuous_.near_sum_u=continuous_.near_sum_v=0.0;
+          continuous_.near_valid_count=0;
+          return result;
+        }
+      }
       const int limit=i==0 ? config_.ball.recovery_max_observations :
           i==1 ? config_.goal.recovery_max_observations : config_.hurdle.recovery_max_observations;
       if (continuous_.near_attempts>=limit) {
-        if (i==0 && continuous_.near_turn_batches>0) {
-          // Never lower the camera after a failed post-turn observation.
-          ReleaseContinuousApproach();
-          line_state_=LineState::kFinalHold;
-        } else if (input.allow_new_commands && input.allow_new_body_actions) {
+        if (input.allow_new_commands && input.allow_new_body_actions) {
+          // A completed turn recovery uses the same final path as center
+          // loss: enter BALL_VIEW; do not FINAL_HOLD merely for turning.
           EnterContinuousMission(input,true);result.entered=true;
         }
       } else {
