@@ -1023,6 +1023,16 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     const MissionFrameInput &source, std::optional<double> line_image_center_u,
     bool evaluating_ready_successor) {
   MissionFrameInput input = source;
+  if(active_mission_==MissionType::kBall &&
+     input.camera_feedback.actual_mode==CameraMode::kBallView) {
+    static int begin_debug_rows=0;
+    if(begin_debug_rows++<24)
+      std::fprintf(stderr,"BALL_STEP_BEGIN mode=%d pending=%d lastid=%llu pose=%d settle=%.3f now=%.3f obs=%d allow=%d scope=%d\\n",
+        static_cast<int>(ball_result_.mode),int(command_coordinator_.HasPendingAction()),
+        static_cast<unsigned long long>(last_command_.action_id),int(pose_change_pending_),
+        settle_until_sec_,input.now_sec,int(decision_observation_active_),
+        int(input.allow_new_body_actions),RepeatScope());
+  }
   if (decision_observation_restart_pending_) {
     decision_observation_restart_pending_ = false;
     if (decision_observation_active_)
