@@ -171,7 +171,7 @@ def main(argv=None):
         background(plan, directory)
         if args.background:
             print("JANDI 실행 관리자 시작/연결 완료. 0/5/10초 실행, 15초 이후 수동 서비스.")
-            print("숫자 메뉴: jandi " + args.mode + " (SSH가 끊겨도 계속 실행)")
+            print("숫자 메뉴: run_jandi " + args.mode + " (SSH가 끊겨도 계속 실행)")
         else:
             console(directory)
 

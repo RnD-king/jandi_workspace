@@ -33,7 +33,7 @@ class LaunchTest(unittest.TestCase):
             context = LaunchContext()
             context.launch_configurations.update(mode=mode, workspace="/home/rnd/jandi", core_prefix="/home/rnd/vision_core/install")
             command = [perform_substitutions(context, part) for part in processes[0].cmd]
-            self.assertEqual(command[:3], ["/target/install/vision/lib/vision/jandi", "--background", mode])
+            self.assertEqual(command[:3], ["/target/install/vision/lib/vision/run_jandi", "--background", mode])
             self.assertNotIn("robot_bringup", " ".join(command))
 
     def test_install_rules_and_declared_runtime_dependencies(self):
@@ -41,6 +41,7 @@ class LaunchTest(unittest.TestCase):
         for filename in ("scripts/jandi.py", "scripts/jandi_runtime.py", "scripts/jandi_ros.py",
                          "scripts/install_jandi_command.sh", "JANDI_RUNTIME.md", "DIRECTORY launch/"):
             self.assertIn(filename, cmake)
+        self.assertIn("install(PROGRAMS scripts/jandi.py DESTINATION lib/${PROJECT_NAME} RENAME run_jandi)", cmake)
         deps = {n.text for n in ET.parse(ROOT / "package.xml").findall("exec_depend")}
         self.assertTrue({"rclpy", "launch", "launch_ros", "ros2launch", "ros2run", "ament_index_python",
                          "python3-yaml", "realsense2_camera"} <= deps)
@@ -52,10 +53,15 @@ class LaunchTest(unittest.TestCase):
             (workspace / "install").mkdir(parents=True)
             (workspace / "install/setup.bash").write_text("export JANDI_INSTALL_TEST=1\n")
             bin_dir = root / "bin"
+            bin_dir.mkdir()
+            old_command = bin_dir / "jandi"
+            old_contents = "#!/bin/bash\necho existing environment command\n"
+            old_command.write_text(old_contents)
             core = root / "core with spaces"
             args = ["bash", str(ROOT / "scripts/install_jandi_command.sh"), str(workspace), str(core), str(bin_dir)]
             subprocess.run(args, check=True, capture_output=True)
-            wrapper = bin_dir / "jandi"
+            wrapper = bin_dir / "run_jandi"
+            self.assertEqual(old_command.read_text(), old_contents)
             subprocess.run(["bash", "-n", str(wrapper)], check=True)
             self.assertFalse((root / "invoked").exists())
             ros2 = bin_dir / "ros2"
@@ -63,10 +69,17 @@ class LaunchTest(unittest.TestCase):
             ros2.chmod(0o755)
             env = dict(os.environ, PATH=str(bin_dir) + ":" + os.environ["PATH"],
                        JANDI_TEST_OUTPUT=str(root / "invoked"))
-            subprocess.run([str(wrapper), "IRC"], env=env, check=True, capture_output=True)
-            values = (root / "invoked").read_text().splitlines()
-            self.assertEqual(values[:3], ["22", str(core), "1"])
-            self.assertEqual(values[3:7], ["run", "vision", "jandi", "IRC"])
+            for mode in ("practice", "IRC", "attach"):
+                with self.subTest(mode=mode):
+                    # The existing Jetson environment function must not intercept
+                    # the renamed command, including reconnecting to a session.
+                    subprocess.run(["bash", "-c",
+                                    'jandi() { return 91; }; run_jandi "$@"',
+                                    "entrypoint-test", mode],
+                                   env=env, check=True, capture_output=True)
+                    values = (root / "invoked").read_text().splitlines()
+                    self.assertEqual(values[:3], ["22", str(core), "1"])
+                    self.assertEqual(values[3:7], ["run", "vision", "run_jandi", mode])
             wrapper.write_text("#!/bin/bash\necho unrelated\n")
             self.assertNotEqual(subprocess.run(args, capture_output=True).returncode, 0)
 

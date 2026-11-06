@@ -257,7 +257,7 @@ install(DIRECTORY config/
 )
 
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
-install(PROGRAMS scripts/jandi.py DESTINATION lib/${PROJECT_NAME} RENAME jandi)
+install(PROGRAMS scripts/jandi.py DESTINATION lib/${PROJECT_NAME} RENAME run_jandi)
 install(FILES scripts/jandi_runtime.py scripts/jandi_ros.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/install_jandi_command.sh DESTINATION lib/${PROJECT_NAME})
 install(FILES JANDI_RUNTIME.md DESTINATION share/${PROJECT_NAME})

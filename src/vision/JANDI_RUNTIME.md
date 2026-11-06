@@ -44,6 +44,8 @@ export PATH="$HOME/.local/bin:$PATH"
 
 `~/.local/bin`이 새 SSH 창의 PATH에도 들어 있도록 설정한다. 엔트리포인트는
 ROS와 위 워크스페이스 환경을 로드하고 Domain 22를 설정한다.
+등록되는 명령은 `run_jandi`이며 기존 Jetson 환경 함수 `jandi()`와 함께 사용할 수 있다.
+기존 함수나 이전에 등록된 `~/.local/bin/jandi`는 덮어쓰거나 삭제하지 않는다.
 다른 경로를 이미 사용한다면 설치 명령의 경로를 그 실제 경로로 지정한다.
 `vision`에 런치·스크립트·문서를 모두 설치하므로 기존 세 패키지 동기화 대상에 포함된다.
 `forward_walk`는 `vision`에 의존하므로 `vision`에 역방향 패키지 의존성은 추가하지 않는다.
@@ -51,9 +53,9 @@ ROS와 위 워크스페이스 환경을 로드하고 Domain 22를 설정한다.
 ## 첫 번째 PowerShell SSH 창
 
 ```bash
-jandi practice
+run_jandi practice
 # 또는
-jandi IRC
+run_jandi IRC
 ```
 
 두 모드의 유일한 노드 파라미터 차이는 `terminal_node=true/false`다.
@@ -82,9 +84,9 @@ ERROR/FATAL/WARN과 비정상 종료는 화면에 알리며, **그 어떤 로그
 발생시키지 않는다.** 프로세스 실패 시 다른 프로세스를 그대로 유지한다.
 
 관리자는 SSH와 분리된 세션에서 실행된다. SSH 단절, 콘솔 9번, 콘솔 Ctrl+C는
-미션·노드 상태를 바꾸지 않는다. 다시 `jandi practice` 또는 `jandi IRC`로 동일 세션에
+미션·노드 상태를 바꾸지 않는다. 다시 `run_jandi practice` 또는 `run_jandi IRC`로 동일 세션에
 연결한다. 실행 중 모드를 바꾸려 하면 중복 실행하지 않고 안내한다.
-`jandi attach`는 현재 세션에만 연결한다.
+`run_jandi attach`는 현재 세션에만 연결한다.
 
 ## 두 번째 PowerShell SSH 창: Practice ASCII 화면
 
@@ -137,7 +139,7 @@ ros2 launch vision jandi.launch.py mode:=IRC
 ```
 
 같은 분리형 관리자를 시작하는 런치다. 관리자 준비 후 런치 명령은 반환되며 노드는
-계속 실행된다. 숫자 메뉴는 `jandi practice`, `jandi IRC` 또는 `ros2 run vision jandi attach`로 연다.
+계속 실행된다. 숫자 메뉴는 `run_jandi practice`, `run_jandi IRC` 또는 `ros2 run vision run_jandi attach`로 연다.
 launch 프로세스나 SSH의 수명으로 모터가 종료되지 않게 하기 위한 구성이다.
 필요하면 `workspace:=... core_prefix:=...`로 기존 설치 위치를 지정한다.
 RealSense는 **현재 설치된 `realsense2_camera/rs_launch.py`를 그대로 사용**한다.

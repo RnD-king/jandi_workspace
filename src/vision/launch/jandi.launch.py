@@ -8,7 +8,7 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
-    executable = str(Path(get_package_prefix("vision")) / "lib/vision/jandi")
+    executable = str(Path(get_package_prefix("vision")) / "lib/vision/run_jandi")
     return LaunchDescription([
         DeclareLaunchArgument("mode", default_value="practice", choices=["practice", "IRC"]),
         DeclareLaunchArgument("workspace", default_value="",
