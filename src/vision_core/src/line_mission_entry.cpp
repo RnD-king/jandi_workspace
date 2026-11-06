@@ -140,8 +140,13 @@ MissionFrameResult MissionController::StepPlannedLine(
     }
     if (automatic_approach && block.owner && block.owner==continuous_.epoch) {
       if (block.probe) {
-        continuous_.probe_active=false;
-        continuous_.loss_pending=true;
+        if (continuous_.mission==MissionType::kBall &&
+            continuous_.probe_return_to_line) {
+          FinishPrelockProbeToLine(); // Keep the already-ACKed LINE successor.
+        } else {
+          continuous_.probe_active=false;
+          continuous_.loss_pending=true;
+        }
         continue;
       } else if (block.object_qualified) {
         ++continuous_.blocks;
@@ -758,6 +763,7 @@ MissionFrameResult MissionController::StepPlannedLine(
             line_plan_.ObjectOwned(id,continuous_.epoch) &&
             !line_plan_.IsProbe(id) && !line_plan_.ObjectQualified(id);
         if (!decision.valid && !idle && !object_loss &&
+            !route.resume_line_at_ready &&
             !(automatic_approach && continuous_.mission==MissionType::kHurdle &&
               continuous_.near))
           line_failure_pending_done_ = true;
@@ -767,8 +773,31 @@ MissionFrameResult MissionController::StepPlannedLine(
             !line_plan_.IsProbe(id) &&
             !line_plan_.ObjectQualified(id)) {
           continuous_.loss_pending=true;
-          line_plan_.Abort();
+          line_plan_.Abort(); // Real DONE still belongs to the original block.
           route.hold=true;
+          if (continuous_.mission==MissionType::kBall && ready &&
+              !continuous_.probe_used &&
+              config_.object_approach.prelock_loss_extra_blocks>0 &&
+              continuous_.last_ready_center && continuous_.last) {
+            // A failed first BALL approach can queue exactly ONE 32/33/36
+            // search unit at A's READY rather than waiting idle after DONE.
+            auto remembered=*continuous_.last;
+            remembered.center_px=*continuous_.last_ready_center;
+            const auto bounds=config_.ball.ApproachBounds(
+                remembered.center_px.v,input.image_height);
+            const auto guide=ObjectZoneGuide(remembered,bounds.first,bounds.second,
+                config_.object_approach.steering_deadband_deg,input.image_width);
+            const auto dir=SteeringDecision(guide).direction;
+            const MissionAction cruise=dir==CruiseDirection::kLeft ? MissionAction::kStepForwardLeft :
+                dir==CruiseDirection::kStraight ? MissionAction::kStepForwardFour :
+                dir==CruiseDirection::kRight ? MissionAction::kStepForwardRight :
+                MissionAction::kNone;
+            if (cruise!=MissionAction::kNone) {
+              route.action={cruise,ActionCategory::kLocomotion,0,false};
+              route.probe_start=true;
+              route.hold=false;
+            }
+          }
         }
       }
       // HURDLE near votes only commit the NUMBER of remaining LINE units.
@@ -903,7 +932,8 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   if (LinePlan::IsCruise(request.action)) {
     if (input.allow_new_line_plan) request = line_plan_.Begin(request.action,
-        automatic_approach ? continuous_.epoch : 0,route.probe_start);
+        automatic_approach && !route.resume_line_at_ready ? continuous_.epoch : 0,
+        route.probe_start);
     else request = {};
   }
   if (!input.allow_new_commands) camera = CameraRequest::kNone;
@@ -953,6 +983,9 @@ MissionFrameResult MissionController::StepPlannedLine(
             ? output.line_features.guide_reference_v_px
             : config_.object_approach.reference_v_ratio * input.image_height};
   }
+  if (route.resume_line_at_ready && command.command_type==CommandType::kAction &&
+      command.action_id && LinePlan::IsUnit(command.action))
+    continuous_.probe_return_to_line=true;
   if (route.probe_start) {
     if (command.command_type==CommandType::kAction && command.action_id &&
         LinePlan::IsUnit(command.action)) {
