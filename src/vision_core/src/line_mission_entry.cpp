@@ -143,10 +143,13 @@ MissionFrameResult MissionController::StepPlannedLine(
         if (continuous_.mission==MissionType::kBall &&
             continuous_.probe_return_to_line) {
           FinishPrelockProbeToLine(); // Keep the already-ACKed LINE successor.
-        } else {
+        } else if (continuous_.probe_active) {
+          // The probe finished with no rediscovery and no LINE successor.
           continuous_.probe_active=false;
           continuous_.loss_pending=true;
         }
+        // A rediscovered BALL turned the probe into its final issued unit.
+        // It is NOT a lock-qualified normal approach block.
         continue;
       } else if (block.object_qualified) {
         ++continuous_.blocks;
@@ -739,9 +742,13 @@ MissionFrameResult MissionController::StepPlannedLine(
         std::optional<LineGuide> mean;
         if (pixel_owner) {
           const bool ball_owner=continuous_.mission==MissionType::kBall;
+          const bool rediscovered_ball_probe=ball_owner &&
+              line_plan_.IsProbe(id) && route.object_visible &&
+              !continuous_.probe_active;
           averaged_center=line_plan_.FinishObjectCenter(
               id,input.now_sec,ready_remaining,
-              !ball_owner, !ball_owner || line_plan_.ObjectQualified(id));
+              !ball_owner, !ball_owner || line_plan_.ObjectQualified(id) ||
+                  rediscovered_ball_probe);
           if (averaged_center && continuous_.last) {
             auto averaged_target=*continuous_.last;
             averaged_target.center_px=*averaged_center;
@@ -766,7 +773,9 @@ MissionFrameResult MissionController::StepPlannedLine(
         decision=mean.value_or(LineGuide{});
         if (automatic_approach && continuous_.mission!=MissionType::kNone) {
           if (line_plan_.ObjectOwned(id,continuous_.epoch)) {
-            if (!line_plan_.IsProbe(id) && line_plan_.ObjectQualified(id) &&
+            if (((!line_plan_.IsProbe(id) && line_plan_.ObjectQualified(id)) ||
+                 (line_plan_.IsProbe(id) && continuous_.mission==MissionType::kBall &&
+                  route.object_visible && !continuous_.probe_active)) &&
                 mean && mean->valid) {
               if (pixel_owner)
                 continuous_.last_ready_center=averaged_center;
