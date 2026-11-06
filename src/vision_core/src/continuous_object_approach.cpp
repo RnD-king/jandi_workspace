@@ -693,7 +693,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         GoalNearDistanceSample(input.backboard_center_depth_m,input.goal_pose,
                                config_.goal.approach_short_z_m),windows[i]);
     if (continuous_.probe_active)
-      line_plan_.Abort(); // Issued IDs drain; only unissued probe repeats stop.
+      line_plan_.TruncateUnissuedProbeRepeats(continuous_.epoch); // Retain this unit's READY.
     continuous_.missing=0;continuous_.loss_pending=false;
     continuous_.probe_active=false;continuous_.probe_used=false;
   }
