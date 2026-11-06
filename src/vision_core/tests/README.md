@@ -17,11 +17,12 @@ GOAL 회전/FINE 동작은 별도 고정 시나리오에서 15도와 30도를 �
 
 ## YAML 미션별 배치
 
-백보드 Depth 설정은 `goal.backboard_depth_strip_width_px`,
+백보드 Depth 설정은 `goal.backboard_depth_strip_width_ratio`,
 `goal.backboard_min_depth_m`, `goal.backboard_max_depth_m`에서 읽는다.
 단독 시험 설정은 `goal.trial_start_goal`, `goal.test_mission_index`,
 `ball.test_mission_index`에서 읽는다. 이 항목들의 예전 `mission` 경로는 사용하지
-않는다. ROS/rqt 파라미터 이름과 기존 C++ 구성 필드는 유지했다.
+않는다. 백보드 밴드 폭은 `*_width_ratio`로 지정하며 기본 15%, 5%p씩 최대 30%다.
+상하 10%만 제외하고 좌우 끝은 유지한다. 기존 `*_width_px` 파라미터는 사용하지 않는다.
 
 `goal.edge_margin_px`는 화면 좌우 끝의 회전 보정 여유 폭(px)이다.
 실제 노드에서는 `goal_edge_margin_px`로 설정한다. 필수 키 누락·음수·NaN·무한대는

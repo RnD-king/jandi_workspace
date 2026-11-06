@@ -226,10 +226,10 @@ void CheckConfiguration(const std::string& path) {
   FIELD(goal, shoot_yaw_limit_deg);
   FIELD(goal, post_shoot_back_steps);
   FIELD(goal, recovery_center_tolerance_px);
-  CheckAlgorithmField(a,"goal","backboard_depth_strip_width_px",c.backboard_depth_strip_width_px);
+  CheckAlgorithmField(a,"goal","backboard_depth_strip_width_ratio",c.backboard_depth_strip_width_ratio);
   CheckAlgorithmField(a,"goal","backboard_depth_center_size_px",c.backboard_depth_center_size_px);
-  CheckAlgorithmField(a,"goal","backboard_depth_strip_step_px",c.backboard_depth_strip_step_px);
-  CheckAlgorithmField(a,"goal","backboard_depth_strip_max_width_px",c.backboard_depth_strip_max_width_px);
+  CheckAlgorithmField(a,"goal","backboard_depth_strip_step_ratio",c.backboard_depth_strip_step_ratio);
+  CheckAlgorithmField(a,"goal","backboard_depth_strip_max_width_ratio",c.backboard_depth_strip_max_width_ratio);
   CheckAlgorithmField(a,"goal","backboard_depth_inner_margin_ratio",c.backboard_depth_inner_margin_ratio);
   CheckAlgorithmField(a,"goal","backboard_depth_min_valid_ratio",c.backboard_depth_min_valid_ratio);
   FIELD(line_detection, class_id);
@@ -291,7 +291,7 @@ void CheckConfiguration(const std::string& path) {
   FIELD(command, action_ack_timeout_sec);
   CheckAlgorithmField(a, "mission", "test_mission", static_cast<int>(c.test_mission));
   MISSION(test_stage);
-  CheckAlgorithmField(a, "goal", "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px);
+  CheckAlgorithmField(a, "goal", "backboard_depth_strip_width_ratio", c.backboard_depth_strip_width_ratio);
   CheckAlgorithmField(a, "goal", "trial_start_goal", c.goal_trial_start_goal);
   CheckAlgorithmField(a, "ball", "test_mission_index", c.test_ball_mission_index);
   CheckAlgorithmField(a, "goal", "test_mission_index", c.test_goal_mission_index);

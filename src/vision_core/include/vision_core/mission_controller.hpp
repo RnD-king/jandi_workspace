@@ -95,10 +95,10 @@ struct MissionControllerConfig {
   int mission_recovery_turn_yaw_deg{};
   MissionType test_mission{MissionType::kNone};
   int test_stage{}; // 0 full, 1 far approach, 2 near alignment, 3 mission execution/recovery
-  int backboard_depth_strip_width_px{};
+  double backboard_depth_strip_width_ratio{};
   int backboard_depth_center_size_px{21};
-  int backboard_depth_strip_step_px{7};
-  int backboard_depth_strip_max_width_px{28};
+  double backboard_depth_strip_step_ratio{0.05};
+  double backboard_depth_strip_max_width_ratio{0.30};
   double backboard_depth_inner_margin_ratio{0.10};
   double backboard_depth_min_valid_ratio{0.10};
 };
@@ -555,6 +555,7 @@ private:
   void EnterMission(MissionType mission);
   void FinishMission();
   bool StraightGoalGateReached(int additional_straight_blocks = 0) const;
+  bool FinishCourseEnabled(const MissionFrameInput& input) const;
   void PopulateDiagnostics(MissionFrameResult &output, double now_sec) const;
   void InitializeTest();
   bool TestExecutionReady() const;

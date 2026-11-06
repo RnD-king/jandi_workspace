@@ -77,8 +77,12 @@ YAML::Node AlgorithmSections(const YAML::Node &a) {
   Assign(common, "depth_roi_size_px", depth_roi_size_px);
   sections["object_targets"]["depth_roi_size_px"] = depth_roi_size_px;
   const auto board_depth = map(map(map(a, "goal"), "backboard"), "depth");
-  for (const auto *key : {"depth_strip_width_px", "min_depth_m", "max_depth_m"})
+  for (const auto *key : {"depth_strip_width_ratio", "min_depth_m", "max_depth_m"})
     sections["goal"][std::string("backboard_") + key] = board_depth[key];
+  for (const auto& field : board_depth) {
+    const auto key=field.first.as<std::string>();
+    if (key.rfind("backboard_",0)==0) sections["goal"][key]=field.second;
+  }
   return sections;
 }
 void Finite(double value, const char *key) {
@@ -191,11 +195,14 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   const int tm=static_cast<int>(c.test_mission);
   if ((tm!=0 && tm!=2 && tm!=3 && tm!=4) || c.test_stage<0 || c.test_stage>3 ||
       (tm==0 && c.test_stage!=0)) throw std::runtime_error("invalid test mission/stage");
-  PositiveInt(c.backboard_depth_strip_width_px,"goal.backboard_depth_strip_width_px");
+  Positive(c.backboard_depth_strip_width_ratio,"goal.backboard_depth_strip_width_ratio");
   PositiveInt(c.backboard_depth_center_size_px,"goal.backboard_depth_center_size_px");
   if(c.backboard_depth_center_size_px%2!=1)throw std::runtime_error("goal.backboard_depth_center_size_px must be odd");
-  PositiveInt(c.backboard_depth_strip_step_px,"goal.backboard_depth_strip_step_px");
-  if(c.backboard_depth_strip_max_width_px<c.backboard_depth_strip_width_px)throw std::runtime_error("goal backboard maximum strip width must cover minimum");
+  Positive(c.backboard_depth_strip_step_ratio,"goal.backboard_depth_strip_step_ratio");
+  Positive(c.backboard_depth_strip_max_width_ratio,"goal.backboard_depth_strip_max_width_ratio");
+  if(c.backboard_depth_strip_max_width_ratio<c.backboard_depth_strip_width_ratio ||
+     c.backboard_depth_strip_max_width_ratio>0.5)
+    throw std::runtime_error("goal backboard strip ratios require 0 < width <= maximum <= 0.5");
   Finite(c.backboard_depth_inner_margin_ratio,"goal.backboard_depth_inner_margin_ratio");
   Finite(c.backboard_depth_min_valid_ratio,"goal.backboard_depth_min_valid_ratio");
   if(c.backboard_depth_inner_margin_ratio<0 || c.backboard_depth_inner_margin_ratio>=.5 ||
@@ -837,10 +844,10 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   if(g && g["edge_stable_min_hits"])Assign(g,"edge_stable_min_hits",c.goal.edge_stable_min_hits);
   Assign(g, "trial_start_goal", c.goal_trial_start_goal);
   Assign(g, "test_mission_index", c.test_goal_mission_index);
-  Assign(g, "backboard_depth_strip_width_px", c.backboard_depth_strip_width_px);
+  Assign(g, "backboard_depth_strip_width_ratio", c.backboard_depth_strip_width_ratio);
   if(g && g["backboard_depth_center_size_px"])Assign(g,"backboard_depth_center_size_px",c.backboard_depth_center_size_px);
-  if(g && g["backboard_depth_strip_step_px"])Assign(g,"backboard_depth_strip_step_px",c.backboard_depth_strip_step_px);
-  if(g && g["backboard_depth_strip_max_width_px"])Assign(g,"backboard_depth_strip_max_width_px",c.backboard_depth_strip_max_width_px);
+  if(g && g["backboard_depth_strip_step_ratio"])Assign(g,"backboard_depth_strip_step_ratio",c.backboard_depth_strip_step_ratio);
+  if(g && g["backboard_depth_strip_max_width_ratio"])Assign(g,"backboard_depth_strip_max_width_ratio",c.backboard_depth_strip_max_width_ratio);
   if(g && g["backboard_depth_inner_margin_ratio"])Assign(g,"backboard_depth_inner_margin_ratio",c.backboard_depth_inner_margin_ratio);
   if(g && g["backboard_depth_min_valid_ratio"])Assign(g,"backboard_depth_min_valid_ratio",c.backboard_depth_min_valid_ratio);
   Assign(g, "backboard_min_depth_m", c.backboard_min_depth_m);

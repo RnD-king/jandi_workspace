@@ -135,8 +135,10 @@ vision_algorithm:
     # 화면 이탈 방지: 좌우 끝에서 이 픽셀 이내에 박스가 닿으면 연속 2회 회전
     edge_margin_px: 50.0 # rqt: goal_edge_margin_px, 양쪽에 동시에 닿으면 HOLD
 
-    # 백보드 Depth 표본 및 유효 거리 (px, m)
-    backboard_depth_strip_width_px: 5
+    # 백보드 Depth 표본 폭은 원본 박스 너비 대비 비율
+    backboard_depth_strip_width_ratio: 0.15
+    backboard_depth_strip_step_ratio: 0.05
+    backboard_depth_strip_max_width_ratio: 0.30
     backboard_min_depth_m: 0.20
     backboard_max_depth_m: 2.50
 

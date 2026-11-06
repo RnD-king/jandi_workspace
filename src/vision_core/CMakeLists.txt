@@ -337,6 +337,12 @@ if(BUILD_TESTING)
   add_test(NAME shared_vision_core_goal_recovery_policy_test COMMAND shared_vision_core_goal_recovery_policy_test)
   set_tests_properties(shared_vision_core_goal_recovery_policy_test PROPERTIES
     ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+  add_executable(shared_vision_core_finish_line_test tests/finish_line_test.cpp)
+  target_link_libraries(shared_vision_core_finish_line_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_finish_line_test COMMAND shared_vision_core_finish_line_test)
+  set_tests_properties(shared_vision_core_finish_line_test PROPERTIES
+    ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+
   get_property(_logic_tests DIRECTORY PROPERTY TESTS)
   add_executable(shared_vision_core_continuous_object_approach_test tests/continuous_object_approach_test.cpp)
   target_link_libraries(shared_vision_core_continuous_object_approach_test PRIVATE shared_vision_core)

@@ -196,7 +196,7 @@ public:
     declare_parameter<double>("simulate_turn_duration_sec", 1.0);
     declare_parameter<double>("simulate_ready_lead_sec", 0.25);
     declare_parameter<bool>("enable_command_transport", true);
-    declare_parameter<int>("backboard_depth_strip_width_px",algorithm_defaults.backboard_depth_strip_width_px);
+    declare_parameter<double>("backboard_depth_strip_width_ratio",algorithm_defaults.backboard_depth_strip_width_ratio);
     declare_parameter<double>("max_depth_age_sec", 0.20);
     declare_parameter<double>("backboard_min_depth_m", algorithm_defaults.backboard_min_depth_m);
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
@@ -253,7 +253,7 @@ public:
         get_parameter("simulate_ready_lead_sec").as_double();
     enable_command_transport_ = get_parameter("enable_command_transport").as_bool();
     max_depth_age_sec_ = get_parameter("max_depth_age_sec").as_double();
-    backboard_depth_strip_width_px_=static_cast<int>(get_parameter("backboard_depth_strip_width_px").as_int());
+    backboard_depth_strip_width_ratio_=get_parameter("backboard_depth_strip_width_ratio").as_double();
     if (algorithm_mode_ != "all" && algorithm_mode_ != "line" && algorithm_mode_ != "ball" &&
         algorithm_mode_ != "hurdle" && algorithm_mode_ != "goal") {
       throw std::invalid_argument("algorithm_mode must be one of: all, line, ball, hurdle, goal");
@@ -291,7 +291,7 @@ public:
     line_recovery_config_=algorithm_defaults.line_recovery;
     goal_scan_config_=algorithm_defaults.goal;
     vision_core::MissionControllerConfig mission_config = algorithm_defaults;
-    mission_config.backboard_depth_strip_width_px=backboard_depth_strip_width_px_;
+    mission_config.backboard_depth_strip_width_ratio=backboard_depth_strip_width_ratio_;
     mission_config.camera_motion_timeout_sec =
         get_parameter("camera_motion_timeout_sec").as_double();
     mission_config.line_features = line_feature_cfg;
@@ -847,8 +847,8 @@ private:
       // core에서 한 번만 수행한다.
       if (detection.class_id == backboard_class_id_ && !depth.empty()) {
         const auto sample=vision::SampleBackboardDepth(depth,detection.box,
-            debug_config_.backboard_depth_center_size_px,backboard_depth_strip_width_px_,
-            debug_config_.backboard_depth_strip_step_px,debug_config_.backboard_depth_strip_max_width_px,
+            debug_config_.backboard_depth_center_size_px,backboard_depth_strip_width_ratio_,
+            debug_config_.backboard_depth_strip_step_ratio,debug_config_.backboard_depth_strip_max_width_ratio,
             debug_config_.backboard_depth_inner_margin_ratio,debug_config_.backboard_depth_min_valid_ratio,
             debug_config_.backboard_min_depth_m,debug_config_.backboard_max_depth_m);
         observation.center_depth_m=sample.center;
@@ -1780,7 +1780,7 @@ private:
   vision_core::CameraRequest pending_camera_request_{
       vision_core::CameraRequest::kNone};
   bool camera_acknowledged_{false};
-  int backboard_depth_strip_width_px_{};
+  double backboard_depth_strip_width_ratio_{};
   double max_depth_age_sec_{0.20};
   std::string algorithm_mode_{"all"};
   bool goal_trial_start_goal_pending_{false};

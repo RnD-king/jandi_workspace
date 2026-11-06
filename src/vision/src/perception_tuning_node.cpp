@@ -239,7 +239,7 @@ public:
     declare_parameter<double>("simulate_turn_duration_sec", 1.0);
     declare_parameter<double>("simulate_ready_lead_sec", 0.25);
     declare_parameter<bool>("enable_command_transport", true);
-    declare_parameter<int>("backboard_depth_strip_width_px",algorithm_defaults.backboard_depth_strip_width_px);
+    declare_parameter<double>("backboard_depth_strip_width_ratio",algorithm_defaults.backboard_depth_strip_width_ratio);
     declare_parameter<double>("max_depth_age_sec", 0.20);
     declare_parameter<double>("backboard_min_depth_m", algorithm_defaults.backboard_min_depth_m);
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
@@ -296,7 +296,7 @@ public:
         get_parameter("simulate_ready_lead_sec").as_double();
     enable_command_transport_ = get_parameter("enable_command_transport").as_bool();
     max_depth_age_sec_ = get_parameter("max_depth_age_sec").as_double();
-    backboard_depth_strip_width_px_=static_cast<int>(get_parameter("backboard_depth_strip_width_px").as_int());
+    backboard_depth_strip_width_ratio_=get_parameter("backboard_depth_strip_width_ratio").as_double();
     if (algorithm_mode_ != "all" && algorithm_mode_ != "line" && algorithm_mode_ != "ball" &&
         algorithm_mode_ != "hurdle" && algorithm_mode_ != "goal") {
       throw std::invalid_argument("algorithm_mode must be one of: all, line, ball, hurdle, goal");
@@ -354,7 +354,7 @@ public:
     mission_config.line_p2p.heading_gain = get_parameter("line_p2p_heading_gain").as_double();
     mission_config.line_p2p.steering_deadband =
         get_parameter("line_p2p_steering_deadband").as_double();
-    mission_config.backboard_depth_strip_width_px=backboard_depth_strip_width_px_;
+    mission_config.backboard_depth_strip_width_ratio=backboard_depth_strip_width_ratio_;
     mission_config.camera_motion_timeout_sec =
         get_parameter("camera_motion_timeout_sec").as_double();
     mission_config.line_features = line_feature_cfg;
@@ -868,11 +868,13 @@ private:
         else candidate.goal.recovery_turn_max=parameter.as_int();
         touched=true; continue;
       }
-      if (name=="backboard_depth_strip_width_px") {
-        if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || parameter.as_int()<1 || parameter.as_int()>640) {
-          response.successful=false; response.reason="depth strip width must be an integer in [1,640]"; return response;
+      if (name=="backboard_depth_strip_width_ratio") {
+        if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
+            !std::isfinite(parameter.as_double()) || parameter.as_double()<=0 ||
+            parameter.as_double()>candidate.backboard_depth_strip_max_width_ratio) {
+          response.successful=false; response.reason="depth strip width ratio must be finite, positive and no greater than its maximum"; return response;
         }
-        candidate.backboard_depth_strip_width_px=static_cast<int>(parameter.as_int()); touched=true; continue;
+        candidate.backboard_depth_strip_width_ratio=parameter.as_double(); touched=true; continue;
       }
       if (name=="mission_recovery_max_turns") {
         if (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER || parameter.as_int()<1 || parameter.as_int()>100) {
@@ -975,14 +977,14 @@ private:
           !(candidate.backboard_candidate_tracking==tuning_config_.backboard_candidate_tracking) ||
           candidate.line_detection.min_box_width != tuning_config_.line_detection.min_box_width ||
           candidate.line_detection.min_box_height != tuning_config_.line_detection.min_box_height ||
-          candidate.backboard_depth_strip_width_px != backboard_depth_strip_width_px_ ||
+          candidate.backboard_depth_strip_width_ratio != backboard_depth_strip_width_ratio_ ||
           candidate.backboard_min_depth_m != tuning_config_.backboard_min_depth_m ||
           candidate.backboard_max_depth_m != tuning_config_.backboard_max_depth_m;
       if (preview_ready_ && !depth_observation_changed)
         updated = trial_controller.PreviewPerception(trial_input);
       *mission_controller_ = std::move(trial_controller);
       tuning_config_ = candidate;
-      backboard_depth_strip_width_px_=candidate.backboard_depth_strip_width_px;
+      backboard_depth_strip_width_ratio_=candidate.backboard_depth_strip_width_ratio;
       if (preview_ready_ && depth_observation_changed) {
         LeaveWaitCommit(get_clock()->now().seconds());
         preview_ready_=false; preview_command_={}; preview_image_.release();
@@ -1361,8 +1363,8 @@ private:
       // core에서 한 번만 수행한다.
       if (detection.class_id == backboard_class_id_ && !depth.empty()) {
         const auto sample=vision::SampleBackboardDepth(depth,detection.box,
-            tuning_config_.backboard_depth_center_size_px,backboard_depth_strip_width_px_,
-            tuning_config_.backboard_depth_strip_step_px,tuning_config_.backboard_depth_strip_max_width_px,
+            tuning_config_.backboard_depth_center_size_px,backboard_depth_strip_width_ratio_,
+            tuning_config_.backboard_depth_strip_step_ratio,tuning_config_.backboard_depth_strip_max_width_ratio,
             tuning_config_.backboard_depth_inner_margin_ratio,tuning_config_.backboard_depth_min_valid_ratio,
             tuning_config_.backboard_min_depth_m,tuning_config_.backboard_max_depth_m);
         observation.center_depth_m=sample.center;
@@ -2537,7 +2539,7 @@ private:
   vision_core::CameraRequest pending_camera_request_{
       vision_core::CameraRequest::kNone};
   bool camera_acknowledged_{false};
-  int backboard_depth_strip_width_px_{};
+  double backboard_depth_strip_width_ratio_{};
   double max_depth_age_sec_{0.20};
   std::string algorithm_mode_{"all"};
 

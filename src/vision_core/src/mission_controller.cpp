@@ -69,6 +69,11 @@ bool MissionController::StraightGoalGateReached(int additional_straight_blocks) 
       post_pickup_straight_blocks_completed_ + additional_straight_blocks >= required;
 }
 
+bool MissionController::FinishCourseEnabled(const MissionFrameInput& input) const {
+  return config_.test_mission==MissionType::kNone && !input.manual_observation_control &&
+      hurdle_crosses_completed_>=2 && course_curve_index_==5;
+}
+
 ActionRequest MissionController::CruiseAction(const LineGuide &guide,
                                               bool queue_eligible) {
   const CruiseDecision decision = SteeringDecision(guide);
@@ -176,6 +181,20 @@ std::optional<LineGuide> MissionController::FinishObservation() const {
 ActionRequest MissionController::ComputeLineAction(
     const LineGuide &guide, const MissionFrameInput &input, bool action_active,
     bool action_done, bool *reference_valid, bool append_stability) {
+  if (FinishCourseEnabled(input)) {
+    // Finish-only loss policy: keep the shared block/READY transport, but do
+    // not start stationary searches or in-place recovery turns past the course.
+    if (action_active || !input.camera_feedback.settled ||
+        input.camera_feedback.actual_mode!=CameraMode::kForward) return {};
+    const auto decision=line_p2p_controller_.Compute(guide);
+    MissionAction action=MissionAction::kStepForwardFour;
+    if (decision.applicable &&
+        std::abs(decision.error)<=config_.line_p2p.in_place_turn_score) {
+      if (decision.direction==CruiseDirection::kLeft) action=MissionAction::kStepForwardLeft;
+      else if (decision.direction==CruiseDirection::kRight) action=MissionAction::kStepForwardRight;
+    }
+    return LineLocomotion(action,true);
+  }
   if (!line_observation_active_ && (line_state_ == LineState::kFailureObserve ||
                                     line_state_ == LineState::kRecoveryObserve))
     BeginObservation(line_state_, input.now_sec);
@@ -3183,11 +3202,11 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.backboard_min_depth_m = candidate.backboard_min_depth_m;
   updated.backboard_max_depth_m = candidate.backboard_max_depth_m;
   updated.mission_recovery_max_turns = candidate.mission_recovery_max_turns;
-  updated.backboard_depth_strip_width_px =
-      candidate.backboard_depth_strip_width_px;
+  updated.backboard_depth_strip_width_ratio =
+      candidate.backboard_depth_strip_width_ratio;
   updated.backboard_depth_center_size_px=candidate.backboard_depth_center_size_px;
-  updated.backboard_depth_strip_step_px=candidate.backboard_depth_strip_step_px;
-  updated.backboard_depth_strip_max_width_px=candidate.backboard_depth_strip_max_width_px;
+  updated.backboard_depth_strip_step_ratio=candidate.backboard_depth_strip_step_ratio;
+  updated.backboard_depth_strip_max_width_ratio=candidate.backboard_depth_strip_max_width_ratio;
   updated.backboard_depth_inner_margin_ratio=candidate.backboard_depth_inner_margin_ratio;
   updated.backboard_depth_min_valid_ratio=candidate.backboard_depth_min_valid_ratio;
   ValidateAlgorithmConfig(updated);

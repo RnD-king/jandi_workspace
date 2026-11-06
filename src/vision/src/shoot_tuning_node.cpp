@@ -166,8 +166,8 @@ public:
       descriptor.floating_point_range.push_back(range);
       *setting.value=declare_parameter<double>(setting.name,*setting.value,descriptor);
     }
-    config_.backboard_depth_strip_width_px=ReadOnly<int>(
-        "backboard_depth_strip_width_px",config_.backboard_depth_strip_width_px);
+    config_.backboard_depth_strip_width_ratio=ReadOnly<double>(
+        "backboard_depth_strip_width_ratio",config_.backboard_depth_strip_width_ratio);
     click_yaw_deg_=declare_parameter<double>("click_backboard_yaw_deg",0.0);
     prepare_duration_sec_=declare_parameter<double>("shoot_prepare_duration_sec",2.0);
     if (!std::isfinite(prepare_duration_sec_) || prepare_duration_sec_<0.2 || prepare_duration_sec_>60)
@@ -565,10 +565,15 @@ private:
             static_cast<double>(detection.box.y),static_cast<double>(detection.box.width),
             static_cast<double>(detection.box.height)},detection.confidence,detection.class_id};
         if (detection.class_id==config_.object_targets.backboard_class_id) {
-          const auto region=DepthRegions(detection.box,frame.bgr.size(),config_.backboard_depth_strip_width_px);
-          observation.center_depth_m=MedianRegionMeters(frame.depth,region.center);
-          observation.left_depth_m=MedianRegionMeters(frame.depth,region.left);
-          observation.right_depth_m=MedianRegionMeters(frame.depth,region.right);
+          const auto sample=SampleBackboardDepth(frame.depth,detection.box,
+              config_.backboard_depth_center_size_px,config_.backboard_depth_strip_width_ratio,
+              config_.backboard_depth_strip_step_ratio,config_.backboard_depth_strip_max_width_ratio,
+              config_.backboard_depth_inner_margin_ratio,config_.backboard_depth_min_valid_ratio,
+              config_.backboard_min_depth_m,config_.backboard_max_depth_m);
+          const auto& region=sample.regions;
+          observation.center_depth_m=sample.center;
+          observation.left_depth_m=sample.left;
+          observation.right_depth_m=sample.right;
           if (!region.left.empty()) observation.left_depth_u_px=region.left_u;
           if (!region.right.empty()) observation.right_depth_u_px=region.right_u;
         }

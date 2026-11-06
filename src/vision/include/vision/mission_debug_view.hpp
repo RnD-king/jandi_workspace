@@ -331,9 +331,9 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         detection.confidence>=config.object_targets.backboard_confidence)
       vision::DrawDepthRegions(vis,cv::Rect(static_cast<int>(std::lround(detection.box.x)),
           static_cast<int>(std::lround(detection.box.y)),static_cast<int>(std::lround(detection.box.width)),
-          static_cast<int>(std::lround(detection.box.height))),config.backboard_depth_strip_width_px,
-          aligned_depth,config.backboard_depth_center_size_px,config.backboard_depth_strip_step_px,
-          config.backboard_depth_strip_max_width_px,config.backboard_depth_inner_margin_ratio,
+          static_cast<int>(std::lround(detection.box.height))),config.backboard_depth_strip_width_ratio,
+          aligned_depth,config.backboard_depth_center_size_px,config.backboard_depth_strip_step_ratio,
+          config.backboard_depth_strip_max_width_ratio,config.backboard_depth_inner_margin_ratio,
           config.backboard_depth_min_valid_ratio,config.backboard_min_depth_m,config.backboard_max_depth_m,
           mission_result.active_mission==vision_core::MissionType::kGoal ||
           mission_result.approach_near);

@@ -19,7 +19,7 @@ int main() {
   c.ball.pickup_v1_px=80;c.ball.pickup_v2_px=130;
   c.hurdle.down_one_step_v_px=100;c.hurdle.fine_mode_v_px=180;c.hurdle.contact_v_px=260;
   c.goal.edge_margin_px=50;c.goal.target_u_px=360;c.goal.approach_u_deadband_px=160;
-  c.goal.throw_landing_z_m=.4;c.backboard_depth_strip_width_px=5;
+  c.goal.throw_landing_z_m=.4;c.backboard_depth_strip_width_ratio=.15;
   const cv::Mat image=cv::Mat::zeros(480,640,CV_8UC3);
   const std::vector<AdapterDetection> adapter{{{310,190,20,20},1,4}};
   const std::vector<vision_core::Detection> core{{{310,190,20,20},1,4}};

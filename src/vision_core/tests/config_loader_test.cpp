@@ -60,7 +60,7 @@ static YAML::Node GroupedFixture(const std::string &text) {
     }
     if(std::string(name)!="goal") object["candidate_tracking"]=old[prefix+"candidate_tracking"];
   }
-  for(const auto* key:{"depth_strip_width_px","min_depth_m","max_depth_m"}) {
+  for(const auto* key:{"depth_strip_width_ratio","min_depth_m","max_depth_m"}) {
     const auto previous=std::string("backboard_")+key;
     a["goal"]["backboard"]["depth"][key]=old["goal"][previous];
     a["goal"]["control"].remove(previous);
@@ -114,7 +114,10 @@ static void CheckGroupedConfiguration(const std::string &text) {
   a["ball"]["candidate_tracking"]["max_center_distance_px"]=181;
   a["hurdle"]["candidate_tracking"]["max_center_distance_px"]=202;
   a["goal"]["backboard"]["candidate_tracking"]["max_center_distance_px"]=203;
-  a["goal"]["backboard"]["depth"]["depth_strip_width_px"]=7;
+  a["goal"]["backboard"]["depth"]["depth_strip_width_ratio"]=.20;
+  a["goal"]["backboard"]["depth"]["backboard_depth_strip_step_ratio"]=.025;
+  a["goal"]["backboard"]["depth"]["backboard_depth_strip_max_width_ratio"]=.35;
+  a["goal"]["backboard"]["depth"]["backboard_depth_inner_margin_ratio"]=.12;
   a["goal"]["backboard"]["depth"]["min_depth_m"]=.2;
   a["goal"]["backboard"]["depth"]["max_depth_m"]=2.2;
   a["common"]["depth_roi_size_px"]=7;
@@ -127,7 +130,9 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.ball_candidate_tracking.max_center_distance_px==181);
   assert(c.hurdle_candidate_tracking.max_center_distance_px==202);
   assert(c.backboard_candidate_tracking.max_center_distance_px==203);
-  assert(c.backboard_depth_strip_width_px==7 && c.backboard_min_depth_m==.2 && c.backboard_max_depth_m==2.2);
+  assert(c.backboard_depth_strip_width_ratio==.20 && c.backboard_min_depth_m==.2 && c.backboard_max_depth_m==2.2);
+  assert(c.backboard_depth_strip_step_ratio==.025 && c.backboard_depth_strip_max_width_ratio==.35);
+  assert(c.backboard_depth_inner_margin_ratio==.12);
   assert(c.object_targets.depth_roi_size_px==7 && !c.enable_ball && c.enable_hurdle && c.enable_goal);
   const auto reject=[](const YAML::Node& bad) {
     bool rejected=false;
@@ -215,9 +220,9 @@ int main(int argc, char **argv) {
   assert(!c.UsesObjectReadyMean(vision_core::MissionAction::kStepForwardLeftTwo));
   assert(c.test_stage==0 && c.test_mission==vision_core::MissionType::kNone);
   // The fixture is deliberately older than the production YAML.
-  assert(c.backboard_depth_strip_width_px==5);
+  assert(c.backboard_depth_strip_width_ratio==.15);
   assert(c.backboard_depth_center_size_px==21);
-  assert(c.backboard_depth_strip_step_px==7 && c.backboard_depth_strip_max_width_px==28);
+  assert(c.backboard_depth_strip_step_ratio==.05 && c.backboard_depth_strip_max_width_ratio==.30);
   assert(c.backboard_depth_inner_margin_ratio==.10 && c.backboard_depth_min_valid_ratio==.10);
   assert(c.line_p2p.recovery_observation_sec == 1.0);
   assert(c.goal.recovery_center_tolerance_px == 76.8);
@@ -455,7 +460,11 @@ int main(int argc, char **argv) {
   Reject(text.str(), "trial_start_goal: false", "trial_start_goal: not_a_bool");
   Reject(text.str(), "post_motion_observation_sec: 1.0", "post_motion_observation_sec: 0.0");
   Reject(text.str(), "test_stage: 0", "test_stage: 4");
-  Reject(text.str(), "backboard_depth_strip_width_px: 5", "backboard_depth_strip_width_px: 0");
+  Reject(text.str(), "backboard_depth_strip_width_ratio: 0.15", "backboard_depth_strip_width_ratio: 0");
+  Reject(text.str(), "backboard_depth_strip_width_ratio: 0.15", "backboard_depth_strip_width_ratio: .nan");
+  Reject(text.str(), "backboard_depth_strip_width_ratio: 0.15", "backboard_depth_strip_width_ratio: 0.31");
+  Reject(text.str(), "backboard_depth_strip_step_ratio: 0.05", "backboard_depth_strip_step_ratio: 0");
+  Reject(text.str(), "backboard_depth_strip_max_width_ratio: 0.30", "backboard_depth_strip_max_width_ratio: 0.51");
   Reject(text.str(), "offset_gain: 0.3", "offset_gain: .nan");
   Reject(text.str(), "guide_min_points: 3", "guide_min_points: 2");
   Reject(text.str(), "guide_min_points: 3", "guide_min_points: 9");

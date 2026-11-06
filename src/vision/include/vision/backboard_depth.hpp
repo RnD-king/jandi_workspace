@@ -22,13 +22,12 @@ struct BackboardDepthSample {
 inline cv::Rect InnerBackboard(const cv::Rect& raw,const cv::Size& image,double margin) {
   if(raw.width<=0 || raw.height<=0 || image.width<=0 || image.height<=0 ||
      !std::isfinite(margin) || margin<0 || margin>=.5) return {};
-  const int mx=static_cast<int>(std::ceil(raw.width*margin));
   const int my=static_cast<int>(std::ceil(raw.height*margin));
-  return cv::Rect(raw.x+mx,raw.y+my,std::max(0,raw.width-2*mx),
+  return cv::Rect(raw.x,raw.y+my,raw.width,
                   std::max(0,raw.height-2*my)) & cv::Rect(0,0,image.width,image.height);
 }
 inline BackboardDepthRegions DepthRegions(const cv::Rect& raw,const cv::Size& image,
-                                          int strip_width,int center_size=21,
+                                          double strip_width_ratio,int center_size=21,
                                           double margin=.10) {
   BackboardDepthRegions r;
   r.inner=InnerBackboard(raw,image,margin);
@@ -37,11 +36,14 @@ inline BackboardDepthRegions DepthRegions(const cv::Rect& raw,const cv::Size& im
   const int center_v=static_cast<int>(std::lround(raw.y+.5*raw.height));
   r.center=cv::Rect(center_u-center_size/2,center_v-center_size/2,
                     center_size,center_size)&r.inner;
-  const int width=std::min(strip_width,r.inner.width/2);
+  if(!std::isfinite(strip_width_ratio) || strip_width_ratio<=0 || strip_width_ratio>.5)
+    return r;
+  // Ratios refer to the original detection, including when it is image-clipped.
+  const int width=std::min(static_cast<int>(std::ceil(raw.width*strip_width_ratio-1e-9)),raw.width/2);
   if(width<=0)return r;
   r.strip_width=width;
-  r.left={r.inner.x,r.inner.y,width,r.inner.height};
-  r.right={r.inner.x+r.inner.width-width,r.inner.y,width,r.inner.height};
+  r.left=cv::Rect(raw.x,r.inner.y,width,r.inner.height)&r.inner;
+  r.right=cv::Rect(raw.x+raw.width-width,r.inner.y,width,r.inner.height)&r.inner;
   r.left_u=r.left.x+.5*(r.left.width-1);
   r.right_u=r.right.x+.5*(r.right.width-1);
   return r;
@@ -79,8 +81,8 @@ inline std::optional<double> MedianRegionMeters(const cv::Mat& depth,
   std::nth_element(values.begin(),middle,values.end());return *middle;
 }
 inline BackboardDepthSample SampleBackboardDepth(const cv::Mat& depth,
-    const cv::Rect& box,int center_size,int strip_width,int strip_step,
-    int strip_max,double margin,double valid_ratio,double min_depth,
+    const cv::Rect& box,int center_size,double strip_width,double strip_step,
+    double strip_max,double margin,double valid_ratio,double min_depth,
     double max_depth,bool need_sides=true){
   BackboardDepthSample out;
   out.regions=DepthRegions(box,depth.size(),strip_width,center_size,margin);
@@ -94,20 +96,24 @@ inline BackboardDepthSample SampleBackboardDepth(const cv::Mat& depth,
     out.center=median(out.regions.center);
   }
   if(!need_sides)return out;
-  for(int width=strip_width;width<=strip_max;width+=strip_step){
+  if(!std::isfinite(strip_width) || !std::isfinite(strip_step) ||
+     !std::isfinite(strip_max) || strip_width<=0 || strip_step<=0 ||
+     strip_max<strip_width || strip_max>.5)return out;
+  for(int attempt=0;;++attempt){
+    const double width=std::min(strip_width+attempt*strip_step,strip_max);
     auto candidate=DepthRegions(box,depth.size(),width,center_size,margin);
     candidate.center=out.regions.center;
     candidate.center_fallback=out.regions.center_fallback;
     out.regions=candidate;
     out.left=median(candidate.left);
     out.right=median(candidate.right);
-    if(out.left && out.right)break;
+    if((out.left && out.right) || width>=strip_max-1e-12)break;
   }
   return out;
 }
-inline void DrawDepthRegions(cv::Mat& image,const cv::Rect& box,int strip_width,
-    const cv::Mat& aligned_depth=cv::Mat(),int center_size=21,int strip_step=7,
-    int strip_max=28,double margin=.10,double valid_ratio=.10,
+inline void DrawDepthRegions(cv::Mat& image,const cv::Rect& box,double strip_width,
+    const cv::Mat& aligned_depth=cv::Mat(),int center_size=21,double strip_step=.05,
+    double strip_max=.30,double margin=.10,double valid_ratio=.10,
     double min_depth=.10,double max_depth=2.50,bool near=true){
   const auto sample=SampleBackboardDepth(aligned_depth,box,center_size,
       strip_width,strip_step,strip_max,margin,valid_ratio,min_depth,max_depth,near);

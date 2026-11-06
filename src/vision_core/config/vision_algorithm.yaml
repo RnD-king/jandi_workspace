@@ -239,7 +239,7 @@ vision_algorithm:
       down_stationary_observation_sec: 1.0 # 검출 후 33/10번: DONE 후 신규 정지 관측
 
       # DOWN 접근·미세조정
-      down_one_step_v_px: 120.0 # DOWN 검출 v<120: 직진 2걸음 (33번)
+      down_one_step_v_px: 80.0 # DOWN 검출 v<120: 직진 2걸음 (33번)
       fine_mode_v_px: 240.0 # DOWN 검출 v>=240: 즉시 FINE 자세
 
       # DOWN 완료부터 LINE O/H 기억; 2번 자세 DONE 후 FINE 정렬에만 사용
@@ -291,11 +291,11 @@ vision_algorithm:
         missing_frame_limit: 15
         max_tracks: 16
       depth:
-        depth_strip_width_px: 7 # 좌우 밴드 시작 폭; 양측 동시 확대
+        depth_strip_width_ratio: 0.15 # 원본 박스 너비의 15%, 좌우 각각 적용
         backboard_depth_center_size_px: 21 # 중앙 ROI 정사각형 한 변
-        backboard_depth_strip_step_px: 7 # 좌우 밴드 동시 확대 증가 폭
-        backboard_depth_strip_max_width_px: 28 # 좌우 밴드 최대 폭
-        backboard_depth_inner_margin_ratio: 0.10 # 바운딩박스 상하좌우 10% 제거
+        backboard_depth_strip_step_ratio: 0.05 # 실패 시 좌우 함께 5%p 확대
+        backboard_depth_strip_max_width_ratio: 0.30 # 좌우 각각 최대 30%
+        backboard_depth_inner_margin_ratio: 0.10 # 상하만 각각 10% 제거; 좌우는 유지
         backboard_depth_min_valid_ratio: 0.10 # 각 ROI 최소 유효 Depth 픽셀 비율
         min_depth_m: 0.10 # 백보드 최소 거리
         max_depth_m: 2.50 # 백보드 최대 거리
