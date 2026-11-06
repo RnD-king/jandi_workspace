@@ -388,12 +388,34 @@ MissionFrameResult MissionController::StepPlannedLine(
         if(left) scan.phase=Phase::kPendingRight;
         else if(++scan.completed_pairs<config_.line_recovery.scan_max_pairs)
           scan.phase=Phase::kPendingLeft;
-        else { scan.phase=Phase::kIdle;line_state_=LineState::kFinalHold; }
+        else {
+          // Restore elbows ONCE at the end of all left/right scan pairs.
+          scan.phase=Phase::kReleaseArms;
+          scan.release_requested=false;
+          scan.release_align_body=false;
+        }
       }
     } else if (scan.phase==Phase::kReturnFound) {
       if (sf.finished && input.camera_feedback.settled &&
           input.camera_feedback.actual_mode==CameraMode::kForward) {
-        scan.phase=Phase::kAlignBody;
+        scan.phase=Phase::kReleaseArms;
+        scan.release_requested=false;
+        scan.release_align_body=true;
+      }
+    } else if (scan.phase==Phase::kReleaseArms) {
+      if (!scan.release_requested) {
+        // The executor retains both elbows between LINE_SCAN commands.
+        // FORWARD returns the head and explicitly restores both elbows;
+        // its DONE is delayed until the elbow interpolation is finished.
+        if (idle && commands_allowed && input.camera_feedback.settled &&
+            input.camera_feedback.actual_mode==CameraMode::kForward) {
+          camera=CameraRequest::kForward;
+          scan.release_requested=true;
+        }
+      } else if (input.camera_feedback.settled &&
+                 input.camera_feedback.actual_mode==CameraMode::kForward) {
+        if (scan.release_align_body) scan.phase=Phase::kAlignBody;
+        else { scan.phase=Phase::kIdle;line_state_=LineState::kFinalHold; }
       }
     } else if (scan.phase==Phase::kAlignBody) {
       if (scan.align_action_id!=0 && input.delivery_feedback.done &&
