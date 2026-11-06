@@ -831,6 +831,7 @@ MissionFrameResult MissionController::StepPlannedLine(
           line_plan_.Abort(); // Real DONE still belongs to the original block.
           route.hold=true;
           if (continuous_.mission==MissionType::kBall && ready &&
+              !continuous_.locked && !continuous_.near &&
               !continuous_.probe_used &&
               config_.object_approach.prelock_loss_extra_blocks>0 &&
               continuous_.last_ready_center && continuous_.last) {
