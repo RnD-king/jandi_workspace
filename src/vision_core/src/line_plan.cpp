@@ -218,6 +218,14 @@ std::vector<LinePlan::CompletedBlock> LinePlan::TakeCompletedBlocks() {
   }
   return result;
 }
+void LinePlan::TruncateUnissuedProbeRepeats(std::uint64_t owner) {
+  if (!owner) return;
+  for (auto& block:blocks_) {
+    if (block.owner==owner && block.probe && !block.aborted &&
+        !block.reported && block.issued>0)
+      block.count=block.issued;
+  }
+}
 void LinePlan::Abort() {
   for (auto& block : blocks_) {
     if (block.completed < block.count) block.aborted = true;
