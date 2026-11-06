@@ -96,7 +96,7 @@
       "duration_sec": 0.3,
       "hold_sec": 0,
       "interpolation": "smoothstep",
-      "max_speed_deg_s": 180,
+      "max_speed_deg_s": 150,
       "name": "오른발들기2",
       "positions": {
         "0": 1926,
