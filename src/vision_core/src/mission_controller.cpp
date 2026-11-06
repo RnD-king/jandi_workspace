@@ -1598,6 +1598,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         matching_feedback && input.delivery_feedback.done;
     action_feedback.action_active =
         last_command_.action_id != 0 && !action_feedback.action_done;
+    // In the CAMERA-DONE -> first BALL_DOWN_SEARCH frame, last_command_
+    // can still retain the predecessor's sensory ID even though the
+    // transport has already consumed its real DONE. That stale ID is NOT
+    // an active walking action and must not suppress the first search step.
+    if(active_mission_==MissionType::kBall &&
+       ball_result_.mode==BallMode::kDownSearch &&
+       !command_coordinator_.HasPendingAction())
+      action_feedback.action_active=false;
   }
   action_feedback.observation_complete =
       observation_finished || applied_object_ready_mean;
