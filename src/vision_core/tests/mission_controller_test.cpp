@@ -45,7 +45,7 @@ static void TestLineScanReleaseAfterBothDirections() {
   config.enable_ball=config.enable_goal=config.enable_hurdle=false;
   config.curve_search.enabled=false;
   config.transition_settle_sec=0.0;
-  config.post_motion_observation_sec=0.0;
+  config.post_motion_observation_sec=.1; // Strictly positive per config validation.
   config.line_recovery.observation_sec=.2;
   config.line_recovery.scan_max_pairs=1;
   MissionController controller(config);
