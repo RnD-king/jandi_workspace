@@ -79,8 +79,10 @@ struct Driver {
     Tick({current,true,true,false});current=second;
     for(int i=0;i<12;++i) Tick();
     Tick({current,true,false,true});
-    Check(out.command.action_id==current && !out.approach_sequence_qualified,
-          "unqualified object block queued a successor at final READY");
+    // An unqualified BALL block may now reserve exactly one remembered-direction
+    // pre-lock probe at final READY. Qualification must remain false.
+    Check(!out.approach_sequence_qualified,
+          "unqualified object block was incorrectly marked qualified");
     Tick({current,true,true,false});
   }
 };
