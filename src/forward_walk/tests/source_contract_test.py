@@ -135,6 +135,20 @@ checks['preserved camera calibration'] = all(
         '"camera_goal_yaw_tick", 2054', '"camera_goal_pitch_tick", 966'
     )
 )
+# LINE loss head scan: LEFT/RIGHT scans keep elbows extended across pairs.
+# Only the explicit FORWARD request restores elbows, and camera DONE waits
+# for both the physical head encoders and the elbow interpolation to finish.
+checks['LINE scan elbows persist across LEFT/RIGHT'] = all((
+    'line_scan_elbows_held_=true;' in main,
+    'if (line_scan_elbows_held_ && !line_scan)' in main,
+    '&& !line_scan_elbows_held_' in main,
+    'scan_elbow_home_ticks_.clear();' in main,
+))
+checks['LINE scan FORWARD restores elbows before camera DONE'] = all((
+    'if (line_scan_elbows_held_) {' in main,
+    'elbow_tween_.Start(last_sent_positions_,restore,' in main,
+    '!camera_arm_tween_.Active() && !elbow_tween_.Active()' in main,
+))
 for label, passed in checks.items():
     print(('PASS ' if passed else 'FAIL ')+label)
 if not all(checks.values()):
