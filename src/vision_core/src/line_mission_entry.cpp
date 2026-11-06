@@ -794,6 +794,25 @@ MissionFrameResult MissionController::StepPlannedLine(
           }
         }
         output.line_decision_guide = decision;
+        if (automatic_approach && ready && pixel_owner &&
+            continuous_.mission==MissionType::kBall &&
+            line_plan_.IsProbe(id) && !continuous_.probe_active &&
+            route.object_visible && averaged_center && decision.valid) {
+          // A previously lost BALL was rediscovered during the one permitted
+          // probe. Its CURRENT, real-READY weighted mean selects the next
+          // 32/33/36 block. Do not force the generic floor LINE failure FSM
+          // to process a virtual BALL guide or delay this READY handoff.
+          const auto direction=SteeringDecision(decision).direction;
+          const MissionAction cruise=direction==CruiseDirection::kLeft ? MissionAction::kStepForwardLeft :
+              direction==CruiseDirection::kStraight ? MissionAction::kStepForwardFour :
+              direction==CruiseDirection::kRight ? MissionAction::kStepForwardRight :
+              MissionAction::kNone;
+          if(cruise!=MissionAction::kNone) {
+            route.action={cruise,ActionCategory::kLocomotion,0,false};
+            line_failure_pending_done_=false;
+            line_state_=LineState::kNormal;
+          }
+        }
         const bool object_loss=automatic_approach &&
             continuous_.mission!=MissionType::kNone &&
             line_plan_.ObjectOwned(id,continuous_.epoch) &&
