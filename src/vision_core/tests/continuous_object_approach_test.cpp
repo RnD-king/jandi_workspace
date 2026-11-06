@@ -297,7 +297,16 @@ void ProbeRediscoveryAndLineMemory() {
     throw std::runtime_error("rediscovery did not replace an unissued probe repeat with normal approach: action="+
         std::to_string(static_cast<int>(recovered.out.command.action))+" id="+
         std::to_string(next)+" current="+std::to_string(recovered.current)+
-        " line_recovery="+std::to_string(recovered.out.line_in_recovery));
+        " line_recovery="+std::to_string(recovered.out.line_in_recovery)+
+        " probe_active="+std::to_string(recovered.out.approach_probe_active)+
+        " probe_used="+std::to_string(recovered.out.approach_probe_used)+
+        " loss_pending="+std::to_string(recovered.out.approach_loss_pending)+
+        " frames="+std::to_string(recovered.out.approach_sequence_frames)+
+        " hits="+std::to_string(recovered.out.approach_sequence_hits)+
+        " qualified="+std::to_string(recovered.out.approach_sequence_qualified)+
+        " blocks="+std::to_string(recovered.out.approach_completed_blocks)+
+        " guide="+std::to_string(recovered.out.line_decision_guide && recovered.out.line_decision_guide->valid)+
+        " mode="+std::to_string(static_cast<int>(recovered.out.command.control_phase)));
   recovered.Tick({next,true,false,false});
   recovered.Tick({recovered.current,true,true,false});
   Check(recovered.out.approach_completed_blocks==completed &&
