@@ -678,9 +678,10 @@ private:
   struct LineHeadSearch {
     enum class Phase { kIdle, kPendingLeft, kScanningLeft, kHoldingLeft,
                        kPendingRight, kScanningRight, kHoldingRight,
-                       kReturnFound, kAlignBody };
+                       kReturnFound, kReleaseArms, kAlignBody };
     Phase phase{Phase::kIdle};
     bool scan_started{false}, tried{false}, align_left{false};
+    bool release_requested{false}, release_align_body{false};
     int completed_pairs{0};
     int align_remaining{0};
     std::uint64_t align_action_id{0};
