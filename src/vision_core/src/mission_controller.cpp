@@ -1451,7 +1451,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         config_.post_motion_observation_sec > 0.0 && camera_settle_edge &&
         !input.camera_scan.finished &&
         !(active_mission_==MissionType::kHurdle &&
-          hurdle_controller_.ContinuousDownCameraWait()))
+          hurdle_controller_.ContinuousDownCameraWait()) &&
+        !(active_mission_==MissionType::kBall &&
+          ball_result_.mode==BallMode::kWaitCameraDown))
       BeginDecisionObservation(input.now_sec, active_mission_, true, {});
     if (!decision_observation_active_ && !applied_object_ready_mean &&
         !(goal_edge_guard_.phase==GoalEdgeGuard::Phase::kTurning &&
@@ -2671,12 +2673,21 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
     if(entry_track) {
       prepared.ball_entry_center_u=entry_track->MeanU();
       if(entry_track->detection_index) {
+        // The robot may still be walking during first admission. Match the
+        // READY policy: recent valid detections receive weights from 1 to 3.
         Point2 sum{};
-        int valid=0;
-        for(const auto& point:entry_track->positions) if(point) {
-          sum.u+=point->u;sum.v+=point->v;++valid;
+        double weight_sum=0.0;
+        const auto size=entry_track->positions.size();
+        for(std::size_t index=0;index<size;++index) {
+          const auto& point=entry_track->positions[index];
+          if(!point)continue;
+          const double weight=1.0+2.0*static_cast<double>(index)/
+              static_cast<double>(std::max<std::size_t>(1,size-1));
+          sum.u+=weight*point->u;sum.v+=weight*point->v;
+          weight_sum+=weight;
         }
-        if(valid>0) prepared.ball_entry_mean_center=Point2{sum.u/valid,sum.v/valid};
+        if(weight_sum>0.0)
+          prepared.ball_entry_mean_center=Point2{sum.u/weight_sum,sum.v/weight_sum};
       }
     }
   } else if(config_.ball_candidate_tracking.enabled && candidate_.mission==MissionType::kBall) {
