@@ -430,7 +430,7 @@ private:
     std::uint64_t id{}, epoch{};
     int blocks{}, missing{};
     bool locked{false}, near{false}, mission_started{false}, loss_pending{false};
-    bool probe_active{false}, probe_used{false};
+    bool probe_active{false}, probe_used{false}, probe_return_to_line{false};
     std::optional<ObjectTarget> last;
     GoalPoseObservation pose;
     std::optional<double> depth;
@@ -455,6 +455,7 @@ private:
     std::optional<LineGuide> guide;
     std::optional<LineGuide> display_guide;
     bool guide_observed{false};
+    bool resume_line_at_ready{false}; // Return from a failed BALL probe at its final READY.
     CameraRequest camera{CameraRequest::kNone};
     bool hold{false}, entered{false}, object_visible{false}, near_final_action{false};
     bool probe_start{false};
@@ -506,6 +507,7 @@ private:
   double approach_camera_started_{-1.0};
   RouteDecision PrepareContinuousApproach(const MissionFrameInput&,const Features&,bool idle);
   void ReleaseContinuousApproach();
+  void FinishPrelockProbeToLine();
   void EnterContinuousMission(const MissionFrameInput&,bool lost);
   bool ResumeContinuousApproach(const MissionFrameInput&);
   void PopulateApproachDiagnostics(MissionFrameResult&) const;
