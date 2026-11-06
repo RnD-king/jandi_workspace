@@ -871,7 +871,7 @@ private:
                 }
                 if(targets.empty()) {
                     camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
-                        scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,true);
+                        scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_);
                     scan_elbow_stage_=ScanElbowStage::kScanning;
                 } else {
                     elbow_tween_.Start(last_sent_positions_,targets,
