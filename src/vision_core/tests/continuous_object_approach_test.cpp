@@ -595,7 +595,11 @@ void NearAndIdentity() {
         " phase="+std::to_string(static_cast<int>(d.out.command.control_phase))+
         " mission="+std::to_string(static_cast<int>(d.out.active_mission))+
         " observing="+std::to_string(d.out.post_motion_observing)+
-        " camera_request="+std::to_string(static_cast<int>(d.out.command.camera_request)));
+        " camera_request="+std::to_string(static_cast<int>(d.out.command.camera_request))+
+        " planned_ball_action="+std::to_string(static_cast<int>(d.out.ball.action.action))+
+        " repeat_scope="+std::to_string(d.out.repeat_scope)+
+        " ball_active="+std::to_string(d.out.ball.active)+
+        " approach_missing="+std::to_string(d.out.approach_missing_frames));
   Driver replacement(Config());replacement.Warm();replacement.Block();replacement.Block();
   replacement.in.ball_track_id=99;
   for(int i=0;i<3;++i) replacement.Tick();
