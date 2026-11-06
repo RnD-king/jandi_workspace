@@ -846,24 +846,28 @@ private:
                 scan_move_sec_=message->scan_move_sec;
                 scan_hold_sec_=message->scan_hold_sec;
                 scan_return_sec_=message->scan_return_sec;
-                scan_elbow_home_ticks_.clear();
+                if (line_scan_elbows_held_ && !line_scan)
+                    throw std::invalid_argument("LINE scan elbows held; restore FORWARD first");
                 P2PMotionPlayer::RawPositions targets;
                 double minimum=0.0;
-                // BALL: one side; LINE: both sides; GOAL: no elbow movement.
-                for (int id : {17,18}) {
-                    const bool extend=line_scan ||
-                        (!scan_goal_view_ && (scan_left_ ? id==17 : id==18));
-                    if(!extend) continue;
-                    const int home=last_sent_positions_.at(id);
-                    const int sign=id==17 ? +1 : -1;
-                    const int offset=static_cast<int>(std::lround(
-                        curve_scan_elbow_angle_deg_*4096.0/360.0));
-                    const int target=home+sign*offset;
-                    if(target<0 || target>4095)
-                        throw std::invalid_argument("scan elbow target outside 0..4095");
-                    scan_elbow_home_ticks_[id]=home;
-                    targets[id]=target;
-                    minimum=std::max(minimum,std::abs(target-home)*360.0/4096.0/60.0);
+                if (!line_scan_elbows_held_) {
+                    scan_elbow_home_ticks_.clear();
+                    // BALL: one side; LINE: both sides; GOAL: no elbow movement.
+                    for (int id : {17,18}) {
+                        const bool extend=line_scan ||
+                            (!scan_goal_view_ && (scan_left_ ? id==17 : id==18));
+                        if(!extend) continue;
+                        const int home=last_sent_positions_.at(id);
+                        const int sign=id==17 ? +1 : -1;
+                        const int offset=static_cast<int>(std::lround(
+                            curve_scan_elbow_angle_deg_*4096.0/360.0));
+                        const int target=home+sign*offset;
+                        if(target<0 || target>4095)
+                            throw std::invalid_argument("scan elbow target outside 0..4095");
+                        scan_elbow_home_ticks_[id]=home;
+                        targets[id]=target;
+                        minimum=std::max(minimum,std::abs(target-home)*360.0/4096.0/60.0);
+                    }
                 }
                 if(targets.empty()) {
                     camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
@@ -874,8 +878,23 @@ private:
                         std::max(curve_scan_elbow_duration_sec_,minimum),now);
                     scan_elbow_stage_=ScanElbowStage::kExtending;
                 }
+                if (line_scan) line_scan_elbows_held_=true;
             } else {
                 camera_motion_->Start(req,last_sent_positions_,now);
+                if (line_scan_elbows_held_) {
+                    P2PMotionPlayer::RawPositions restore;
+                    double minimum=0.0;
+                    for(const auto& item:scan_elbow_home_ticks_) {
+                        restore[item.first]=item.second;
+                        minimum=std::max(minimum,
+                            std::abs(last_sent_positions_.at(item.first)-item.second)*
+                            360.0/4096.0/60.0);
+                    }
+                    if (!restore.empty())
+                        elbow_tween_.Start(last_sent_positions_,restore,
+                            std::max(curve_scan_elbow_duration_sec_,minimum),now);
+                    line_scan_elbows_held_=false;
+                }
                 camera_arm_forward_=req==vision::msg::CameraCommand::FORWARD ||
                     req==vision::msg::CameraCommand::BALL_VIEW_LINE;
                 const bool special=motion_in_progress_ &&
@@ -1092,7 +1111,7 @@ private:
         // End-of-playback is not arrival. Read only the two camera encoders,
         // at most every 100 ms with a bounded 5 ms timeout per motor.
         if (camera_result == motion_executor::CameraMotion::Result::Verify &&
-            !camera_arm_tween_.Active() && now>=next_camera_verify_at_) {
+            !camera_arm_tween_.Active() && !elbow_tween_.Active() && now>=next_camera_verify_at_) {
             next_camera_verify_at_=now+100ms;
             const auto target=camera_motion_->TargetPose();
             try {
@@ -1101,7 +1120,7 @@ private:
                     dxl_->ReadRawPosition(camera_config_.pitch_id,5.0)};
                 if (camera_motion_->ConfirmArrival(measured)) {
                     if(scan_elbow_stage_==ScanElbowStage::kScanning &&
-                       !scan_elbow_home_ticks_.empty()) {
+                       !scan_elbow_home_ticks_.empty() && !line_scan_elbows_held_) {
                         P2PMotionPlayer::RawPositions targets;
                         double minimum=0.0;
                         for(const auto& pair:scan_elbow_home_ticks_) {
@@ -1121,6 +1140,9 @@ private:
                         target.yaw,target.pitch,measured.yaw,measured.pitch);
                     PublishCameraStatus(camera_transactions_.active_id, vision::msg::CommandStatus::DONE);
                     camera_transactions_.CompleteActive();
+                    if (scan_elbow_stage_==ScanElbowStage::kIdle &&
+                        !line_scan_elbows_held_ && !elbow_tween_.Active())
+                        scan_elbow_home_ticks_.clear();
                     }
                 } else {
                     RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),1000,
@@ -1287,6 +1309,7 @@ private:
     enum class ScanElbowStage { kIdle, kExtending, kScanning, kRestoring };
     ScanElbowStage scan_elbow_stage_{ScanElbowStage::kIdle};
     P2PMotionPlayer::RawPositions scan_elbow_home_ticks_;
+    bool line_scan_elbows_held_{false}; // Persistent across LEFT/RIGHT pairs until FORWARD.
     int scan_yaw_deg_{0};
     bool scan_goal_view_{false};
     bool scan_left_{true};
