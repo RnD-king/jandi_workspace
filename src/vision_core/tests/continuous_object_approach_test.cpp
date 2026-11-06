@@ -579,6 +579,16 @@ void NearAndIdentity() {
   Check(d.out.active_mission==MissionType::kBall,"near object did not use the original near BALL controller");
   Check(d.out.ball.mode==BallMode::kWaitCameraDown && d.out.command.camera_request==CameraRequest::kBallView &&
       !d.out.remembered_line_score,"near BALL did not discard LINE memory and enter DOWN immediately");
+  // BALL_VIEW physical DONE must NOT introduce a generic extra 1s window.
+  // The first 10-step moving search should issue within the next two frames.
+  d.in.camera_feedback={CameraMode::kTransition,false};
+  d.Tick();
+  d.in.camera_feedback={CameraMode::kBallView,true};
+  d.in.ball_target.reset();
+  for(int n=0;n<3 && d.out.command.action!=MissionAction::kStepForwardOne;++n)d.Tick();
+  Check(d.out.command.action==MissionAction::kStepForwardOne &&
+        !d.out.post_motion_observing,
+        "BALL_VIEW camera DONE inserted a stationary 1s window before moving DOWN search");
   Driver replacement(Config());replacement.Warm();replacement.Block();replacement.Block();
   replacement.in.ball_track_id=99;
   for(int i=0;i<3;++i) replacement.Tick();
