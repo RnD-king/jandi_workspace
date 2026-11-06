@@ -256,6 +256,12 @@ install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
 
+install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
+install(PROGRAMS scripts/jandi.py DESTINATION lib/${PROJECT_NAME} RENAME jandi)
+install(FILES scripts/jandi_runtime.py scripts/jandi_ros.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/install_jandi_command.sh DESTINATION lib/${PROJECT_NAME})
+install(FILES JANDI_RUNTIME.md DESTINATION share/${PROJECT_NAME})
+
 install(FILES ROSBAG_RECORDING.md SHOOT_TUNING.md TERMINAL_VIEW.md DESTINATION share/${PROJECT_NAME})
 
 install(PROGRAMS scripts/vision_terminal_node.py
@@ -324,6 +330,16 @@ if(BUILD_TESTING)
   target_link_libraries(vision_backboard_depth_regions_test ${OpenCV_LIBS})
   add_test(NAME vision_backboard_depth_regions_test COMMAND vision_backboard_depth_regions_test)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME vision_jandi_runtime_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_runtime_test.py)
+  add_test(NAME vision_jandi_launch_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_launch_test.py)
+  add_test(NAME vision_jandi_ros_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_ros_test.py)
+  set_tests_properties(vision_jandi_ros_test PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=86;ROS_LOCALHOST_ONLY=1")
+  set_tests_properties(vision_jandi_runtime_test vision_jandi_launch_test vision_jandi_ros_test PROPERTIES
+    LABELS "runtime" TIMEOUT 45)
   add_test(NAME vision_terminal_view_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/terminal_view_test.py)
   set_tests_properties(vision_terminal_view_test PROPERTIES LABELS "logic")
