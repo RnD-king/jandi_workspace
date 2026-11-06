@@ -586,9 +586,16 @@ void NearAndIdentity() {
   d.in.camera_feedback={CameraMode::kBallView,true};
   d.in.ball_target.reset();
   for(int n=0;n<3 && d.out.command.action!=MissionAction::kStepForwardOne;++n)d.Tick();
-  Check(d.out.command.action==MissionAction::kStepForwardOne &&
-        !d.out.post_motion_observing,
-        "BALL_VIEW camera DONE inserted a stationary 1s window before moving DOWN search");
+  if (!(d.out.command.action==MissionAction::kStepForwardOne &&
+        !d.out.post_motion_observing))
+    throw std::runtime_error("BALL_VIEW camera DONE inserted a stationary 1s window before moving DOWN search: mode="+
+        std::to_string(static_cast<int>(d.out.ball.mode))+
+        " action="+std::to_string(static_cast<int>(d.out.command.action))+
+        " action_id="+std::to_string(d.out.command.action_id)+
+        " phase="+std::to_string(static_cast<int>(d.out.command.control_phase))+
+        " mission="+std::to_string(static_cast<int>(d.out.active_mission))+
+        " observing="+std::to_string(d.out.post_motion_observing)+
+        " camera_request="+std::to_string(static_cast<int>(d.out.command.camera_request)));
   Driver replacement(Config());replacement.Warm();replacement.Block();replacement.Block();
   replacement.in.ball_track_id=99;
   for(int i=0;i<3;++i) replacement.Tick();
