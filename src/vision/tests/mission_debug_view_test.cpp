@@ -31,9 +31,13 @@ int main() {
   vision_core::MissionFrameResult m;
   m.line_in_recovery=false;
   for (const auto& entry:std::vector<std::pair<vision_core::MissionAction,const char*>>{
-      {vision_core::MissionAction::kLineLeftUnit,"LEFT"},
-      {vision_core::MissionAction::kLineStraightUnit,"STRAIGHT"},
-      {vision_core::MissionAction::kLineRightUnit,"RIGHT"}}) {
+      {vision_core::MissionAction::kLineLeftUnit,"left"},
+      {vision_core::MissionAction::kLineStraightUnit,"straight"},
+      {vision_core::MissionAction::kLineRightUnit,"right"},
+      {vision_core::MissionAction::kStepForwardLeft,"left"},
+      {vision_core::MissionAction::kStepForwardFour,"straight"},
+      {vision_core::MissionAction::kStepForwardRight,"right"},
+      {vision_core::MissionAction::kLineRightUnitTurnFirst,"right"}}) {
     m.command.action=entry.first;
     Check(std::string(vision::DebugCameraActionStatus(m))==entry.second,
           "camera walk label did not use the short direction");
@@ -247,9 +251,12 @@ int main() {
   virtual_path.heading_rad=.2;
   m.approach_path_guide=virtual_path;
   m.approach_path_reference_px={320,240};
-  auto blue=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
-  Check(blue.image.at<cv::Vec3b>(240,400)==cv::Vec3b(255,0,0),
-        "BALL virtual approach path must be blue");
+  const auto ball_with_path=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
+  auto without_path=m;
+  without_path.approach_path_guide.reset();
+  const auto ball_without_path=vision::RenderMissionDebug(image,empty,{},c,{},without_path,forward,{},state);
+  Check(cv::norm(ball_with_path.image,ball_without_path.image,cv::NORM_INF)==0,
+        "BALL virtual approach path must not be drawn on the camera image");
   m.approach_action_committed=true;
   m.line_computed=true;
   m.line_decision_guide=virtual_path;
@@ -262,9 +269,12 @@ int main() {
   m.approach_action_committed=false;
   m.line_computed=false;
   m.approach_mission=vision_core::MissionType::kGoal;
-  auto blue_goal=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
-  Check(blue_goal.image.at<cv::Vec3b>(240,400)==cv::Vec3b(255,0,0),
-        "GOAL virtual approach path must be blue");
+  const auto goal_with_path=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
+  without_path=m;
+  without_path.approach_path_guide.reset();
+  const auto goal_without_path=vision::RenderMissionDebug(image,empty,{},c,{},without_path,goal_camera,{},state);
+  Check(cv::norm(goal_with_path.image,goal_without_path.image,cv::NORM_INF)==0,
+        "GOAL virtual approach path must not be drawn on the camera image");
   m.approach_path_guide.reset();
   // The BALL near guide is four diagonals only below v=240, not columns
   // frozen at the threshold row. The center row remains split at v=355.

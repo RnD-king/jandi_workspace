@@ -239,8 +239,8 @@ vision_algorithm:
       down_stationary_observation_sec: 1.0 # 검출 후 33/10번: DONE 후 신규 정지 관측
 
       # DOWN 접근·미세조정
-      down_one_step_v_px: 80.0 # DOWN 검출 v<120: 직진 2걸음 (33번)
-      fine_mode_v_px: 240.0 # DOWN 검출 v>=240: 즉시 FINE 자세
+      down_one_step_v_px: 40.0 # DOWN 검출 v<120: 직진 2걸음 (33번)
+      fine_mode_v_px: 220.0 # DOWN 검출 v>=240: 즉시 FINE 자세
 
       # DOWN 완료부터 LINE O/H 기억; 2번 자세 DONE 후 FINE 정렬에만 사용
       fine_line_reference_u_px: 380.0 # 허들 DOWN 화면의 로봇 기준선
@@ -262,9 +262,9 @@ vision_algorithm:
       fine_line_max_search_steps: 3 # 유실 시 3번 FINE 전진 한도
 
       # 허들 접촉·넘기
-      contact_v_px: 240 # 접촉 선 (반걸음)
+      contact_v_px: 220 # 접촉 선 (반걸음)
       contact_steps: 3 # 접촉 보행 반 걸음 횟수
-      contact_inter_action_hold_sec: 0.3 # 접촉 보행 DONE 후 다음 접촉 보행까지 정지 시간 (초, 0: 추가 대기 없음)
+      contact_inter_action_hold_sec: 0.5 # 접촉 보행 DONE 후 다음 접촉 보행까지 정지 시간 (초, 0: 추가 대기 없음)
 
       # 허들 넘은 뒤 재진입 방지
       hurdle_ignore_duration_sec: 5.0
@@ -350,7 +350,7 @@ vision_algorithm:
       # 투척 위치·방향
       hoop_radius_m: 0.10 # 림 위치 보정에 사용하는 반지름
       throw_landing_x_m: -0.02 # 카메라 기준 허리 0도 공 낙하 X (m)
-      throw_landing_z_m: 0.62 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
+      throw_landing_z_m: 0.6 # 카메라 기준 허리 0도 공 낙하 전방 Z (m)
       waist_axis_in_camera_x_m: 0.020 # 카메라 기준 허리축 X (+오른쪽); 실측 전 기존 동작 유지
       waist_axis_in_camera_z_m: -0.100 # 카메라 기준 허리축 Z (+전방); 실측 전 기존 동작 유지
       fine_motion:
@@ -363,7 +363,7 @@ vision_algorithm:
         left_delta_z_m: 0.0
         right_delta_x_m: 0.0
         right_delta_z_m: 0.0
-      position_tolerance_m: 0.05 # 목표 거리의 허용 오차
+      position_tolerance_m: 0.04 # 목표 거리의 허용 오차
       shoot_yaw_limit_deg: 20.0 # ±이 값: FINE 투척 허리각 및 좌우 미세 이동 판단 기준
 
       # 투척 후 복귀

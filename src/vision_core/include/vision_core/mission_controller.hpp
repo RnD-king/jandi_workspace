@@ -562,6 +562,8 @@ private:
   void FinishMission();
   bool StraightGoalGateReached(int additional_straight_blocks = 0) const;
   bool FinishCourseEnabled(const MissionFrameInput& input) const;
+  Features ComputeLineFeaturesForFrame(const MissionFrameInput& input,
+                                      const FeatureConfig& features) const;
   void PopulateDiagnostics(MissionFrameResult &output, double now_sec) const;
   void InitializeTest();
   bool TestExecutionReady() const;

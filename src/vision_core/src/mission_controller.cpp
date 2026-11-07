@@ -74,6 +74,23 @@ bool MissionController::FinishCourseEnabled(const MissionFrameInput& input) cons
       hurdle_crosses_completed_>=2 && course_curve_index_==5;
 }
 
+Features MissionController::ComputeLineFeaturesForFrame(
+    const MissionFrameInput& input, const FeatureConfig& features) const {
+  // Only the carrying AUTO LINE walk toward a GOAL/retry uses three points.
+  // BALL pickup, HURDLE DOWN, FORWARD LINE and isolated/manual trials retain
+  // their existing input gates. RANSAC for four or more points is unchanged.
+  const bool goal_line_view = config_.test_mission == MissionType::kNone &&
+      !input.manual_observation_control && active_mission_ == MissionType::kLine &&
+      !FinishCourseEnabled(input) &&
+      has_ball_ && config_.enable_goal && post_pickup_goal_line_gate_active_ &&
+      input.camera_feedback.settled &&
+      input.camera_feedback.actual_mode == CameraMode::kBallView;
+  auto frame_features = features;
+  if (goal_line_view) frame_features.guide_min_points = 3;
+  return ComputeLineFeatures(input.line_centers, input.image_width,
+      input.image_height, frame_features, goal_line_view ? 3 : 4);
+}
+
 ActionRequest MissionController::CruiseAction(const LineGuide &guide,
                                               bool queue_eligible) {
   const CruiseDecision decision = SteeringDecision(guide);
@@ -936,8 +953,7 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
   const LineGuide guide =
       input.line_decision_guide_override
           ? *input.line_decision_guide_override
-          : ComputeLineFeatures(input.line_centers, input.image_width,
-                                input.image_height, config_.line_features)
+          : ComputeLineFeaturesForFrame(input, config_.line_features)
                 .guide;
   const bool valid=guide.valid && std::isfinite(guide.offset) &&
       std::isfinite(guide.heading_rad);
@@ -1571,8 +1587,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       decision_observation_first_frame_;
   if (observation_hold && !camera_settle_transition_frame) {
     output.line_features =
-        ComputeLineFeatures(input.line_centers, input.image_width,
-                            input.image_height, config_.line_features);
+        ComputeLineFeaturesForFrame(input, config_.line_features);
     output.line_computed = true;
     const bool collecting =
         input.now_sec + 1e-9 >= decision_observation_start_sec_;

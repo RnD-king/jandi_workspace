@@ -74,11 +74,10 @@ void PriorityAndGates() {
   Check(floor.out.command.action==MissionAction::kLineLeftUnit,"valid LINE did not win over finish bbox");
   for(int points:{0,1,2,3}) {
     Driver bbox;bbox.Floor(200,points);bbox.in.hurdle_target=Finish(450);bbox.Tick();
-    Check(bbox.out.command.action==static_cast<MissionAction>(Config().line_p2p.right_unit_action),
-          "sparse LINE did not use finish center");
-    Check(!bbox.out.line_features.guide.valid && bbox.out.line_decision_guide &&
-          bbox.out.line_decision_guide->valid,
-          "virtual finish guide was reported as a real floor fit");
+    Check(bbox.out.command.action==MissionAction::kLineStraightUnit,
+          "sparse LINE steered toward an object instead of going straight");
+    Check(bbox.out.line_decision_guide && !bbox.out.line_decision_guide->valid,
+          "finish synthesized a floor guide from an object");
     Check(bbox.out.active_mission==MissionType::kLine && bbox.out.approach_mission==MissionType::kNone,
           "finish entered HURDLE/FINE instead of retaining LINE transport");
   }
@@ -91,8 +90,8 @@ void PriorityAndGates() {
   outlier.core.config_.line_features.ransac_min_sample_v_gap_px=20;
   outlier.in.hurdle_target=Finish(450);outlier.Tick();
   Check(outlier.out.line_features.n_visible==3 &&
-        outlier.out.command.action==static_cast<MissionAction>(Config().line_p2p.right_unit_action),
-        "three RANSAC inliers incorrectly kept floor steering priority");
+        outlier.out.command.action==MissionAction::kLineStraightUnit,
+        "three RANSAC inliers incorrectly used an object for steering");
   Driver bad;bad.in.hurdle_target=Finish(std::numeric_limits<double>::quiet_NaN());bad.Tick();
   Check(bad.out.command.action==MissionAction::kLineStraightUnit,"invalid finish center was used");
   Driver score;score.core.config_.line_p2p.in_place_turn_score=.01;
@@ -134,12 +133,74 @@ void ActivateRealCooldown(Driver& d) {
 }
 void CooldownScope() {
   Driver second;ActivateRealCooldown(second);second.in.hurdle_target=Finish(450);second.Tick();
-  Check(second.out.command.action==static_cast<MissionAction>(Config().line_p2p.right_unit_action),
-        "second crossing cooldown hid finish center");
+  Check(second.out.command.action==MissionAction::kLineStraightUnit,
+        "finish object affected steering during second crossing cooldown");
   Driver first(1,5);ActivateRealCooldown(first);first.Floor(320);first.in.hurdle_target=Finish(450);
   for(int i=0;i<15;++i)first.Tick();
   Check(first.core.hurdle_controller_.IgnoringUntil(first.in.now_sec),"first cooldown ended too soon");
   Check(first.out.approach_mission==MissionType::kNone,"first crossing lost its cooldown protection");
+}
+void AllObjectsAreIgnored() {
+  for (bool carrying : {false,true}) for (int points : {0,3,5}) {
+    Driver baseline,visible;
+    for (auto* d : {&baseline,&visible}) {
+      d->core.config_.enable_ball=d->core.config_.enable_goal=true;
+      d->core.config_.curve_search.enabled=true;
+      d->core.has_ball_=carrying;
+      d->core.post_pickup_goal_line_gate_active_=true;
+      d->core.post_pickup_line_actions_completed_=100;
+      d->core.post_pickup_straight_blocks_completed_=100;
+      d->core.post_pickup_five_step_completed_=true;
+      d->Floor(200,points);
+    }
+    const auto tick=[&](CommandDeliveryFeedback feedback=CommandDeliveryFeedback{}) {
+      // Qualifying objects move across the image, including a clipped board
+      // and missing Depth. None may affect finish steering or cause a camera
+      // change, object admission, recovery search, or observation hold.
+      const double u=visible.in.now_sec<1 ? 10 : visible.in.now_sec<2 ? 630 : 320;
+      visible.in.ball_target=Finish(u);
+      visible.in.hurdle_target=Finish(u);
+      visible.in.goal_target=Finish(u);
+      visible.in.backboard_target=Finish(u);
+      visible.in.raw_backboard_target=Finish(u);
+      visible.in.raw_backboard_observation_available=true;
+      visible.in.raw_backboard_u=u;
+      visible.in.backboard_image_without_depth=true;
+      visible.in.ball_entry_detected=true;
+      visible.in.ball_entry_track_hits=10;
+      visible.in.ball_entry_track_frames=10;
+      visible.in.ball_entry_center_u=u;
+      visible.in.ball_entry_mean_center=Point2{u,400};
+      visible.in.hurdle_entry_track_hits=10;
+      visible.in.backboard_entry_track_hits=10;
+      visible.in.scan_ball_u=u;
+      visible.in.scan_backboard_u=u;
+      baseline.Tick(feedback);visible.Tick(feedback);
+      const auto& a=baseline.out.command;
+      const auto& b=visible.out.command;
+      Check(a.action==b.action && a.action_id==b.action_id &&
+            a.command_type==b.command_type && a.camera_request==b.camera_request &&
+            a.target_yaw_deg==b.target_yaw_deg,
+            "objects changed finish commands or camera requests");
+      Check(visible.out.active_mission==MissionType::kLine &&
+            visible.out.approach_mission==MissionType::kNone &&
+            visible.out.candidate_mission==MissionType::kNone &&
+            visible.out.candidate_phase==0 && !visible.out.post_motion_observing,
+            "finish objects started an object decision or observation");
+    };
+    tick();
+    for (int block=0;block<3;++block) {
+      const auto a=baseline.out.command.action_id;
+      Check(a!=0,"finish test did not start a walk");
+      tick({a,true,false,false});
+      for (int frame=0;frame<12;++frame) tick();
+      tick({a,true,false,true});
+      const auto b=baseline.out.command.action_id;
+      Check(b!=0 && b!=a,"finish objects blocked the READY successor");
+      tick({b,true,false,false});
+      tick({a,true,true,false});
+    }
+  }
 }
 void ReadyDonePauseReset() {
   Driver d;d.Tick();const auto a=d.out.command.action_id;
@@ -178,4 +239,4 @@ void ReadyDonePauseReset() {
         d.out.command.action_id==0,"RESET retained finish-only forward policy");
 }
 }
-int main() { PriorityAndGates();CooldownScope();ReadyDonePauseReset(); }
+int main() { PriorityAndGates();CooldownScope();AllObjectsAreIgnored();ReadyDonePauseReset(); }

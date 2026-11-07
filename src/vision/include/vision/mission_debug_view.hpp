@@ -190,6 +190,29 @@ inline const char *DebugCameraActionStatus(const vision_core::MissionFrameResult
   if ((result.active_mission==MissionType::kLine && result.line_in_recovery) ||
       result.candidate_phase==3 ||
       ball_search || goal_search || hurdle_search) return "SEARCHING";
+  // Camera overlays use one vocabulary for all forward WALK variants;
+  // detailed action names remain available in the state panel.
+  switch (result.command.action) {
+  case MissionAction::kStepForwardOne:
+  case MissionAction::kStepForwardOneAlternate:
+  case MissionAction::kStepForwardTwo:
+  case MissionAction::kStepForwardThree:
+  case MissionAction::kStepForwardFour:
+  case MissionAction::kStepForwardFive:
+  case MissionAction::kLineStraightUnit: return "straight";
+  case MissionAction::kStepForwardLeft:
+  case MissionAction::kStepForwardLeftTwo:
+  case MissionAction::kStepForwardLeftOne:
+  case MissionAction::kTurnLeftAndStep:
+  case MissionAction::kLineLeftUnit: return "left";
+  case MissionAction::kStepForwardRight:
+  case MissionAction::kStepForwardRightTwo:
+  case MissionAction::kStepForwardRightOne:
+  case MissionAction::kTurnRightAndStep:
+  case MissionAction::kLineRightUnit:
+  case MissionAction::kLineRightUnitTurnFirst: return "right";
+  default: break;
+  }
   return DebugActionName(result.command.action);
 }
 inline std::string DebugRepeatLabel(int scope, const vision_core::MissionControllerConfig& config,
@@ -405,31 +428,6 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
       }
     }
   }
-  // Draw the current BALL/GOAL image path. The next action can use the
-  // completed block's weighted mean instead of this frame's heading.
-  // The core supplies its reference pixel so a valid guide also works when
-  // the real floor LINE is absent (notably in the GOAL camera view).
-  if (mission_result.approach_path_guide && vis.cols > 1 && vis.rows > 1) {
-    const auto& guide = *mission_result.approach_path_guide;
-    const auto ref = mission_result.approach_path_reference_px;
-    if (guide.valid && std::isfinite(guide.offset) &&
-        std::isfinite(guide.heading_rad) && std::isfinite(ref.u) &&
-        std::isfinite(ref.v)) {
-      const double slope = -std::tan(guide.heading_rad);
-      const double u_ref = ref.u + 0.5 * vis.cols * guide.offset;
-      const double top = u_ref - slope * ref.v;
-      const double bottom = u_ref + slope * (vis.rows - 1 - ref.v);
-      if (std::isfinite(top) && std::isfinite(bottom)) {
-        const auto pixel_x = [](double u) {
-          return static_cast<int>(std::lround(std::clamp(u, -1000000.0, 1000000.0)));
-        };
-        cv::Point start(pixel_x(top), 0), end(pixel_x(bottom), vis.rows - 1);
-        if (cv::clipLine(cv::Rect(0, 0, vis.cols, vis.rows), start, end))
-          cv::line(vis, start, end, cv::Scalar(255, 0, 0), 2, cv::LINE_AA);
-      }
-    }
-  }
-
   if (selected_goal) {
     const auto &fine = goal_cmd.fine_decision_pose;
     if (goal_cmd.fine_decision_pose_used && fine.valid &&
@@ -1100,8 +1098,16 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         panel_font_scale,item.row.color,1,cv::LINE_AA);
   }
   cv::putText(vis,view.performance,{10,24},cv::FONT_HERSHEY_SIMPLEX,0.7,{0,255,0},2);
-  cv::putText(vis,std::string(DebugMissionName(mission_result.active_mission))+": "+DebugCameraActionStatus(mission_result),
+  const std::string action_status=DebugCameraActionStatus(mission_result);
+  const bool walk_direction=action_status=="straight" || action_status=="left" || action_status=="right";
+  cv::putText(vis,walk_direction ? action_status :
+      std::string(DebugMissionName(mission_result.active_mission))+": "+action_status,
       {10,48},cv::FONT_HERSHEY_SIMPLEX,0.55,{0,200,255},2);
+  const std::string curve_index=std::to_string(mission_result.course_curve_index);
+  const int index_width=cv::getTextSize(curve_index,cv::FONT_HERSHEY_SIMPLEX,0.7,2,nullptr).width;
+  const cv::Point index_position(std::max(0,vis.cols-10-index_width),48);
+  cv::putText(vis,curve_index,index_position,cv::FONT_HERSHEY_SIMPLEX,0.7,{0,0,0},4,cv::LINE_AA);
+  cv::putText(vis,curve_index,index_position,cv::FONT_HERSHEY_SIMPLEX,0.7,{255,255,255},2,cv::LINE_AA);
   if (!hurdle_test_boundary.empty() && vis.cols>20 && vis.rows>120) {
     cv::rectangle(vis,{4,55},{vis.cols-5,113},cv::Scalar(0,0,0),cv::FILLED);
     const std::string title="HURDLE TEST STAGE "+std::to_string(config.test_stage)+" COMPLETE";

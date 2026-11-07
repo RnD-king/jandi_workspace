@@ -83,7 +83,7 @@ MissionFrameResult MissionController::StepPlannedLine(
     line_failure_pending_done_=false;
     line_observation_active_=false;
   }
-  if (automatic_approach && has_ball_ && config_.enable_goal) {
+  if (automatic_approach && !finish_course && has_ball_ && config_.enable_goal) {
     BallResult carrying;carrying.has_ball=true;
     goal_controller_.UpdateBallState(carrying);
   }
@@ -175,8 +175,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   FeatureConfig features = config_.line_features;
   if (image_center && std::isfinite(*image_center) && *image_center >= 0 &&
       *image_center < input.image_width) features.image_center_u = *image_center;
-  output.line_features = ComputeLineFeatures(input.line_centers, input.image_width,
-                                            input.image_height, features);
+  output.line_features = ComputeLineFeaturesForFrame(input, features);
   output.line_computed = true;
   // The normal LINE guide is untouched; this only records independent curve
   // votes during an executing logical LINE block.
@@ -211,12 +210,10 @@ MissionFrameResult MissionController::StepPlannedLine(
   const auto actual_line_guide=raw;
   const bool finish_floor_usable=actual_line_guide.valid && output.line_features.n_visible>=4;
   if (finish_course && !finish_floor_usable) {
-    // Use a CURRENT finish-line center only when ordinary four-point LINE
-    // fitting fails. No near/FINE/crossing admission and no post-hurdle cooldown.
+    // Finish steering uses floor LINE only. Objects, including a finish gate
+    // detected as HURDLE, must never substitute for missing floor evidence.
+    // ComputeLineAction keeps the existing straight fallback for this case.
     raw={};
-    if (input.hurdle_target)
-      raw=ImageLineGuide(0.0,input.hurdle_target->center_px.u,
-          config_.hurdle.target_u_px,input.image_width,input.hurdle_target->confidence);
   }
   LineGuide decision = input.line_decision_guide_override.value_or(raw);
   if (finish_course) decision=raw;
@@ -1143,7 +1140,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   if (input.delivery_feedback.ready && command.control_phase == ControlPhase::kWaitingQueuedActionAck)
     line_ready_handled_id_ = input.delivery_feedback.action_id;
-  if(automatic_approach && input.raw_backboard_observation_available && has_ball_ &&
+  if(automatic_approach && !finish_course && input.raw_backboard_observation_available && has_ball_ &&
      command.command_type==CommandType::kAction && command.action_id!=0 &&
      !route.edge_turn_step && goal_edge_guard_.phase==GoalEdgeGuard::Phase::kIdle)
     ClearGoalEdgeObservation();

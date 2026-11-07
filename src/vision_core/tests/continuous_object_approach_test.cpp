@@ -409,6 +409,129 @@ void LockAndLoss() {
         "locked BALL reused the pre-lock entry-loss budget");
 }
 
+void GoalLineReturnThreePointSteering() {
+  struct SteeringCase { double offset, slope; MissionAction action; };
+  const std::array<SteeringCase,5> cases{{
+      {0,0,MissionAction::kLineStraightUnit},
+      {-80,0,MissionAction::kLineLeftUnit},
+      {80,0,MissionAction::kLineRightUnitTurnFirst},
+      {0,.5,MissionAction::kLineLeftUnit},
+      {0,-.5,MissionAction::kLineRightUnitTurnFirst}}};
+  for (int points : {3,4,5}) for (const auto& steering : cases) {
+    auto c=Config();
+    c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
+    c.goal_trial_start_goal=true;c.goal.head_scan_enabled=false;c.goal.lost_frames=3;
+    c.goal.post_pickup_straight_blocks_required=0;
+    c.goal.post_pickup_walk_fallback_actions=1;
+    c.line_p2p.left_repetitions=c.line_p2p.straight_repetitions=
+        c.line_p2p.right_repetitions=1;
+    c.line_p2p.right_unit_action=36;
+    c.line_p2p.offset_gain=.45;c.line_p2p.heading_gain=.3;
+    c.line_p2p.steering_deadband=.08;c.line_p2p.in_place_turn_score=.5;
+    c.line_features.curve_local_fit_points=4;
+    Driver d(c);d.in.ball_target.reset();
+    d.in.camera_feedback={CameraMode::kGoal,true};
+    bool returned=false;
+    for(int i=0;i<100 && !returned;++i) {
+      d.Tick();returned=d.out.command.camera_request==CameraRequest::kBallViewLine;
+    }
+    Check(returned,"three-point fixture never returned from empty GOAL to LINE");
+    d.in.camera_feedback={CameraMode::kTransition,false};d.Tick();
+    d.in.line_centers.clear();
+    const double mean_v=450-50*(points-1);
+    for(int i=0;i<points;++i) {
+      const double v=450-100*i;
+      d.in.line_centers.push_back({320+steering.offset+steering.slope*(v-mean_v),v});
+    }
+    d.in.camera_feedback={CameraMode::kBallView,true};
+    for(int i=0;i<80 && !d.out.command.action_id;++i)d.Tick();
+    const auto id=d.out.command.action_id;
+    Check(id && d.out.command.action==steering.action && !d.out.line_in_recovery,
+          "GOAL floor return did not select normal LINE from three-point O/H");
+    // Five points retain the existing nearest-four fit reference (v + 50).
+    const double expected_offset=steering.offset+(points==5 ? 50*steering.slope : 0);
+    Check(d.out.line_features.guide.valid &&
+          std::abs(d.out.line_features.guide.offset-expected_offset/320)<1e-9 &&
+          std::abs(d.out.line_features.guide.heading_rad+std::atan(steering.slope))<1e-9,
+          "GOAL floor O/H changed its geometry for three/four/five points");
+    d.Tick({id,true,false,false});
+    for(int i=0;i<12;++i)d.Tick();
+    d.Tick({id,true,false,true});
+    Check(d.out.line_window_stats && d.out.line_window_stats->used_frames>=5 &&
+          d.out.command.camera_request==CameraRequest::kNone &&
+          d.out.command.action_id==id,
+          "GOAL floor return skipped its READY mean or changed camera before real DONE");
+    d.Tick({id,true,true,false});
+    bool goal_view=d.out.command.camera_request==CameraRequest::kGoal;
+    for(int i=0;i<40 && !goal_view;++i) {
+      d.Tick();goal_view=d.out.command.camera_request==CameraRequest::kGoal;
+    }
+    Check(goal_view && d.out.goal_walk_actions_completed==1,
+          "one normal GOAL floor LINE block did not recheck the backboard");
+  }
+}
+
+void GoalLineReturnSparseRecoveryUnchanged() {
+  for(int points : {0,1,2,3}) {
+    auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
+    c.goal.post_pickup_straight_blocks_required=0;
+    c.goal.post_pickup_walk_fallback_actions=100;
+    auto old=c;old.enable_goal=false; // Keeps the existing four-point input gate.
+    Driver d(c), baseline(old);
+    d.in.ball_target.reset();baseline.in.ball_target.reset();
+    d.in.camera_feedback=baseline.in.camera_feedback={CameraMode::kBallView,true};
+    d.in.line_centers.clear();
+    for(int i=0;i<points;++i)
+      d.in.line_centers.push_back({300.0+10*i,points==3 ? 400.0 : 450.0-100*i});
+    // The three-point case is degenerate (no vertical span), hence also invalid.
+    baseline.in.line_centers=d.in.line_centers;
+    std::uint64_t action_id=0;int age=0;
+    for(int i=0;i<120;++i) {
+      CommandDeliveryFeedback feedback;
+      if(d.out.command.action_id && d.out.command.action_id!=action_id) {
+        action_id=d.out.command.action_id;age=0;
+        feedback={action_id,true,false,false};
+      } else if(action_id && ++age==14) feedback={action_id,true,true,false};
+      d.Tick(feedback);baseline.Tick(feedback);
+      Check(d.out.command.command_type==baseline.out.command.command_type &&
+            d.out.command.action==baseline.out.command.action &&
+            d.out.command.action_id==baseline.out.command.action_id &&
+            d.out.command.camera_request==baseline.out.command.camera_request &&
+            d.out.line_in_recovery==baseline.out.line_in_recovery &&
+            d.out.line_features.guide.valid==baseline.out.line_features.guide.valid,
+            "GOAL floor three-point policy changed existing sparse/degenerate recovery");
+    }
+  }
+}
+
+void GoalLineThreePointScope() {
+  for(int scenario=0;scenario<6;++scenario) {
+    auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
+    c.goal.head_scan_enabled=false;
+    c.goal.post_pickup_straight_blocks_required=0;
+    c.goal.post_pickup_walk_fallback_actions=100;
+    if(scenario==3)c.initial_has_ball=false;
+    if(scenario==4)c.enable_goal=false;
+    Driver d(c);d.in.ball_target.reset();
+    d.in.line_centers={{320,450},{320,350},{320,250}};
+    const auto mode=scenario==0 ? CameraMode::kForward :
+        scenario==1 ? CameraMode::kDown :
+        scenario==2 ? CameraMode::kGoal : CameraMode::kBallView;
+    d.in.camera_feedback={mode,true};
+    if(scenario==5)d.in.manual_observation_control=true;
+    bool checked=false;
+    for(int i=0;i<50;++i) {
+      d.Tick();
+      if(d.out.line_computed) {
+        checked=true;
+        Check(!d.out.line_features.guide.valid,
+              "GOAL return three-point gate leaked into another camera/mission/manual mode");
+      }
+    }
+    Check(checked,"three-point scope fixture never computed LINE features");
+  }
+}
+
 void EmptyGoalRetryLimit() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
   c.goal_trial_start_goal=true;c.goal.lost_frames=3;
@@ -1462,6 +1585,9 @@ void GoalAutoReferenceIsIsolated() {
 }
 }
 int main() {
+  GoalLineReturnThreePointSteering();
+  GoalLineReturnSparseRecoveryUnchanged();
+  GoalLineThreePointScope();
   RelaxedHurdleBackboardContinuousIdentity();
   GoalAutoReferenceIsIsolated();
   GoalAutoThreePixelZones();
