@@ -832,10 +832,16 @@ void GoalStableNewIdentityKeepsApproach() {
         "unstable GOAL ID replacement was adopted immediately");
   d.in.backboard_entry_track_hits=7;
   d.Tick();
-  Check(d.out.approach_track_id==2 && d.out.approach_missing_frames==0 &&
-        d.out.approach_completed_blocks==blocks &&
-        !d.out.approach_loss_pending,
-        "stable GOAL ID replacement failed to preserve completed blocks");
+  if(!(d.out.approach_track_id==2 && d.out.approach_missing_frames==0 &&
+       d.out.approach_completed_blocks==blocks &&
+       !d.out.approach_loss_pending))
+    throw std::runtime_error("stable GOAL ID replacement: id="+
+        std::to_string(d.out.approach_track_id)+" blocks="+
+        std::to_string(d.out.approach_completed_blocks)+" expected="+
+        std::to_string(blocks)+" missing="+
+        std::to_string(d.out.approach_missing_frames)+" loss="+
+        std::to_string(d.out.approach_loss_pending)+
+        " active="+std::to_string(static_cast<int>(d.out.approach_mission)));
   // A different RGB-only ID is still a Depth-recovery input, not RGB loss.
   d.in.backboard_target.reset();
   d.in.backboard_track_id=3;
