@@ -633,10 +633,17 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
               pickup.pickup_top_inset_px);
       if (plan.action!=MissionAction::kNone) {
         result.action=Locomotion(plan.action);
-        if (plan.repetitions>1 && allow_new_body_actions && allow_fine_pair) {
+        // Keep forward's full measured sequence; make BACK/LEFT/RIGHT
+        // reobserve one motion earlier (1->1, 2->1, 3->2).
+        const int execute=plan.action==MissionAction::kStepForwardHalf
+            ? plan.repetitions : std::max(1,plan.repetitions-1);
+        if (execute>1 && allow_new_body_actions && allow_fine_pair) {
           fine_side_action_=plan.action;
-          fine_side_remaining_=fine_repeat_total_=plan.repetitions;
-          fine_repeat_predicted_center_=plan.predicted_center_px;
+          fine_side_remaining_=fine_repeat_total_=execute;
+          const double fraction=static_cast<double>(execute)/plan.repetitions;
+          fine_repeat_predicted_center_={
+              tracked_.center_px.u+fraction*(plan.predicted_center_px.u-tracked_.center_px.u),
+              tracked_.center_px.v+fraction*(plan.predicted_center_px.v-tracked_.center_px.v)};
           fine_side_pending_=true;fine_side_done_=false;
           mode_=BallMode::kFineMotionRepeat;result.mode=mode_;
           return result;
@@ -644,24 +651,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       }
       // No valid improving prediction: retain the original single action.
       // Never append unmeasured motions to a partially calibrated plan.
-    } else if (pickup.pickup_polygon.empty() &&
-               (result.action.action == MissionAction::kLeftSideStep ||
-                result.action.action == MissionAction::kRightSideStep)) {
-      const double excess = result.action.action == MissionAction::kLeftSideStep
-          ? pickup.PickupLeftAt(tracked_.center_px.v) - tracked_.center_px.u
-          : tracked_.center_px.u - pickup.PickupRightAt(tracked_.center_px.v);
-      if (excess >= config_.fine_side_two_step_margin_px &&
-          allow_new_body_actions && allow_fine_pair && config_.fine_motion.max_repetitions>=2) {
-        fine_side_action_ = result.action.action;
-        fine_side_remaining_ = 2;
-        fine_repeat_total_ = 2;
-        fine_side_pending_ = allow_new_body_actions;
-        fine_side_done_ = false;
-        mode_ = BallMode::kFineSidePair;
-        result.mode = mode_;
-        return result;
-      }
-    }
+    } // Uncalibrated lateral corrections execute once before reobservation.
     if (allow_new_body_actions && allow_pickup &&
         result.action.action == MissionAction::kPickBall) {
       ++pickup_attempt_count_;
