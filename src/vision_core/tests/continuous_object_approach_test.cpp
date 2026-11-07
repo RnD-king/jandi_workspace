@@ -186,7 +186,7 @@ void WeightedProbeDirection() {
   d.Tick(); // Last valid frame now points right; this block remains unqualified.
   d.MissingBlock();             // Current object block never qualifies.
   if (d.out.command.action!=MissionAction::kLineLeftUnit ||
-      d.out.approach_completed_blocks!=1)
+      d.out.approach_completed_blocks!=2)
     throw std::runtime_error("pre-lock probe mean wrong: action="+
         std::to_string(static_cast<int>(d.out.command.action))+
         " blocks="+std::to_string(d.out.approach_completed_blocks)+
@@ -225,31 +225,31 @@ void FinishProbe(Driver& d) {
 }
 void SoftLoss(int blocks) {
   Driver d(Config());d.Warm();
-  d.Block(); // The already-running LINE block belongs to LINE, not the object.
-  Check(d.out.approach_completed_blocks==0,"pre-existing LINE block counted towards object lock");
-  for(int i=0;i<blocks;++i) d.Block();
-  Check(d.out.approach_completed_blocks==blocks && !d.out.approach_locked,
-        "soft target locked before three completed blocks");
+  d.Block(); // The physical first LINE block now counts as qualified BALL 1/3.
+  Check(d.out.approach_completed_blocks==1,
+        "qualified first LINE block was not counted as BALL 1/3");
+  for(int i=1;i<blocks;++i)d.Block();
+  const int expected=std::max(1,blocks);
+  Check(d.out.approach_completed_blocks==expected && !d.out.approach_locked,
+        "soft target locked before three actual completed blocks");
   const auto before=d.out.approach_completed_blocks;
   d.Tick({d.last_done,true,true,false});
-  Check(d.out.approach_completed_blocks==before,"duplicate DONE counted a second block");
+  Check(d.out.approach_completed_blocks==before,
+        "duplicate DONE counted another BALL block");
   d.MissingBlock();
-  if (blocks==0) {
-    Check(d.out.approach_mission==MissionType::kNone,
-          "probe used a raw pixel before the first qualified READY mean");
-  } else {
-    Check(d.out.active_mission==MissionType::kLine &&
-          d.out.approach_mission==MissionType::kBall &&
-          d.out.approach_completed_blocks==blocks && LinePlan::IsUnit(d.out.command.action),
-          "pre-lock loss did not start one ordinary approach probe from READY mean");
-    FinishProbe(d);
-    Check(d.out.approach_mission==MissionType::kNone && !d.out.candidate_phase,
-          "failed probe did not return to LINE without another probe");
-  }
+  Check(d.out.active_mission==MissionType::kLine &&
+        d.out.approach_mission==MissionType::kBall &&
+        d.out.approach_completed_blocks==expected &&
+        LinePlan::IsUnit(d.out.command.action),
+        "pre-lock loss failed to issue one remembered READY probe");
+  FinishProbe(d);
+  Check(d.out.approach_mission==MissionType::kNone &&
+        !d.out.candidate_phase,"failed pre-lock probe did not return to LINE");
   d.in.ball_target=Target();
   for(int i=0;i<12;++i)d.Tick();
-  Check(LinePlan::IsUnit(d.out.command.action) && d.out.approach_completed_blocks==0,
-        "soft loss failed to reconnect LINE without retaining old object lock");
+  Check(LinePlan::IsUnit(d.out.command.action) &&
+        d.out.approach_completed_blocks==0,
+        "soft loss did not reconnect LINE without retaining old object lock");
 }
 void ProbeDisabled() {
   auto c=Config();c.object_approach.prelock_loss_extra_blocks=0;
@@ -379,7 +379,7 @@ void PrelockProbeForMission(MissionType mission) {
 }
 void LockAndLoss() {
   Driver d(Config());d.Warm();d.Block();
-  d.Block();d.Block();
+  d.Block(); // Initial LINE + first object-owned block = 2/3.
   Check(!d.out.approach_locked,"two blocks already locked the target");
   // No READY/ACK, including the final block's last READY, may commit early.
   d.Tick({d.current,true,false,true});
@@ -604,11 +604,11 @@ void NearAndIdentity() {
   Driver replacement(Config());replacement.Warm();replacement.Block();replacement.Block();
   replacement.in.ball_track_id=99;
   for(int i=0;i<3;++i) replacement.Tick();
-  Check(replacement.out.approach_completed_blocks==1,
+  Check(replacement.out.approach_completed_blocks==2,
         "replacement identity cancelled a walking block before its evidence window");
   replacement.MissingBlock();
   Check(replacement.out.approach_mission==MissionType::kBall &&
-        replacement.out.approach_completed_blocks==1,
+        replacement.out.approach_completed_blocks==2,
         "replacement identity incorrectly inherited a new lock during probe");
   FinishProbe(replacement);
   replacement.in.ball_target=Target();
