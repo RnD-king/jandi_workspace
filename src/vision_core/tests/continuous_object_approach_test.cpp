@@ -144,10 +144,13 @@ void VirtualHeadingOnly() {
         opposite.out.approach_path_guide->heading_rad<0,
         "first BALL approach unit inherited the previous real LINE mean");
   ball.MissingBlock();
-  // The first object block lost its target before producing a valid READY mean.
-  // Recovery must not use an instantaneous frame's H as a surrogate direction.
-  Check(ball.out.approach_mission==MissionType::kNone,
-        "pre-lock BALL loss invented a probe from a missing READY coordinate mean");
+  // The new first-LINE admission preserves a qualified, weighted BALL
+  // coordinate at READY. After one more unqualified physical block, the
+  // existing bounded pre-lock probe must use that memory instead of stopping.
+  Check(ball.out.approach_mission==MissionType::kBall &&
+        ball.out.approach_probe_active &&
+        LinePlan::IsUnit(ball.out.command.action),
+        "qualified first BALL READY did not start its one bounded pre-lock probe");
 
   c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
   c.goal_trial_start_goal=true;
