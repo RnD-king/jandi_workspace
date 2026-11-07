@@ -1121,41 +1121,69 @@ void FarReacquisitionReturnsToSharedPath(MissionType mission) {
         "a repeated far loss admitted a new mission instead of preserving the existing mission");
 }
 void InitialLineMeanProbeAfterIdentityExpiry() {
-  // BALL was admitted while the first LINE unit was in flight. Its first
-  // object-owned READY mean does not exist; the tracked LINE mean must still
-  // supply exactly one bounded recovery block when ID 12 expires.
+  // Admission already qualified inside the current physical LINE block.
+  // Its READY must use its own cached BALL center, even when RGB is now gone.
   auto c=Config();
   c.line_p2p.left_repetitions=c.line_p2p.straight_repetitions=
       c.line_p2p.right_repetitions=1;
-  c.ball_candidate_tracking.missing_frame_limit=15;
   Driver d(c);
   d.in.ball_track_id=12;
   d.in.ball_entry_mean_center=Point2{320,100};
   d.Warm();
   Check(d.out.approach_mission==MissionType::kBall &&
         d.out.approach_completed_blocks==0,
-        "initial BALL admission fixture did not start before first owned block");
+        "BALL admission was not active before first LINE DONE");
   d.in.ball_target.reset();
   for(int i=0;i<18;++i)d.Tick();
-  Check(!d.out.approach_loss_pending,"pre-lock identity expired before existing LINE block finished");
   d.Tick({d.current,true,false,true});
+  const auto next=d.out.command.action_id;
+  Check(next && next!=d.current && LinePlan::IsUnit(d.out.command.action) &&
+        !d.out.approach_probe_active && !d.out.post_motion_observing,
+        "first BALL-admitted LINE READY failed to reserve its normal successor");
+  d.Tick({next,true,false,false});
   d.Tick({d.current,true,true,false});
+  Check(d.out.approach_completed_blocks==1 && !d.out.approach_locked,
+        "admitted LINE first DONE did not count as exactly one BALL block");
+  d.current=next;
+  for(int i=0;i<12;++i)d.Tick();
+  d.Tick({d.current,true,false,true});
   const auto probe=d.out.command.action_id;
-  Check(probe && probe!=d.current && LinePlan::IsUnit(d.out.command.action) &&
-        d.out.approach_probe_active,"expired ID did not issue one LINE-mean-based probe");
+  Check(probe && probe!=d.current && d.out.approach_probe_active &&
+        LinePlan::IsUnit(d.out.command.action),
+        "first lost BALL-owned block failed to reserve one remembered READY probe");
   d.Tick({probe,true,false,false});
+  d.Tick({d.current,true,true,false});
+  d.current=probe;
   for(int i=0;i<12;++i)d.Tick();
   d.Tick({probe,true,false,true});
   d.Tick({probe,true,true,false});
-  Check(d.out.approach_mission==MissionType::kNone && d.out.walking.probe==1,
-        "failed pre-lock probe did not release the old ID after physical DONE");
-  d.in.ball_track_id=13;
-  d.in.ball_target=Target();
-  for(int i=0;i<12;++i)d.Tick();
-  Check(d.out.approach_mission==MissionType::kBall &&
-        d.out.approach_track_id==13,"released pre-lock ID did not accept a newly stable ID");
+  Check(d.out.approach_mission==MissionType::kNone,
+        "failed probe did not return to LINE after the first admitted LINE block");
 }
-
+void FirstBallAdmissionReadyOverwritesInitialMean() {
+  auto c=Config();
+  c.line_p2p.straight_repetitions=1;
+  c.ball_candidate_tracking.max_center_distance_px=800.0;
+  Driver d(c);
+  d.in.ball_target=Target(90,100);
+  d.in.ball_entry_mean_center=Point2{90,100};
+  d.Warm();
+  for(int i=0;i<20;++i) {
+    d.in.ball_target=Target(600,100);
+    d.Tick();
+  }
+  d.Tick({d.current,true,false,true});
+  const auto successor=d.out.command.action_id;
+  Check(successor && successor!=d.current &&
+        d.out.command.action==MissionAction::kLineRightUnit,
+        "new final READY mean was not used before selecting BALL successor");
+  Check(d.out.approach_completed_blocks==0,
+        "READY counted the admitted LINE block before physical DONE");
+  d.Tick({successor,true,false,false});
+  d.Tick({d.current,true,true,false});
+  Check(d.out.approach_completed_blocks==1 && !d.out.approach_locked,
+        "admitted LINE block was not counted exactly once on its actual DONE");
+}
 void RelaxedHurdleBackboardContinuousIdentity() {
   // The per-object candidate tracker already permits 800px / 100x size,
   // so the continuous router must not reject a stable ID using the stricter
@@ -1321,6 +1349,7 @@ int main() {
   BallNearMissingReadyTurnsAndCentralFallback(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
   ReadyCenterAccumulator();InitialLineMeanProbeAfterIdentityExpiry();
+  FirstBallAdmissionReadyOverwritesInitialMean();
   NearFinalActionSequence(150,true,true); NearFinalActionSequence(240,true,false);
   NearFinalActionSequence(575,false,true); NearFinalActionSequence(500,false,false);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
