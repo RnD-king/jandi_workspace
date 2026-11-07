@@ -29,11 +29,14 @@ struct Trial {
   HurdleController controller;
   double now{0};
   const CameraFeedback down{CameraMode::kDown, true};
-  explicit Trial(bool close = false,double measured_turn=0.0,double measured_side=0.0)
+  explicit Trial(bool close = false,double measured_turn=0.0,double measured_side=0.0,
+                 double left_turn=0.0,double right_turn=0.0)
       : controller([&] {
     auto c = LoadDefaultAlgorithmConfig().hurdle;
     c.stable_window = c.stable_min_hits = c.down_search_min_hits = 1;
     c.fine_line_measured_turn_deg=measured_turn;
+    c.fine_line_measured_left_turn_deg=left_turn;
+    c.fine_line_measured_right_turn_deg=right_turn;
     c.fine_line_measured_side_px=measured_side;
     if(measured_turn>0 || measured_side>0)
       c.fine_line_offset_tolerance_px=2.0;
@@ -247,6 +250,41 @@ void CameraTransitionRequiresFreshObservation() {
   out = t.Observe(Guide(0, 0));
   assert(out.mode == HurdleMode::kFineAdjust);
 }
+void DirectionalCalibrationPreservesRequestedYaw() {
+  for (bool left : {true, false}) {
+    // |H|=27, tolerance=8: left ceil(19/11)=2, right ceil(19/8)=3.
+    // Common calibration is deliberately different to verify the override.
+    Trial t(false, 100.0, 0.0, 11.0, 8.0);
+    t.PoseDone();
+    auto out=t.Observe(Guide(0,left ? -27 : 27));
+    const auto action=left ? MissionAction::kTurnLeft : MissionAction::kTurnRight;
+    const int expected=left ? 2 : 3;
+    for (int n=1; n<=expected; ++n) {
+      assert(out.action.action==action && out.action.target_yaw_deg==15);
+      ActionExecutionFeedback done;
+      done.action_done=true;
+      t.now+=.1;
+      t.controller.OnActualMotionDone(action,t.now);
+      out=t.controller.Compute({},640,480,t.now,t.down,done,{});
+      assert(out.fine_line_turns==n);
+    }
+    assert(out.action.action==MissionAction::kNone);
+    // Direction-specific calibration also enables the post-turn hold.
+    t.now+=.25;
+    t.controller.ObserveFineLine(Guide(0,0),640,t.now);
+    out=t.controller.Compute({},640,480,t.now,t.down,{},{});
+    assert(out.action.action==MissionAction::kNone);
+    out=t.Observe(Guide(0,0));
+    assert(out.mode==HurdleMode::kFineAdjust);
+  }
+  // Stale evidence still permits only one motion before reobservation.
+  Trial stale(false,0,0,11,8);
+  stale.Remember(Guide(0,27));
+  stale.PoseDone();
+  auto out=stale.Observe();
+  assert(out.action.action==MissionAction::kTurnRight && out.action.target_yaw_deg==15);
+  stale.Done(MissionAction::kTurnRight);
+}
 } // namespace
 int main() {
   ThreePointGate();
@@ -257,5 +295,6 @@ int main() {
   IndependentCorrectionLimits();
   StaleAlignedIsNotSuccess();
   CalibratedHeadingThenSideBatches();
+  DirectionalCalibrationPreservesRequestedYaw();
   CameraTransitionRequiresFreshObservation();
 }

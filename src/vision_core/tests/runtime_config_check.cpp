@@ -186,6 +186,10 @@ void CheckConfiguration(const std::string& path) {
   FIELD(hurdle, fine_line_stable_window);
   FIELD(hurdle, fine_line_stable_min_hits);
   FIELD(hurdle, fine_line_turn_yaw_deg);
+  if (AlgorithmField(a,"hurdle","fine_line_measured_left_turn_deg"))
+    FIELD(hurdle, fine_line_measured_left_turn_deg);
+  if (AlgorithmField(a,"hurdle","fine_line_measured_right_turn_deg"))
+    FIELD(hurdle, fine_line_measured_right_turn_deg);
   FIELD(hurdle, fine_line_max_turns);
   FIELD(hurdle, fine_line_max_side_steps);
   FIELD(hurdle, fine_line_max_stale_corrections);

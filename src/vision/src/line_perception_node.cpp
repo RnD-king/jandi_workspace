@@ -1,4 +1,5 @@
 #include "vision/debug_bag_publisher.hpp"
+#include "vision/debug_mjpeg_server.hpp"
 #include "vision/mission_debug_view.hpp"
 #include "vision/mission_state_log.hpp"
 #include "vision/terminal_publisher.hpp"
@@ -170,6 +171,17 @@ public:
     declare_parameter<bool>("show_debug_view", false);
     // YOLO의 필터 전 raw detection bbox를 별도 창에서 확인할 때만 켠다.
     declare_parameter<bool>("show_yolo_debug_view", false);
+    rcl_interfaces::msg::ParameterDescriptor stream_descriptor;
+    stream_descriptor.read_only = true;
+    stream_descriptor.description = "Serve final debug image over HTTP MJPEG on port 8080 (startup only)";
+    if (declare_parameter<bool>("stream_debug_view", false, stream_descriptor)) {
+      try {
+        debug_stream_ = std::make_unique<vision::DebugMjpegServer>();
+        RCLCPP_INFO(get_logger(), "[STREAM] http://<JETSON_IP>:8080 (JPEG quality 40, max 15 fps)");
+      } catch (const std::exception &error) {
+        RCLCPP_WARN(get_logger(), "[STREAM] disabled: %s", error.what());
+      }
+    }
     debug_bag_ = std::make_unique<vision::DebugBagPublisher>(*this);
     terminal_publisher_=std::make_unique<vision::TerminalPublisher>(*this);
     declare_parameter<double>("inference_hz", 15.0);
@@ -788,7 +800,8 @@ private:
     terminal_publisher_->Publish(header,bgr.cols,bgr.rows,dets,debug_config_,result,
         camera_feedback_,DebugContext(imu_ready,roll,pitch));
     const auto request = debug_bag_->RequestFrame();
-    if (!show_debug_view_ && !show_yolo_debug_view_ && !request) return;
+    const bool stream_frame = debug_stream_ && debug_stream_->RequestFrame();
+    if (!show_debug_view_ && !show_yolo_debug_view_ && !request && !stream_frame) return;
     vision::MissionDebugImages views;
     cv::Mat yolo_view;
     try {
@@ -796,12 +809,13 @@ private:
         yolo_view = bgr.clone();
         DrawYoloDetections(yolo_view, dets);
       }
-      if (show_debug_view_ || request.image || request.panel) {
+      if (show_debug_view_ || request.image || request.panel || stream_frame) {
         views = vision::RenderMissionDebug(bgr, dets, aligned_depth, debug_config_,
             result.perception, result.mission, camera_feedback_, camera_intrinsics_,
-            DebugContext(imu_ready, roll, pitch));
+            DebugContext(imu_ready, roll, pitch), show_debug_view_ || request.panel);
       }
       debug_bag_->Submit(request, header, views.image, views.panel, yolo_view);
+      if (stream_frame) debug_stream_->Submit(views.image);
     } catch (const cv::Exception &error) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
                           "[VIEW] debug render error: %s", error.what());
@@ -1812,6 +1826,7 @@ private:
   float backboard_conf_thres_{0.60f};
   float hurdle_conf_thres_{0.60f};
   std::unique_ptr<vision::DebugBagPublisher> debug_bag_;
+  std::unique_ptr<vision::DebugMjpegServer> debug_stream_;
   std::unique_ptr<vision::TerminalPublisher> terminal_publisher_;
   bool show_debug_view_{false};
   bool show_yolo_debug_view_{false};

@@ -84,6 +84,10 @@ int main() {
   Check(vision::DebugRepeatLabel(300+static_cast<int>(vision_core::GoalMode::kEdgeTurn),c)=="EDGE TURN x2",
         "edge pair preview must show its repeat scope");
   auto a=vision::RenderMissionDebug(image,adapter,{},c,p,m,camera,{},state);
+  const auto image_only=vision::RenderMissionDebug(image,adapter,{},c,p,m,camera,{},state,false);
+  Check(image_only.panel.empty() && !a.panel.empty(),"image-only rendering allocated a panel");
+  Check(cv::norm(a.image,image_only.image,cv::NORM_INF)==0,
+        "headless rendering changed the final debug image");
   auto b=vision::RenderMissionDebug(image,core,{},c,p,m,camera,{},state);
   Check(cv::norm(a.image,b.image,cv::NORM_INF)==0 && cv::norm(a.panel,b.panel,cv::NORM_INF)==0,
         "adapter/core detection representations render differently");
@@ -199,11 +203,11 @@ int main() {
   m.active_mission=vision_core::MissionType::kGoal;m.goal.mode=vision_core::GoalMode::kApproach;
   const std::vector<vision_core::Detection> empty;
   c.goal.edge_margin_px=40;
-  const vision_core::CameraFeedback edge_goal_camera{vision_core::CameraMode::kGoal,true};
-  auto edge=vision::RenderMissionDebug(image,empty,{},c,{},m,edge_goal_camera,{},state);
+  const vision_core::CameraFeedback goal_camera{vision_core::CameraMode::kGoal,true};
+  auto edge=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
   Check(edge.image.at<cv::Vec3b>(400,40)!=cv::Vec3b(0,0,0),"configured edge guide absent");
   c.goal.edge_margin_px=90;
-  edge=vision::RenderMissionDebug(image,empty,{},c,{},m,edge_goal_camera,{},state);
+  edge=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
   Check(edge.image.at<cv::Vec3b>(400,40)==cv::Vec3b(0,0,0) &&
         edge.image.at<cv::Vec3b>(400,90)!=cv::Vec3b(0,0,0),"edge guide ignored new tuning");
   // GOAL far AUTO is still a LINE-owned WALK, but must display the
@@ -211,7 +215,7 @@ int main() {
   m.active_mission=vision_core::MissionType::kLine;
   m.approach_mission=vision_core::MissionType::kGoal;
   m.foot_pose=vision_core::FootPose::kWalk;
-  edge=vision::RenderMissionDebug(image,empty,{},c,{},m,edge_goal_camera,{},state);
+  edge=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
   Check(edge.image.at<cv::Vec3b>(400,90)!=cv::Vec3b(0,0,0),
         "GOAL far AUTO edge margin absent while shared LINE plan is active");
   m.approach_mission=vision_core::MissionType::kNone;
@@ -258,7 +262,6 @@ int main() {
   m.approach_action_committed=false;
   m.line_computed=false;
   m.approach_mission=vision_core::MissionType::kGoal;
-  const vision_core::CameraFeedback goal_camera{vision_core::CameraMode::kGoal,true};
   auto blue_goal=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
   Check(blue_goal.image.at<cv::Vec3b>(240,400)==cv::Vec3b(255,0,0),
         "GOAL virtual approach path must be blue");
@@ -358,6 +361,9 @@ int main() {
         std::abs(landing.z_m-(-.08*std::sin(angle)+.48*std::cos(angle)))<1e-12,
         "landing must use the actual signed integer SHOOT angle");
   const auto shot=vision::RenderMissionDebug(image,empty,{},c,{},m,camera,{},state);
+  const auto streamed_shot=vision::RenderMissionDebug(image,empty,{},c,{},m,camera,{},state,false);
+  Check(streamed_shot.panel.empty() && cv::norm(shot.image,streamed_shot.image,cv::NORM_INF)==0,
+        "image-only rendering changed GOAL coordinates");
   m.goal.fine_decision_pose_used=false;
   landing=vision::ComputeGoalLandingDebug(c.goal,m);
   Check(landing.valid && landing.commanded && !landing.rim_valid && landing.yaw_deg==-10,
@@ -389,6 +395,10 @@ int main() {
   m.ball.pickup_shrink_count=1;
   const auto small_poly=vision::RenderMissionDebug(
       image,empty,{},c,{},m,{vision_core::CameraMode::kBallView,true},{},state);
+  const auto streamed_poly=vision::RenderMissionDebug(
+      image,empty,{},c,{},m,{vision_core::CameraMode::kBallView,true},{},state,false);
+  Check(streamed_poly.panel.empty() && cv::norm(small_poly.image,streamed_poly.image,cv::NORM_INF)==0,
+        "image-only rendering changed BALL pickup guides");
   const cv::Rect polygon_roi(360,240,100,115);
   Check(cv::norm(full_poly.image(polygon_roi),
                  small_poly.image(polygon_roi),cv::NORM_INF)>0,

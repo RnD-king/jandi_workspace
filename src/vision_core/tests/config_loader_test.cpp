@@ -185,6 +185,29 @@ static void CheckGroupedConfiguration(const std::string &text) {
     reject(bad);
   }
 }
+static void CheckDirectionalHurdleCalibration(const std::string &text) {
+  auto root=GroupedFixture(text);
+  auto h=root["vision_algorithm"]["hurdle"]["control"];
+  auto legacy=LoadText(YAML::Dump(root));
+  assert(legacy.hurdle.fine_line_measured_left_turn_deg==0);
+  assert(legacy.hurdle.fine_line_measured_right_turn_deg==0);
+  h["fine_line_measured_left_turn_deg"]=11.0;
+  h["fine_line_measured_right_turn_deg"]=8.0;
+  const auto c=LoadText(YAML::Dump(root));
+  assert(c.hurdle.fine_line_measured_left_turn_deg==11.0);
+  assert(c.hurdle.fine_line_measured_right_turn_deg==8.0);
+  assert(c.hurdle.fine_line_turn_yaw_deg==15);
+  for (const char *key : {"fine_line_measured_left_turn_deg","fine_line_measured_right_turn_deg"}) {
+    for (const char *bad : {"-1", ".nan", ".inf"}) {
+      auto invalid=YAML::Clone(root);
+      invalid["vision_algorithm"]["hurdle"]["control"][key]=YAML::Load(bad);
+      bool rejected=false;
+      try { (void)LoadText(YAML::Dump(invalid)); }
+      catch (const std::runtime_error &) { rejected=true; }
+      assert(rejected);
+    }
+  }
+}
 
 int main(int argc, char **argv) {
   // CTest supplies tests/fixtures/mission_scenarios.yaml, never the tuned YAML.
@@ -252,6 +275,7 @@ int main(int argc, char **argv) {
   assert(c.line_features.ransac_max_outliers==2);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
   CheckGroupedConfiguration(text.str());
+  CheckDirectionalHurdleCalibration(text.str());
   // Old F/T configuration must fail explicitly, never silently restore or
   // appear to select a second AUTO approach policy.
   for (const auto* old_value : {"false", "true"})

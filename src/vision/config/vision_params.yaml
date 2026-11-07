@@ -25,6 +25,7 @@ line_perception_node:
     rosbag: false
     rosbag_fps: 10.0
     show_debug_view: false
+    stream_debug_view: false # HTTP :8080, views.image only; works without a display
     show_yolo_debug_view: false
     terminal_node: false
     terminal_fps: 5.0

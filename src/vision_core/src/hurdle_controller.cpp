@@ -10,6 +10,11 @@ namespace vision_core {
 namespace {
 constexpr double kEpsilon = 1e-9;
 double Denom(double value) { return std::max(value, 1e-6); }
+double MeasuredTurnDeg(const HurdleConfig &config, MissionAction action) {
+  const double directional = action == MissionAction::kTurnLeft
+      ? config.fine_line_measured_left_turn_deg : config.fine_line_measured_right_turn_deg;
+  return directional > 0.0 ? directional : config.fine_line_measured_turn_deg;
+}
 ActionRequest Locomotion(MissionAction action, std::int16_t yaw = 0) {
   return {action, ActionCategory::kLocomotion, yaw, false};
 }
@@ -119,7 +124,7 @@ void HurdleController::OnActualMotionDone(MissionAction action, double now_sec) 
     const bool turning=action==MissionAction::kTurnLeft ||
                        action==MissionAction::kTurnRight;
     BeginFineLineObservation(now_sec+
-        (turning && config_.fine_line_measured_turn_deg>0.0
+        (turning && MeasuredTurnDeg(config_, action)>0.0
              ? config_.fine_line_post_turn_hold_sec : 0.0));
   }
 }
@@ -589,7 +594,7 @@ HurdleResult HurdleController::Compute(
           const bool turning=completed==MissionAction::kTurnLeft ||
                              completed==MissionAction::kTurnRight;
           BeginFineLineObservation(now_sec+
-              (turning && config_.fine_line_measured_turn_deg>0.0
+              (turning && MeasuredTurnDeg(config_, completed)>0.0
                    ? config_.fine_line_post_turn_hold_sec : 0.0));
         }
       }
@@ -667,7 +672,7 @@ HurdleResult HurdleController::Compute(
                          correction==MissionAction::kTurnRight;
       const bool side=correction==MissionAction::kLeftSideStep ||
                       correction==MissionAction::kRightSideStep;
-      const double measured=turning ? config_.fine_line_measured_turn_deg :
+      const double measured=turning ? MeasuredTurnDeg(config_, correction) :
                             side ? config_.fine_line_measured_side_px : 0.0;
       const double error=turning ? std::abs(line->heading_deg) :
                           side ? std::abs(line->offset_px) : 0.0;

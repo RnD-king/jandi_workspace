@@ -456,6 +456,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.hurdle.fine_line_stable_window < 3)
     throw std::runtime_error("hurdle.fine_line_stable_window must be >= 3");
   Nonnegative(c.hurdle.fine_line_measured_turn_deg,"hurdle.fine_line_measured_turn_deg");
+  Nonnegative(c.hurdle.fine_line_measured_left_turn_deg,"hurdle.fine_line_measured_left_turn_deg");
+  Nonnegative(c.hurdle.fine_line_measured_right_turn_deg,"hurdle.fine_line_measured_right_turn_deg");
   Nonnegative(c.hurdle.fine_line_measured_side_px,"hurdle.fine_line_measured_side_px");
   Nonnegative(c.hurdle.fine_line_post_turn_hold_sec,"hurdle.fine_line_post_turn_hold_sec");
   if(c.hurdle.fine_line_batch_max_repetitions<1 ||
@@ -832,6 +834,10 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "fine_line_turn_yaw_deg", c.hurdle.fine_line_turn_yaw_deg);
   if(h["fine_line_measured_turn_deg"])
     Assign(h,"fine_line_measured_turn_deg",c.hurdle.fine_line_measured_turn_deg);
+  if(h["fine_line_measured_left_turn_deg"])
+    Assign(h,"fine_line_measured_left_turn_deg",c.hurdle.fine_line_measured_left_turn_deg);
+  if(h["fine_line_measured_right_turn_deg"])
+    Assign(h,"fine_line_measured_right_turn_deg",c.hurdle.fine_line_measured_right_turn_deg);
   if(h["fine_line_measured_side_px"])
     Assign(h,"fine_line_measured_side_px",c.hurdle.fine_line_measured_side_px);
   if(h["fine_line_batch_max_repetitions"])

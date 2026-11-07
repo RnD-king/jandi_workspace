@@ -36,6 +36,7 @@ find_package(std_srvs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(Threads REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -134,6 +135,10 @@ ament_target_dependencies(vision_core
 add_executable(line_perception_node
   src/line_perception_node.cpp
 )
+add_library(vision_debug_mjpeg STATIC src/debug_mjpeg_server.cpp)
+target_include_directories(vision_debug_mjpeg PUBLIC include ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(vision_debug_mjpeg PUBLIC ${OpenCV_LIBS} Threads::Threads)
+target_link_libraries(line_perception_node vision_debug_mjpeg)
 
 # Standalone read-only camera inspection tools. Neither publishes action/camera commands.
 add_executable(click_pixel_node src/click_pixel_node.cpp)
@@ -262,7 +267,7 @@ install(FILES scripts/jandi_runtime.py scripts/jandi_ros.py DESTINATION lib/${PR
 install(PROGRAMS scripts/install_jandi_command.sh DESTINATION lib/${PROJECT_NAME})
 install(FILES JANDI_RUNTIME.md DESTINATION share/${PROJECT_NAME})
 
-install(FILES ROSBAG_RECORDING.md SHOOT_TUNING.md TERMINAL_VIEW.md DESTINATION share/${PROJECT_NAME})
+install(FILES ROSBAG_RECORDING.md SHOOT_TUNING.md TERMINAL_VIEW.md HTTP_DEBUG_STREAMING.md DESTINATION share/${PROJECT_NAME})
 
 install(PROGRAMS scripts/vision_terminal_node.py
   DESTINATION lib/${PROJECT_NAME} RENAME vision_terminal_node)
@@ -278,6 +283,10 @@ install(FILES scripts/mock_executor_protocol.py
 )
 
 if(BUILD_TESTING)
+  add_executable(vision_debug_mjpeg_test tests/debug_mjpeg_test.cpp)
+  target_link_libraries(vision_debug_mjpeg_test vision_debug_mjpeg)
+  add_test(NAME vision_debug_mjpeg_test COMMAND vision_debug_mjpeg_test)
+  set_tests_properties(vision_debug_mjpeg_test PROPERTIES LABELS "logic" TIMEOUT 35)
   add_executable(vision_pixel_inspection_test tests/pixel_inspection_test.cpp)
   target_include_directories(vision_pixel_inspection_test PRIVATE include ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(vision_pixel_inspection_test ${OpenCV_LIBS})

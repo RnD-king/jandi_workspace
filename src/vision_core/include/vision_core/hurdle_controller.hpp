@@ -65,8 +65,12 @@ struct HurdleConfig {
   int fine_line_stable_window{};
   int fine_line_stable_min_hits{};
   int fine_line_turn_yaw_deg{};
-  // Zero calibration preserves the existing single-motion observation policy.
+  // Legacy common calibration; zero effective calibration keeps single-motion observations.
   double fine_line_measured_turn_deg{0.0};
+  // Magnitudes of observed image H change per completed 7/8 motion.
+  // Zero/missing directional values fall back to the legacy common value.
+  double fine_line_measured_left_turn_deg{0.0};
+  double fine_line_measured_right_turn_deg{0.0};
   double fine_line_measured_side_px{0.0};
   double fine_line_post_turn_hold_sec{0.5};
   int fine_line_batch_max_repetitions{3};

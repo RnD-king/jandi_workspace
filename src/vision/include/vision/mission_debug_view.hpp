@@ -312,7 +312,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     const cv::Mat& aligned_depth,const vision_core::MissionControllerConfig& config,
     const vision_core::PreparedPerceptionFrame& prepared,const vision_core::MissionFrameResult& mission_result,
     const vision_core::CameraFeedback& camera,const vision_core::Intrinsics& intrinsics,
-    const MissionDebugContext& view) {
+    const MissionDebugContext& view, bool render_panel = true) {
   const auto& feats=mission_result.line_features;
   const auto& ball_cmd=mission_result.ball;
   const auto& goal_cmd=mission_result.goal;
@@ -561,8 +561,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   const cv::Scalar text_color(235,235,235),muted(150,150,150);
   const cv::Scalar line_color(0,230,0),ball_color(0,165,255);
   const cv::Scalar hurdle_color(0,255,255),goal_color(255,210,100);
-  const auto add_row=[](PanelRows& rows,const std::string& text,const cv::Scalar& color) {
-    rows.push_back({text,color,false});
+  const auto add_row=[render_panel](PanelRows& rows,const std::string& text,const cv::Scalar& color) {
+    if (render_panel) rows.push_back({text,color,false});
   };
   const auto state=mission_result.terminal_hold ? std::string("HOLD / RESET REQUIRED") : view.control_state;
   add_row(header_rows,"CONTROL: "+state+" | RGB: LIVE",mission_result.terminal_hold ? cv::Scalar(0,0,255) : ball_color);
@@ -1021,6 +1021,10 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         landing.valid ? landing.yaw_deg : goal_cmd.shoot_yaw_rad*180/kDebugPi);
     add_row(goal_fine_rows,buf,goal_color);
   } else add_row(goal_fine_rows,"SHOOT ROTATION YAW: --",goal_color);
+  // Keep camera overlays identical while skipping panel allocation, wrapping
+  // and rasterization for headless image-only consumers.
+  cv::Mat state_panel;
+  if (render_panel) {
   PanelRows left_rows,right_rows;
   const auto append=[](PanelRows& column,const PanelRows& rows) {
     column.insert(column.end(),rows.begin(),rows.end());
@@ -1085,8 +1089,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
                                 columns_top,column_width);
   const int footer_top=std::max(left_bottom,right_bottom)+12;
   const int panel_bottom=layout(footer_rows,margin,footer_top,panel_width-2*margin);
-  cv::Mat state_panel(std::max(720,panel_bottom+margin),panel_width,CV_8UC3,
-                      cv::Scalar(20,20,20));
+  state_panel = cv::Mat(std::max(720,panel_bottom+margin),panel_width,CV_8UC3,
+                       cv::Scalar(20,20,20));
   cv::line(state_panel,{panel_width/2,columns_top-16},
       {panel_width/2,footer_top-12},cv::Scalar(65,65,65),1);
   cv::line(state_panel,{margin,footer_top-line_height},
@@ -1094,6 +1098,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   for (const auto& item:placed)
     cv::putText(state_panel,item.row.text,item.position,cv::FONT_HERSHEY_SIMPLEX,
         panel_font_scale,item.row.color,1,cv::LINE_AA);
+  }
   cv::putText(vis,view.performance,{10,24},cv::FONT_HERSHEY_SIMPLEX,0.7,{0,255,0},2);
   cv::putText(vis,std::string(DebugMissionName(mission_result.active_mission))+": "+DebugCameraActionStatus(mission_result),
       {10,48},cv::FONT_HERSHEY_SIMPLEX,0.55,{0,200,255},2);
