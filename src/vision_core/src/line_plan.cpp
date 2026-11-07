@@ -156,11 +156,9 @@ std::optional<Point2> LinePlan::FinishBallEntryCenter(
   if (!block || !block->ball_entry_epoch || block->aborted)
     return std::nullopt;
   if (!block->ball_entry_finished) {
-    block->ball_entry_mean=block->ball_entry_centers.FinishCenter(
-        block->id,now,remaining,false).value_or(
-            block->ball_entry_seed.value_or(Point2{}));
-    if (!block->ball_entry_seed &&
-        !block->ball_entry_mean) block->ball_entry_mean.reset();
+    const auto measured=block->ball_entry_centers.FinishCenter(
+        block->id,now,remaining,false);
+    block->ball_entry_mean=measured ? measured : block->ball_entry_seed;
     block->ball_entry_finished=true;
   }
   return block->ball_entry_mean;
