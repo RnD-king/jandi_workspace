@@ -802,6 +802,95 @@ void FarGoalDepthRecovery(bool found,bool acquired=false) {
         "third failed GOAL Depth probe did not return to LINE");
 }
 
+void GoalStableNewIdentityKeepsApproach() {
+  auto c=Config();c.enable_ball=false;c.enable_goal=true;
+  c.initial_has_ball=c.goal_trial_start_goal=true;
+  c.line_p2p.straight_repetitions=1;
+  Driver d(c);d.in.ball_target.reset();d.in.line_centers.clear();
+  d.in.camera_feedback={CameraMode::kGoal,true};
+  d.in.backboard_target=Target(320,100,3);
+  d.in.backboard_track_id=1;
+  d.in.backboard_entry_track_hits=7;
+  d.in.backboard_entry_track_frames=10;
+  d.in.backboard_center_depth_m=2.0;
+  d.in.goal_pose={true,0,2,0,1};
+  for(int n=0;n<14;++n)d.Tick();
+  Check(d.out.approach_mission==MissionType::kGoal &&
+        d.out.approach_track_id==1,
+        "GOAL initial ID was not acquired");
+  const auto first=d.out.command.action_id;
+  Check(first,"GOAL first motion was not issued");
+  d.Tick({first,true,false,false});
+  d.Tick({first,true,true,false});
+  const auto blocks=d.out.approach_completed_blocks;
+  d.in.backboard_target=Target(375,100,3);
+  d.in.backboard_track_id=2;
+  d.in.backboard_entry_track_hits=6; // New ID not yet stable.
+  d.in.backboard_entry_track_frames=10;
+  d.Tick();
+  Check(d.out.approach_track_id==1,
+        "unstable GOAL ID replacement was adopted immediately");
+  d.in.backboard_entry_track_hits=7;
+  d.Tick();
+  Check(d.out.approach_track_id==2 && d.out.approach_missing_frames==0 &&
+        d.out.approach_completed_blocks==blocks &&
+        !d.out.approach_loss_pending,
+        "stable GOAL ID replacement failed to preserve completed blocks");
+  // A different RGB-only ID is still a Depth-recovery input, not RGB loss.
+  d.in.backboard_target.reset();
+  d.in.backboard_track_id=3;
+  d.in.backboard_image_without_depth=true;
+  d.in.raw_backboard_u=320;
+  for(int n=0;n<20;++n)d.Tick();
+  Check(d.out.approach_mission==MissionType::kGoal &&
+        !d.out.approach_loss_pending,
+        "GOAL RGB-only depth episode incorrectly counted as RGB disappearance");
+}
+void GoalTrueRgbLossAndRangeRejection() {
+  auto c=Config();c.enable_ball=false;c.enable_goal=true;
+  c.initial_has_ball=c.goal_trial_start_goal=true;
+  c.goal.lost_frames=3;c.line_p2p.straight_repetitions=1;
+  // First verify that 3 truly empty RGB frames, not a changed ID, cause loss.
+  Driver lost(c);lost.in.ball_target.reset();lost.in.line_centers.clear();
+  lost.in.camera_feedback={CameraMode::kGoal,true};
+  lost.in.backboard_target=Target(320,100,3);
+  lost.in.backboard_track_id=1;
+  lost.in.backboard_center_depth_m=2;lost.in.goal_pose={true,0,2,0,1};
+  for(int n=0;n<12;++n)lost.Tick();
+  Check(lost.out.approach_mission==MissionType::kGoal,"RGB loss fixture failed GOAL acquisition");
+  lost.in.backboard_target.reset();
+  lost.in.backboard_center_depth_m.reset();lost.in.goal_pose={};
+  lost.in.raw_backboard_target.reset();lost.in.raw_backboard_u.reset();
+  for(int n=0;n<2;++n)lost.Tick();
+  Check(!lost.out.approach_loss_pending,"RGB loss confirmed before 3 missing frames");
+  lost.Tick();
+  Check(lost.out.approach_loss_pending,"3 consecutive GOAL RGB misses did not latch loss");
+  // A forbidden numerical Depth must never authorize the missing-Depth probe.
+  Driver range(c);range.in.ball_target.reset();range.in.line_centers.clear();
+  range.in.camera_feedback={CameraMode::kGoal,true};
+  range.in.backboard_target=Target(320,100,3);
+  range.in.backboard_track_id=1;
+  range.in.backboard_center_depth_m=2;range.in.goal_pose={true,0,2,0,1};
+  for(int n=0;n<12;++n)range.Tick();
+  const auto first=range.out.command.action_id;
+  Check(first,"out-of-range GOAL fixture did not start");
+  range.Tick({first,true,false,false});
+  range.in.backboard_target.reset();
+  range.in.backboard_center_depth_m.reset();range.in.goal_pose={};
+  range.in.backboard_image_out_of_depth_range=true;
+  range.in.raw_backboard_u=320;
+  range.in.raw_backboard_target=Target(320,100,3);
+  range.Tick({first,true,true,false});
+  bool returned=false;
+  for(int n=0;n<30 && !returned;++n) {
+    range.Tick();
+    Check(range.out.command.action!=MissionAction::kStepForwardOne,
+          "out-of-range GOAL Depth issued blind forward recovery");
+    returned=range.out.command.camera_request==CameraRequest::kBallViewLine;
+  }
+  Check(returned || range.out.approach_mission==MissionType::kNone,
+        "out-of-range GOAL did not reach bounded LINE fallback");
+}
 void GoalEdgeTenInFourRawBBox() {
   // GOAL is initially image-visible but has no central Depth. The raw edge
   // guard must win before the first head scan or any blind Depth recovery.
@@ -1344,6 +1433,7 @@ int main() {
   GoalAutoThreePixelZones();
   AcquiredGoalLossScansBeforeLineReturn();
   GoalEdgeTenInFourRawBBox();
+  GoalStableNewIdentityKeepsApproach();GoalTrueRgbLossAndRangeRejection();
   Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   BallNearMissingReadyTurnsAndCentralFallback(false);
   BallNearMissingReadyTurnsAndCentralFallback(true);
