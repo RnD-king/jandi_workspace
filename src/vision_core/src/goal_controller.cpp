@@ -880,9 +880,11 @@ GoalResult GoalController::Compute(
     result.action = FineAction(*mean_pose);
     if(allow_new_body_actions && result.action.category==ActionCategory::kLocomotion) {
       const auto plan=PlanFineMotion(*mean_pose);
-      if(plan.action==result.action.action && plan.repetitions>1) {
+      const int execute=plan.action==MissionAction::kStepForwardHalf
+          ? plan.repetitions : std::max(1,plan.repetitions-1);
+      if(plan.action==result.action.action && execute>1) {
         fine_repeat_action_=plan.action;
-        fine_repeat_remaining_=plan.repetitions;
+        fine_repeat_remaining_=execute;
         fine_repeat_pending_=true; // First motion is issued with this result.
         mode_=GoalMode::kFineMotionRepeat;
         result.mode=mode_;
