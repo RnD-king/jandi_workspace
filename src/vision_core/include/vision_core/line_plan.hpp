@@ -37,6 +37,15 @@ public:
                bool object_uses_center = false);
   void ObserveObject(double now, std::uint64_t owner, bool visible,
                      int window, int minimum_hits);
+  // Keep the original LINE block owner while tracking a BALL admission in parallel.
+  // The admission is already qualified; READY still determines its final center.
+  void AttachBallEntry(std::uint64_t action_id, std::uint64_t epoch,
+                       std::optional<Point2> admission_mean, double now);
+  void ObserveBallEntry(double now, std::uint64_t epoch,
+                        std::optional<Point2> center);
+  bool BallEntryOwned(std::uint64_t action_id, std::uint64_t epoch) const;
+  std::optional<Point2> FinishBallEntryCenter(std::uint64_t action_id,
+                                              double now, double remaining);
   bool ObjectQualified(std::uint64_t action_id) const;
   bool ObjectOwned(std::uint64_t action_id, std::uint64_t owner) const;
   bool IsProbe(std::uint64_t action_id) const;
@@ -55,7 +64,10 @@ public:
                                             bool object_qualified=true);
   std::optional<LineWindowStats> Stats(std::uint64_t id) const;
   std::vector<MissionAction> TakeCompleted();
-  struct CompletedBlock { MissionAction cruise; std::uint64_t owner; bool object_qualified; bool probe; };
+  struct CompletedBlock {
+    MissionAction cruise; std::uint64_t owner; bool object_qualified; bool probe;
+    std::uint64_t ball_entry_epoch{0};
+  };
   std::vector<CompletedBlock> TakeCompletedBlocks();
   void Abort();
   // On rediscovery during a pre-lock probe, retain the running unit and
@@ -80,11 +92,20 @@ private:
     std::optional<Point2> mean_center;
     std::deque<bool> object_hits;
     bool object_qualified{false};
+    // A previously issued LINE block can admit BALL without changing
+    // its physical owner, LINE observations, or ACK/READY/DONE IDs.
+    std::uint64_t ball_entry_epoch{0};
+    std::optional<Point2> ball_entry_seed;
+    std::optional<Point2> ball_entry_mean;
+    LineGuideAccumulator ball_entry_centers;
+    bool ball_entry_finished{false};
     Block(std::uint64_t key, MissionAction old, MissionAction basic, int repeat,
           const LineP2pConfig &config,int window,int required_hits)
         : id(key), cruise(old), unit(basic), count(repeat),
           observations(config.failure_min_valid_samples,config.observation_start_ratio,
-                       window,required_hits) {}
+                       window,required_hits),
+          ball_entry_centers(config.failure_min_valid_samples,config.observation_start_ratio,
+                             window,required_hits) {}
   };
   struct Unit {
     std::uint64_t block, parent;
