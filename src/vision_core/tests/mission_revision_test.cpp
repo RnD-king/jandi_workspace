@@ -662,7 +662,10 @@ void FineSidePairTransport(bool left, bool manual) {
   f.manual_observation_control=manual;f.now_sec+=.1;
   f.delivery_feedback={id,true,true,false};
   out=core.Step(f);
-  assert(!out.repeat_sequence && out.command.action_id==0);
+  // A single uncalibrated correction must not start an automatic second
+  // side step. The transport may still display the just-completed ID.
+  assert(!out.repeat_sequence &&
+         (out.command.action_id==0 || out.command.action_id==id));
 }
 void EntryDirectionRecovery(bool left, bool reacquire) {
   auto c=LoadDefaultAlgorithmConfig().ball;
