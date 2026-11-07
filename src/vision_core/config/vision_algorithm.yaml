@@ -14,8 +14,8 @@ vision_algorithm:
       # 라인 중심점과 기준선
       max_centers: 8
       guide_min_points: 3 # 필요한 최소 개수
-      image_center_u: 360.0 # 라인 중앙 기준선
-      ball_view_image_center_u: 360.0 # BALL_VIEW LINE only
+      image_center_u: 380.0 # 라인 중앙 기준선
+      ball_view_image_center_u: 380.0 # BALL_VIEW LINE only
 
       # 직선 피팅과 이상점 제거
       ransac_enabled: true
@@ -244,8 +244,8 @@ vision_algorithm:
 
       # DOWN 완료부터 LINE O/H 기억; 2번 자세 DONE 후 FINE 정렬에만 사용
       fine_line_reference_u_px: 380.0 # 허들 DOWN 화면의 로봇 기준선
-      fine_line_offset_tolerance_px: 80.0 # |O| 허용 범위 (px)
-      fine_line_heading_tolerance_deg: 8.0 # |H| 허용 범위 (도)
+      fine_line_offset_tolerance_px: 120.0 # |O| 허용 범위 (px)
+      fine_line_heading_tolerance_deg: 10.0 # |H| 허용 범위 (도)
       fine_line_observation_sec: 1.0 # 각 실제 DONE 이후 정지 관측 (초)
       fine_line_stable_window: 10
       fine_line_stable_min_hits: 5
@@ -264,7 +264,7 @@ vision_algorithm:
       # 허들 접촉·넘기
       contact_v_px: 220 # 접촉 선 (반걸음)
       contact_steps: 3 # 접촉 보행 반 걸음 횟수
-      contact_inter_action_hold_sec: 0.5 # 접촉 보행 DONE 후 다음 접촉 보행까지 정지 시간 (초, 0: 추가 대기 없음)
+      contact_inter_action_hold_sec: 0.3 # 접촉 보행 DONE 후 다음 접촉 보행까지 정지 시간 (초, 0: 추가 대기 없음)
 
       # 허들 넘은 뒤 재진입 방지
       hurdle_ignore_duration_sec: 5.0
@@ -344,7 +344,7 @@ vision_algorithm:
       edge_margin_px: 50.0 # GOAL 이미지 경계 보호 구간(px)
       edge_stable_window: 10 # 연속된 프레임 관측창; 기간 내 한번 충족하면 래치
       edge_stable_min_hits: 4 # 좌/우 각각 10중4 이상 접촉 시 우선 제자리 2회전
-      approach_short_z_m: 0.9 # GOAL 근거리 진입·FINE 자세 전환 기준; FORWARD 뷰에서는 짧은 보행 선택 기준
+      approach_short_z_m: 0.8 # GOAL 근거리 진입·FINE 자세 전환 기준; FORWARD 뷰에서는 짧은 보행 선택 기준
       camera_goal_start_z_m: 0.9 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
 
       # 투척 위치·방향
