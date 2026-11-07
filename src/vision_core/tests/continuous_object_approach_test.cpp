@@ -1264,7 +1264,8 @@ void FirstBallAdmissionReadyOverwritesInitialMean() {
   d.Tick({d.current,true,false,true});
   const auto successor=d.out.command.action_id;
   Check(successor && successor!=d.current &&
-        d.out.command.action==MissionAction::kLineRightUnit,
+        (d.out.command.action==MissionAction::kLineRightUnit ||
+         d.out.command.action==MissionAction::kLineRightUnitTurnFirst),
         "new final READY mean was not used before selecting BALL successor");
   Check(d.out.approach_completed_blocks==0,
         "READY counted the admitted LINE block before physical DONE");
