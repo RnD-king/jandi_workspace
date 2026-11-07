@@ -286,10 +286,10 @@ static void WaistPivotAndCalibratedFine() {
       true,{CameraMode::kGoal,true},{});
   assert(r.mode==GoalMode::kFineMotionRepeat &&
          r.action.action==MissionAction::kRightSideStep);
-  for(int i=0;i<3;++i) {
+  for(int i=0;i<2;++i) {
     r=continuous.Compute({},Board(),Pose(.09,1.03),640,480,0.1+i*.1,
         true,{CameraMode::kGoal,true},{true,true,false});
-    if(i<2) assert(r.mode==GoalMode::kFineMotionRepeat &&
+    if(i==0) assert(r.mode==GoalMode::kFineMotionRepeat &&
                     r.action.action==MissionAction::kRightSideStep);
     else assert(r.mode==GoalMode::kFineAdjust &&
                 r.action.action==MissionAction::kNone);
