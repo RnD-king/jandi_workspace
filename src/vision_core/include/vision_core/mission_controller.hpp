@@ -111,7 +111,7 @@ struct MissionFrameInput {
   bool rectify_approach{false};
   double approach_roll_rad{}, approach_pitch_rad{};
   std::uint64_t ball_track_id{}, hurdle_track_id{}, backboard_track_id{};
-  std::optional<int> backboard_entry_track_hits;
+  std::optional<int> backboard_entry_track_hits, backboard_entry_track_frames;
   std::optional<ObjectTarget> ball_target;
   // StepPerception supplies per-ID entry evidence within upper_acquire_v_px.
   // Candidates already passed confidence, bbox, aspect and optional depth gates.
@@ -129,6 +129,9 @@ struct MissionFrameInput {
   GoalPoseObservation goal_pose;
   // A valid image detection whose center depth is rejected/missing.
   bool backboard_image_without_depth{false};
+  // RGB is visible but finite central Depth is outside the configured range.
+  // Unlike absent Depth, an out-of-range board must never trigger blind walks.
+  bool backboard_image_out_of_depth_range{false};
   std::optional<double> backboard_center_depth_m;
   int image_width{0};
   int image_height{0};
@@ -494,6 +497,8 @@ private:
   bool approach_goal_search_failed_{false};
   bool approach_goal_depth_failed_{false};
   int approach_goal_bad_depth_frames_{0};
+  int goal_rgb_missing_frames_{0};
+  int goal_out_of_range_frames_{0};
   bool goal_approach_walk_done_{false}; // At least one object-owned GOAL action actually DONE.
   struct FarGoalDepthProbe {
     enum class Phase { kIdle, kMotion, kObserve };
