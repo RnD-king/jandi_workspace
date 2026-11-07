@@ -65,6 +65,11 @@ struct HurdleConfig {
   int fine_line_stable_window{};
   int fine_line_stable_min_hits{};
   int fine_line_turn_yaw_deg{};
+  // Zero calibration preserves the existing single-motion observation policy.
+  double fine_line_measured_turn_deg{0.0};
+  double fine_line_measured_side_px{0.0};
+  double fine_line_post_turn_hold_sec{0.5};
+  int fine_line_batch_max_repetitions{3};
   int fine_line_max_turns{};
   int fine_line_max_side_steps{};
   int fine_line_max_stale_corrections{};
@@ -244,6 +249,8 @@ private:
   bool fine_line_qualified_{false};
   bool fine_line_close_{false};
   MissionAction fine_line_pending_action_{MissionAction::kNone};
+  MissionAction fine_line_repeat_action_{MissionAction::kNone};
+  int fine_line_repeat_remaining_{0}; // Includes the physically pending unit.
   bool fine_line_pending_stale_{false};
   double fine_line_observation_start_sec_{0.0};
   std::optional<double> fine_line_last_sample_sec_;
