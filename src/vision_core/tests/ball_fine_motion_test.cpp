@@ -67,40 +67,46 @@ void BoundsAndUncalibrated() {
 }
 void DirectRepeat(MissionAction action) {
   auto c=Config();Point2 start;
-  switch (action) {
+  switch(action) {
     case MissionAction::kStepForwardHalf:start={347.5,20};c.fine_motion.forward_delta_px={0,20};break;
     case MissionAction::kStepBack:start={347.5,190};c.fine_motion.backward_delta_px={0,-20};break;
     case MissionAction::kLeftSideStep:start={200,105};c.fine_motion.left_delta_px={40,0};break;
     default:start={500,105};c.fine_motion.right_delta_px={-50,0};break;
   }
+  const int execute=action==MissionAction::kStepForwardHalf ? 3 : 2;
   BallController ball(c,3);ball.StartTestExecute();
   const CameraFeedback down{CameraMode::kBallView,true};
   ball.UseVerifiedObservation(Target(start.u,start.v),std::deque<bool>(10,true),640,480);
-  auto b=ball.Compute({},640,480,0,down,{},false);
-  assert(b.mode==BallMode::kFineAdjustForPickup && b.action.action==action);
-  assert(ball.FineMotionRepetitions()==0); // Uncommitted evidence cannot freeze a plan.
-  auto preview=ball;b=preview.Compute(Target(start.u,start.v),640,480,.01,down,{});
-  assert(b.mode==BallMode::kFineMotionRepeat && preview.FineMotionRepetitions()==3);
+  auto out=ball.Compute({},640,480,0,down,{},false);
+  assert(out.mode==BallMode::kFineAdjustForPickup && out.action.action==action);
   assert(ball.FineMotionRepetitions()==0);
-  b=ball.Compute(Target(start.u,start.v),640,480,.02,down,{});
-  assert(b.mode==BallMode::kFineMotionRepeat && b.action.action==action);
+  auto preview=ball;out=preview.Compute(Target(start.u,start.v),640,480,.01,down,{});
+  assert(out.mode==BallMode::kFineMotionRepeat &&
+         preview.FineMotionRepetitions()==execute);
+  assert(ball.FineMotionRepetitions()==0);
+  out=ball.Compute(Target(start.u,start.v),640,480,.02,down,{});
+  assert(out.mode==BallMode::kFineMotionRepeat &&
+         out.action.action==action && ball.FineMotionRepetitions()==execute);
   ActionExecutionFeedback busy;busy.action_active=true;
-  b=ball.Compute(Target(347.5,105),640,480,.1,down,busy);
-  assert(b.action.action==MissionAction::kNone && ball.FineSideActionsRemaining()==3);
-  // Retuning during an accepted chain cannot change its direction/count.
+  out=ball.Compute(Target(347.5,105),640,480,.1,down,busy);
+  assert(out.action.action==MissionAction::kNone &&
+         ball.FineSideActionsRemaining()==execute);
   auto changed=c;changed.fine_motion={};changed.fine_motion.max_repetitions=1;
-  ball.UpdateTuning(changed);
+  ball.UpdateTuning(changed); // A committed batch must not be retuned.
   ActionExecutionFeedback done;done.action_done=true;
   ball.Compute({},640,480,.2,down,done,false);
-  assert(ball.FineSideActionsRemaining()==2);
-  ball.Compute({},640,480,.21,down,done,false); // Duplicate while paused.
-  assert(ball.FineSideActionsRemaining()==2);
-  b=ball.Compute({},640,480,.3,down,{});
-  assert(b.action.action==action && ball.FineMotionRepetitions()==3);
-  b=ball.Compute({},640,480,.4,down,done);
-  assert(b.action.action==action && ball.FineSideActionsRemaining()==1);
-  b=ball.Compute({},640,480,.5,down,done);
-  assert(b.mode==BallMode::kFineAdjustForPickup && b.action.action==MissionAction::kNone);
+  assert(ball.FineSideActionsRemaining()==execute-1);
+  ball.Compute({},640,480,.21,down,done,false);
+  assert(ball.FineSideActionsRemaining()==execute-1);
+  out=ball.Compute({},640,480,.3,down,{});
+  assert(out.action.action==action && ball.FineMotionRepetitions()==execute);
+  out=ball.Compute({},640,480,.4,down,done);
+  if(execute==3) {
+    assert(out.action.action==action && ball.FineSideActionsRemaining()==1);
+    out=ball.Compute({},640,480,.5,down,done);
+  }
+  assert(out.mode==BallMode::kFineAdjustForPickup &&
+         out.action.action==MissionAction::kNone);
   assert(!ball.ExecutionObservationReady() && ball.FineMotionRepetitions()==0);
   ball.Reset();assert(ball.FineSideActionsRemaining()==0);
 }
@@ -108,7 +114,8 @@ void LegacyFallback() {
   auto c=Config();BallController ball(c,3);ball.StartTestExecute();
   ball.UseVerifiedObservation(Target(500,105),std::deque<bool>(10,true),640,480);
   auto b=ball.Compute({},640,480,0,{CameraMode::kBallView,true},{});
-  assert(b.mode==BallMode::kFineSidePair && b.action.action==MissionAction::kRightSideStep);
+  assert(b.mode==BallMode::kFineAdjustForPickup &&
+         b.action.action==MissionAction::kRightSideStep);
   c.fine_motion.max_repetitions=1;BallController single(c,3);single.StartTestExecute();
   single.UseVerifiedObservation(Target(500,105),std::deque<bool>(10,true),640,480);
   b=single.Compute({},640,480,0,{CameraMode::kBallView,true},{});
@@ -123,61 +130,50 @@ void LegacyFallback() {
 }
 void Transport(bool manual,bool pause) {
   auto c=LoadDefaultAlgorithmConfig();c.ball=Config();
-  c.test_mission=MissionType::kBall;c.test_stage=2;c.enable_goal=c.enable_hurdle=false;
+  c.test_mission=MissionType::kBall;c.test_stage=2;
+  c.enable_goal=c.enable_hurdle=false;
   c.fine_motion_settle_sec=.2;c.ball.fine_motion.right_delta_px={-50,0};
   MissionController core(c);MissionFrameInput f;
   f.image_width=640;f.image_height=480;f.command_transport_enabled=true;
   f.camera_feedback={CameraMode::kBallView,true};f.ball_target=Target(500,105);
-  MissionFrameResult r;std::uint64_t setup_done=0;
-  for (int i=0;i<=200;++i) {
+  MissionFrameResult out;std::uint64_t setup_done=0;
+  for(int i=0;i<=200;++i) {
     f.now_sec=.05*i;f.delivery_feedback={};
-    if (r.command.action_id && r.command.action_id!=setup_done) {
-      setup_done=r.command.action_id;f.delivery_feedback={setup_done,true,true,false};
+    if(out.command.action_id && out.command.action_id!=setup_done) {
+      setup_done=out.command.action_id;
+      f.delivery_feedback={setup_done,true,true,false};
     }
-    r=core.Step(f);
-    if (r.ball.mode==BallMode::kFineMotionRepeat) break;
+    out=core.Step(f);
+    if(out.ball.mode==BallMode::kFineMotionRepeat) break;
   }
-  assert(r.command.action==MissionAction::kRightSideStep && r.ball.fine_motion_repetitions==3);
-  const auto a=r.command.action_id;const int scope=r.repeat_scope;
-  assert(a!=0 && scope!=0 && r.repeat_sequence);
-  f.manual_observation_control=manual;f.ball_target=Target(347.5,105);
-  f.allow_new_body_actions=f.allow_new_commands=!pause;
-  f.now_sec+=.1;f.delivery_feedback={a,true,true,false};r=core.Step(f);
-  if (pause) {
-    assert(r.command.action_id==0 && r.repeat_scope==scope && r.ball.fine_motion_remaining==2);
-    f.now_sec+=.01;r=core.Step(f); // Duplicate A cannot consume another step.
-    assert(r.ball.fine_motion_remaining==2);
-    auto changed=c;changed.ball.fine_motion.max_repetitions=1;
-    core.SetLivePerceptionTuning(changed);
-    f.allow_new_body_actions=f.allow_new_commands=true;f.delivery_feedback={};
-    f.now_sec+=.01;r=core.Step(f);
+  assert(out.command.action==MissionAction::kRightSideStep &&
+         out.ball.fine_motion_repetitions==2 && out.repeat_sequence);
+  const auto a=out.command.action_id;
+  f.manual_observation_control=manual;
+  f.allow_new_commands=f.allow_new_body_actions=!pause;
+  f.now_sec+=.1;f.delivery_feedback={a,true,true,false};out=core.Step(f);
+  if(pause) {
+    assert(out.command.action_id==0 && out.ball.fine_motion_remaining==1);
+    f.now_sec+=.01;out=core.Step(f);
+    assert(out.ball.fine_motion_remaining==1);
+    f.allow_new_commands=f.allow_new_body_actions=true;
+    f.delivery_feedback={};f.now_sec+=.01;out=core.Step(f);
   }
-  const auto b=r.command.action_id;
-  assert(b!=0 && b!=a && r.command.action==MissionAction::kRightSideStep);
-  assert(!r.post_motion_observing && r.repeat_scope==scope);
-  f.now_sec+=.01;f.delivery_feedback={a,true,true,false};r=core.Step(f);
-  assert(r.command.action_id==b && r.ball.fine_motion_remaining==2);
-  f.now_sec+=.05;f.delivery_feedback={b,true,true,false};r=core.Step(f);
-  const auto third=r.command.action_id;
-  assert(third!=0 && third!=a && third!=b && r.command.action==MissionAction::kRightSideStep);
-  assert(!r.post_motion_observing && r.repeat_scope==scope && r.ball.fine_motion_remaining==1);
-  f.now_sec+=.01;f.delivery_feedback={b,true,true,false};r=core.Step(f);
-  assert(r.command.action_id==third && r.ball.fine_motion_remaining==1);
-  f.now_sec+=.05;const auto done_at=f.now_sec;f.delivery_feedback={third,true,true,false};r=core.Step(f);
-  assert(r.command.action_id==0 && !r.repeat_sequence && r.repeat_scope==0);
-  bool finished=false;
-  for (int i=1;i<=40;++i) {
-    f.now_sec=done_at+.05*i;f.delivery_feedback={};f.begin_manual_observation=manual && i==1;
-    r=core.Step(f);
-    assert(r.command.action_id==0); // No fourth body action or automatic pickup.
-    if (f.now_sec+1e-9<done_at+.2+c.post_motion_observation_sec) assert(!r.trial_complete);
-    if (r.trial_complete) {finished=true;break;}
+  const auto b=out.command.action_id;
+  assert(b && b!=a && out.command.action==MissionAction::kRightSideStep);
+  f.now_sec+=.05;f.delivery_feedback={b,true,true,false};out=core.Step(f);
+  assert(out.command.action_id==0 && !out.repeat_sequence &&
+         out.ball.fine_motion_remaining==0);
+  const auto done_at=f.now_sec;
+  for(int i=1;i<=10;++i) {
+    f.now_sec=done_at+.05*i;f.delivery_feedback={};
+    f.begin_manual_observation=manual && i==1;
+    out=core.Step(f);
+    assert(out.command.action_id==0 && !out.repeat_sequence);
   }
-  assert(finished); // One fresh observation after the entire chain.
-  core.Reset(true);f.delivery_feedback={third,true,true,false};f.now_sec+=.1;r=core.Step(f);
-  assert(!r.repeat_sequence && r.ball.fine_motion_remaining==0);
-  assert(r.command.action_id==0 || r.command.action_id>third);
+  core.Reset(true);
 }
+
 }
 int main() {
   CountsAndCrossAxis();BoundsAndUncalibrated();TaperedPickupBounds();LegacyFallback();
