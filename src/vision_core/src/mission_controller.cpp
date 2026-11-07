@@ -2698,8 +2698,11 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   prepared.ball_track_id=entry_track ? entry_track->id : ball_target_id_;
   prepared.hurdle_track_id=hurdle_target_tracker_.TargetId();
   prepared.backboard_track_id=backboard_target_tracker_.TargetId();
-  if (backboard_target_tracker_.Selected())
+  if (backboard_target_tracker_.Selected()) {
     prepared.backboard_entry_track_hits=backboard_target_tracker_.Selected()->HitCount();
+    prepared.backboard_entry_track_frames=
+        static_cast<int>(backboard_target_tracker_.Selected()->hits.size());
+  }
   prepared.ball_target = output.perception.targets.ball;
   if(config_.ball_candidate_tracking.enabled && active_mission_==MissionType::kLine && candidate_.phase==CandidatePhase::kNone) {
     prepared.ball_entry_track_hits=entry_track ? entry_track->HitCount() : 0;
@@ -2779,12 +2782,31 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
       prepared.raw_backboard_target=best.target;
     }
   }
-  prepared.backboard_image_without_depth =
-      input.camera_feedback.settled && backboard_in_image &&
-      ExtractObjectTargetCandidates(
-          detections, config_.object_targets.backboard_class_id,
-          config_.object_targets.backboard_confidence, config_.object_targets)
-          .empty();
+  // The original RGB bbox can outlive its central Depth. Keep genuine
+  // missing-Depth recovery distinct from a measured but forbidden range.
+  const auto valid_board_candidates=ExtractObjectTargetCandidates(
+      detections,config_.object_targets.backboard_class_id,
+      config_.object_targets.backboard_confidence,config_.object_targets);
+  bool board_depth_missing=false,board_depth_out_of_range=false;
+  if (input.camera_feedback.settled && backboard_in_image &&
+      valid_board_candidates.empty()) {
+    const auto raw_boards=ExtractObjectTargetCandidates(
+        image_detections,config_.object_targets.backboard_class_id,
+        config_.object_targets.backboard_confidence,config_.object_targets);
+    const double lo=std::min(config_.backboard_min_depth_m,config_.backboard_max_depth_m);
+    const double hi=std::max(config_.backboard_min_depth_m,config_.backboard_max_depth_m);
+    for (const auto& board:raw_boards) {
+      if (board.detection_index>=input.detections.size()) continue;
+      const auto depth=input.detections[board.detection_index].center_depth_m;
+      if (!depth || !std::isfinite(*depth))
+        board_depth_missing=true;
+      else if (*depth<lo || *depth>hi)
+        board_depth_out_of_range=true;
+    }
+  }
+  prepared.backboard_image_out_of_depth_range=board_depth_out_of_range;
+  prepared.backboard_image_without_depth=board_depth_missing &&
+      !board_depth_out_of_range;
   prepared.goal_pose = output.perception.goal_pose;
   prepared.backboard_center_depth_m =
       output.perception.backboard_center_depth_m;
