@@ -498,6 +498,7 @@ private:
   bool approach_goal_depth_failed_{false};
   int approach_goal_bad_depth_frames_{0};
   int goal_rgb_missing_frames_{0};
+  int goal_tracking_unusable_frames_{0};
   int goal_out_of_range_frames_{0};
   bool goal_approach_walk_done_{false}; // At least one object-owned GOAL action actually DONE.
   struct FarGoalDepthProbe {
