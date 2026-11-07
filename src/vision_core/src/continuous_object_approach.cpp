@@ -758,7 +758,10 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   // A separate bounded counter handles persistent visible but unusable
   // candidates (e.g. repeated unstable replacements) rather than HOLD forever.
   if(i==1 && !continuous_.near) {
-    goal_rgb_missing_frames_=input.raw_backboard_target ? 0 :
+    const bool rgb_visible=input.raw_backboard_target.has_value() ||
+        input.raw_backboard_u.has_value() || input.backboard_target.has_value() ||
+        input.backboard_image_without_depth || input.backboard_image_out_of_depth_range;
+    goal_rgb_missing_frames_=rgb_visible ? 0 :
         std::min(config_.goal.lost_frames,goal_rgb_missing_frames_+1);
     const bool tracking_unusable=input.raw_backboard_target && !target &&
         !input.backboard_image_without_depth &&
