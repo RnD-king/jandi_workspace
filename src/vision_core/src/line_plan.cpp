@@ -120,6 +120,51 @@ void LinePlan::ObserveObject(double now, std::uint64_t owner, bool visible,
       block.object_qualified = true;
   }
 }
+void LinePlan::AttachBallEntry(std::uint64_t action_id, std::uint64_t epoch,
+                               std::optional<Point2> admission_mean, double now) {
+  if (!epoch) return;
+  const auto it=units_.find(action_id);
+  auto* block=it==units_.end()?nullptr:Find(it->second.block);
+  if (!block || block->owner || block->aborted || block->reported ||
+      block->window_finished || !block->start || block->completed==block->count)
+    return;
+  if (block->ball_entry_epoch) return; // One admission per physical block.
+  block->ball_entry_epoch=epoch;
+  block->ball_entry_seed=admission_mean;
+  block->ball_entry_centers.Begin(block->id,*block->start);
+  block->ball_entry_centers.AddCenter(block->id,now,admission_mean);
+}
+void LinePlan::ObserveBallEntry(double now, std::uint64_t epoch,
+                                std::optional<Point2> center) {
+  if (!epoch) return;
+  for (auto& block:blocks_) {
+    if (block.ball_entry_epoch!=epoch || block.aborted || block.reported ||
+        block.ball_entry_finished || !block.start || now<*block.start ||
+        block.completed==block.count) continue;
+    block.ball_entry_centers.AddCenter(block.id,now,center);
+  }
+}
+bool LinePlan::BallEntryOwned(std::uint64_t action_id,std::uint64_t epoch) const {
+  const auto it=units_.find(action_id);
+  const auto* block=it==units_.end()?nullptr:Find(it->second.block);
+  return block && epoch && block->ball_entry_epoch==epoch;
+}
+std::optional<Point2> LinePlan::FinishBallEntryCenter(
+    std::uint64_t action_id,double now,double remaining) {
+  const auto it=units_.find(action_id);
+  auto* block=it==units_.end()?nullptr:Find(it->second.block);
+  if (!block || !block->ball_entry_epoch || block->aborted)
+    return std::nullopt;
+  if (!block->ball_entry_finished) {
+    block->ball_entry_mean=block->ball_entry_centers.FinishCenter(
+        block->id,now,remaining,false).value_or(
+            block->ball_entry_seed.value_or(Point2{}));
+    if (!block->ball_entry_seed &&
+        !block->ball_entry_mean) block->ball_entry_mean.reset();
+    block->ball_entry_finished=true;
+  }
+  return block->ball_entry_mean;
+}
 bool LinePlan::ObjectQualified(std::uint64_t action_id) const {
   const auto it = units_.find(action_id);
   const auto* block = it == units_.end() ? nullptr : Find(it->second.block);
@@ -212,7 +257,8 @@ std::vector<LinePlan::CompletedBlock> LinePlan::TakeCompletedBlocks() {
   for (auto& block : blocks_) {
     if (!block.reported && block.completed == block.issued &&
         (block.aborted || block.completed == block.count)) {
-      if (!block.aborted) result.push_back({block.cruise,block.owner,block.object_qualified,block.probe});
+      if (!block.aborted) result.push_back({block.cruise,block.owner,block.object_qualified,block.probe,
+                          block.ball_entry_epoch});
       block.reported = true;
     }
   }
