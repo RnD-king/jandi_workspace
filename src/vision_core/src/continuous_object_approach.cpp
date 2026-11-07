@@ -55,6 +55,7 @@ void MissionController::ReleaseContinuousApproach() {
     goal_controller_.ClearDepthRecovery();
     approach_goal_depth_action_id_=0;
     approach_goal_bad_depth_frames_=0;
+    goal_rgb_missing_frames_=goal_tracking_unusable_frames_=goal_out_of_range_frames_=0;
   }
 }
 
@@ -135,6 +136,7 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
   approach_goal_probe_=approach_return_ball_view_=false;
   approach_goal_empty_retries_=0;
   approach_goal_bad_depth_frames_=0;
+  goal_rgb_missing_frames_=goal_tracking_unusable_frames_=goal_out_of_range_frames_=0;
   approach_goal_depth_action_id_=0;
   far_goal_depth_probe_={};
   approach_camera_started_=-1;
@@ -404,6 +406,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const bool goal_view=camera.actual_mode==CameraMode::kGoal;
   // A stationary 10/4 raw-bbox edge guard always precedes Depth recovery.
   if(goal_view && input.raw_backboard_observation_available && has_ball_ &&
+     !input.backboard_image_out_of_depth_range &&
      !(continuous_.mission==MissionType::kGoal && continuous_.near)) {
     ActionRequest edge_action;
     if(PrepareGoalEdgeGuard(input,idle,edge_action)) {
@@ -669,8 +672,31 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const std::size_t i=continuous_.mission==MissionType::kBall ? 0 :
                       continuous_.mission==MissionType::kGoal ? 1 : 2;
   auto target=targets[i];
-  if (target && continuous_.last && ((ids[i] && continuous_.id && ids[i]!=continuous_.id) ||
-      !same_target(*continuous_.last,*target,i))) target.reset();
+  // GOAL follows the currently stable RGB+Depth backboard rather than
+  // permanently pinning a lost tracker ID. Do NOT inherit old-ID READY
+  // centers or detection windows; keep completed physical block counts and
+  // the bounded recovery budgets across identity replacement.
+  if(i==1 && !continuous_.near && target && ids[i] && continuous_.id &&
+     ids[i]!=continuous_.id) {
+    const bool stable_replacement=
+        input.backboard_entry_track_hits.value_or(0)>=config_.goal.stable_min_hits &&
+        input.backboard_entry_track_frames.value_or(0)>=config_.goal.stable_window;
+    if(stable_replacement) {
+      continuous_.id=ids[i];
+      continuous_.last.reset();
+      continuous_.last_ready_center.reset();
+      continuous_.hits.clear();
+      continuous_.near_hits.clear();
+      continuous_.pose_hits.clear();
+      continuous_.good_hits.clear();
+      continuous_.missing=0;
+      continuous_.loss_pending=false;
+      goal_tracking_unusable_frames_=0;
+    } else target.reset();
+  }
+  if (target && continuous_.last &&
+      ((ids[i] && continuous_.id && ids[i]!=continuous_.id) ||
+       !same_target(*continuous_.last,*target,i))) target.reset();
   if (target) {
     continuous_.last=target;continuous_.missing=0;
     if (ids[i]) continuous_.id=ids[i];
@@ -728,7 +754,40 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
      !continuous_.loss_pending && !line_plan_.Active() && !line_plan_.Outstanding() &&
      continuous_.missing>config_.ball_candidate_tracking.missing_frame_limit)
     continuous_.loss_pending=true;
+  // A true RGB loss is independent of tracker IDs and Depth validity.
+  // A separate bounded counter handles persistent visible but unusable
+  // candidates (e.g. repeated unstable replacements) rather than HOLD forever.
+  if(i==1 && !continuous_.near) {
+    goal_rgb_missing_frames_=input.raw_backboard_target ? 0 :
+        std::min(config_.goal.lost_frames,goal_rgb_missing_frames_+1);
+    const bool tracking_unusable=input.raw_backboard_target && !target &&
+        !input.backboard_image_without_depth &&
+        !input.backboard_image_out_of_depth_range;
+    goal_tracking_unusable_frames_=tracking_unusable ?
+        std::min(config_.goal.lost_frames,goal_tracking_unusable_frames_+1) : 0;
+    if(goal_rgb_missing_frames_>=config_.goal.lost_frames ||
+       goal_tracking_unusable_frames_>=config_.goal.lost_frames)
+      continuous_.loss_pending=true;
+  }
   const bool lost=continuous_.loss_pending;
+  if(i==1 && !continuous_.near && input.backboard_image_out_of_depth_range) {
+    // A measured but forbidden Depth is NOT a missing-Depth search request.
+    // Discard unissued movements, then return to LINE after bounded evidence.
+    result.hold=true;
+    line_plan_.Abort();
+    goal_out_of_range_frames_=std::min(
+        config_.goal.lost_frames,goal_out_of_range_frames_+1);
+    if(goal_out_of_range_frames_>=config_.goal.lost_frames &&
+       idle && !line_plan_.Outstanding()) {
+      ReleaseContinuousApproach();
+      approach_return_ball_view_=true;
+      post_pickup_goal_line_gate_active_=true;
+      approach_goal_retry_after_=post_pickup_line_actions_completed_+1;
+      result.camera=CameraRequest::kBallViewLine;
+    }
+    return result;
+  }
+  if(i==1) goal_out_of_range_frames_=0;
   // A completed GOAL approach with visible RGB but invalid Depth takes the
   // direction-aware 3x probe path BEFORE generic object-loss handling.
   if(i==1 && !continuous_.near && input.backboard_image_without_depth &&
