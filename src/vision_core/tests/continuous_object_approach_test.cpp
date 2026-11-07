@@ -820,9 +820,19 @@ void GoalStableNewIdentityKeepsApproach() {
         "GOAL initial ID was not acquired");
   const auto first=d.out.command.action_id;
   Check(first,"GOAL first motion was not issued");
+  // Give the physical first block its complete 10/7 window and final
+  // READY.  A bare DONE with no READY would trigger a separate post-DONE
+  // observation and could (correctly) mark an unqualified block lost.
   d.Tick({first,true,false,false});
+  for(int n=0;n<12;++n)d.Tick();
+  d.Tick({first,true,false,true});
+  const auto next=d.out.command.action_id;
+  Check(next && next!=first && LinePlan::IsUnit(d.out.command.action),
+        "GOAL final READY did not reserve successor");
+  d.Tick({next,true,false,false});
   d.Tick({first,true,true,false});
   const auto blocks=d.out.approach_completed_blocks;
+  Check(blocks==1,"GOAL first qualified block DONE not counted");
   d.in.backboard_target=Target(375,100,3);
   d.in.backboard_track_id=2;
   d.in.backboard_entry_track_hits=6; // New ID not yet stable.
