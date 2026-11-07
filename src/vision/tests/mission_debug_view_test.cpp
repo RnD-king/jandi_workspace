@@ -199,11 +199,11 @@ int main() {
   m.active_mission=vision_core::MissionType::kGoal;m.goal.mode=vision_core::GoalMode::kApproach;
   const std::vector<vision_core::Detection> empty;
   c.goal.edge_margin_px=40;
-  const vision_core::CameraFeedback goal_camera{vision_core::CameraMode::kGoal,true};
-  auto edge=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
+  const vision_core::CameraFeedback edge_goal_camera{vision_core::CameraMode::kGoal,true};
+  auto edge=vision::RenderMissionDebug(image,empty,{},c,{},m,edge_goal_camera,{},state);
   Check(edge.image.at<cv::Vec3b>(400,40)!=cv::Vec3b(0,0,0),"configured edge guide absent");
   c.goal.edge_margin_px=90;
-  edge=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
+  edge=vision::RenderMissionDebug(image,empty,{},c,{},m,edge_goal_camera,{},state);
   Check(edge.image.at<cv::Vec3b>(400,40)==cv::Vec3b(0,0,0) &&
         edge.image.at<cv::Vec3b>(400,90)!=cv::Vec3b(0,0,0),"edge guide ignored new tuning");
   // GOAL far AUTO is still a LINE-owned WALK, but must display the
@@ -211,7 +211,7 @@ int main() {
   m.active_mission=vision_core::MissionType::kLine;
   m.approach_mission=vision_core::MissionType::kGoal;
   m.foot_pose=vision_core::FootPose::kWalk;
-  edge=vision::RenderMissionDebug(image,empty,{},c,{},m,goal_camera,{},state);
+  edge=vision::RenderMissionDebug(image,empty,{},c,{},m,edge_goal_camera,{},state);
   Check(edge.image.at<cv::Vec3b>(400,90)!=cv::Vec3b(0,0,0),
         "GOAL far AUTO edge margin absent while shared LINE plan is active");
   m.approach_mission=vision_core::MissionType::kNone;
