@@ -84,9 +84,10 @@ struct GoalConfig {
   double recovery_center_tolerance_px{};
   bool head_scan_enabled{true};
   int head_scan_max_yaw_deg{25};
-  double head_scan_center_half_width_px{50.0};
+  double head_scan_center_half_width_px{100.0};
   int head_scan_pause_window{4}, head_scan_pause_hits{2};
-  int head_scan_verify_window{10}, head_scan_verify_hits{7};
+  int head_scan_verify_window{10}, head_scan_verify_hits{5};
+  double head_scan_observation_timeout_sec{2.0};
   double head_scan_move_sec{0.5}, head_scan_hold_sec{0.5}, head_scan_return_sec{0.5};
   double head_scan_body_turn_one_threshold_deg{10.0};
   double head_scan_body_turn_two_threshold_deg{20.0};

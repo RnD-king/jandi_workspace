@@ -20,6 +20,7 @@ line_perception_node:
     assume_zero_imu: false
     imu_abs_limit_deg: 45.0
     max_depth_age_sec: 0.20
+    scan_depth_sync_tolerance_sec: 0.03 # Stationary GOAL scan RGB/Depth pairing limit
 
     # 디버깅 토픽 발행만 제어한다. 실제 저장은 ~/ros2_bag/record.sh에서 선택.
     rosbag: false

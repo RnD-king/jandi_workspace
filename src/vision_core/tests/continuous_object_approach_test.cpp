@@ -1511,25 +1511,90 @@ void AcquiredGoalLossScansBeforeLineReturn() {
     started=d.out.command.camera_request==CameraRequest::kGoalScanLeft;
   }
   Check(started,"acquired far GOAL loss skipped left head scan and returned to LINE");
-  d.in.camera_scan.phase=1;d.in.camera_scan.finished=false;
-  d.Tick();
-  d.in.camera_scan.phase=4;d.in.camera_scan.finished=true;
-  d.Tick();
-  d.in.camera_scan.phase=0;d.in.camera_scan.finished=false;
-  bool right=false;
-  for(int i=0;i<8 && !right;++i){
-    d.Tick();right=d.out.command.camera_request==CameraRequest::kGoalScanRight;
+  for(unsigned stop=1;stop<=3;++stop) {
+    d.in.camera_feedback={CameraMode::kTransition,false};
+    d.in.camera_scan={1,2,stop==1 ? 25.0 : stop==2 ? -25.0 : 0.0,false,stop,true};
+    bool advanced=false;
+    for(int i=0;i<13;++i) {
+      d.Tick();advanced |= d.out.command.camera_request==CameraRequest::kScanResume;
+      Check(d.out.command.camera_request!=CameraRequest::kBallViewLine,
+            "GOAL scan returned to LINE before trying all three stationary stops");
+    }
+    Check(advanced,"empty stationary GOAL stop did not advance after 0.5s");
   }
-  Check(right,"GOAL lost-object scan never tried right after failed left");
-  d.in.camera_scan.phase=1;d.in.camera_scan.finished=false;d.Tick();
-  d.in.camera_scan.phase=4;d.in.camera_scan.finished=true;d.Tick();
-  d.in.camera_scan.phase=0;d.in.camera_scan.finished=false;
+  d.in.camera_feedback={CameraMode::kGoal,true};
+  d.in.camera_scan={1,0,0,true};d.Tick();
+  d.in.camera_scan.finished=false;
   bool returned=false;
   for(int i=0;i<12 && !returned;++i){
     d.Tick();returned=d.out.command.camera_request==CameraRequest::kBallViewLine;
   }
   Check(returned,"GOAL scan exhausted both sides without BALL_VIEW_LINE fallback");
 }
+// A found LEFT must not count as an exhausted search when the central
+// tracker is lost. Conversely, 5/10 central hits survive a final missing frame.
+void GoalStationaryRecheck(bool reacquired) {
+  auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
+  c.goal_trial_start_goal=true;c.goal.lost_frames=3;c.goal.head_scan_enabled=true;
+  c.goal.head_scan_verify_window=10;c.goal.head_scan_verify_hits=5;
+  c.goal.head_scan_center_half_width_px=100;
+  c.line_p2p.left_repetitions=c.line_p2p.straight_repetitions=c.line_p2p.right_repetitions=1;
+  Driver d(c);d.in.ball_target.reset();d.in.camera_feedback={CameraMode::kGoal,true};
+  d.in.backboard_target=Target(280,100);d.in.backboard_track_id=9;
+  d.in.backboard_center_depth_m=2;d.in.goal_pose={true,0,2,0,1};
+  for(int i=0;i<12;++i)d.Tick();
+  const auto id=d.out.command.action_id;Check(id!=0,"recheck fixture has no GOAL walk");
+  d.Tick({id,true,false,false});
+  d.in.backboard_target.reset();d.in.backboard_center_depth_m.reset();
+  for(int i=0;i<14;++i)d.Tick();
+  d.Tick({id,true,false,true});d.Tick({id,true,true,false});
+  bool scanning=false;
+  for(int i=0;i<50 && !scanning;++i) {
+    d.Tick();scanning=d.out.command.camera_request==CameraRequest::kGoalScanLeft;
+  }
+  Check(scanning,"GOAL recheck fixture did not start scan");
+  d.in.camera_feedback={CameraMode::kTransition,false};
+  d.in.scan_backboard_u=280;
+  d.in.camera_scan={1,1,8,false,0,true};
+  for(int i=0;i<20;++i) {
+    d.Tick();Check(d.out.command.camera_request!=CameraRequest::kScanReturn,
+                   "moving frames confirmed a stationary GOAL scan");
+  }
+  d.in.camera_scan={1,2,8,false,1,false};
+  for(int i=0;i<15;++i) {
+    d.Tick();Check(d.out.command.camera_request!=CameraRequest::kScanReturn,
+                   "stale captured frames confirmed a stationary GOAL scan");
+  }
+  d.in.camera_scan.frame_is_fresh=true;
+  bool found=false;
+  for(int i=0;i<12 && !found;++i) {
+    d.Tick();found=d.out.command.camera_request==CameraRequest::kScanReturn;
+  }
+  Check(found,"stationary LEFT GOAL candidate never confirmed");
+  d.in.camera_scan={1,0,0,true};d.in.camera_feedback={CameraMode::kGoal,true};
+  d.in.scan_backboard_u.reset();d.Tick();d.in.camera_scan.finished=false;
+  bool central=false;
+  for(int i=0;i<10 && !central;++i) {
+    d.Tick();central=d.out.stationary_scan_observing;
+  }
+  Check(central,"LEFT success did not begin a fresh central recheck");
+  bool right=false;
+  for(int i=0;i<25;++i) {
+    // Start with a late candidate, then exactly 5 valid samples / 10.
+    if(reacquired && i>=5 && i<10) {
+      d.in.backboard_target=Target(280,100);d.in.backboard_track_id=99;
+      d.in.backboard_center_depth_m=2;
+    } else { d.in.backboard_target.reset();d.in.backboard_center_depth_m.reset(); }
+    d.Tick();
+    right |= d.out.command.camera_request==CameraRequest::kGoalScanRight;
+    Check(d.out.command.camera_request!=CameraRequest::kBallViewLine,
+          "LEFT success prematurely fell back to floor LINE");
+    if(!reacquired && right)break;
+  }
+  Check(reacquired ? !right : right,
+        "central 5/10 success was lost, or failed central recheck skipped remaining RIGHT");
+}
+
 void GoalAutoThreePixelZones() {
   for(const auto &item:std::array<std::pair<double,MissionAction>,3>{{
        {179.0,MissionAction::kLineLeftUnit},
@@ -1585,6 +1650,7 @@ void GoalAutoReferenceIsIsolated() {
 }
 }
 int main() {
+  GoalStationaryRecheck(false);GoalStationaryRecheck(true);
   GoalLineReturnThreePointSteering();
   GoalLineReturnSparseRecoveryUnchanged();
   GoalLineThreePointScope();

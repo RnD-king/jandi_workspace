@@ -195,8 +195,9 @@ struct CameraConfig {
 class CameraMotion {
 public:
     enum class Result { Idle, Running, Command, Verify };
-    enum class ScanPhase : uint8_t { None=0, Outbound=1, Dwell=2, Paused=3, Returning=4, Verify=5 };
+    enum class ScanPhase : uint8_t { None=0, Outbound=1, Dwell=2, Paused=3, Returning=4, Verify=5, Settling=6 };
     ScanPhase ScanState() const { return scan_phase_; }
+    uint32_t ScanStopId() const { return scan_stop_id_; }
     bool ScanActive() const { return scan_phase_ != ScanPhase::None; }
     double ScanCommandedYawDeg() const {
         return (static_cast<double>(current_.yaw)-scan_origin_.yaw)*360.0/4096.0;
@@ -204,7 +205,7 @@ public:
     void StartScan(bool left, int max_yaw_deg, double move_sec,
                    double hold_sec, double return_sec,
                    const RawPositions& base, Clock::time_point now,
-                   bool goal_view = false) {
+                   bool goal_view = false, double observation_timeout_sec = 0.0) {
         if(active_) throw std::runtime_error("camera already active");
         if(max_yaw_deg<1 || max_yaw_deg>90 || move_sec<=0 || hold_sec<0 || return_sec<=0 ||
             !std::isfinite(move_sec) || !std::isfinite(hold_sec) || !std::isfinite(return_sec))
@@ -217,6 +218,14 @@ public:
             throw std::invalid_argument("scan yaw target outside 0..4095");
         scan_far_={proposed,scan_origin_.pitch};
         scan_move_sec_=move_sec;scan_hold_sec_=hold_sec;scan_return_sec_=return_sec;
+        point_scan_=observation_timeout_sec>0;
+        observation_timeout_sec_=observation_timeout_sec;
+        point_index_=left ? 0 : 1;
+        scan_amplitude_=std::abs(proposed-scan_origin_.yaw);
+        if(point_scan_ && (scan_origin_.yaw-scan_amplitude_<0 ||
+                          !std::isfinite(observation_timeout_sec) || observation_timeout_sec<hold_sec))
+            throw std::invalid_argument("invalid stationary scan range/timeout");
+        scan_stop_id_=0;
         paused_was_dwell_=paused_was_returning_=false;
         current_={base.at(config_.yaw_id),base.at(config_.pitch_id)};
         active_=override_enabled_=true;
@@ -224,6 +233,8 @@ public:
         BeginSegment(scan_far_,scan_move_sec_,now);
     }
     bool HoldScan() {
+        if(point_scan_ && scan_phase_!=ScanPhase::Dwell && scan_phase_!=ScanPhase::Paused)
+            return false; // Never freeze a point scan halfway through a movement.
         if(scan_phase_!=ScanPhase::Outbound && scan_phase_!=ScanPhase::Dwell &&
            scan_phase_!=ScanPhase::Returning)
             return scan_phase_==ScanPhase::Paused;
@@ -234,6 +245,16 @@ public:
         return true;
     }
     bool ResumeScan(Clock::time_point now) {
+        if(point_scan_) {
+            if(scan_phase_!=ScanPhase::Dwell && scan_phase_!=ScanPhase::Paused) return false;
+            if(++point_index_>2) { scan_phase_=ScanPhase::Verify; return true; }
+            const CameraPose next{point_index_==1 ? scan_origin_.yaw-scan_amplitude_ :
+                                                     scan_origin_.yaw,scan_origin_.pitch};
+            const double distance=std::abs(double(next.yaw-current_.yaw));
+            scan_phase_=ScanPhase::Outbound;
+            BeginSegment(next,std::max(.02,scan_move_sec_*distance/std::max(1,scan_amplitude_)),now);
+            return true;
+        }
         if(scan_phase_!=ScanPhase::Paused) return false;
         if(paused_was_dwell_) {
             scan_phase_=ScanPhase::Dwell;
@@ -261,6 +282,7 @@ public:
     }
     explicit CameraMotion(CameraConfig config = {}) : config_(config) { config_.Validate(); }
     void Start(uint8_t request, const RawPositions& base, Clock::time_point now) {
+        point_scan_=false;
         const auto target = config_.Target(request);
         current_ = {base.at(config_.yaw_id), base.at(config_.pitch_id)};
         scan_phase_=ScanPhase::None;
@@ -269,6 +291,11 @@ public:
     }
     Result Update(Clock::time_point now) {
         if (!active_) return Result::Idle;
+        if(point_scan_ && (scan_phase_==ScanPhase::Dwell || scan_phase_==ScanPhase::Paused)) {
+            if(now>=observation_until_) ResumeScan(now); // Camera cannot wait forever for vision.
+            return scan_phase_==ScanPhase::Verify ? Result::Verify : Result::Running;
+        }
+        if(point_scan_ && scan_phase_==ScanPhase::Settling) return Result::Verify;
         if (scan_phase_==ScanPhase::Paused) return Result::Running;
         if (scan_phase_==ScanPhase::Dwell) {
             if(now<dwell_until_) return Result::Running;
@@ -278,6 +305,7 @@ public:
         if (scan_phase_==ScanPhase::Verify) return Result::Verify;
         const auto result=UpdateSegment(now);
         if(result==Result::Verify && scan_phase_==ScanPhase::Outbound) {
+            if(point_scan_) { scan_phase_=ScanPhase::Settling; return Result::Verify; }
             scan_phase_=ScanPhase::Dwell;
             dwell_until_=now + std::chrono::duration_cast<Clock::duration>(
                 std::chrono::duration<double>(scan_hold_sec_));
@@ -297,7 +325,7 @@ public:
     }
     bool Active() const { return active_; }
     CameraPose TargetPose() const { return target_; }
-    bool ConfirmArrival(CameraPose measured) {
+    bool ConfirmArrival(CameraPose measured, Clock::time_point now=Clock::now()) {
         if (!active_ || step_!=steps_ || !settling_) return false;
         const auto close=[this](int32_t actual,int32_t target) {
             return actual>=0 && actual<=4095 &&
@@ -305,6 +333,13 @@ public:
                     std::abs(static_cast<double>(target))*config_.position_tolerance_ratio;
         };
         if (!close(measured.yaw,target_.yaw) || !close(measured.pitch,target_.pitch)) return false;
+        if(point_scan_ && scan_phase_==ScanPhase::Settling) {
+            scan_phase_=ScanPhase::Dwell;
+            ++scan_stop_id_;
+            observation_until_=now+std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double>(observation_timeout_sec_));
+            return false; // An intermediate arrival is not transaction DONE.
+        }
         active_=false;
         scan_phase_=ScanPhase::None;
         return true;
@@ -353,6 +388,11 @@ private:
         return Result::Command;
     }
     ScanPhase scan_phase_{ScanPhase::None};
+    bool point_scan_{false};
+    int point_index_{0},scan_amplitude_{0};
+    uint32_t scan_stop_id_{0};
+    double observation_timeout_sec_{0};
+    Clock::time_point observation_until_{};
     CameraPose scan_far_{},scan_origin_{};
     double scan_move_sec_{0.5},scan_hold_sec_{0.5},scan_return_sec_{0.5};
     bool paused_was_dwell_{false},paused_was_returning_{false};

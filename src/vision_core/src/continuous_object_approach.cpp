@@ -426,8 +426,8 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     }
     result.camera=request;
   };
-  // Dedicated GOAL-view yaw scan. The backboard search uses raw RGB
-  // evidence during TRANSITION and leaves Depth/FINE admission untouched.
+  // Dedicated stationary GOAL-view search. Only fresh captures from
+  // encoder-confirmed stops with valid center Depth may qualify.
   if (goal_head_search_.phase!=GoalHeadSearch::Phase::kIdle) {
     using Phase=GoalHeadSearch::Phase;
     auto &scan=goal_head_search_;
@@ -438,6 +438,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
          camera.settled && camera.actual_mode==CameraMode::kGoal) {
         scan.phase=phase;scan.started=false;
         scan.pause_hits.clear();scan.verify_hits.clear();
+        scan.observation.Reset();scan.exhausted=false;
         result.camera=request;
       }
     };
@@ -448,50 +449,31 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     else if(scan.phase==Phase::kScanningLeft || scan.phase==Phase::kScanningRight ||
             scan.phase==Phase::kHoldingLeft || scan.phase==Phase::kHoldingRight) {
       if(sf.phase!=0) scan.started=true;
-      const bool left=scan.phase==Phase::kScanningLeft ||
-                      scan.phase==Phase::kHoldingLeft;
-      const bool centered=input.scan_backboard_u &&
-          std::abs(*input.scan_backboard_u-config_.goal.auto_approach_center_u_px)<=
-          config_.goal.head_scan_center_half_width_px;
-      if(sf.phase>=1 && sf.phase<=4) {
-        scan.pause_hits.push_back(centered);
-        scan.verify_hits.push_back(centered);
-        while(scan.pause_hits.size()>static_cast<std::size_t>(
-             config_.goal.head_scan_pause_window)) scan.pause_hits.pop_front();
-        while(scan.verify_hits.size()>static_cast<std::size_t>(
-             config_.goal.head_scan_verify_window)) scan.verify_hits.pop_front();
-      }
-      const bool searching=scan.phase==Phase::kScanningLeft ||
-                           scan.phase==Phase::kScanningRight;
-      if(searching && (sf.phase==1 || sf.phase==2 || sf.phase==4) &&
-          scan.pause_hits.size()==static_cast<std::size_t>(
-              config_.goal.head_scan_pause_window) &&
-          std::count(scan.pause_hits.begin(),scan.pause_hits.end(),true)>=
-              config_.goal.head_scan_pause_hits) {
-        result.camera=CameraRequest::kScanHold;
-        scan.phase=left ? Phase::kHoldingLeft : Phase::kHoldingRight;
-      } else if(!searching && sf.phase==3 &&
-          scan.verify_hits.size()>=static_cast<std::size_t>(
-              config_.goal.head_scan_verify_window)) {
-        const bool verified=std::count(scan.verify_hits.begin(),
-            scan.verify_hits.end(),true)>=config_.goal.head_scan_verify_hits;
-        if(verified) {
+      const bool stopped=(sf.phase==2 || sf.phase==3) && sf.stop_id;
+      if(stopped) {
+        const bool centered=input.scan_backboard_u &&
+            std::abs(*input.scan_backboard_u-config_.goal.auto_approach_center_u_px)<=
+                config_.goal.head_scan_center_half_width_px;
+        const auto verdict=scan.observation.Observe(sf.stop_id,sf.frame_is_fresh,
+            input.now_sec,centered,config_.goal.head_scan_hold_sec,
+            config_.goal.head_scan_observation_timeout_sec,
+            config_.goal.head_scan_verify_window,config_.goal.head_scan_verify_hits);
+        using Verdict=StationaryScanObservation::Result;
+        if(verdict==Verdict::kConfirmed) {
           const double yaw=sf.yaw_deg;
           scan.turn_left=yaw>=0;
+          scan.resume_right=yaw>1.0;
           scan.turns_remaining=std::abs(yaw)<=
                   config_.goal.head_scan_body_turn_one_threshold_deg ? 0 :
               std::abs(yaw)<=config_.goal.head_scan_body_turn_two_threshold_deg ? 1 : 2;
           scan.phase=Phase::kReturnFound;
           result.camera=CameraRequest::kScanReturn;
-        } else {
-          scan.pause_hits.clear();scan.verify_hits.clear();
-          scan.phase=left ? Phase::kScanningLeft : Phase::kScanningRight;
+        } else if(verdict==Verdict::kEmpty || verdict==Verdict::kRejected) {
           result.camera=CameraRequest::kScanResume;
         }
       }
       if(sf.finished && scan.started) {
-        if(left) scan.phase=Phase::kPendingRight;
-        else { scan.phase=Phase::kIdle;approach_goal_empty_frames_=0; }
+        scan.phase=Phase::kIdle;scan.exhausted=true;approach_goal_empty_frames_=0;
       }
     } else if(scan.phase==Phase::kReturnFound) {
       if(sf.finished && camera.settled && camera.actual_mode==CameraMode::kGoal)
@@ -504,6 +486,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       }
       if(scan.turns_remaining==0 && !scan.body_action_id && idle) {
         scan.phase=Phase::kReobserve;scan.reobserve_started_sec=input.now_sec;
+        scan.observation.Reset();scan.observed_target.reset();
       } else if(!scan.body_action_id && idle &&
                 input.allow_new_commands && input.allow_new_body_actions) {
         result.action={scan.turn_left ? MissionAction::kTurnLeftInPlace :
@@ -511,25 +494,39 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
                        ActionCategory::kLocomotion,0,false};
       }
     } else if(scan.phase==Phase::kReobserve) {
-      // Reconfirm the board in a fresh GOAL view after physical body turns.
-      if(!idle || !camera.settled || camera.actual_mode!=CameraMode::kGoal ||
-         input.now_sec+1e-9<scan.reobserve_started_sec+
-             config_.post_motion_observation_sec)
+      // Reconfirm with a full fresh window, retaining success even if its
+      // final frame misses. Never let an old lost ID override this result.
+      if(!idle || !camera.settled || camera.actual_mode!=CameraMode::kGoal) return result;
+      const bool valid=input.backboard_target && input.backboard_center_depth_m &&
+          std::isfinite(*input.backboard_center_depth_m) &&
+          *input.backboard_center_depth_m>=config_.backboard_min_depth_m &&
+          *input.backboard_center_depth_m<=config_.backboard_max_depth_m &&
+          std::abs(input.backboard_target->center_px.u-config_.goal.auto_approach_center_u_px)<=
+              config_.goal.head_scan_center_half_width_px;
+      if(valid) { scan.observed_target=input.backboard_target;scan.observed_id=input.backboard_track_id; }
+      const auto verdict=scan.observation.Observe(1,true,input.now_sec,valid,
+          config_.goal.head_scan_hold_sec,config_.goal.head_scan_observation_timeout_sec,
+          config_.goal.head_scan_verify_window,config_.goal.head_scan_verify_hits);
+      using Verdict=StationaryScanObservation::Result;
+      if(verdict==Verdict::kWaiting)return result;
+      if(verdict==Verdict::kConfirmed) {
+        if(continuous_.mission==MissionType::kGoal) {
+          continuous_.id=scan.observed_id;continuous_.last=scan.observed_target;
+          continuous_.last_ready_center.reset();continuous_.good_hits.clear();
+          continuous_.loss_pending=false;continuous_.missing=0;
+          continuous_.hits.clear();continuous_.near_hits.clear();continuous_.pose_hits.clear();
+          line_plan_.Reset();continuous_.probe_used=false;
+        }
+        goal_rgb_missing_frames_=goal_tracking_unusable_frames_=goal_out_of_range_frames_=0;
+        scan.phase=Phase::kIdle;scan.used=false;scan.exhausted=false;
+        approach_goal_empty_frames_=0;approach_evidence_={};
         return result;
-      scan.phase=Phase::kIdle;
-      approach_goal_empty_frames_=0;
-      approach_evidence_={};
-      if(continuous_.mission==MissionType::kGoal && input.backboard_target) {
-        // A successful acquired-object scan starts a fresh approach episode;
-        // the old missing READY block must not force legacy recovery now.
-        continuous_.loss_pending=false;
-        continuous_.missing=0;
-        continuous_.hits.clear();continuous_.near_hits.clear();
-        continuous_.pose_hits.clear();
-        line_plan_.Reset();
-        continuous_.probe_used=false;
-        scan.used=false; // Verified re-acquisition permits a later independent loss scan.
       }
+      scan.observation.Reset();scan.observed_target.reset();
+      if(scan.resume_right) {
+        scan.phase=Phase::kPendingRight;scan.resume_right=false;
+      } else { scan.phase=Phase::kIdle;scan.exhausted=true; }
+      return result;
     }
     if(scan.phase!=Phase::kIdle) return result;
     // If a complete scan failed, let the original bounded return-to-LINE
@@ -816,7 +813,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     }
     return result;
   }
-  if (lost && i==1 && !continuous_.near && goal_head_search_.used &&
+  if (lost && i==1 && !continuous_.near && goal_head_search_.used && goal_head_search_.exhausted &&
       !target && !input.backboard_image_without_depth &&
       idle && !line_plan_.Outstanding()) {
     // Completed left/right scan found no board: do not enter a stale

@@ -43,12 +43,14 @@ vision_algorithm:
       scan_move_sec: 0.5
       scan_hold_sec: 0.5
       scan_return_sec: 0.5
+      scan_center_half_width_px: 100.0
+      scan_observation_timeout_sec: 2.0
       scan_pause_window: 4
       scan_pause_hits: 2
       scan_verify_window: 10
       scan_verify_hits: 5
       scan_body_turn_deg: 15.0
-      scan_max_pairs: 3 # LEFT → RIGHT 반복 3묶음(총 6회), 미발견 시 FINAL HOLD
+      scan_max_pairs: 3 # LEFT → RIGHT → CENTER 정지 탐색 최대 3묶음, 미발견 시 FINAL HOLD
 
     # Separate from the unchanged normal LINE RANSAC and O/H steering.
     curve_search:
@@ -324,14 +326,15 @@ vision_algorithm:
       # GOAL AUTO search: no arm extension; yaw is relative to GOAL pose.
       head_scan_enabled: true
       head_scan_max_yaw_deg: 25
-      head_scan_center_half_width_px: 50.0
+      head_scan_center_half_width_px: 100.0
       head_scan_pause_window: 4
       head_scan_pause_hits: 2
       head_scan_verify_window: 10
-      head_scan_verify_hits: 7
+      head_scan_verify_hits: 5
       head_scan_move_sec: 0.5
       head_scan_hold_sec: 0.5
       head_scan_return_sec: 0.5
+      head_scan_observation_timeout_sec: 2.0
       head_scan_body_turn_one_threshold_deg: 10.0
       head_scan_body_turn_two_threshold_deg: 20.0
 

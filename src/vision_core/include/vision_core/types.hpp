@@ -253,6 +253,8 @@ struct CameraScanFeedback {
   std::uint8_t phase{0}; // 1 outbound, 2 dwell, 3 paused, 4 return, 5 verify
   double yaw_deg{0.0}; // commanded angle, not encoder measurement
   bool finished{false}; // final camera DONE edge
+  std::uint32_t stop_id{0}; // Encoder-confirmed stationary pose within this scan.
+  bool frame_is_fresh{true}; // Adapter rejects captures preceding this stop.
 };
 
 struct CameraFeedback {

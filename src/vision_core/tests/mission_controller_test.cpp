@@ -62,42 +62,24 @@ static void TestLineScanReleaseAfterBothDirections() {
     left=result.command.camera_request==CameraRequest::kLineScanLeft;
   }
   assert(left);
-  {
-    auto input=frame();
-    input.camera_feedback={CameraMode::kTransition,false};
-    input.camera_scan.phase=1;
-    result=controller.Step(input);
-    assert(result.command.action==MissionAction::kNone);
+  // One camera transaction visits LEFT -> RIGHT -> CENTER. No arm release
+  // or separate return-to-center transaction may occur between these stops.
+  for(unsigned stop=1;stop<=3;++stop) {
+    bool advanced=false;
+    for(int i=0;i<8;++i) {
+      auto input=frame();input.camera_feedback={CameraMode::kTransition,false};
+      input.camera_scan={1,2,stop==1 ? 45.0 : stop==2 ? -45.0 : 0.0,false,stop,true};
+      result=controller.Step(input);
+      advanced |= result.command.camera_request==CameraRequest::kScanResume;
+      assert(result.command.action==MissionAction::kNone);
+      assert(result.command.camera_request!=CameraRequest::kForward);
+      assert(result.command.camera_request!=CameraRequest::kLineScanRight);
+    }
+    assert(advanced);
   }
   {
-    auto input=frame();
-    input.camera_feedback={CameraMode::kForward,true};
-    input.camera_scan.phase=4;
-    input.camera_scan.finished=true;
-    result=controller.Step(input);
-    assert(result.command.camera_request!=CameraRequest::kForward);
-  }
-  bool right=false;
-  for(int i=0;i<15 && !right;++i) {
-    result=controller.Step(frame());
-    right=result.command.camera_request==CameraRequest::kLineScanRight;
-    assert(result.command.camera_request!=CameraRequest::kForward);
-  }
-  assert(right);
-  {
-    auto input=frame();
-    input.camera_feedback={CameraMode::kTransition,false};
-    input.camera_scan.phase=1;
-    result=controller.Step(input);
-    assert(result.command.action==MissionAction::kNone);
-  }
-  {
-    auto input=frame();
-    input.camera_feedback={CameraMode::kForward,true};
-    input.camera_scan.phase=4;
-    input.camera_scan.finished=true;
-    result=controller.Step(input);
-    assert(result.command.camera_request!=CameraRequest::kForward);
+    auto input=frame();input.camera_feedback={CameraMode::kForward,true};
+    input.camera_scan={1,0,0,true};result=controller.Step(input);
   }
   // No additional LINE_SCAN: an explicit FORWARD request now releases arms.
   bool release=false;
@@ -124,6 +106,40 @@ static void TestLineScanReleaseAfterBothDirections() {
     result=controller.Step(frame());
     assert(result.command.action==MissionAction::kNone &&
            result.command.camera_request!=CameraRequest::kForward);
+  }
+}
+
+static void TestStationaryLineCenterGate() {
+  for(double u : {220.0,420.0,421.0}) {
+    auto c=LoadDefaultAlgorithmConfig();
+    c.enable_ball=c.enable_goal=c.enable_hurdle=false;c.curve_search.enabled=false;
+    c.line_features.image_center_u=320;c.line_recovery.scan_center_half_width_px=100;
+    c.line_recovery.scan_verify_window=10;c.line_recovery.scan_verify_hits=5;
+    MissionController controller(c);double now=0;
+    auto tick=[&](int phase,unsigned stop,bool fresh) {
+      auto in=Frame(now+=.1);in.line_centers.clear();
+      if(phase) {
+        in.camera_feedback={CameraMode::kTransition,false};
+        in.line_centers={{u,450},{u,350}};
+        in.camera_scan={1,static_cast<std::uint8_t>(phase),45,false,stop,fresh};
+      }
+      return controller.Step(in);
+    };
+    bool started=false;
+    for(int i=0;i<50 && !started;++i)
+      started=tick(0,0,true).command.camera_request==CameraRequest::kLineScanLeft;
+    assert(started);
+    for(int i=0;i<15;++i)
+      assert(tick(1,0,true).command.camera_request!=CameraRequest::kScanReturn);
+    for(int i=0;i<15;++i)
+      assert(tick(2,1,false).command.camera_request!=CameraRequest::kScanReturn);
+    bool found=false,advanced=false;
+    for(int i=0;i<15;++i) {
+      const auto result=tick(2,1,true);
+      found |= result.command.camera_request==CameraRequest::kScanReturn;
+      advanced |= result.command.camera_request==CameraRequest::kScanResume;
+    }
+    assert(u<=420 ? found && !advanced : !found && advanced);
   }
 }
 
@@ -235,6 +251,7 @@ static void TestLiveBallPickupTrapezoidTuning() {
 }
 
 int main() {
+  TestStationaryLineCenterGate();
   TestLineScanReleaseAfterBothDirections();
   TestLiveBallPickupTrapezoidTuning();
   TestNearBallTurnThenDown();

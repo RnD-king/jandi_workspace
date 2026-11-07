@@ -1,4 +1,7 @@
 #include "motion_executor_state.hpp"
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -77,6 +80,57 @@ int main() {
   right_scan.StartScan(false,45,0.5,0.5,0.5,positions,start);
   for(int i=0;i<10;++i) right_scan.Update(start+std::chrono::milliseconds(21*i));
   assert(right_scan.ScanCommandedYawDeg()<0.0);
+  // Stationary search is ONE transaction: left -> right -> center. Each
+  // stop requires measured arrival, and only explicit RESUME (or watchdog)
+  // advances it. In particular the left-to-right leg does not stop at zero.
+  CameraMotion points(cfg);
+  auto now=start+std::chrono::seconds(30);
+  points.StartScan(true,25,.5,.5,.5,positions,now,true,2.0);
+  assert(!points.HoldScan());
+  int stops=0;bool crossed_zero=false;bool wrong_encoder_checked=false;
+  for(int tick=0;tick<500 && stops<3;++tick) {
+    now+=std::chrono::milliseconds(21);
+    const auto result=points.Update(now);
+    if(stops==1 && std::abs(points.ScanCommandedYawDeg())<2)
+      crossed_zero=true;
+    if(result==CameraMotion::Result::Verify) {
+      assert(points.ScanState()==CameraMotion::ScanPhase::Settling);
+      const auto target=points.TargetPose();
+      if(!wrong_encoder_checked) {
+        auto wrong=target;wrong.yaw+=1000;
+        assert(!points.ConfirmArrival(wrong,now));
+        assert(points.ScanStopId()==0);wrong_encoder_checked=true;
+      }
+      assert(!points.ConfirmArrival(target,now));
+      ++stops;
+      assert(points.ScanState()==CameraMotion::ScanPhase::Dwell);
+      assert(points.ScanStopId()==unsigned(stops));
+      assert(stops==1 ? points.ScanCommandedYawDeg()>24 :
+             stops==2 ? points.ScanCommandedYawDeg()<-24 :
+                        std::abs(points.ScanCommandedYawDeg())<.1);
+      // Head remains fixed for the requested base observation.
+      const auto held=points.ScanCommandedYawDeg();
+      now+=std::chrono::milliseconds(510);points.Update(now);
+      assert(std::abs(points.ScanCommandedYawDeg()-held)<.01);
+      if(stops<3) assert(points.ResumeScan(now));
+    }
+  }
+  assert(stops==3 && crossed_zero && points.ScanActive());
+  assert(points.ResumeScan(now));
+  assert(points.Update(now)==CameraMotion::Result::Verify);
+  assert(points.ConfirmArrival(cfg.goal,now));
+  assert(!points.ScanActive());
+  // A lost control message / stopped vision cannot hold the camera forever.
+  CameraMotion watchdog(cfg);
+  now+=std::chrono::seconds(10);
+  watchdog.StartScan(true,25,.1,.5,.1,positions,now,true,.7);
+  bool completed=false;
+  for(int i=0;i<400 && !completed;++i) {
+    now+=std::chrono::milliseconds(21);
+    if(watchdog.Update(now)==CameraMotion::Result::Verify)
+      completed=watchdog.ConfirmArrival(watchdog.TargetPose(),now);
+  }
+  assert(completed && watchdog.ScanStopId()==3);
   // The normal forward/down/goal interpolation remains available.
   camera.Start(1,positions,start);
   assert(!camera.ScanActive());

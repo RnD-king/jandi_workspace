@@ -781,6 +781,10 @@ private:
             req==vision::msg::CameraCommand::SCAN_RETURN) {
             if (message->command_id==camera_transactions_.active_id &&
                 camera_motion_->ScanActive()) {
+                if(message->scan_stop_id && message->scan_stop_id!=camera_motion_->ScanStopId()) return;
+                if(message->scan_stop_id &&
+                   camera_motion_->ScanState()!=motion_executor::CameraMotion::ScanPhase::Dwell &&
+                   camera_motion_->ScanState()!=motion_executor::CameraMotion::ScanPhase::Paused) return;
                 const auto now=std::chrono::steady_clock::now();
                 if(req==vision::msg::CameraCommand::SCAN_HOLD) camera_motion_->HoldScan();
                 else if(req==vision::msg::CameraCommand::SCAN_RESUME) camera_motion_->ResumeScan(now);
@@ -846,6 +850,10 @@ private:
                 scan_move_sec_=message->scan_move_sec;
                 scan_hold_sec_=message->scan_hold_sec;
                 scan_return_sec_=message->scan_return_sec;
+                scan_observation_timeout_sec_=(line_scan || scan_goal_view_) ? message->scan_observation_timeout_sec : 0.0;
+                if(!std::isfinite(scan_observation_timeout_sec_) || scan_observation_timeout_sec_<0)
+                    throw std::invalid_argument("invalid stationary scan timeout");
+                scan_stationary_since_=builtin_interfaces::msg::Time();
                 if (line_scan_elbows_held_ && !line_scan)
                     throw std::invalid_argument("LINE scan elbows held; restore FORWARD first");
                 P2PMotionPlayer::RawPositions targets;
@@ -871,7 +879,7 @@ private:
                 }
                 if(targets.empty()) {
                     camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
-                        scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_);
+                        scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_,scan_observation_timeout_sec_);
                     scan_elbow_stage_=ScanElbowStage::kScanning;
                 } else {
                     elbow_tween_.Start(last_sent_positions_,targets,
@@ -1048,7 +1056,7 @@ private:
         if(scan_elbow_stage_==ScanElbowStage::kExtending && !elbow_tween_.Active()) {
             // Start head scan only after the last arm-extension command is ready.
             camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
-                scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_);
+                scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_,scan_observation_timeout_sec_);
             scan_elbow_stage_=ScanElbowStage::kScanning;
         }
         // camera_result: Idle=재생 없음, Running=다음 단계/안정화 대기,
@@ -1059,6 +1067,8 @@ private:
             scan.command_id=camera_transactions_.active_id;
             scan.phase=static_cast<std::uint8_t>(camera_motion_->ScanState());
             scan.commanded_yaw_deg=camera_motion_->ScanCommandedYawDeg();
+            scan.stop_id=camera_motion_->ScanStopId();
+            scan.stationary_since=scan_stationary_since_;
             camera_scan_status_pub_->publish(scan);
         }
         // camera_command는 위치 데이터가 아니라 "카메라 목표를 전송해야 하는가"라는 bool이다.
@@ -1118,7 +1128,11 @@ private:
                 const motion_executor::CameraPose measured{
                     dxl_->ReadRawPosition(camera_config_.yaw_id,5.0),
                     dxl_->ReadRawPosition(camera_config_.pitch_id,5.0)};
-                if (camera_motion_->ConfirmArrival(measured)) {
+                const auto previous_stop=camera_motion_->ScanStopId();
+                const bool final_arrival=camera_motion_->ConfirmArrival(measured,now);
+                if(camera_motion_->ScanStopId()!=previous_stop)
+                    scan_stationary_since_=this->get_clock()->now();
+                if (final_arrival) {
                     if(scan_elbow_stage_==ScanElbowStage::kScanning &&
                        !scan_elbow_home_ticks_.empty() && !line_scan_elbows_held_) {
                         P2PMotionPlayer::RawPositions targets;
@@ -1144,7 +1158,7 @@ private:
                         !line_scan_elbows_held_ && !elbow_tween_.Active())
                         scan_elbow_home_ticks_.clear();
                     }
-                } else {
+                } else if(camera_motion_->ScanStopId()==previous_stop) {
                     RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),1000,
                         "[CAMERA] waiting for encoder arrival id=%llu target=(%d,%d) measured=(%d,%d); no DONE",
                         static_cast<unsigned long long>(camera_transactions_.active_id),
@@ -1314,6 +1328,8 @@ private:
     bool scan_goal_view_{false};
     bool scan_left_{true};
     double scan_move_sec_{0.5},scan_hold_sec_{0.5},scan_return_sec_{0.5};
+    double scan_observation_timeout_sec_{0};
+    builtin_interfaces::msg::Time scan_stationary_since_;
     double curve_scan_elbow_angle_deg_{90.0},curve_scan_elbow_duration_sec_{1.5};
     double turn_step_deg_{15.0};                      // 회전 JSON 1회당 계획상 회전각(도)
     int max_turn_repetitions_{12};                     // 한 회전 요청의 최대 JSON 반복 횟수

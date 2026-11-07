@@ -19,3 +19,7 @@ uint16 scan_max_yaw_deg
 float32 scan_move_sec
 float32 scan_hold_sec
 float32 scan_return_sec
+# Bound one stationary stop; zero selects legacy continuous scanning.
+float32 scan_observation_timeout_sec
+# Idempotent controls target the exact stop being observed (zero for legacy).
+uint32 scan_stop_id

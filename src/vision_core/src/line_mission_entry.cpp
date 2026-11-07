@@ -369,6 +369,7 @@ MissionFrameResult MissionController::StepPlannedLine(
           input.camera_feedback.actual_mode==CameraMode::kForward) {
         scan.phase=scanning;scan.scan_started=false;
         scan.pause_hits.clear();scan.verify_hits.clear();
+        scan.observation.Reset();
         camera=request;
       }
     };
@@ -379,55 +380,33 @@ MissionFrameResult MissionController::StepPlannedLine(
     else if (scan.phase==Phase::kScanningLeft || scan.phase==Phase::kScanningRight ||
              scan.phase==Phase::kHoldingLeft || scan.phase==Phase::kHoldingRight) {
       if (sf.phase!=0) scan.scan_started=true;
-      const bool two_or_more=input.line_centers.size()>=2;
-      const bool left=scan.phase==Phase::kScanningLeft ||
-                      scan.phase==Phase::kHoldingLeft;
-      if (sf.phase>=1 && sf.phase<=4) {
-        scan.pause_hits.push_back(two_or_more);
-        scan.verify_hits.push_back(two_or_more);
-        while (scan.pause_hits.size()>
-            static_cast<std::size_t>(config_.line_recovery.scan_pause_window))
-          scan.pause_hits.pop_front();
-        while (scan.verify_hits.size()>
-            static_cast<std::size_t>(config_.line_recovery.scan_verify_window))
-          scan.verify_hits.pop_front();
-      }
-      const bool scanning=scan.phase==Phase::kScanningLeft ||
-                          scan.phase==Phase::kScanningRight;
-      if (scanning && (sf.phase==1 || sf.phase==2 || sf.phase==4) &&
-          scan.pause_hits.size()==
-              static_cast<std::size_t>(config_.line_recovery.scan_pause_window) &&
-          std::count(scan.pause_hits.begin(),scan.pause_hits.end(),true)>=
-              config_.line_recovery.scan_pause_hits) {
-        camera=CameraRequest::kScanHold;
-        scan.phase=left ? Phase::kHoldingLeft : Phase::kHoldingRight;
-      } else if (!scanning && sf.phase==3 &&
-          scan.verify_hits.size()>=
-              static_cast<std::size_t>(config_.line_recovery.scan_verify_window)) {
-        const bool found=std::count(scan.verify_hits.begin(),
-                                   scan.verify_hits.end(),true)>=
-                          config_.line_recovery.scan_verify_hits;
-        if(found) {
+      if ((sf.phase==2 || sf.phase==3) && sf.stop_id) {
+        FeatureConfig hint=config_.line_features;
+        hint.ransac_enabled=false;hint.guide_min_points=2;
+        const auto guide=ComputeLineFeatures(input.line_centers,input.image_width,
+            input.image_height,hint,2).guide;
+        const bool centered=guide.valid &&
+            std::abs(guide.offset*(input.image_width*.5))<=config_.line_recovery.scan_center_half_width_px;
+        const auto verdict=scan.observation.Observe(sf.stop_id,sf.frame_is_fresh,
+            input.now_sec,centered,config_.line_recovery.scan_hold_sec,
+            config_.line_recovery.scan_observation_timeout_sec,
+            config_.line_recovery.scan_verify_window,config_.line_recovery.scan_verify_hits);
+        using Verdict=StationaryScanObservation::Result;
+        if(verdict==Verdict::kConfirmed) {
           scan.align_left=sf.yaw_deg>=0.0;
+          scan.resume_right=sf.yaw_deg>1.0;
           scan.align_remaining=std::min(3,static_cast<int>(std::lround(
               std::abs(sf.yaw_deg)/config_.line_recovery.scan_body_turn_deg)));
-          camera=CameraRequest::kScanReturn;
-          scan.phase=Phase::kReturnFound;
-        } else {
-          scan.pause_hits.clear();
+          camera=CameraRequest::kScanReturn;scan.phase=Phase::kReturnFound;
+        } else if(verdict==Verdict::kEmpty || verdict==Verdict::kRejected)
           camera=CameraRequest::kScanResume;
-          scan.phase=left ? Phase::kScanningLeft : Phase::kScanningRight;
-        }
       }
       if (sf.finished && scan.scan_started) {
-        if(left) scan.phase=Phase::kPendingRight;
-        else if(++scan.completed_pairs<config_.line_recovery.scan_max_pairs)
+        if(++scan.completed_pairs<config_.line_recovery.scan_max_pairs)
           scan.phase=Phase::kPendingLeft;
         else {
-          // Restore elbows ONCE at the end of all left/right scan pairs.
           scan.phase=Phase::kReleaseArms;
-          scan.release_requested=false;
-          scan.release_seen_transition=false;
+          scan.release_requested=false;scan.release_seen_transition=false;
           scan.release_align_body=false;
         }
       }
@@ -464,11 +443,28 @@ MissionFrameResult MissionController::StepPlannedLine(
         if (scan.align_remaining>0) --scan.align_remaining;
       }
       if (scan.align_remaining==0 && scan.align_action_id==0 && idle) {
-        scan.phase=Phase::kIdle;
-        BeginObservation(LineState::kRecoveryObserve,input.now_sec);
+        scan.phase=Phase::kReobserve;scan.observation.Reset();
       } else if (scan.align_action_id==0 && idle && commands_allowed &&
                  input.allow_new_line_action) {
         request=WalkTurn(scan.align_left);
+      }
+    } else if(scan.phase==Phase::kReobserve) {
+      FeatureConfig hint=config_.line_features;hint.ransac_enabled=false;hint.guide_min_points=2;
+      const auto guide=ComputeLineFeatures(input.line_centers,input.image_width,
+          input.image_height,hint,2).guide;
+      const bool centered=guide.valid &&
+          std::abs(guide.offset*(input.image_width*.5))<=config_.line_recovery.scan_center_half_width_px;
+      const auto verdict=scan.observation.Observe(1,true,input.now_sec,centered,
+          config_.line_recovery.scan_hold_sec,config_.line_recovery.scan_observation_timeout_sec,
+          config_.line_recovery.scan_verify_window,config_.line_recovery.scan_verify_hits);
+      using Verdict=StationaryScanObservation::Result;
+      if(verdict==Verdict::kConfirmed) {
+        scan.phase=Phase::kIdle;BeginObservation(LineState::kRecoveryObserve,input.now_sec);
+      } else if(verdict!=Verdict::kWaiting) {
+        if(scan.resume_right) { scan.phase=Phase::kPendingRight;scan.resume_right=false; }
+        else if(++scan.completed_pairs<config_.line_recovery.scan_max_pairs)
+          scan.phase=Phase::kPendingLeft;
+        else { scan.phase=Phase::kIdle;line_state_=LineState::kFinalHold; }
       }
     }
   }

@@ -102,6 +102,9 @@ install(PROGRAMS
 include(CTest)
 if(BUILD_TESTING)
   enable_testing()
+  add_executable(scan_motion_test tests/scan_motion_test.cpp)
+  add_test(NAME scan_motion_test COMMAND scan_motion_test)
+  set_tests_properties(scan_motion_test PROPERTIES LABELS "logic")
   add_executable(motion_assets_check
     tests/motion_assets_check.cpp src/p2p_motion_player.cpp src/dynamixel.cpp)
   ament_target_dependencies(motion_assets_check dynamixel_sdk Eigen3)
@@ -130,7 +133,7 @@ if(BUILD_TESTING)
   target_link_libraries(executor_integration_test shared_vision_core::shared_vision_core)
   add_test(NAME executor_integration_test COMMAND executor_integration_test)
   set_tests_properties(executor_integration_test PROPERTIES
-    TIMEOUT 60 ENVIRONMENT "ROS_DOMAIN_ID=87;ROS_LOCALHOST_ONLY=1")
+    TIMEOUT 90 ENVIRONMENT "ROS_DOMAIN_ID=87;ROS_LOCALHOST_ONLY=1")
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME executor_source_contract
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/source_contract_test.py)

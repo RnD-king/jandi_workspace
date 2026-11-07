@@ -273,6 +273,10 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.line_recovery.scan_move_sec,"line_recovery.scan_move_sec");
   Nonnegative(c.line_recovery.scan_hold_sec,"line_recovery.scan_hold_sec");
   Positive(c.line_recovery.scan_return_sec,"line_recovery.scan_return_sec");
+  Positive(c.line_recovery.scan_center_half_width_px,"line_recovery.scan_center_half_width_px");
+  Positive(c.line_recovery.scan_observation_timeout_sec,"line_recovery.scan_observation_timeout_sec");
+  if(c.line_recovery.scan_observation_timeout_sec<c.line_recovery.scan_hold_sec)
+    throw std::runtime_error("LINE scan timeout must cover its observation hold");
   HitsWithinWindow(c.line_recovery.scan_pause_hits,c.line_recovery.scan_pause_window,
       "line_recovery.scan_pause_hits","line_recovery.scan_pause_window");
   HitsWithinWindow(c.line_recovery.scan_verify_hits,c.line_recovery.scan_verify_window,
@@ -291,6 +295,9 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Positive(c.goal.head_scan_move_sec,"goal.head_scan_move_sec");
   Nonnegative(c.goal.head_scan_hold_sec,"goal.head_scan_hold_sec");
   Positive(c.goal.head_scan_return_sec,"goal.head_scan_return_sec");
+  Positive(c.goal.head_scan_observation_timeout_sec,"goal.head_scan_observation_timeout_sec");
+  if(c.goal.head_scan_observation_timeout_sec<c.goal.head_scan_hold_sec)
+    throw std::runtime_error("GOAL scan timeout must cover its observation hold");
   Nonnegative(c.goal.head_scan_body_turn_one_threshold_deg,"goal.head_scan_body_turn_one_threshold_deg");
   Positive(c.goal.head_scan_body_turn_two_threshold_deg,"goal.head_scan_body_turn_two_threshold_deg");
   if (c.goal.head_scan_body_turn_one_threshold_deg>=
@@ -690,6 +697,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     Assign(lr,"heading_gain",c.line_recovery.heading_gain);
     Assign(lr,"forward_max_turns",c.line_recovery.forward_max_turns);
     Assign(lr,"body_max_turns",c.line_recovery.body_max_turns);
+    if(lr["scan_center_half_width_px"]) Assign(lr,"scan_center_half_width_px",c.line_recovery.scan_center_half_width_px);
+    if(lr["scan_observation_timeout_sec"]) Assign(lr,"scan_observation_timeout_sec",c.line_recovery.scan_observation_timeout_sec);
     Assign(lr,"scan_max_yaw_deg",c.line_recovery.scan_max_yaw_deg);
     Assign(lr,"scan_move_sec",c.line_recovery.scan_move_sec);
     Assign(lr,"scan_hold_sec",c.line_recovery.scan_hold_sec);
@@ -901,6 +910,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     Assign(g,"head_scan_move_sec",c.goal.head_scan_move_sec);
     Assign(g,"head_scan_hold_sec",c.goal.head_scan_hold_sec);
     Assign(g,"head_scan_return_sec",c.goal.head_scan_return_sec);
+    if(g["head_scan_observation_timeout_sec"]) Assign(g,"head_scan_observation_timeout_sec",c.goal.head_scan_observation_timeout_sec);
     Assign(g,"head_scan_body_turn_one_threshold_deg",c.goal.head_scan_body_turn_one_threshold_deg);
     Assign(g,"head_scan_body_turn_two_threshold_deg",c.goal.head_scan_body_turn_two_threshold_deg);
   }

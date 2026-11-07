@@ -81,6 +81,9 @@ install(FILES
 )
 
 if(BUILD_TESTING)
+  add_executable(shared_vision_core_stationary_scan_observation_test tests/stationary_scan_observation_test.cpp)
+  target_link_libraries(shared_vision_core_stationary_scan_observation_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_stationary_scan_observation_test COMMAND shared_vision_core_stationary_scan_observation_test)
   add_executable(shared_vision_core_hurdle_down_sequence_test
     tests/hurdle_down_sequence_test.cpp)
   target_link_libraries(shared_vision_core_hurdle_down_sequence_test

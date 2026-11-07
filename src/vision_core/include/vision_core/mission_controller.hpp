@@ -22,6 +22,7 @@
 #include "vision_core/object_target_extractor.hpp"
 #include "vision_core/object_association_tracker.hpp"
 #include "vision_core/object_target_tracker.hpp"
+#include "vision_core/stationary_scan_observation.hpp"
 
 namespace vision_core {
 
@@ -37,10 +38,12 @@ struct LineLossRecoveryConfig {
   double scan_move_sec{0.5};
   double scan_hold_sec{0.5};
   double scan_return_sec{0.5};
+  double scan_center_half_width_px{100.0};
+  double scan_observation_timeout_sec{2.0};
   int scan_pause_window{4}, scan_pause_hits{2};
   int scan_verify_window{10}, scan_verify_hits{5};
   double scan_body_turn_deg{15.0};
-  int scan_max_pairs{3}; // Alternating LEFT/RIGHT pairs before terminal hold.
+  int scan_max_pairs{3}; // Bounded LEFT/RIGHT/CENTER search cycles.
 };
 
 struct MissionControllerConfig {
@@ -204,6 +207,7 @@ struct MissionFrameResult {
   bool has_ball{false};
   // Diagnostics of post-DONE observations, never counting pre-DONE history.
   bool post_motion_observing{false};
+  bool stationary_scan_observing{false};
   // Candidate is pre-entry: active_mission remains LINE until fresh 10/7.
   MissionType candidate_mission{MissionType::kNone};
   int candidate_phase{0}, candidate_search_turns{0}, candidate_restore_turns{0};
@@ -474,6 +478,10 @@ private:
     int turns_remaining{0};
     std::uint64_t body_action_id{0};
     double reobserve_started_sec{0.0};
+    bool resume_right{false}, exhausted{false};
+    StationaryScanObservation observation;
+    std::optional<ObjectTarget> observed_target;
+    std::uint64_t observed_id{0};
     std::deque<bool> pause_hits, verify_hits;
   } goal_head_search_;
   bool approach_goal_probe_{false}, approach_return_ball_view_{false};
@@ -687,12 +695,14 @@ private:
   struct LineHeadSearch {
     enum class Phase { kIdle, kPendingLeft, kScanningLeft, kHoldingLeft,
                        kPendingRight, kScanningRight, kHoldingRight,
-                       kReturnFound, kReleaseArms, kAlignBody };
+                       kReturnFound, kReleaseArms, kAlignBody, kReobserve };
     Phase phase{Phase::kIdle};
     bool scan_started{false}, tried{false}, align_left{false};
     bool release_requested{false}, release_align_body{false}, release_seen_transition{false};
     int completed_pairs{0};
     int align_remaining{0};
+    bool resume_right{false};
+    StationaryScanObservation observation;
     std::uint64_t align_action_id{0};
     std::deque<bool> pause_hits, verify_hits;
   } line_head_search_;

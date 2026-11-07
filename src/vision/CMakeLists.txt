@@ -35,6 +35,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
@@ -47,7 +48,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TerminalDetection.msg"
   "msg/TerminalFrame.msg"
   "msg/ShootTuningPose.msg"
-  DEPENDENCIES std_msgs
+  DEPENDENCIES std_msgs builtin_interfaces
 )
 
 message(STATUS "OpenCV_DIR=${OpenCV_DIR}")
@@ -283,6 +284,9 @@ install(FILES scripts/mock_executor_protocol.py
 )
 
 if(BUILD_TESTING)
+  add_executable(vision_scan_frame_guard_test tests/scan_frame_guard_test.cpp)
+  target_include_directories(vision_scan_frame_guard_test PRIVATE include)
+  add_test(NAME vision_scan_frame_guard_test COMMAND vision_scan_frame_guard_test)
   add_executable(vision_debug_mjpeg_test tests/debug_mjpeg_test.cpp)
   target_link_libraries(vision_debug_mjpeg_test vision_debug_mjpeg)
   add_test(NAME vision_debug_mjpeg_test COMMAND vision_debug_mjpeg_test)

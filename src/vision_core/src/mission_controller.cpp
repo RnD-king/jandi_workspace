@@ -736,6 +736,9 @@ bool MissionController::ShouldDeferDone(
     return false;
   if (RepeatScope() != 0)
     return false;
+  if(goal_head_search_.phase==GoalHeadSearch::Phase::kBodyTurn ||
+     line_head_search_.phase==LineHeadSearch::Phase::kAlignBody)
+    return false; // The scan owns its fresh, bounded central recheck.
   // A committed BALL/HURDLE near chain is TURN(s) -> STEP(s) -> camera DOWN.
   // The fixed successor is independent of intervening pixels. Keep actual
   // matching DONE synchronization but do not insert a 1s observation after
@@ -1493,6 +1496,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     if (!decision_observation_active_ &&
         config_.post_motion_observation_sec > 0.0 && camera_settle_edge &&
         !input.camera_scan.finished &&
+        goal_head_search_.phase==GoalHeadSearch::Phase::kIdle &&
+        line_head_search_.phase==LineHeadSearch::Phase::kIdle &&
         !(active_mission_==MissionType::kHurdle &&
           hurdle_controller_.ContinuousDownCameraWait()) &&
         !(active_mission_==MissionType::kBall &&
@@ -2231,6 +2236,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 
 void MissionController::PopulateDiagnostics(MissionFrameResult &output,
                                             double now) const {
+  output.stationary_scan_observing=
+      goal_head_search_.phase==GoalHeadSearch::Phase::kReobserve ||
+      line_head_search_.phase==LineHeadSearch::Phase::kReobserve;
   output.course_curve_index=course_curve_index_;
   output.curve_search_phase=static_cast<int>(curve_.phase);
   output.curve_confirmations=curve_.confirmations;

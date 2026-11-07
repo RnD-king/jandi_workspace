@@ -1,3 +1,4 @@
+#include "vision/scan_frame_guard.hpp"
 #include "vision/debug_bag_publisher.hpp"
 #include "vision/debug_mjpeg_server.hpp"
 #include "vision/mission_debug_view.hpp"
@@ -210,6 +211,7 @@ public:
     declare_parameter<bool>("enable_command_transport", true);
     declare_parameter<double>("backboard_depth_strip_width_ratio",algorithm_defaults.backboard_depth_strip_width_ratio);
     declare_parameter<double>("max_depth_age_sec", 0.20);
+    declare_parameter<double>("scan_depth_sync_tolerance_sec", 0.03);
     declare_parameter<double>("backboard_min_depth_m", algorithm_defaults.backboard_min_depth_m);
     declare_parameter<double>("backboard_max_depth_m", algorithm_defaults.backboard_max_depth_m);
     declare_parameter<double>("goal_approach_short_z_m", algorithm_defaults.goal.approach_short_z_m);
@@ -265,6 +267,10 @@ public:
         get_parameter("simulate_ready_lead_sec").as_double();
     enable_command_transport_ = get_parameter("enable_command_transport").as_bool();
     max_depth_age_sec_ = get_parameter("max_depth_age_sec").as_double();
+    scan_depth_sync_tolerance_sec_=get_parameter("scan_depth_sync_tolerance_sec").as_double();
+    if(!std::isfinite(scan_depth_sync_tolerance_sec_) || scan_depth_sync_tolerance_sec_<=0 ||
+       scan_depth_sync_tolerance_sec_>1.0/30.0)
+      throw std::runtime_error("scan_depth_sync_tolerance_sec must be in (0, 1/30]");
     backboard_depth_strip_width_ratio_=get_parameter("backboard_depth_strip_width_ratio").as_double();
     if (algorithm_mode_ != "all" && algorithm_mode_ != "line" && algorithm_mode_ != "ball" &&
         algorithm_mode_ != "hurdle" && algorithm_mode_ != "goal") {
@@ -486,6 +492,8 @@ public:
           camera_scan_feedback_.phase=message->phase;
           camera_scan_feedback_.yaw_deg=message->commanded_yaw_deg;
           camera_scan_feedback_.finished=false;
+          camera_scan_feedback_.stop_id=message->stop_id;
+          scan_stationary_since_sec_=double(message->stationary_since.sec)+1e-9*message->stationary_since.nanosec;
         });
 
     start_service_ = create_service<std_srvs::srv::Trigger>(
@@ -1221,6 +1229,7 @@ private:
       vision::msg::CameraCommand control;
       control.command_id=pending_camera_id_;
       control.request=static_cast<std::uint8_t>(request);
+      control.scan_stop_id=camera_scan_feedback_.stop_id;
       camera_cmd_pub_->publish(control);
       return;
     }
@@ -1304,6 +1313,9 @@ private:
     message.scan_return_sec=static_cast<float>(goal_scan
         ? goal_scan_config_.head_scan_return_sec :
           line_scan ? line_recovery_config_.scan_return_sec : curve_search_config_.scan_return_sec);
+    message.scan_observation_timeout_sec=static_cast<float>(goal_scan
+        ? goal_scan_config_.head_scan_observation_timeout_sec :
+          line_scan ? line_recovery_config_.scan_observation_timeout_sec : 0.0);
     camera_cmd_pub_->publish(message);
   }
 
@@ -1389,6 +1401,8 @@ private:
   void OnDepth(const sensor_msgs::msg::Image::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(image_mutex_);
     latest_depth_ = msg;
+    scan_depth_frames_.push_back(msg);
+    while(scan_depth_frames_.size()>8)scan_depth_frames_.pop_front();
   }
 
   void OnCameraInfo(const sensor_msgs::msg::CameraInfo::SharedPtr msg) {
@@ -1464,6 +1478,21 @@ private:
     RCLCPP_DEBUG(get_logger(), "[IMU] snapshot roll=%.5f pitch=%.5f | imu_ready=%d", roll, pitch,
                  imu_ready_snapshot ? 1 : 0);
 
+    const bool stationary_scan=camera_scan_feedback_.stop_id &&
+        (camera_scan_feedback_.phase==2 || camera_scan_feedback_.phase==3);
+    const double capture_sec=StampSeconds(msg->header);
+    const bool stationary_observation=stationary_scan || last_debug_result_.mission.stationary_scan_observing;
+    if(stationary_observation) {
+      if(!std::isfinite(capture_sec) || capture_sec<=last_stationary_capture_sec_) return;
+      last_stationary_capture_sec_=capture_sec;
+    }
+    const bool fresh_scan_frame=stationary_scan && scan_frame_guard_.Accept(
+        camera_scan_feedback_.command_id,camera_scan_feedback_.stop_id,
+        capture_sec,scan_stationary_since_sec_,
+        (pending_camera_request_==vision_core::CameraRequest::kGoalScanLeft ||
+         pending_camera_request_==vision_core::CameraRequest::kGoalScanRight)
+            ? goal_scan_config_.head_scan_observation_timeout_sec
+            : line_recovery_config_.scan_observation_timeout_sec);
     // 3) YOLO 추론
     std::vector<Detection> dets;
 
@@ -1478,8 +1507,8 @@ private:
       return;
     }
     // YOLO first: subscribe to depth continuously but convert/read it only
-    // when a BACKBOARD or enabled BALL/HURDLE candidate exists. Keep RGB/Depth timestamp
-    // and image-size gates identical in AUTO and MANUAL executables.
+    // when a BACKBOARD or enabled BALL/HURDLE candidate exists. Normal gates
+    // are unchanged; stationary search chooses a fresh synchronized cached pair.
     cv::Mat aligned_depth;
     const bool need_board_depth = std::any_of(
         dets.begin(), dets.end(), [this](const Detection &d) {
@@ -1493,6 +1522,21 @@ private:
       {
         std::lock_guard<std::mutex> lock(image_mutex_);
         depth_msg = latest_depth_;
+        if(stationary_observation) {
+          depth_msg.reset();double best=scan_depth_sync_tolerance_sec_;
+          for(const auto& frame:scan_depth_frames_) {
+            const double stamp=StampSeconds(frame->header);
+            const double distance=std::abs(capture_sec-stamp);
+            const double after=stationary_scan ? scan_stationary_since_sec_ :
+                std::max(last_action_done_event_sec_,last_camera_done_event_sec_);
+            if(stamp>after && distance<=best) {
+              depth_msg=frame;best=distance;
+            }
+          }
+        }
+        if(stationary_observation && depth_msg &&
+           !scan_frame_guard_.AcceptDepth(StampSeconds(depth_msg->header)))
+          depth_msg.reset(); // One Depth sample cannot qualify multiple RGB frames.
       }
       if (depth_msg &&
           std::abs(StampSeconds(msg->header) - StampSeconds(depth_msg->header)) <=
@@ -1570,6 +1614,7 @@ private:
     if (!applied_action_feedback_queue_.empty()) perception_input.allow_new_commands=false;
     perception_input.camera_feedback = camera_feedback_;
     perception_input.camera_scan = camera_scan_feedback_;
+    perception_input.camera_scan.frame_is_fresh=fresh_scan_frame;
     perception_input.command_transport_enabled =
         enable_command_transport_ || simulate_decision_;
     perception_input.delivery_feedback = action_delivery_feedback_;
@@ -1796,6 +1841,10 @@ private:
   bool camera_acknowledged_{false};
   double backboard_depth_strip_width_ratio_{};
   double max_depth_age_sec_{0.20};
+  double scan_depth_sync_tolerance_sec_{0.03},scan_stationary_since_sec_{0};
+  double last_stationary_capture_sec_{0};
+  vision::ScanFrameGuard scan_frame_guard_;
+  std::deque<sensor_msgs::msg::Image::SharedPtr> scan_depth_frames_;
   std::string algorithm_mode_{"all"};
   bool goal_trial_start_goal_pending_{false};
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr

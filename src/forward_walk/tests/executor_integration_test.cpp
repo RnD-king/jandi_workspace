@@ -684,6 +684,40 @@ int main() {
                 Check(false,"curve scan did not restore the correct elbow and head before DONE");
             }
         }
+        // Production point-search transport: arrival, fresh-stop metadata and
+        // idempotent stop controls, using only the in-memory Dxl above.
+        camera(71000,3);
+        pump([&]{return node->camera_transactions_.completed.Contains(71000);});
+        auto stationary=std::make_shared<vision::msg::CameraCommand>();
+        stationary->command_id=71001;stationary->request=vision::msg::CameraCommand::GOAL_SCAN_LEFT;
+        stationary->scan_max_yaw_deg=25;stationary->scan_move_sec=.04;
+        stationary->scan_hold_sec=.5;stationary->scan_return_sec=.04;
+        stationary->scan_observation_timeout_sec=2;
+        node->CameraCommandCallback(stationary);
+        Dxl::fail_camera_read=true;
+        pump([&]{return node->camera_motion_->ScanState()==motion_executor::CameraMotion::ScanPhase::Settling;});
+        flush();Check(node->camera_motion_->ScanStopId()==0,
+                      "unverified encoder position became a stationary scan stop");
+        Dxl::fail_camera_read=false;
+        auto resume=std::make_shared<vision::msg::CameraCommand>();
+        resume->command_id=71001;resume->request=vision::msg::CameraCommand::SCAN_RESUME;
+        for(unsigned stop=1;stop<=3;++stop) {
+            pump([&]{return node->camera_motion_->ScanStopId()==stop;});flush();
+            Check(node->scan_stationary_since_.sec!=0 && Count(cameras,71001,Status::DONE)==0,
+                  "stationary stop lacks an arrival timestamp or emitted early DONE");
+            if(stop>1) {
+                resume->scan_stop_id=stop-1;node->CameraCommandCallback(resume);
+                Check(node->camera_motion_->ScanStopId()==stop &&
+                      node->camera_motion_->ScanState()==motion_executor::CameraMotion::ScanPhase::Dwell,
+                      "duplicate old-stop RESUME skipped a new stationary pose");
+            }
+            resume->scan_stop_id=stop;node->CameraCommandCallback(resume);
+            node->CameraCommandCallback(resume); // Same control cannot advance twice.
+        }
+        pump([&]{return node->camera_transactions_.completed.Contains(71001);});flush();
+        Check(Count(cameras,71001,Status::ACK)==1 && Count(cameras,71001,Status::DONE)==1,
+              "stationary triplet changed the single camera ACK/DONE contract");
+        std::cout<<"PASS encoder-confirmed stationary triplet and idempotent stop controls\n";
         std::cout<<"PASS sequenced 17/18 elbow extension, camera scan and safe restoration\n";
         rclcpp::shutdown();fs::remove_all(directory);return 0;
     } catch(const std::exception& e) {
