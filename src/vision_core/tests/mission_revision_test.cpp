@@ -620,88 +620,50 @@ void ImageDetectionWithMissingDepth() {
 }
 void FineSidePairDirect(bool left) {
   auto c=LoadDefaultAlgorithmConfig().ball;
-  c.stable_window=10;c.stable_min_hits=7;c.fine_side_two_step_margin_px=100;
+  c.stable_window=10;c.stable_min_hits=7;
+  c.fine_side_two_step_margin_px=100;
   const auto side=left?MissionAction::kLeftSideStep:MissionAction::kRightSideStep;
-  const auto target=Target(left?c.pickup_u1_px-100:c.pickup_u2_px+100,c.PickupCenterV());
-  const std::deque<bool> hits(10,true);
-  const CameraFeedback down{CameraMode::kBallView,true};
+  const auto target=Target(left?c.pickup_u1_px-100:c.pickup_u2_px+100,
+                           c.PickupCenterV());
   BallController ball(c,3);ball.StartTestExecute();
-  ball.UseVerifiedObservation(target,hits,640,480);
-  auto b=ball.Compute({},640,480,0,down,{},false);
-  assert(b.mode==BallMode::kFineAdjustForPickup && b.action.action==side);
-  // Preview is reversible: a changed threshold re-evaluates the same evidence.
-  auto preview=ball;
-  b=preview.Compute(target,640,480,.01,down,{});
-  assert(b.mode==BallMode::kFineSidePair && b.action.action==side);
-  auto changed=c;changed.fine_side_two_step_margin_px=101;ball.UpdateTuning(changed);
-  b=ball.Compute(target,640,480,.02,down,{});
-  assert(b.mode==BallMode::kFineAdjustForPickup && b.action.action==side);
-  ball.UpdateTuning(c);
-  b=ball.Compute(target,640,480,.03,down,{});
-  assert(b.mode==BallMode::kFineSidePair && b.action.action==side);
-  // Neither opposite detections nor loss can change an accepted fixed pair.
-  b=ball.Compute(Target(left?600:50),640,480,.1,down,{false,true,false});
-  assert(b.mode==BallMode::kFineSidePair && b.action.action==MissionAction::kNone);
-  // PAUSE consumes A DONE but does not authorize B. Repeated DONE while idle
-  // cannot decrement the remaining count again.
-  b=ball.Compute({},640,480,.2,down,{true,false,false},false);
-  assert(b.mode==BallMode::kFineSidePair);
-  b=ball.Compute({},640,480,.21,down,{true,false,false},false);
-  assert(b.mode==BallMode::kFineSidePair);
-  b=ball.Compute({},640,480,.3,down,{});
-  assert(b.mode==BallMode::kFineSidePair && b.action.action==side);
-  b=ball.Compute({},640,480,.4,down,{true,false,false});
-  assert(b.mode==BallMode::kFineAdjustForPickup && b.action.action==MissionAction::kNone);
-  assert(!ball.ExecutionObservationReady());
-  ball.Reset();
-  assert(ball.Compute({},640,480,.5,{},{}).mode==BallMode::kLineFollow);
+  ball.UseVerifiedObservation(target,std::deque<bool>(10,true),640,480);
+  const CameraFeedback down{CameraMode::kBallView,true};
+  auto out=ball.Compute({},640,480,0,down,{},false);
+  assert(out.mode==BallMode::kFineAdjustForPickup &&
+         out.action.action==side);
+  // The legacy unmeasured 2-action side pair is now always reduced to ONE.
+  out=ball.Compute(target,640,480,.01,down,{});
+  assert(out.mode==BallMode::kFineAdjustForPickup &&
+         out.action.action==side);
 }
-
 void FineSidePairTransport(bool left, bool manual) {
-  auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kBall;c.test_stage=2;
-  c.enable_goal=c.enable_hurdle=false;c.ball.fine_side_two_step_margin_px=100;
-  c.fine_motion_settle_sec=.2;
+  auto c=LoadDefaultAlgorithmConfig();c.test_mission=MissionType::kBall;
+  c.test_stage=2;c.enable_goal=c.enable_hurdle=false;
+  c.ball.fine_side_two_step_margin_px=100;
   MissionController core(c);
   auto f=Frame(0);f.camera_feedback={CameraMode::kBallView,true};
   const auto side=left?MissionAction::kLeftSideStep:MissionAction::kRightSideStep;
-  const auto target=Target(left?c.ball.pickup_u1_px-100:c.ball.pickup_u2_px+100,c.ball.PickupCenterV());
-  MissionFrameResult r;std::uint64_t setup_done=0;
+  const auto target=Target(left?c.ball.pickup_u1_px-100:
+      c.ball.pickup_u2_px+100,c.ball.PickupCenterV());
+  MissionFrameResult out;std::uint64_t setup_done=0;
   for(int i=0;i<=180;++i) {
     f.now_sec=.05*i;f.ball_target=target;f.delivery_feedback={};
-    if(r.command.action_id && r.command.action_id!=setup_done) {
-      setup_done=r.command.action_id;f.delivery_feedback={setup_done,true,true,false};
+    if(out.command.action_id && out.command.action_id!=setup_done) {
+      setup_done=out.command.action_id;
+      f.delivery_feedback={setup_done,true,true,false};
     }
-    r=core.Step(f);
-    if(r.command.action==side)break;
+    out=core.Step(f);
+    if(out.command.action==side)break;
   }
-  assert(r.command.action==side && r.ball.mode==BallMode::kFineSidePair && r.repeat_sequence);
-  const auto a=r.command.action_id;f.manual_observation_control=manual;
-  f.now_sec+=.1;f.ball_target=Target(left?600:50,100);
-  f.delivery_feedback={a,true,true,false};r=core.Step(f);
-  const auto b=r.command.action_id;
-  assert(b && b!=a && r.command.action==side && !r.post_motion_observing);
-  // The fixed pair must also bypass fine_motion_settle_sec between its actions.
-  f.now_sec+=.01;f.delivery_feedback={a,true,true,false};r=core.Step(f);
-  assert(r.command.action_id==b && r.command.action==side);
-  f.now_sec+=.3;const auto done_at=f.now_sec;
-  f.ball_target=Target(c.ball.pickup_u1_px-10,c.ball.PickupCenterV());
-  f.delivery_feedback={b,true,true,false};r=core.Step(f);
-  assert(!r.repeat_sequence && r.command.action_id==0);
-  const double begin=done_at+std::max(manual?.05:0,c.fine_motion_settle_sec);
-  bool decided=false;
-  for(int i=1;i<=40;++i) {
-    f.now_sec=done_at+.05*i;f.delivery_feedback={};
-    f.begin_manual_observation=manual && i==1;r=core.Step(f);
-    if(f.now_sec+1e-9<begin+1) assert(r.command.action_id==0);
-    else {
-      assert(r.command.action==MissionAction::kLeftSideStep);
-      assert(r.ball.mode==BallMode::kFineAdjustForPickup && !r.repeat_sequence);
-      decided=true;break;
-    }
-  }
-  assert(decided); // Exactly one common observation, with concurrent 10/7.
+  assert(out.command.action==side &&
+         out.ball.mode==BallMode::kFineAdjustForPickup &&
+         !out.repeat_sequence);
+  const auto id=out.command.action_id;
+  f.manual_observation_control=manual;f.now_sec+=.1;
+  f.delivery_feedback={id,true,true,false};
+  out=core.Step(f);
+  assert(!out.repeat_sequence && out.command.action_id==0);
 }
-
 void EntryDirectionRecovery(bool left, bool reacquire) {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.entry_min_hits=6;c.stable_min_hits=7;c.stable_window=10;
