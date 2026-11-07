@@ -352,6 +352,9 @@ bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
         (foot_pose_==FootPose::kFine ? MissionAction::kTurnRight :
                                       MissionAction::kStepForwardRightOneHurdle);
   };
+  // FINE TURN_LEFT/RIGHT (7/8) use the requested yaw to select JSON repeats.
+  // WALK in-place turns (31/28) play their fixed asset once; keep yaw at zero.
+  const int edge_turn_yaw_deg=foot_pose_==FootPose::kFine ? 15 : 0;
   if(e.phase==GoalEdgeGuard::Phase::kTurning) {
     if(e.action_id && input.delivery_feedback.done &&
        input.delivery_feedback.action_id==e.action_id) {
@@ -365,7 +368,7 @@ bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
     }
     if(e.phase==GoalEdgeGuard::Phase::kTurning && e.action_id==0 && idle &&
        input.allow_new_commands && input.allow_new_body_actions) {
-      action={select_turn(),ActionCategory::kLocomotion,0,false};
+      action={select_turn(),ActionCategory::kLocomotion,edge_turn_yaw_deg,false};
     }
     return true;
   }
@@ -380,7 +383,7 @@ bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
     e.turns_completed=0;e.action_id=0;
     e.phase=GoalEdgeGuard::Phase::kTurning;
     if(input.allow_new_commands && input.allow_new_body_actions)
-      action={select_turn(),ActionCategory::kLocomotion,0,false};
+      action={select_turn(),ActionCategory::kLocomotion,edge_turn_yaw_deg,false};
     return true;
   }
   e.phase=GoalEdgeGuard::Phase::kIdle;
