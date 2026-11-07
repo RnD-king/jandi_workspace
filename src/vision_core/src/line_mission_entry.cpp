@@ -89,7 +89,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   const auto completed_blocks=line_plan_.TakeCompletedBlocks();
   for (const auto& block : completed_blocks) {
-    if (automatic_approach && block.owner==0 && !block.probe &&
+    if (automatic_approach && block.owner==0 && !block.ball_entry_epoch && !block.probe &&
         config_.curve_search.enabled && config_.enable_ball) {
       int left_hits=0,right_hits=0;
       for(const int d:curve_.frame_directions) {
@@ -145,7 +145,9 @@ MissionFrameResult MissionController::StepPlannedLine(
         } else {curve_.phase=CurveSearchState::Phase::kIdle;curve_.confirmations=0;}
       }
     }
-    if (automatic_approach && block.owner && block.owner==continuous_.epoch) {
+    if (automatic_approach && continuous_.epoch &&
+        (block.owner==continuous_.epoch ||
+         block.ball_entry_epoch==continuous_.epoch)) {
       if (block.probe) {
         if (continuous_.mission==MissionType::kBall &&
             continuous_.probe_return_to_line) {
@@ -158,7 +160,8 @@ MissionFrameResult MissionController::StepPlannedLine(
         // A rediscovered BALL turned the probe into its final issued unit.
         // It is NOT a lock-qualified normal approach block.
         continue;
-      } else if (block.object_qualified) {
+      } else if (block.object_qualified ||
+                 block.ball_entry_epoch==continuous_.epoch) {
         ++continuous_.blocks;
         continuous_.locked=continuous_.blocks>=config_.object_approach.lock_blocks;
       } else continuous_.loss_pending=true;
@@ -309,8 +312,23 @@ MissionFrameResult MissionController::StepPlannedLine(
     const std::optional<Point2> object_center =
         pixel_owner && route.object_visible && continuous_.last
         ? std::optional<Point2>(continuous_.last->center_px) : std::nullopt;
+    // The first BALL admission may occur inside an already-issued LINE
+    // block. Keep that block's LINE ownership and samples, but preserve its
+    // independently qualified BALL entry mean through its final READY.
+    if (automatic_approach && continuous_.mission==MissionType::kBall &&
+        !continuous_.near && continuous_.blocks==0) {
+      const auto pending=command_coordinator_.PendingActionId();
+      if (pending && !line_plan_.ObjectOwned(pending,continuous_.epoch))
+        line_plan_.AttachBallEntry(pending,continuous_.epoch,
+                                   input.ball_entry_mean_center,input.now_sec);
+    }
     line_plan_.Observe(input.now_sec,automatic_approach ? actual_line_guide : raw,
                        object_observation,continuous_.epoch,object_center,pixel_owner);
+    if (automatic_approach && continuous_.mission==MissionType::kBall)
+      line_plan_.ObserveBallEntry(input.now_sec,continuous_.epoch,
+          route.object_visible && input.ball_target
+              ? std::optional<Point2>(input.ball_target->center_px)
+              : std::nullopt);
     if (automatic_approach && continuous_.mission!=MissionType::kNone) {
       const int minimum=continuous_.mission==MissionType::kBall ? config_.ball.entry_min_hits :
           continuous_.mission==MissionType::kGoal ? config_.goal.stable_min_hits : config_.hurdle.stable_min_hits;
@@ -760,6 +778,9 @@ MissionFrameResult MissionController::StepPlannedLine(
             (continuous_.mission==MissionType::kBall ||
              continuous_.mission==MissionType::kGoal) &&
             line_plan_.ObjectOwned(id,continuous_.epoch);
+        const bool ball_entry_owner=automatic_approach &&
+            continuous_.mission==MissionType::kBall &&
+            line_plan_.BallEntryOwned(id,continuous_.epoch);
         std::optional<Point2> averaged_center;
         std::optional<LineGuide> mean;
         if (pixel_owner) {
@@ -809,6 +830,30 @@ MissionFrameResult MissionController::StepPlannedLine(
                      continuous_.mission==MissionType::kGoal) {
             // The preceding floor LINE mean must not steer the virtual path.
             decision=route.guide_observed && route.guide ? *route.guide : LineGuide{};
+          }
+        }
+        // First admitted BALL can still be on the preceding physical LINE
+        // block. Finish its independent center mean BEFORE reading/steering
+        // from the saved center. Never use the prior mean in this READY.
+        if (ball_entry_owner) {
+          const auto entry_center=line_plan_.FinishBallEntryCenter(
+              id,input.now_sec,ready_remaining);
+          if (entry_center && continuous_.last) {
+            continuous_.last_ready_center=*entry_center;
+            auto averaged_target=*continuous_.last;
+            averaged_target.center_px=*entry_center;
+            const auto bounds=config_.ball.ApproachBounds(
+                entry_center->v,input.image_height);
+            const auto entry_guide=ObjectZoneGuide(
+                averaged_target,bounds.first,bounds.second,
+                config_.object_approach.steering_deadband_deg,input.image_width);
+            if (entry_guide.valid && !continuous_.near) {
+              decision=entry_guide;
+              route.guide=entry_guide;
+              route.guide_observed=true;
+              route.hold=false;
+              line_failure_pending_done_=false;
+            }
           }
         }
         output.line_decision_guide = decision;
