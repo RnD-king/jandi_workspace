@@ -29,9 +29,14 @@ struct Trial {
   HurdleController controller;
   double now{0};
   const CameraFeedback down{CameraMode::kDown, true};
-  explicit Trial(bool close = false) : controller([] {
+  explicit Trial(bool close = false,double measured_turn=0.0,double measured_side=0.0)
+      : controller([&] {
     auto c = LoadDefaultAlgorithmConfig().hurdle;
     c.stable_window = c.stable_min_hits = c.down_search_min_hits = 1;
+    c.fine_line_measured_turn_deg=measured_turn;
+    c.fine_line_measured_side_px=measured_side;
+    if(measured_turn>0 || measured_side>0)
+      c.fine_line_offset_tolerance_px=2.0;
     return c;
   }(), 3.0) {
     controller.StartTestNear();
@@ -56,11 +61,14 @@ struct Trial {
   }
   HurdleResult Observe(const LineGuide &guide = {}) {
     HurdleResult out;
-    for (int i = 0; i < 10; ++i) {
+    // The post-turn 0.5s pause precedes the fresh 1s observation.
+    for (int i = 0; i < 25; ++i) {
       now += .11;
       controller.ObserveFineLine(guide, 640, now);
       out = controller.Compute({}, 640, 480, now, down, {}, {});
       if (i < 9) assert(out.action.action == MissionAction::kNone);
+      if (out.action.action!=MissionAction::kNone ||
+          out.mode==HurdleMode::kFineAdjust) break;
     }
     return out;
   }
@@ -192,6 +200,40 @@ void StaleAlignedIsNotSuccess() {
   assert(out.mode == HurdleMode::kFineLineAlign &&
          out.action.action == MissionAction::kStepForwardHalf);
 }
+void CalibratedHeadingThenSideBatches() {
+  Trial t(false,5.0,10.0);
+  t.PoseDone();
+  auto out=t.Observe(Guide(30,30));
+  assert(out.action.action==MissionAction::kTurnRight &&
+         out.action.target_yaw_deg==15);
+  ActionExecutionFeedback done;
+  done.action_done=true;
+  for(int n=1;n<=3;++n) {
+    t.now+=.1;
+    t.controller.OnActualMotionDone(MissionAction::kTurnRight,t.now);
+    out=t.controller.Compute({},640,480,t.now,t.down,done,{});
+    assert(out.mode==HurdleMode::kFineLineAlign);
+    assert(out.action.action==(n<3 ? MissionAction::kTurnRight : MissionAction::kNone));
+    assert(out.fine_line_turns==n);
+  }
+  // No early observations before the committed turn batch is complete.
+  t.now+=.25;
+  t.controller.ObserveFineLine(Guide(30,0),640,t.now);
+  out=t.controller.Compute({},640,480,t.now,t.down,{},{});
+  assert(out.action.action==MissionAction::kNone);
+  out=t.Observe(Guide(30,0));
+  assert(out.action.action==MissionAction::kRightSideStep);
+  for(int n=1;n<=3;++n) {
+    t.now+=.1;
+    t.controller.OnActualMotionDone(MissionAction::kRightSideStep,t.now);
+    out=t.controller.Compute({},640,480,t.now,t.down,done,{});
+    assert(out.mode==HurdleMode::kFineLineAlign);
+    assert(out.action.action==(n<3 ? MissionAction::kRightSideStep : MissionAction::kNone));
+    assert(out.fine_line_side_steps==n);
+  }
+  out=t.Observe(Guide(0,0));
+  assert(out.mode==HurdleMode::kFineAdjust);
+}
 void CameraTransitionRequiresFreshObservation() {
   Trial t;
   t.PoseDone();
@@ -214,5 +256,6 @@ int main() {
   FiveOfTenIncludesMissingLastFrame();
   IndependentCorrectionLimits();
   StaleAlignedIsNotSuccess();
+  CalibratedHeadingThenSideBatches();
   CameraTransitionRequiresFreshObservation();
 }
