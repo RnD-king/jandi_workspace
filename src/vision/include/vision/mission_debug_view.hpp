@@ -524,7 +524,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     draw_u_line(c.target_u_px-c.approach_u_deadband_px,cv::Scalar(0,160,160));
     draw_u_line(c.target_u_px+c.approach_u_deadband_px,cv::Scalar(0,160,160));
   }
-  if (selected_goal && mission_result.foot_pose==vision_core::FootPose::kWalk) {
+  if ((selected_goal || active_goal_auto) && camera.settled &&
+      camera.actual_mode==vision_core::CameraMode::kGoal) {
     draw_u_line(config.goal.edge_margin_px,cv::Scalar(60,60,255));
     draw_u_line(vis.cols-config.goal.edge_margin_px,cv::Scalar(60,60,255));
   }
