@@ -455,6 +455,12 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
                    "hurdle.fine_line_stable_min_hits", "hurdle.fine_line_stable_window");
   if (c.hurdle.fine_line_stable_window < 3)
     throw std::runtime_error("hurdle.fine_line_stable_window must be >= 3");
+  Nonnegative(c.hurdle.fine_line_measured_turn_deg,"hurdle.fine_line_measured_turn_deg");
+  Nonnegative(c.hurdle.fine_line_measured_side_px,"hurdle.fine_line_measured_side_px");
+  Nonnegative(c.hurdle.fine_line_post_turn_hold_sec,"hurdle.fine_line_post_turn_hold_sec");
+  if(c.hurdle.fine_line_batch_max_repetitions<1 ||
+     c.hurdle.fine_line_batch_max_repetitions>3)
+    throw std::runtime_error("hurdle.fine_line_batch_max_repetitions must be in [1,3]");
   PositiveInt(c.hurdle.fine_line_turn_yaw_deg, "hurdle.fine_line_turn_yaw_deg");
   if (c.hurdle.fine_line_turn_yaw_deg > 32767)
     throw std::runtime_error("hurdle.fine_line_turn_yaw_deg exceeds action protocol range");
@@ -824,6 +830,14 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "fine_line_stable_window", c.hurdle.fine_line_stable_window);
   Assign(h, "fine_line_stable_min_hits", c.hurdle.fine_line_stable_min_hits);
   Assign(h, "fine_line_turn_yaw_deg", c.hurdle.fine_line_turn_yaw_deg);
+  if(h["fine_line_measured_turn_deg"])
+    Assign(h,"fine_line_measured_turn_deg",c.hurdle.fine_line_measured_turn_deg);
+  if(h["fine_line_measured_side_px"])
+    Assign(h,"fine_line_measured_side_px",c.hurdle.fine_line_measured_side_px);
+  if(h["fine_line_batch_max_repetitions"])
+    Assign(h,"fine_line_batch_max_repetitions",c.hurdle.fine_line_batch_max_repetitions);
+  if(h["fine_line_post_turn_hold_sec"])
+    Assign(h,"fine_line_post_turn_hold_sec",c.hurdle.fine_line_post_turn_hold_sec);
   Assign(h, "fine_line_max_turns", c.hurdle.fine_line_max_turns);
   Assign(h, "fine_line_max_side_steps", c.hurdle.fine_line_max_side_steps);
   Assign(h, "fine_line_max_stale_corrections", c.hurdle.fine_line_max_stale_corrections);
