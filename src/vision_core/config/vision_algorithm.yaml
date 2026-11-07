@@ -250,6 +250,10 @@ vision_algorithm:
       fine_line_stable_window: 10
       fine_line_stable_min_hits: 5
       fine_line_turn_yaw_deg: 15 # 7/8번 회전 1회 요청각 (도)
+      fine_line_measured_turn_deg: 0.0 # 1회 실제 회전에 따른 H 변화량(도). 0: 기존 단발 관측 유지
+      fine_line_measured_side_px: 0.0 # 1회 실제 옆걸음에 따른 O 변화량(px). 0: 기존 단발 관측 유지
+      fine_line_batch_max_repetitions: 3 # 실측값 기반 정렬의 1회 최대 연속 동작 수
+      fine_line_post_turn_hold_sec: 0.5 # 연속 회전의 마지막 DONE 후 정지 대기
       fine_line_max_turns: 4
       fine_line_max_side_steps: 4
       fine_line_max_stale_corrections: 2 # 같은 마지막 유효 O/H 재사용 한도
