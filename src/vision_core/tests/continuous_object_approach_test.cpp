@@ -279,7 +279,9 @@ void ProbeRediscoveryAndLineMemory() {
         std::abs(*d.out.remembered_line_score-remembered)<1e-9,
         "invalid actual LINE erased the far-approach directional memory");
 
-  Driver recovered(Config());recovered.Warm();recovered.Block();recovered.Block();
+  // The admission LINE block now counts toward the 3-block lock. Start with
+  // one qualified block so a successful rediscovery still remains pre-lock.
+  Driver recovered(Config());recovered.Warm();recovered.Block();
   // A successful object block establishes the READY mean needed for probing.
   recovered.MissingBlock();
   const int completed=recovered.out.approach_completed_blocks;
