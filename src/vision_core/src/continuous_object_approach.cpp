@@ -768,8 +768,12 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         !input.backboard_image_out_of_depth_range;
     goal_tracking_unusable_frames_=tracking_unusable ?
         std::min(config_.goal.lost_frames,goal_tracking_unusable_frames_+1) : 0;
-    if(goal_rgb_missing_frames_>=config_.goal.lost_frames ||
-       goal_tracking_unusable_frames_>=config_.goal.lost_frames)
+    // A missing object must not truncate the remainder of a physically
+    // executing 32/33/36 block. Its last READY or actual DONE decides
+    // loss; once all issued units drain, a persistent RGB miss can scan.
+    if((goal_rgb_missing_frames_>=config_.goal.lost_frames ||
+        goal_tracking_unusable_frames_>=config_.goal.lost_frames) &&
+       !line_plan_.Active() && !line_plan_.Outstanding())
       continuous_.loss_pending=true;
   }
   const bool lost=continuous_.loss_pending;
