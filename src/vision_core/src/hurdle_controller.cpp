@@ -119,7 +119,8 @@ void HurdleController::OnActualMotionDone(MissionAction action, double now_sec) 
     const bool turning=action==MissionAction::kTurnLeft ||
                        action==MissionAction::kTurnRight;
     BeginFineLineObservation(now_sec+
-        (turning ? config_.fine_line_post_turn_hold_sec : 0.0));
+        (turning && config_.fine_line_measured_turn_deg>0.0
+             ? config_.fine_line_post_turn_hold_sec : 0.0));
   }
 }
 
@@ -588,7 +589,8 @@ HurdleResult HurdleController::Compute(
           const bool turning=completed==MissionAction::kTurnLeft ||
                              completed==MissionAction::kTurnRight;
           BeginFineLineObservation(now_sec+
-              (turning ? config_.fine_line_post_turn_hold_sec : 0.0));
+              (turning && config_.fine_line_measured_turn_deg>0.0
+                   ? config_.fine_line_post_turn_hold_sec : 0.0));
         }
       }
     }
