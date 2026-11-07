@@ -861,10 +861,22 @@ void GoalTrueRgbLossAndRangeRejection() {
   lost.in.backboard_target.reset();
   lost.in.backboard_center_depth_m.reset();lost.in.goal_pose={};
   lost.in.raw_backboard_target.reset();lost.in.raw_backboard_u.reset();
+  const auto lost_motion=lost.out.command.action_id;
+  Check(lost_motion,"RGB loss fixture lost its first active GOAL action");
+  lost.Tick({lost_motion,true,false,false});
   for(int n=0;n<2;++n)lost.Tick();
   Check(!lost.out.approach_loss_pending,"RGB loss confirmed before 3 missing frames");
   lost.Tick();
-  Check(lost.out.approach_loss_pending,"3 consecutive GOAL RGB misses did not latch loss");
+  Check(!lost.out.approach_loss_pending,
+        "RGB loss cancelled an executing physical GOAL block");
+  lost.Tick({lost_motion,true,false,true});
+  lost.Tick({lost_motion,true,true,false});
+  bool scanning=false;
+  for(int n=0;n<30 && !scanning;++n) {
+    lost.Tick();
+    scanning=lost.out.command.camera_request==CameraRequest::kGoalScanLeft;
+  }
+  Check(scanning,"3+ GOAL RGB misses failed to scan after first actual DONE");
   // A forbidden numerical Depth must never authorize the missing-Depth probe.
   Driver range(c);range.in.ball_target.reset();range.in.line_centers.clear();
   range.in.camera_feedback={CameraMode::kGoal,true};
