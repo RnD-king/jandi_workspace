@@ -120,7 +120,8 @@ void HurdleController::ObserveFineLine(const LineGuide &guide, int image_width,
 void HurdleController::OnActualMotionDone(MissionAction action, double now_sec) {
   if (mode_ == HurdleMode::kFineLineAlign &&
       fine_line_pending_action_ == action && !fine_line_observation_started_ &&
-      fine_line_repeat_remaining_<=1) {
+      fine_line_repeat_remaining_<=1 &&
+      fine_line_next_side_remaining_==0) {
     const bool turning=action==MissionAction::kTurnLeft ||
                        action==MissionAction::kTurnRight;
     BeginFineLineObservation(now_sec+
@@ -132,8 +133,10 @@ void HurdleController::OnActualMotionDone(MissionAction action, double now_sec) 
 void HurdleController::FinishFineLineAlign(HurdleResult &result) {
   fine_line_history_.clear();
   fine_line_fresh_.reset();
-  fine_line_pending_action_=fine_line_repeat_action_=MissionAction::kNone;
-  fine_line_repeat_remaining_=0;
+  fine_line_pending_action_=fine_line_repeat_action_=
+      fine_line_next_side_action_=MissionAction::kNone;
+  fine_line_repeat_remaining_=fine_line_next_side_remaining_=0;
+  fine_line_next_action_sec_=0.0;
   fine_line_pending_stale_ = false;
   fine_line_monitoring_ = false;
   fine_line_observing_ = false;
@@ -563,8 +566,10 @@ HurdleResult HurdleController::Compute(
       fine_pose_entered_=true; mode_=HurdleMode::kFineLineAlign; ClearTracking();
       fine_line_turns_ = fine_line_side_steps_ = 0;
       fine_line_stale_corrections_ = fine_line_search_steps_ = 0;
-      fine_line_pending_action_=fine_line_repeat_action_=MissionAction::kNone;
-      fine_line_repeat_remaining_=0;
+      fine_line_pending_action_=fine_line_repeat_action_=
+          fine_line_next_side_action_=MissionAction::kNone;
+      fine_line_repeat_remaining_=fine_line_next_side_remaining_=0;
+      fine_line_next_action_sec_=0.0;
       BeginFineLineObservation(now_sec);
 
       result.mode=mode_; result.tracked={}; return result;
@@ -588,20 +593,33 @@ HurdleResult HurdleController::Compute(
       result.fine_line_side_steps=fine_line_side_steps_;
       result.fine_line_search_steps=fine_line_search_steps_;
       if(fine_line_repeat_remaining_==0) {
-        fine_line_repeat_action_=MissionAction::kNone;
         fine_line_pending_stale_=false;
-        if(!fine_line_observation_started_) {
-          const bool turning=completed==MissionAction::kTurnLeft ||
-                             completed==MissionAction::kTurnRight;
-          BeginFineLineObservation(now_sec+
-              (turning && MeasuredTurnDeg(config_, completed)>0.0
-                   ? config_.fine_line_post_turn_hold_sec : 0.0));
+        const bool turning=completed==MissionAction::kTurnLeft ||
+                           completed==MissionAction::kTurnRight;
+        if(fine_line_next_side_remaining_>0) {
+          // Both quantities came from the SAME initial O/H observation.
+          // Preserve post-turn hold, but do not reobserve between batches.
+          fine_line_repeat_action_=fine_line_next_side_action_;
+          fine_line_repeat_remaining_=fine_line_next_side_remaining_;
+          fine_line_next_side_action_=MissionAction::kNone;
+          fine_line_next_side_remaining_=0;
+          fine_line_next_action_sec_=now_sec+
+              (turning && MeasuredTurnDeg(config_,completed)>0.0
+                   ? config_.fine_line_post_turn_hold_sec : 0.0);
+        } else {
+          fine_line_repeat_action_=MissionAction::kNone;
+          fine_line_next_action_sec_=0.0;
+          if(!fine_line_observation_started_)
+            BeginFineLineObservation(now_sec+
+                (turning && MeasuredTurnDeg(config_,completed)>0.0
+                     ? config_.fine_line_post_turn_hold_sec : 0.0));
         }
       }
     }
     if (feedback.action_active && !feedback.action_done) return result;
     // Only a matching physical DONE advances each unit of the committed batch.
     if(fine_line_repeat_remaining_>0) {
+      if(now_sec+kEpsilon<fine_line_next_action_sec_) return result;
       if(allow_new_body_actions) {
         fine_line_pending_action_=fine_line_repeat_action_;
         result.action=Locomotion(fine_line_repeat_action_,
@@ -637,19 +655,26 @@ HurdleResult HurdleController::Compute(
       return result;
     }
     MissionAction correction = MissionAction::kNone;
+    MissionAction planned_side = MissionAction::kNone;
     if (line && (fresh || fine_line_stale_corrections_ <
                                   config_.fine_line_max_stale_corrections)) {
       const bool heading_outside =
           std::abs(line->heading_deg) > config_.fine_line_heading_tolerance_deg;
       const bool offset_outside =
           std::abs(line->offset_px) > config_.fine_line_offset_tolerance_px;
-      if (heading_outside && fine_line_turns_ < config_.fine_line_max_turns) {
+      const bool can_turn=heading_outside &&
+          fine_line_turns_<config_.fine_line_max_turns;
+      const bool can_side=offset_outside &&
+          fine_line_side_steps_<config_.fine_line_max_side_steps;
+      if (can_turn) {
         correction = line->heading_deg < 0.0 ? MissionAction::kTurnLeft
                                              : MissionAction::kTurnRight;
-      } else if (offset_outside &&
-                 fine_line_side_steps_ < config_.fine_line_max_side_steps) {
+        if(fresh && can_side)
+          planned_side=line->offset_px < 0.0 ? MissionAction::kLeftSideStep
+                                             : MissionAction::kRightSideStep;
+      } else if (can_side) {
         correction = line->offset_px < 0.0 ? MissionAction::kLeftSideStep
-                                            : MissionAction::kRightSideStep;
+                                           : MissionAction::kRightSideStep;
       } else if (heading_outside || offset_outside) {
         // Every remaining error has exhausted its own correction budget.
         FinishFineLineAlign(result);
@@ -668,27 +693,32 @@ HurdleResult HurdleController::Compute(
         correction == MissionAction::kTurnLeft || correction == MissionAction::kTurnRight
             ? static_cast<std::int16_t>(config_.fine_line_turn_yaw_deg) : 0);
     if (allow_new_body_actions) {
-      const bool turning=correction==MissionAction::kTurnLeft ||
-                         correction==MissionAction::kTurnRight;
-      const bool side=correction==MissionAction::kLeftSideStep ||
-                      correction==MissionAction::kRightSideStep;
-      const double measured=turning ? MeasuredTurnDeg(config_, correction) :
-                            side ? config_.fine_line_measured_side_px : 0.0;
-      const double error=turning ? std::abs(line->heading_deg) :
-                          side ? std::abs(line->offset_px) : 0.0;
-      const double tolerance=turning ? config_.fine_line_heading_tolerance_deg :
-                              config_.fine_line_offset_tolerance_px;
-      const int budget=turning ? config_.fine_line_max_turns-fine_line_turns_ :
-                       side ? config_.fine_line_max_side_steps-fine_line_side_steps_ : 1;
-      int repeats=1; // No calibration or stale: preserve single-action behavior.
-      if(fresh && measured>0.0 && std::isfinite(measured) &&
-         (turning || side) && budget>0) {
+      const auto repeats_for=[&](MissionAction action) {
+        const bool turning=action==MissionAction::kTurnLeft ||
+                           action==MissionAction::kTurnRight;
+        const bool side=action==MissionAction::kLeftSideStep ||
+                        action==MissionAction::kRightSideStep;
+        if(!turning && !side)return 1; // Lost-line forward search stays one unit.
+        const double measured=turning ? MeasuredTurnDeg(config_,action) :
+                                      config_.fine_line_measured_side_px;
+        const double error=turning ? std::abs(line->heading_deg) :
+                                    std::abs(line->offset_px);
+        const double tolerance=turning ? config_.fine_line_heading_tolerance_deg :
+                                        config_.fine_line_offset_tolerance_px;
+        const int budget=turning ? config_.fine_line_max_turns-fine_line_turns_ :
+                                  config_.fine_line_max_side_steps-fine_line_side_steps_;
+        if(!fresh || !std::isfinite(measured) || measured<=0.0 || budget<=0)
+          return 1; // Stale/unmeasured evidence never fabricates extra moves.
         const double needed=std::max(0.0,error-tolerance)/measured;
-        repeats=std::clamp(static_cast<int>(std::ceil(needed)),1,
+        return std::clamp(static_cast<int>(std::ceil(needed)),1,
             std::min(config_.fine_line_batch_max_repetitions,budget));
-      }
+      };
       fine_line_repeat_action_=correction;
-      fine_line_repeat_remaining_=repeats;
+      fine_line_repeat_remaining_=repeats_for(correction);
+      fine_line_next_side_action_=planned_side;
+      fine_line_next_side_remaining_=planned_side==MissionAction::kNone
+          ? 0 : repeats_for(planned_side);
+      fine_line_next_action_sec_=0.0;
       fine_line_pending_action_=correction;
       fine_line_pending_stale_=!fresh && correction!=MissionAction::kStepForwardHalf;
       fine_line_observing_=false;
@@ -923,8 +953,10 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   fine_line_fresh_.reset();
   fine_line_monitoring_ = fine_line_observing_ = fine_line_observation_started_ = false;
   fine_line_close_ = false;
-  fine_line_pending_action_=fine_line_repeat_action_=MissionAction::kNone;
-  fine_line_repeat_remaining_=0;
+  fine_line_pending_action_=fine_line_repeat_action_=
+      fine_line_next_side_action_=MissionAction::kNone;
+  fine_line_repeat_remaining_=fine_line_next_side_remaining_=0;
+  fine_line_next_action_sec_=0.0;
   fine_line_pending_stale_ = false;
   fine_line_observation_start_sec_ = 0.0;
   fine_line_turns_ = fine_line_side_steps_ = fine_line_stale_corrections_ =
