@@ -119,6 +119,8 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, fine_side_two_step_margin_px);
   const auto fine_motion=(a["common"] ? a["ball"]["control"] : a["ball"])["fine_motion"];
   CheckField(fine_motion,"max_repetitions",c.ball.fine_motion.max_repetitions,"ball.fine_motion");
+  CheckField(fine_motion,"forward_first_max_lateral_error_px",
+      c.ball.fine_motion.forward_first_max_lateral_error_px,"ball.fine_motion");
   CheckField(fine_motion,"forward_delta_u_px",c.ball.fine_motion.forward_delta_px.u,"ball.fine_motion");
   CheckField(fine_motion,"forward_delta_v_px",c.ball.fine_motion.forward_delta_px.v,"ball.fine_motion");
   CheckField(fine_motion,"backward_delta_u_px",c.ball.fine_motion.backward_delta_px.u,"ball.fine_motion");
@@ -130,9 +132,9 @@ void CheckConfiguration(const std::string& path) {
   FIELD(ball, lost_frames);
   FIELD(ball, upper_acquire_v_px);
   FIELD(ball, far_u_des_px);
-  FIELD(ball, approach_u_deadband_px);
-  FIELD(ball, approach_left_top_u_px);
-  FIELD(ball, approach_right_top_u_px);
+  FIELD(ball, approach_top_half_width_px);
+  FIELD(ball, approach_bottom_half_width_px);
+  FIELD(ball, approach_near_outer_margin_px);
   FIELD(ball, approach_short_v_px);
   FIELD(ball, approach_two_step_v_px);
   FIELD(ball, approach_direct_down_v_px);

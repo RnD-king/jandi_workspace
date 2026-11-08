@@ -8,9 +8,10 @@
 #include "vision_core/mission_controller.hpp"
 
 namespace vision {
-inline std::array<std::pair<const char*,double*>,8> BallFineMotionParameters(
+inline std::array<std::pair<const char*,double*>,9> BallFineMotionParameters(
     vision_core::BallFineMotionConfig& c) {
-  return {{{"ball_fine_forward_delta_u_px",&c.forward_delta_px.u},
+  return {{{"ball_fine_forward_first_max_lateral_error_px",&c.forward_first_max_lateral_error_px},
+      {"ball_fine_forward_delta_u_px",&c.forward_delta_px.u},
       {"ball_fine_forward_delta_v_px",&c.forward_delta_px.v},
       {"ball_fine_backward_delta_u_px",&c.backward_delta_px.u},
       {"ball_fine_backward_delta_v_px",&c.backward_delta_px.v},
@@ -85,8 +86,10 @@ inline void DeclareMissionParameters(rclcpp::Node& node,
   node.declare_parameter<int>("ball_down_search_max_steps",c.ball.down_search_max_steps);
   node.declare_parameter<double>("ball_down_search_inter_action_hold_sec",c.ball.down_search_inter_action_hold_sec);
   node.declare_parameter<double>("ball_approach_direct_down_v_px",c.ball.approach_direct_down_v_px);
-  node.declare_parameter<double>("ball_approach_left_top_u_px",c.ball.approach_left_top_u_px);
-  node.declare_parameter<double>("ball_approach_right_top_u_px",c.ball.approach_right_top_u_px);
+  node.declare_parameter<double>("ball_far_u_des_px",c.ball.far_u_des_px);
+  node.declare_parameter<double>("ball_approach_top_half_width_px",c.ball.approach_top_half_width_px);
+  node.declare_parameter<double>("ball_approach_bottom_half_width_px",c.ball.approach_bottom_half_width_px);
+  node.declare_parameter<double>("ball_approach_near_outer_margin_px",c.ball.approach_near_outer_margin_px);
   node.declare_parameter<int>("hurdle_down_search_max_steps",c.hurdle.down_search_max_steps);
   node.declare_parameter<double>("hurdle_down_search_inter_action_hold_sec",c.hurdle.down_search_inter_action_hold_sec);
   node.declare_parameter<double>("hurdle_contact_inter_action_hold_sec",c.hurdle.contact_inter_action_hold_sec);
@@ -134,7 +137,9 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   c.ball.pickup_shrink_max_failures=static_cast<int>(max_shrinks);
   for (const auto& setting : BallFineMotionParameters(c.ball.fine_motion)) {
     const double value=node.get_parameter(setting.first).as_double();
-    if (!std::isfinite(value)) throw std::invalid_argument(std::string(setting.first)+" must be finite");
+    if (!std::isfinite(value) ||
+        (std::string(setting.first)=="ball_fine_forward_first_max_lateral_error_px" && value<0.0))
+      throw std::invalid_argument(std::string(setting.first)+" must be valid and finite");
     *setting.second=value;
   }
   const auto read_int=[&](const char* name) {
@@ -169,13 +174,18 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   };
   c.ball.down_search_max_steps=turns("ball_down_search_max_steps");
   c.ball.approach_direct_down_v_px=node.get_parameter("ball_approach_direct_down_v_px").as_double();
-  c.ball.approach_left_top_u_px=node.get_parameter("ball_approach_left_top_u_px").as_double();
-  c.ball.approach_right_top_u_px=node.get_parameter("ball_approach_right_top_u_px").as_double();
-  if (!std::isfinite(c.ball.approach_left_top_u_px) ||
-      !std::isfinite(c.ball.approach_right_top_u_px) ||
-      c.ball.approach_left_top_u_px<0.0 ||
-      c.ball.approach_left_top_u_px>=c.ball.approach_right_top_u_px)
-    throw std::invalid_argument("BALL approach top endpoints must be finite and 0 <= left < right");
+  c.ball.far_u_des_px=node.get_parameter("ball_far_u_des_px").as_double();
+  c.ball.approach_top_half_width_px=node.get_parameter("ball_approach_top_half_width_px").as_double();
+  c.ball.approach_bottom_half_width_px=node.get_parameter("ball_approach_bottom_half_width_px").as_double();
+  c.ball.approach_near_outer_margin_px=node.get_parameter("ball_approach_near_outer_margin_px").as_double();
+  if (!std::isfinite(c.ball.far_u_des_px) || c.ball.far_u_des_px<0.0 ||
+      !std::isfinite(c.ball.approach_top_half_width_px) ||
+      c.ball.approach_top_half_width_px<=0.0 ||
+      !std::isfinite(c.ball.approach_bottom_half_width_px) ||
+      c.ball.approach_bottom_half_width_px<=0.0 ||
+      !std::isfinite(c.ball.approach_near_outer_margin_px) ||
+      c.ball.approach_near_outer_margin_px<0.0)
+    throw std::invalid_argument("BALL center/half-widths/near margin must be finite and valid");
   c.hurdle.down_search_max_steps=turns("hurdle_down_search_max_steps");
   const auto search_hold=[&](const char* name) {
     const double value=node.get_parameter(name).as_double();
@@ -255,16 +265,26 @@ inline bool ApplyLivePerceptionParameter(const rclcpp::Parameter& p,
     if (name!=setting.first) continue;
     if (p.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE || !std::isfinite(p.as_double()))
       throw std::invalid_argument(name+" must be a finite double");
+    if (name=="ball_fine_forward_first_max_lateral_error_px" && p.as_double()<0.0)
+      throw std::invalid_argument(name+" must be nonnegative");
     *setting.second=p.as_double();return true;
   }
-  if (name=="ball_approach_left_top_u_px" || name=="ball_approach_right_top_u_px") {
+  if (name=="ball_far_u_des_px" ||
+      name=="ball_approach_top_half_width_px" ||
+      name=="ball_approach_bottom_half_width_px" ||
+      name=="ball_approach_near_outer_margin_px") {
+    const bool half_width=name=="ball_approach_top_half_width_px" ||
+        name=="ball_approach_bottom_half_width_px";
     if (p.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
-        !std::isfinite(p.as_double()) || p.as_double()<0.0)
-      throw std::invalid_argument(name+" must be a finite nonnegative double");
-    if (name=="ball_approach_left_top_u_px") c.ball.approach_left_top_u_px=p.as_double();
-    else c.ball.approach_right_top_u_px=p.as_double();
-    // Validate left/right order after the full parameter batch, so a paired
-    // endpoint move is atomic in the existing adapter callbacks.
+        !std::isfinite(p.as_double()) ||
+        (half_width ? p.as_double()<=0.0 : p.as_double()<0.0))
+      throw std::invalid_argument(name+" must be a finite valid geometry parameter");
+    if (name=="ball_far_u_des_px") c.ball.far_u_des_px=p.as_double();
+    else if (name=="ball_approach_top_half_width_px")
+      c.ball.approach_top_half_width_px=p.as_double();
+    else if (name=="ball_approach_bottom_half_width_px")
+      c.ball.approach_bottom_half_width_px=p.as_double();
+    else c.ball.approach_near_outer_margin_px=p.as_double();
     return true;
   }
   for(const auto& entry:kObjectFilterDoubles) if(name==entry.name) {

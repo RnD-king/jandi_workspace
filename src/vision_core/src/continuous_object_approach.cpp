@@ -107,7 +107,8 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
       ball_association_tracker_.Seed(*route.last);
     }
   } else if (route.mission==MissionType::kHurdle) {
-    if (route.near) hurdle_controller_.EnterContinuousNear(input.now_sec);
+    if (route.near) hurdle_controller_.EnterContinuousNear(
+        input.now_sec,route.hurdle_down_ready_action);
     else hurdle_controller_.EnterContinuousRecovery(recovery_target,route.good_hits,input.image_width,input.image_height,input.now_sec);
     hurdle_result_.mode=route.near ? HurdleMode::kWaitCameraDown : HurdleMode::kRecoveryStep;
     hurdle_result_.active=true;
@@ -133,6 +134,7 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
     actual_line_stability_history_.clear();
   }
   continuous_={};approach_evidence_={};
+  hurdle_down_ready_accumulator_.Reset();
   approach_goal_probe_=approach_return_ball_view_=false;
   approach_goal_empty_retries_=0;
   approach_goal_bad_depth_frames_=0;

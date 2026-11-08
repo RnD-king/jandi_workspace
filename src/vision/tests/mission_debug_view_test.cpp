@@ -224,8 +224,9 @@ int main() {
         "GOAL far AUTO edge margin absent while shared LINE plan is active");
   m.approach_mission=vision_core::MissionType::kNone;
 
-  c.ball.far_u_des_px=380;c.ball.approach_u_deadband_px=90;
-  c.ball.approach_left_top_u_px=290;c.ball.approach_right_top_u_px=470;
+  c.ball.far_u_des_px=380;
+  c.ball.approach_top_half_width_px=90;c.ball.approach_bottom_half_width_px=90;
+  c.ball.approach_near_outer_margin_px=60;
   c.ball.approach_short_v_px=100;c.ball.approach_two_step_v_px=240;
   c.ball.approach_direct_down_v_px=355;
   m.active_mission=vision_core::MissionType::kBall;
@@ -294,14 +295,14 @@ int main() {
         direct.image.at<cv::Vec3b>(390,380)!=cv::Vec3b(0,0,0),
         "central 1/2 step threshold did not move to the configured row");
 
-  c.ball.approach_left_top_u_px=390;c.ball.approach_right_top_u_px=530;
+  c.ball.approach_top_half_width_px=70;
   direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
   const auto at300=c.ball.ApproachBounds(300,480);
   const int left300=static_cast<int>(std::lround(at300.first));
   const int right300=static_cast<int>(std::lround(at300.second));
   Check(direct.image.at<cv::Vec3b>(300,left300)!=cv::Vec3b(0,0,0) &&
         direct.image.at<cv::Vec3b>(300,right300)!=cv::Vec3b(0,0,0) &&
-        direct.image.at<cv::Vec3b>(100,390)==cv::Vec3b(0,0,0),
+        direct.image.at<cv::Vec3b>(100,310)==cv::Vec3b(0,0,0),
         "near boundaries are not the configured converging diagonals");
   const int bottom_left=static_cast<int>(std::lround(c.ball.ApproachBounds(479,480).first));
   const int bottom_right=static_cast<int>(std::lround(c.ball.ApproachBounds(479,480).second));
@@ -313,14 +314,16 @@ int main() {
         direct.image.at<cv::Vec3b>(300,static_cast<int>(std::lround(outer.second)))!=cv::Vec3b(0,0,0),
         "outer near 2-turn diagonal bands are absent");
 
-  c.ball.approach_left_top_u_px=450;
+  c.ball.approach_top_half_width_px=40;
   direct=vision::RenderMissionDebug(image,empty,{},c,{},m,forward,{},state);
-  const int shifted_left=static_cast<int>(std::lround(
-      c.ball.ApproachBounds(300,480).first));
+  const auto shifted=c.ball.ApproachBounds(300,480);
+  const int shifted_left=static_cast<int>(std::lround(shifted.first));
+  const int shifted_right=static_cast<int>(std::lround(shifted.second));
   Check(direct.image.at<cv::Vec3b>(300,shifted_left)!=cv::Vec3b(0,0,0) &&
+        direct.image.at<cv::Vec3b>(300,shifted_right)!=cv::Vec3b(0,0,0) &&
         direct.image.at<cv::Vec3b>(300,left300)==cv::Vec3b(0,0,0) &&
-        direct.image.at<cv::Vec3b>(300,right300)!=cv::Vec3b(0,0,0),
-        "left top endpoint tuning did not shift only the left diagonal");
+        direct.image.at<cv::Vec3b>(300,right300)==cv::Vec3b(0,0,0),
+        "shared half-width tuning did not shift both diagonals symmetrically");
 
   // The near guides must disappear in DOWN view and after active BALL starts.
   direct=vision::RenderMissionDebug(image,empty,{},c,{},m,camera,{},state);

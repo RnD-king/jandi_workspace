@@ -7,6 +7,7 @@ namespace vision_core {
 // completed body action. A zero vector means this direction is uncalibrated.
 struct BallFineMotionConfig {
   int max_repetitions{3};
+  double forward_first_max_lateral_error_px{60.0}; // Prefer measured forward prefixes near the polygon's lateral extent.
   Point2 forward_delta_px,backward_delta_px,left_delta_px,right_delta_px;
   bool HasCalibration() const;
 };

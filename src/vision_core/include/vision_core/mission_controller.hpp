@@ -443,6 +443,8 @@ private:
     std::optional<double> depth;
     std::optional<Point2> last_ready_center; // BALL/GOAL only: qualified READY pixel mean.
     LineGuide hurdle_last_guide,hurdle_last_mean_guide; // HURDLE keeps actual floor LINE recovery.
+    MissionAction hurdle_down_ready_action{MissionAction::kLineStraightUnit};
+    bool hurdle_down_final_acknowledged{false}, hurdle_down_ready_finalized{false};
     bool near_observing{false}, near_qualified{false};
     double near_observation_started_sec{0.0}, near_sum_u{0.0}, near_sum_v{0.0};
     int near_valid_count{0}, near_attempts{0};
@@ -665,6 +667,7 @@ private:
   double last_line_image_center_u_{0.0};
   LineP2pController line_p2p_controller_;
   LineGuideAccumulator line_guide_accumulator_;
+  LineGuideAccumulator hurdle_down_ready_accumulator_; // Extra pre-DOWN unit only.
   struct MovingObjectSample {
     double now_sec{0.0};
     std::optional<ObjectTarget> target;

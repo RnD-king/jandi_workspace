@@ -202,7 +202,9 @@ public:
     declare_parameter<int>("test_ball_mission_index",algorithm_defaults.test_ball_mission_index);
     declare_parameter<int>("test_goal_mission_index",algorithm_defaults.test_goal_mission_index);
     declare_parameter<double>("ball_far_u_des_px", algorithm_defaults.ball.far_u_des_px);
-    declare_parameter<double>("ball_approach_u_deadband_px", algorithm_defaults.ball.approach_u_deadband_px);
+    declare_parameter<double>("ball_approach_top_half_width_px", algorithm_defaults.ball.approach_top_half_width_px);
+    declare_parameter<double>("ball_approach_bottom_half_width_px", algorithm_defaults.ball.approach_bottom_half_width_px);
+    declare_parameter<double>("ball_approach_near_outer_margin_px", algorithm_defaults.ball.approach_near_outer_margin_px);
     declare_parameter<double>("ball_upper_acquire_v_px", algorithm_defaults.ball.upper_acquire_v_px);
     declare_parameter<double>("ball_approach_two_step_v_px", algorithm_defaults.ball.approach_two_step_v_px);
     declare_parameter<double>("goal_target_u_px", algorithm_defaults.goal.target_u_px);
@@ -342,7 +344,9 @@ public:
     goal_cmd_cfg.shoot_yaw_limit_deg =
         get_parameter("goal_shoot_yaw_limit_deg").as_double();
     ball_cmd_cfg.far_u_des_px = get_parameter("ball_far_u_des_px").as_double();
-    ball_cmd_cfg.approach_u_deadband_px = get_parameter("ball_approach_u_deadband_px").as_double();
+    ball_cmd_cfg.approach_top_half_width_px = get_parameter("ball_approach_top_half_width_px").as_double();
+    ball_cmd_cfg.approach_bottom_half_width_px = get_parameter("ball_approach_bottom_half_width_px").as_double();
+    ball_cmd_cfg.approach_near_outer_margin_px = get_parameter("ball_approach_near_outer_margin_px").as_double();
     ball_cmd_cfg.upper_acquire_v_px = get_parameter("ball_upper_acquire_v_px").as_double();
     ball_cmd_cfg.approach_two_step_v_px = get_parameter("ball_approach_two_step_v_px").as_double();
     goal_cmd_cfg.target_u_px = get_parameter("goal_target_u_px").as_double();
@@ -905,7 +909,9 @@ private:
       else if (name == "line_p2p_heading_gain") target = &candidate.line_p2p.heading_gain;
       else if (name == "line_p2p_steering_deadband") target = &candidate.line_p2p.steering_deadband;
       else if (name == "ball_far_u_des_px") target = &candidate.ball.far_u_des_px;
-      else if (name == "ball_approach_u_deadband_px") target = &candidate.ball.approach_u_deadband_px;
+      else if (name == "ball_approach_top_half_width_px") target = &candidate.ball.approach_top_half_width_px;
+      else if (name == "ball_approach_bottom_half_width_px") target = &candidate.ball.approach_bottom_half_width_px;
+      else if (name == "ball_approach_near_outer_margin_px") target = &candidate.ball.approach_near_outer_margin_px;
       else if (name == "ball_upper_acquire_v_px") target = &candidate.ball.upper_acquire_v_px;
       else if (name == "ball_approach_two_step_v_px") target = &candidate.ball.approach_two_step_v_px;
       else if (name == "goal_target_u_px") target = &candidate.goal.target_u_px;

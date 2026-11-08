@@ -43,6 +43,22 @@ ActionExecutionFeedback Running() {
 ActionExecutionFeedback Done() {
   ActionExecutionFeedback f;f.action_done=true;return f;
 }
+void InitialDownMotionUsesLastReadyAction() {
+  auto config=LoadDefaultAlgorithmConfig().hurdle;
+  for (const auto first : {MissionAction::kLineLeftUnit,
+                           MissionAction::kLineStraightUnit,
+                           MissionAction::kLineRightUnitTurnFirst}) {
+    HurdleController controller(config,3.0);
+    controller.EnterContinuousNear(0.0,first);
+    const CameraFeedback down{CameraMode::kDown,true};
+    auto result=controller.Compute({},640,480,0.1,down,{}, {},true);
+    Require(result.mode==HurdleMode::kDownSearch,
+            "HURDLE did not enter DOWN");
+    result=controller.Compute({},640,480,0.2,down,{}, {},true);
+    Require(result.action.action==first,
+            "HURDLE first DOWN unit ignored final extra LINE READY");
+  }
+}
 void FirstTwoMovingVotes(double v,MissionAction expected) {
   auto config=LoadDefaultAlgorithmConfig().hurdle;
   config.stable_window=10;config.stable_min_hits=7;
@@ -161,6 +177,7 @@ void DownIgnoresOutOfRangeDepthButForwardDoesNot() {
 } // namespace
 
 int main() {
+  InitialDownMotionUsesLastReadyAction();
   FirstTwoMovingVotes(100,MissionAction::kLineStraightUnit);
   FirstTwoMovingVotes(120,MissionAction::kStepForwardOne);
   FirstTwoMovingVotes(240,MissionAction::kDefaultPoseMode);

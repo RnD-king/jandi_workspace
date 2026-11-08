@@ -41,6 +41,11 @@ MissionController::MissionController(const MissionControllerConfig &config)
       line_plan_(config_.line_p2p,config_.line.line_stable_window,config_.line.line_stable_min_hits),
       line_p2p_controller_(config_.line_p2p),
       line_guide_accumulator_(config_.line_p2p),
+      hurdle_down_ready_accumulator_(
+          config_.line_p2p.failure_min_valid_samples,
+          config_.line_p2p.observation_start_ratio,
+          config_.line.line_stable_window,
+          config_.line.line_stable_min_hits),
       ball_controller_(config_.ball, config_.camera_motion_timeout_sec),
       hurdle_controller_(config_.hurdle, config_.camera_motion_timeout_sec),
       goal_controller_(config_.goal, config_.camera_motion_timeout_sec),
@@ -3162,8 +3167,10 @@ void MissionController::SetLivePerceptionTuning(
   auto updated = config_;
   updated.ball.approach_direct_down_v_px =
       candidate.ball.approach_direct_down_v_px;
-  updated.ball.approach_left_top_u_px = candidate.ball.approach_left_top_u_px;
-  updated.ball.approach_right_top_u_px = candidate.ball.approach_right_top_u_px;
+  updated.ball.far_u_des_px = candidate.ball.far_u_des_px;
+  updated.ball.approach_top_half_width_px = candidate.ball.approach_top_half_width_px;
+  updated.ball.approach_bottom_half_width_px = candidate.ball.approach_bottom_half_width_px;
+  updated.ball.approach_near_outer_margin_px = candidate.ball.approach_near_outer_margin_px;
   updated.ball.pickup_u1_px = candidate.ball.pickup_u1_px;
   updated.ball.pickup_u2_px = candidate.ball.pickup_u2_px;
   updated.ball.pickup_top_inset_px = candidate.ball.pickup_top_inset_px;
@@ -3287,6 +3294,11 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   config_ = updated;
   line_guide_accumulator_ =
       LineGuideAccumulator(config_.line_p2p);
+  hurdle_down_ready_accumulator_ =
+      LineGuideAccumulator(config_.line_p2p.failure_min_valid_samples,
+          config_.line_p2p.observation_start_ratio,
+          config_.line.line_stable_window,
+          config_.line.line_stable_min_hits);
   line_p2p_controller_ = LineP2pController(config_.line_p2p);
   line_plan_.UpdateConfig(config_.line_p2p);
   ball_controller_.UpdateTuning(config_.ball);
@@ -3372,6 +3384,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   far_goal_depth_probe_={};
   approach_camera_started_=-1;
   line_plan_.Reset();
+  hurdle_down_ready_accumulator_.Reset();
   candidate_ = {};
   line_ready_handled_id_ = line_auxiliary_id_ = 0;
   line_auxiliary_done_ = line_auxiliary_observing_ = false;

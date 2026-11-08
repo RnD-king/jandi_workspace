@@ -93,6 +93,21 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
   const double initial_distance=PickupPolygonDistance(polygon,center);
   double best_distance=initial_distance;
   bool best_inside=false;
+  // The robot's measured forward motion is oblique in the DOWN image.
+  // If the ball is still above pickup and not excessively far sideways,
+  // prefer a safe improving forward prefix before fine lateral correction.
+  double min_u=polygon.front().u,max_u=min_u,min_v=polygon.front().v;
+  for(const auto& vertex:polygon) {
+    min_u=std::min(min_u,vertex.u);
+    max_u=std::max(max_u,vertex.u);
+    min_v=std::min(min_v,vertex.v);
+  }
+  const bool forward_first=center.v<min_v &&
+      center.u>=min_u-config.forward_first_max_lateral_error_px &&
+      center.u<=max_u+config.forward_first_max_lateral_error_px;
+  BallFineMotionPlan forward_plan;
+  double forward_distance=initial_distance;
+  bool forward_inside=false;
   for(std::size_t i=0;i<actions.size();++i) {
     if(!Calibrated(deltas[i])) continue;
     double previous=initial_distance;
@@ -113,6 +128,18 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
       }
       const double distance=PickupPolygonDistance(polygon,predicted);
       if(!inside && distance>=previous-1e-9) break;
+      if(i==0 && forward_first && predicted.v>center.v &&
+         predicted.u>=min_u-config.forward_first_max_lateral_error_px &&
+         predicted.u<=max_u+config.forward_first_max_lateral_error_px) {
+        if (inside && (!forward_inside || n<forward_plan.repetitions)) {
+          forward_plan={actions[i],n,predicted};
+          forward_inside=true;
+          forward_distance=0.0;
+        } else if (!forward_inside && distance<forward_distance-1e-9) {
+          forward_plan={actions[i],n,predicted};
+          forward_distance=distance;
+        }
+      }
       if(inside) {
         if(!best_inside || n<best.repetitions) {
           best={actions[i],n,predicted};
@@ -131,6 +158,11 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
       previous=distance;
     }
   }
+  // Entering the polygon is always better than an outside-only forward
+  // preference. Otherwise retain the forward-first policy and reobserve
+  // only after the chosen 1..3-action batch.
+  if(forward_plan.repetitions>0 && (forward_inside || !best_inside))
+    return forward_plan;
   return best;
 }
 } // namespace vision_core

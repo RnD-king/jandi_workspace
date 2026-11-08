@@ -61,31 +61,24 @@ struct BallConfig {
   int entry_min_hits{}; // LINE entry only; independent of FINE stability.
   int lost_frames{};
   double far_u_des_px{};
-  double approach_u_deadband_px{};
-  double approach_left_top_u_px{};
-  double approach_right_top_u_px{};
-  double approach_extreme_turn_top_margin_px{45.0}; // Outer near-zone slope at v=0.
-  // Top endpoints are at v=0; bottom endpoints keep the legacy center/band
-  // at v=image_height-1. Use the same interpolation for control and drawing.
+  double approach_top_half_width_px{};
+  double approach_bottom_half_width_px{};
+  double approach_near_outer_margin_px{60.0}; // Constant horizontal shift: identical inner/outer slopes.
+  // The far and near grids share this center and the same two inner diagonals.
   std::pair<double,double> ApproachBounds(double v, int image_height) const {
     const double t=std::clamp(v/std::max(1,image_height-1),0.0,1.0);
-    const double left_bottom=far_u_des_px-approach_u_deadband_px;
-    const double right_bottom=far_u_des_px+approach_u_deadband_px;
-    if (t==1.0) return {left_bottom,right_bottom};
-    return {approach_left_top_u_px+t*(left_bottom-approach_left_top_u_px),
-            approach_right_top_u_px+t*(right_bottom-approach_right_top_u_px)};
+    const double half_width=approach_top_half_width_px+
+        t*(approach_bottom_half_width_px-approach_top_half_width_px);
+    return {far_u_des_px-half_width,far_u_des_px+half_width};
   }
   std::pair<double,double> ExtremeApproachBounds(double v,int image_height) const {
     const auto inner=ApproachBounds(v,image_height);
-    const double t=std::clamp(v/std::max(1,image_height-1),0.0,1.0);
-    const double margin=(1.0-t)*approach_extreme_turn_top_margin_px+
-        t*approach_extreme_turn_margin_px;
-    return {inner.first-margin,inner.second+margin};
+    return {inner.first-approach_near_outer_margin_px,
+            inner.second+approach_near_outer_margin_px};
   }
   double upper_acquire_v_px{};
   double approach_two_step_v_px{};
   double approach_direct_down_v_px{}; // Zone 8 only: one step instead of two before DOWN.
-  double approach_extreme_turn_margin_px{90.0}; // Extra distance beyond left/right band for 2 turns.
   double fine_side_two_step_margin_px{};
   BallFineMotionConfig fine_motion;
   int pickup_max_attempts{};
