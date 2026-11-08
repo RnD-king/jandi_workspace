@@ -73,22 +73,47 @@ void ForwardFirstOnMeasuredPolygon() {
   c.left_delta_px={40,15};
   c.backward_delta_px={-35,-18};
   c.forward_first_max_lateral_error_px=60;
-  // A single right step reaches closer to the boundary, but forward
-  // approaches the correct vertical band; lateral will be refined AFTER DONE.
+  // Once v reaches the polygon's vertical band, reobserve instead of
+  // continuing forward merely to reduce the lateral error.
   const auto plan=PlanBallFineMotion(c,{505,250},polygon,640,480,3);
   assert(plan.action==MissionAction::kStepForwardHalf &&
-         plan.repetitions==2 &&
-         plan.predicted_center_px.u==465 &&
-         plan.predicted_center_px.v==334);
-  // Far outside lateral tolerance: favor measured lateral motion.
+         plan.repetitions==1 &&
+         plan.predicted_center_px.u==485 &&
+         plan.predicted_center_px.v==292);
+  // The start is inside the lateral margin, even though ALL predicted
+  // forward positions leave it; vertical approach still wins.
+  const auto boundary=PlanBallFineMotion(c,{325,150},polygon,640,480,3);
+  assert(boundary.action==MissionAction::kStepForwardHalf &&
+         boundary.repetitions==3 &&
+         boundary.predicted_center_px.u==265 &&
+         boundary.predicted_center_px.v==276);
+  // Even if the predicted polygon distance grows due to u drift, forward
+  // has priority when the start is close laterally and above the polygon.
+  const auto close=PlanBallFineMotion(c,{325,250},polygon,640,480,3);
+  assert(close.action==MissionAction::kStepForwardHalf &&
+         close.repetitions==1 && close.predicted_center_px.u==305);
+  // A lateral motion could already enter the region, but the agreed
+  // forward-first rule is intentionally unconditional within this band.
+  const auto lateral_inside=PlanBallFineMotion(c,{375,250},polygon,640,480,3);
+  assert(lateral_inside.action==MissionAction::kStepForwardHalf);
+  // Far outside lateral tolerance: retain measured distance optimization.
   const auto far=PlanBallFineMotion(c,{590,250},polygon,640,480,3);
   assert(far.action==MissionAction::kRightSideStep);
   // If already vertically aligned, the forward-first policy is disabled.
   const auto aligned=PlanBallFineMotion(c,{505,300},polygon,640,480,3);
   assert(aligned.action==MissionAction::kRightSideStep);
   // A configured one-action cap must remain a hard limit.
-  const auto limited=PlanBallFineMotion(c,{505,250},polygon,640,480,1);
-  assert(limited.repetitions<=1);
+  const auto limited=PlanBallFineMotion(c,{325,150},polygon,640,480,1);
+  assert(limited.action==MissionAction::kStepForwardHalf &&
+         limited.repetitions==1);
+  // Do not overshoot below the entire pickup band.
+  c.forward_delta_px={-20,100};
+  const auto overshoot=PlanBallFineMotion(c,{400,250},polygon,640,480,3);
+  assert(overshoot.action!=MissionAction::kStepForwardHalf);
+  // A calibrated forward prediction outside the image must not execute.
+  c.forward_delta_px={-500,42};
+  const auto offscreen=PlanBallFineMotion(c,{400,150},polygon,640,480,3);
+  assert(offscreen.action!=MissionAction::kStepForwardHalf);
 }
 void DirectRepeat(MissionAction action) {
   auto c=Config();Point2 start;
