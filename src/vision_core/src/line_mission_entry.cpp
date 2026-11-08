@@ -208,10 +208,10 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   auto raw = output.line_features.guide;
   const auto actual_line_guide=raw;
-  const bool finish_floor_usable=actual_line_guide.valid && output.line_features.n_visible>=4;
+  const bool finish_floor_usable=actual_line_guide.valid && output.line_features.n_visible>=3;
   if (finish_course && !finish_floor_usable) {
-    // Finish steering uses floor LINE only. Objects, including a finish gate
-    // detected as HURDLE, must never substitute for missing floor evidence.
+    // Finish steering needs >=3 valid floor LINE points. Objects, including a
+    // finish gate detected as HURDLE, must never substitute for missing floor evidence.
     // ComputeLineAction keeps the existing straight fallback for this case.
     raw={};
   }

@@ -76,19 +76,23 @@ bool MissionController::FinishCourseEnabled(const MissionFrameInput& input) cons
 
 Features MissionController::ComputeLineFeaturesForFrame(
     const MissionFrameInput& input, const FeatureConfig& features) const {
-  // Only the carrying AUTO LINE walk toward a GOAL/retry uses three points.
-  // BALL pickup, HURDLE DOWN, FORWARD LINE and isolated/manual trials retain
-  // their existing input gates. RANSAC for four or more points is unchanged.
+  // Carrying GOAL-return LINE and the verified finish straight both steer
+  // from three floor points. Ordinary LINE, HURDLE, and isolated/manual
+  // trials keep their four-point gate. RANSAC for >=4 is unchanged.
   const bool goal_line_view = config_.test_mission == MissionType::kNone &&
       !input.manual_observation_control && active_mission_ == MissionType::kLine &&
       !FinishCourseEnabled(input) &&
       has_ball_ && config_.enable_goal && post_pickup_goal_line_gate_active_ &&
       input.camera_feedback.settled &&
       input.camera_feedback.actual_mode == CameraMode::kBallView;
+  const bool finish_line_view = FinishCourseEnabled(input) &&
+      input.camera_feedback.settled &&
+      input.camera_feedback.actual_mode == CameraMode::kForward;
+  const bool allow_three_points = goal_line_view || finish_line_view;
   auto frame_features = features;
-  if (goal_line_view) frame_features.guide_min_points = 3;
+  if (allow_three_points) frame_features.guide_min_points = 3;
   return ComputeLineFeatures(input.line_centers, input.image_width,
-      input.image_height, frame_features, goal_line_view ? 3 : 4);
+      input.image_height, frame_features, allow_three_points ? 3 : 4);
 }
 
 ActionRequest MissionController::CruiseAction(const LineGuide &guide,

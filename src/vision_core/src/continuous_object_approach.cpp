@@ -1077,10 +1077,13 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         const bool extreme=left ? u<outer.first : u>outer.second;
         continuous_.near_actions.push_back(turn);
         if(extreme) continuous_.near_actions.push_back(turn);
-        // Side zones commit turn(s) + two forward steps + DOWN as one chain.
-        continuous_.near_actions.push_back(MissionAction::kStepForwardTwo);
+        // All near-grid columns share the same v split: turn(s), then
+        // two or one physical forward step(s), then camera DOWN.
+        continuous_.near_actions.push_back(
+            v<config_.ball.approach_direct_down_v_px ?
+                MissionAction::kStepForwardTwo : MissionAction::kStepForwardOne);
       } else {
-        // Center is split by the lower horizontal line: 2 or 1 step.
+        // Center uses the same lower horizontal split as both side zones.
         continuous_.near_actions.push_back(
             v<config_.ball.approach_direct_down_v_px ?
                 MissionAction::kStepForwardTwo : MissionAction::kStepForwardOne);
