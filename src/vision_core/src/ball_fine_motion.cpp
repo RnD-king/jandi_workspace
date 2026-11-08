@@ -93,21 +93,42 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
   const double initial_distance=PickupPolygonDistance(polygon,center);
   double best_distance=initial_distance;
   bool best_inside=false;
-  // The robot's measured forward motion is oblique in the DOWN image.
-  // If the ball is still above pickup and not excessively far sideways,
-  // prefer a safe improving forward prefix before fine lateral correction.
-  double min_u=polygon.front().u,max_u=min_u,min_v=polygon.front().v;
+  // If the ball is above the pickup region and starts within the
+  // configured lateral margin, prioritize measured forward movement.
+  // Its predicted u may leave that margin: vertical approach comes first.
+  double min_u=polygon.front().u,max_u=min_u,min_v=polygon.front().v,max_v=min_v;
   for(const auto& vertex:polygon) {
     min_u=std::min(min_u,vertex.u);
     max_u=std::max(max_u,vertex.u);
     min_v=std::min(min_v,vertex.v);
+    max_v=std::max(max_v,vertex.v);
   }
   const bool forward_first=center.v<min_v &&
       center.u>=min_u-config.forward_first_max_lateral_error_px &&
       center.u<=max_u+config.forward_first_max_lateral_error_px;
-  BallFineMotionPlan forward_plan;
-  double forward_distance=initial_distance;
-  bool forward_inside=false;
+  if(forward_first && Calibrated(deltas[0]) && deltas[0].v>0) {
+    BallFineMotionPlan forward_plan;
+    for(int n=1;n<=limit;++n) {
+      const Point2 predicted{center.u+n*deltas[0].u,center.v+n*deltas[0].v};
+      if(!std::isfinite(predicted.u) || !std::isfinite(predicted.v) ||
+         predicted.u<0 || predicted.u>=image_width ||
+         predicted.v<0 || predicted.v>=image_height) break;
+      const bool inside=PickupPolygonContains(polygon,predicted);
+      // Stop before passing below the whole pickup region.
+      if(!inside && predicted.v>max_v) break;
+      if(!inside) {
+        int crossings=0;
+        for(std::size_t edge=0;edge<polygon.size();++edge)
+          if(PickupSegmentsIntersect(center,predicted,polygon[edge],
+                  polygon[(edge+1)%polygon.size()])) ++crossings;
+        if(crossings>=2) break;
+      }
+      forward_plan={MissionAction::kStepForwardHalf,n,predicted};
+      // Once the vertical band is reached, reobserve and correct u.
+      if(inside || predicted.v>=min_v) break;
+    }
+    if(forward_plan.repetitions>0) return forward_plan;
+  }
   for(std::size_t i=0;i<actions.size();++i) {
     if(!Calibrated(deltas[i])) continue;
     double previous=initial_distance;
@@ -128,18 +149,6 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
       }
       const double distance=PickupPolygonDistance(polygon,predicted);
       if(!inside && distance>=previous-1e-9) break;
-      if(i==0 && forward_first && predicted.v>center.v &&
-         predicted.u>=min_u-config.forward_first_max_lateral_error_px &&
-         predicted.u<=max_u+config.forward_first_max_lateral_error_px) {
-        if (inside && (!forward_inside || n<forward_plan.repetitions)) {
-          forward_plan={actions[i],n,predicted};
-          forward_inside=true;
-          forward_distance=0.0;
-        } else if (!forward_inside && distance<forward_distance-1e-9) {
-          forward_plan={actions[i],n,predicted};
-          forward_distance=distance;
-        }
-      }
       if(inside) {
         if(!best_inside || n<best.repetitions) {
           best={actions[i],n,predicted};
@@ -158,11 +167,6 @@ BallFineMotionPlan PlanBallFineMotion(const BallFineMotionConfig& config,
       previous=distance;
     }
   }
-  // Entering the polygon is always better than an outside-only forward
-  // preference. Otherwise retain the forward-first policy and reobserve
-  // only after the chosen 1..3-action batch.
-  if(forward_plan.repetitions>0 && (forward_inside || !best_inside))
-    return forward_plan;
   return best;
 }
 } // namespace vision_core
