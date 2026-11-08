@@ -49,23 +49,39 @@ int main(int argc,char** argv) {
           applied.ball.fine_motion.right_delta_px.u==-50 && applied.ball.fine_motion.right_delta_px.v==3,
           "BALL fine calibration startup override was lost");
     for (const auto& setting : vision::BallFineMotionParameters(applied.ball.fine_motion)) {
-      Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter(setting.first,-7.5),applied) &&
-            *setting.second==-7.5,"signed BALL fine calibration live value rejected");
+      const bool nonnegative=std::string(setting.first)=="ball_fine_forward_first_max_lateral_error_px";
+      const double valid=nonnegative ? 60.0 : -7.5;
+      Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter(setting.first,valid),applied) &&
+            *setting.second==valid,"valid BALL fine parameter live value rejected");
+      // The priority margin is a distance, unlike the signed measured deltas.
+      // Check both live tuning and startup validation without weakening either.
+      if(nonnegative) {
+        bool rejected=false;
+        try {vision::ApplyLivePerceptionParameter(rclcpp::Parameter(setting.first,-7.5),applied);}
+        catch (const std::invalid_argument&) {rejected=true;}
+        Check(rejected && *setting.second==valid,"negative BALL fine margin accepted/changed candidate");
+        node->set_parameter(rclcpp::Parameter(setting.first,-7.5));
+        rejected=false;
+        try {vision::ReadMissionParameters(*node,applied);}
+        catch (const std::invalid_argument&) {rejected=true;}
+        Check(rejected,"negative BALL fine margin startup value accepted");
+        node->set_parameter(rclcpp::Parameter(setting.first,valid));
+      }
       for (double bad : {std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()}) {
         bool rejected=false;
         try {vision::ApplyLivePerceptionParameter(rclcpp::Parameter(setting.first,bad),applied);}
         catch (const std::invalid_argument&) {rejected=true;}
-        Check(rejected && *setting.second==-7.5,"nonfinite fine delta accepted/changed candidate");
+        Check(rejected && *setting.second==valid,"nonfinite BALL fine parameter accepted/changed candidate");
         node->set_parameter(rclcpp::Parameter(setting.first,bad));
         rejected=false;
         try {vision::ReadMissionParameters(*node,applied);} catch (const std::invalid_argument&) {rejected=true;}
-        Check(rejected,"nonfinite fine delta startup value accepted");
+        Check(rejected,"nonfinite BALL fine parameter startup value accepted");
       }
       node->set_parameter(rclcpp::Parameter(setting.first,0.0));
       bool rejected=false;
       try {vision::ApplyLivePerceptionParameter(rclcpp::Parameter(setting.first,5),applied);}
       catch (const std::invalid_argument&) {rejected=true;}
-      Check(rejected,"integer fine delta accepted");
+      Check(rejected,"integer BALL fine parameter accepted");
     }
     for (int bad : {0,4,-1}) {
       bool rejected=false;
