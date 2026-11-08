@@ -41,7 +41,11 @@ MissionController::MissionController(const MissionControllerConfig &config)
       line_plan_(config_.line_p2p,config_.line.line_stable_window,config_.line.line_stable_min_hits),
       line_p2p_controller_(config_.line_p2p),
       line_guide_accumulator_(config_.line_p2p),
-      hurdle_down_ready_accumulator_(config_.line_p2p),
+      hurdle_down_ready_accumulator_(
+          config_.line_p2p.failure_min_valid_samples,
+          config_.line_p2p.observation_start_ratio,
+          config_.line.line_stable_window,
+          config_.line.line_stable_min_hits),
       ball_controller_(config_.ball, config_.camera_motion_timeout_sec),
       hurdle_controller_(config_.hurdle, config_.camera_motion_timeout_sec),
       goal_controller_(config_.goal, config_.camera_motion_timeout_sec),
@@ -3291,7 +3295,10 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   line_guide_accumulator_ =
       LineGuideAccumulator(config_.line_p2p);
   hurdle_down_ready_accumulator_ =
-      LineGuideAccumulator(config_.line_p2p);
+      LineGuideAccumulator(config_.line_p2p.failure_min_valid_samples,
+          config_.line_p2p.observation_start_ratio,
+          config_.line.line_stable_window,
+          config_.line.line_stable_min_hits);
   line_p2p_controller_ = LineP2pController(config_.line_p2p);
   line_plan_.UpdateConfig(config_.line_p2p);
   ball_controller_.UpdateTuning(config_.ball);
