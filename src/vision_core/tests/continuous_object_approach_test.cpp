@@ -775,6 +775,7 @@ void NearAndIdentity() {
 }
 void HurdleAndGoal() {
   auto c=Config();c.enable_ball=false;c.enable_hurdle=true;
+  c.line_p2p.right_unit_action=36; // HURDLE's right LINE unit is 36.
   Driver h(c);h.in.ball_target.reset();h.in.hurdle_target=Target();h.in.hurdle_track_id=5;
   h.Warm();h.Block();h.Block();
   Check(h.out.approach_mission==MissionType::kHurdle && h.out.approach_completed_blocks==1,
@@ -808,8 +809,11 @@ void HurdleAndGoal() {
         "HURDLE did not hand off to DOWN after its one extra LINE unit");
   h.in.camera_feedback={CameraMode::kDown,true};
   h.Tick();h.Tick();
-  Check(h.out.command.action==MissionAction::kLineRightUnitTurnFirst,
-        "first DOWN motion reused prior LINE O/H instead of extra READY");
+  if(h.out.command.action!=MissionAction::kLineRightUnitTurnFirst)
+    throw std::runtime_error("first DOWN motion did not use extra LINE READY: issued="+
+        std::to_string(static_cast<int>(h.out.command.action))+
+        " hurdle_result="+std::to_string(static_cast<int>(h.out.hurdle.action.action))+
+        " mode="+std::to_string(static_cast<int>(h.out.hurdle.mode)));
 
   c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;c.goal_trial_start_goal=true;
   Driver g(c);g.in.ball_target.reset();g.in.camera_feedback={CameraMode::kGoal,true};

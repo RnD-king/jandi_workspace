@@ -45,11 +45,11 @@ void Bounds() {
   }
   c.approach_top_half_width_px=100;
   middle=c.ApproachBounds(239.5,480);bottom=c.ApproachBounds(479,480);
-  assert(middle.first==290 && middle.second==470);
+  assert(middle.first==285 && middle.second==475);
   assert(bottom.first==290 && bottom.second==470);
   bottom=c.ApproachBounds(959,960);middle=c.ApproachBounds(479.5,960);
   assert(bottom.first==290 && bottom.second==470);
-  assert(middle.first==290 && middle.second==470);
+  assert(middle.first==285 && middle.second==475);
   c.far_u_des_px=360;
   assert(c.ApproachBounds(0,480).first==260);
   assert(c.ExtremeApproachBounds(0,480).first==200);

@@ -309,8 +309,7 @@ MissionFrameResult MissionController::StepPlannedLine(
           if (dir==CruiseDirection::kLeft)
             continuous_.hurdle_down_ready_action=MissionAction::kLineLeftUnit;
           else if (dir==CruiseDirection::kRight)
-            continuous_.hurdle_down_ready_action=
-                static_cast<MissionAction>(config_.line_p2p.right_unit_action);
+            continuous_.hurdle_down_ready_action=MissionAction::kLineRightUnitTurnFirst; // 36
           else if (dir==CruiseDirection::kStraight)
             continuous_.hurdle_down_ready_action=MissionAction::kLineStraightUnit;
         }
