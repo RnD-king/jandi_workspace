@@ -1,0 +1,9 @@
+camera_overlay:
+  ros__parameters:
+    # 카메라는 사용자가 따로 실행. 이 노드는 아래 이미지 토픽만 구독한다.
+    image_topic: /camera/camera/color/image_raw
+
+    # 픽셀 단위. 실행 중 rqt에서 변경 가능. 중심은 영상에서 왼쪽 클릭.
+    box_width_px: 160   # 가로 길이: 1~640
+    box_height_px: 120  # 세로 길이: 1~480
+    box_alpha: 0.35     # 빨간색 불투명도: 0.0(투명)~1.0(불투명)

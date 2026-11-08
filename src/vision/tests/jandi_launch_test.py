@@ -25,16 +25,19 @@ class LaunchTest(unittest.TestCase):
         with patch.object(launch_file, "get_package_prefix", return_value="/target/install/vision"):
             description = launch_file.generate_launch_description()
         arguments = [x for x in description.entities if isinstance(x, DeclareLaunchArgument)]
-        self.assertEqual([x.name for x in arguments], ["mode", "workspace", "core_prefix"])
-        self.assertEqual(arguments[0].choices, ["practice", "IRC"])
+        self.assertEqual([x.name for x in arguments], ["mode", "show_debug_view", "terminal_node",
+                                                     "stream_debug_view", "workspace", "core_prefix"])
+        self.assertEqual(arguments[0].choices, ["custom", "practice", "IRC"])
         processes = [x for x in description.entities if isinstance(x, ExecuteProcess)]
         self.assertEqual(len(processes), 1)
         for mode in ("practice", "IRC"):
             context = LaunchContext()
             context.launch_configurations.update(mode=mode, workspace="/home/rnd/jandi", core_prefix="/home/rnd/vision_core/install")
+            context.launch_configurations.update(show_debug_view="false", terminal_node="false", stream_debug_view="true")
             command = [perform_substitutions(context, part) for part in processes[0].cmd]
             self.assertEqual(command[:3], ["/target/install/vision/lib/vision/run_jandi", "--background", mode])
             self.assertNotIn("robot_bringup", " ".join(command))
+            self.assertEqual(command[command.index("--stream-debug-view") + 1], "true")
 
     def test_install_rules_and_declared_runtime_dependencies(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()

@@ -1,0 +1,8 @@
+<launch>
+  <arg name="image_topic" default="/camera/camera/color/image_raw"
+       description="Existing 640x480 sensor_msgs/Image topic"/>
+  <node pkg="camera_overlay" exec="camera_overlay_node" name="camera_overlay" output="screen">
+    <param from="$(find-pkg-share camera_overlay)/config/overlay.yaml"/>
+    <param name="image_topic" value="$(var image_topic)"/>
+  </node>
+</launch>

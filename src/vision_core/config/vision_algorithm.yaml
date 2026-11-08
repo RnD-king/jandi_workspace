@@ -142,7 +142,7 @@ vision_algorithm:
       upper_acquire_v_px: 470.0 # 공이 있을 조건 (중심 v가 이 값 이하인 프레임을 진입 횟수로 계산)
 
       # FORWARD 접근
-      far_u_des_px: 380.0 # FORWARD 사선 및 근거리 격자의 공통 중심선
+      far_u_des_px: 400.0 # FORWARD 사선 및 근거리 격자의 공통 중심선
       approach_top_half_width_px: 35.0 # 화면 위쪽(v=0) 반폭
       approach_bottom_half_width_px: 90.0 # 화면 아래쪽(v=height-1) 반폭
       approach_short_v_px: 100.0 # 위 가로선 (4걸음)
@@ -159,7 +159,7 @@ vision_algorithm:
       fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
       fine_motion:
         max_repetitions: 3 # 같은 방향만 최대 3회. 아래 값은 DOWN 화면의 공 중심 변화량.
-        forward_first_max_lateral_error_px: 60.0 # 영역 위쪽이면 전진 우선, 좌우 허용 여유폭(px)
+        forward_first_max_lateral_error_px: 120.0 # 영역 위쪽이면 전진 우선, 좌우 허용 여유폭(px)
         forward_delta_u_px: -20 # Action 3 1회 후 공의 Δx (오른쪽 +)
         forward_delta_v_px: 42 # Action 3 1회 후 공의 Δy (아래쪽 +)
         backward_delta_u_px: -35 # Action 4
@@ -167,7 +167,7 @@ vision_algorithm:
         left_delta_u_px: 40 # Action 5
         left_delta_v_px: 15
         right_delta_u_px: -60 # Action 6
-        right_delta_v_px: 0.0 # 방향별 (0,0)은 미측정. 모두 미측정이면 기존 단발/옆걸음 2회 유지.
+        right_delta_v_px: 1 # 방향별 (0,0)은 미측정. 모두 미측정이면 기존 단발/옆걸음 2회 유지.
 
       # 픽업
       # 실제 픽업 성공 영역. OpenCV 화면 좌표(u:오른쪽+, v:아래쪽+).
@@ -256,7 +256,7 @@ vision_algorithm:
       fine_line_measured_right_turn_deg: 8.0 # Action 8: 1회 H 변화량의 크기. 실행 요청각 15도와 별개
       fine_line_measured_side_px: 60 # 1회 실제 옆걸음에 따른 O 변화량(px). 0: 기존 단발 관측 유지
       fine_line_batch_max_repetitions: 3 # 하나의 O/H 관측에서 회전과 횡이동 각각 최대 연속 3회
-      fine_line_post_turn_hold_sec: 0.5 # 연속 회전의 마지막 DONE 이후 횡이동 전 대기 (재관측은 마지막에만)
+      fine_line_post_turn_hold_sec: 0.3 # 연속 회전의 마지막 DONE 이후 횡이동 전 대기 (재관측은 마지막에만)
       fine_line_max_turns: 4
       fine_line_max_side_steps: 4
       fine_line_max_stale_corrections: 2 # 같은 마지막 유효 O/H 재사용 한도

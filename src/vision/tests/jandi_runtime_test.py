@@ -282,8 +282,9 @@ r.serve(FakePlan(), {self.temp.name!r}, Observer())
             client = socket.socket(socket.AF_UNIX)
             client.connect(str(Path(self.temp.name) / "manager.sock"))
             client.close()
-            proc.send_signal(signal.SIGHUP)
-            time.sleep(.3)
+            for sig in (signal.SIGHUP,signal.SIGINT,signal.SIGTERM):
+                proc.send_signal(sig)
+                time.sleep(.1)
             status = runtime.rpc(self.temp.name, {"op": "status"})["status"]
             self.assertEqual(status["nodes"]["camera"]["pid"], pid)
             self.assertEqual(status["nodes"]["camera"]["state"], "RUNNING")
@@ -314,6 +315,22 @@ r.serve(FakePlan(), {self.temp.name!r}, Observer())
                 os.close(master)
             status = runtime.rpc(self.temp.name, {"op": "status"})["status"]
             self.assertEqual(status["nodes"]["camera"]["pid"], pid)
+            # A console killed without cleanup must also leave the detached
+            # backend and its fake child alive.
+            master,slave=pty.openpty()
+            lost=subprocess.Popen([sys.executable,str(SCRIPTS/"jandi.py"),"attach",
+                                   "--state-dir",self.temp.name],stdin=slave,stdout=slave,stderr=slave)
+            os.close(slave)
+            try:
+                time.sleep(.15)
+                lost.kill()
+                lost.wait(timeout=3)
+            finally:
+                os.close(master)
+                if lost.poll() is None:
+                    lost.kill()
+                    lost.wait()
+            self.assertEqual(runtime.rpc(self.temp.name,{"op":"status"})["status"]["nodes"]["camera"]["pid"],pid)
             runtime.rpc(self.temp.name, {"op": "shutdown"})
             proc.wait(timeout=5)
             self.assertEqual(proc.returncode, 0, proc.stderr.read().decode())

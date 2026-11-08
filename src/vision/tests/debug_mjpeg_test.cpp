@@ -159,6 +159,41 @@ void IdleAndMultipleViewers() {
   while (stats.buffered.find("mean_encode_ms")==std::string::npos) stats.Receive();
 }
 
+void InteractiveInputIsOptInAndBounded() {
+  using Server=vision::DebugMjpegServer;
+  Server readonly(0,"127.0.0.1");
+  const std::string body="click 17 0 123 234";
+  auto post=[&](Server &server,const std::string &data,bool split=false) {
+    Connection client(server.Port());
+    const auto header="POST /input HTTP/1.1\r\nHost: localhost\r\nContent-Length: "+
+        std::to_string(data.size())+"\r\n\r\n";
+    client.Send(header+(split ? data.substr(0,3) : data));
+    if(split) {std::this_thread::sleep_for(std::chrono::milliseconds(10));client.Send(data.substr(3));}
+    return client.Header();
+  };
+  Check(post(readonly,body).find("404")!=std::string::npos,"competition server accepted input");
+  Server::Input input;
+  Check(!readonly.TakeInput(input),"read-only server produced an input");
+  Server interactive(0,"127.0.0.1",true);
+  Check(post(interactive,body,true).find("202")!=std::string::npos,"split POST rejected");
+  Check(interactive.TakeInput(input) && input.frame_id==17 && input.x==123 && input.y==234,
+        "input coordinates/frame association changed");
+  Check(!interactive.TakeInput(input),"input repeated without a new request");
+  Check(post(interactive,"key 17 3").find("202")!=std::string::npos,"key POST rejected");
+  Check(interactive.TakeInput(input) && input.kind==Server::Input::Kind::Key && input.key==3,
+        "Ctrl+C input was not preserved");
+  Check(post(interactive,"click 17 0 -1 5").find("400")!=std::string::npos,"invalid input accepted");
+  for(unsigned n=0;n<32;++n) Check(post(interactive,body).find("202")!=std::string::npos,"bounded queue failed early");
+  Check(post(interactive,body).find("429")!=std::string::npos,"input queue was unbounded");
+  for(unsigned n=0;n<32;++n) Check(interactive.TakeInput(input),"queued input lost");
+  Check(!interactive.TakeInput(input),"extra queued input");
+  Connection viewer(interactive.Port());viewer.StartStream();
+  Wait([&]{return interactive.RequestFrame();},"interactive viewer not registered");
+  Check(interactive.Submit(cv::Mat(480,640,CV_8UC3,cv::Scalar(20,40,80)),987),"frame handoff failed");
+  auto header=viewer.Header();
+  Check(header.find("X-Frame-Id: 987")!=std::string::npos,"JPEG missing original frame ID");
+}
+
 void SlowViewerAndShutdown() {
   auto server=std::make_unique<vision::DebugMjpegServer>(0,"127.0.0.1");
   Connection slow(server->Port(),true),healthy(server->Port()),partial(server->Port());
@@ -227,6 +262,7 @@ void KernelBacklogDeadline() {
 int main() {
   try {
     IdleAndMultipleViewers();
+    InteractiveInputIsOptInAndBounded();
     SlowViewerAndShutdown();
     KernelBacklogDeadline();
     PortConflictAndLifetime();

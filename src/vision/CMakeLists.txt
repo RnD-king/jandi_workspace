@@ -137,9 +137,14 @@ add_executable(line_perception_node
   src/line_perception_node.cpp
 )
 add_library(vision_debug_mjpeg STATIC src/debug_mjpeg_server.cpp)
-target_include_directories(vision_debug_mjpeg PUBLIC include ${OpenCV_INCLUDE_DIRS})
+target_include_directories(vision_debug_mjpeg PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include> ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(vision_debug_mjpeg PUBLIC ${OpenCV_LIBS} Threads::Threads)
 target_link_libraries(line_perception_node vision_debug_mjpeg)
+install(TARGETS vision_debug_mjpeg EXPORT export_debug_mjpeg ARCHIVE DESTINATION lib)
+ament_export_targets(export_debug_mjpeg HAS_LIBRARY_TARGET)
+ament_export_dependencies(OpenCV Threads)
 
 # Standalone read-only camera inspection tools. Neither publishes action/camera commands.
 add_executable(click_pixel_node src/click_pixel_node.cpp)
@@ -264,7 +269,7 @@ install(DIRECTORY config/
 
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
 install(PROGRAMS scripts/jandi.py DESTINATION lib/${PROJECT_NAME} RENAME run_jandi)
-install(FILES scripts/jandi_runtime.py scripts/jandi_ros.py DESTINATION lib/${PROJECT_NAME})
+install(FILES scripts/jandi_runtime.py scripts/jandi_ros.py scripts/jandi_logs.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/install_jandi_command.sh DESTINATION lib/${PROJECT_NAME})
 install(FILES JANDI_RUNTIME.md DESTINATION share/${PROJECT_NAME})
 
@@ -345,13 +350,16 @@ if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME vision_jandi_runtime_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_runtime_test.py)
+  add_test(NAME vision_jandi_options_logs_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_options_logs_test.py)
   add_test(NAME vision_jandi_launch_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_launch_test.py)
   add_test(NAME vision_jandi_ros_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_ros_test.py)
   set_tests_properties(vision_jandi_ros_test PROPERTIES
     ENVIRONMENT "ROS_DOMAIN_ID=86;ROS_LOCALHOST_ONLY=1")
-  set_tests_properties(vision_jandi_runtime_test vision_jandi_launch_test vision_jandi_ros_test PROPERTIES
+  set_tests_properties(vision_jandi_runtime_test vision_jandi_launch_test vision_jandi_ros_test
+    vision_jandi_options_logs_test PROPERTIES
     LABELS "runtime" TIMEOUT 45)
   add_test(NAME vision_terminal_view_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/terminal_view_test.py)

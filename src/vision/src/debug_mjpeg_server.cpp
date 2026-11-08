@@ -1,4 +1,5 @@
 #include "vision/debug_mjpeg_server.hpp"
+#include "vision/interactive_debug_page.hpp"
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -11,12 +12,15 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <sstream>
 #include <thread>
 #include <vector>
 #include <opencv2/imgcodecs.hpp>
@@ -54,6 +58,10 @@ struct DebugMjpegServer::Impl {
   std::mutex frame_mutex, jpeg_mutex;
   std::condition_variable condition;
   cv::Mat pending;
+  std::uint64_t pending_id{};
+  bool interactive{};
+  std::mutex input_mutex;
+  std::deque<Input> inputs;
   std::shared_ptr<const Packet> latest;
   std::thread encoder, network;
   Clock::time_point last_request{};
@@ -69,7 +77,8 @@ struct DebugMjpegServer::Impl {
     Clock::time_point accepted{Clock::now()}, send_started{};
   };
 
-  Impl(std::uint16_t requested_port, const char *address) {
+  Impl(std::uint16_t requested_port, const char *address, bool accept_input)
+      : interactive(accept_input) {
     try {
       listener = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
       if (listener < 0) Fail("socket");
@@ -130,6 +139,7 @@ struct DebugMjpegServer::Impl {
     try {
       while (!stopping) {
         cv::Mat image;
+        std::uint64_t frame_id{};
         {
           std::unique_lock<std::mutex> lock(frame_mutex);
           condition.wait(lock, [this] { return stopping || !pending.empty(); });
@@ -137,6 +147,7 @@ struct DebugMjpegServer::Impl {
           condition.wait_until(lock, next, [this] { return stopping.load(); });
           if (stopping) break;
           image = std::move(pending);
+          frame_id = pending_id;
           pending.release();
         }
         if (subscribers == 0) continue;
@@ -153,7 +164,8 @@ struct DebugMjpegServer::Impl {
           auto packet = std::make_shared<Packet>();
           packet->sequence = encoded.load() + 1;
           const auto header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " +
-              std::to_string(jpeg.size()) + "\r\n\r\n";
+              std::to_string(jpeg.size()) +
+              (interactive ? "\r\nX-Frame-Id: " + std::to_string(frame_id) : "") + "\r\n\r\n";
           packet->bytes.reserve(header.size() + jpeg.size() + 2);
           packet->bytes.insert(packet->bytes.end(), header.begin(), header.end());
           packet->bytes.insert(packet->bytes.end(), jpeg.begin(), jpeg.end());
@@ -230,10 +242,48 @@ struct DebugMjpegServer::Impl {
     if (client.request.find("\r\n\r\n") == std::string::npos) return;
     const auto line_end = client.request.find("\r\n");
     const auto line = client.request.substr(0, line_end);
+    if (interactive && (line == "POST /input HTTP/1.1" || line == "POST /input HTTP/1.0")) {
+      const auto header_end = client.request.find("\r\n\r\n");
+      std::string headers = client.request.substr(0, header_end);
+      std::transform(headers.begin(), headers.end(), headers.begin(),
+          [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      const auto position = headers.find("\r\ncontent-length:");
+      std::size_t length = 0;
+      if (position != std::string::npos) {
+        std::istringstream size(headers.substr(position + 17));
+        size >> length;
+      }
+      if (position == std::string::npos || length == 0 || length > 128) { Close(client); return; }
+      if (client.request.size() < header_end + 4 + length) return;
+      Input input;
+      std::string kind, extra;
+      std::istringstream body(client.request.substr(header_end + 4, length));
+      bool valid = static_cast<bool>(body >> kind >> input.frame_id) && input.frame_id > 0;
+      if (kind == "click") {
+        input.kind = Input::Kind::Click;
+        valid = valid && static_cast<bool>(body >> input.button >> input.x >> input.y) &&
+            (input.button == 0 || input.button == 2) && input.x >= 0 && input.y >= 0 &&
+            input.x < 8192 && input.y < 8192;
+      } else if (kind == "key") {
+        input.kind = Input::Kind::Key;
+        valid = valid && static_cast<bool>(body >> input.key) && input.key >= 0 && input.key <= 127;
+      } else valid = false;
+      if (body >> extra) valid = false;
+      bool queued = false;
+      if (valid) {
+        std::unique_lock<std::mutex> lock(input_mutex, std::try_to_lock);
+        if (lock.owns_lock() && inputs.size() < 32) { inputs.push_back(input); queued = true; }
+      }
+      client.close_after_send = true;
+      Queue(client, Response("text/plain", queued ? "Queued\n" : "Input rejected\n",
+          queued ? "202 Accepted" : valid ? "429 Too Many Requests" : "400 Bad Request"));
+      client.request.clear();
+      return;
+    }
     if (line == "GET /stream.mjpg HTTP/1.1" || line == "GET /stream.mjpg HTTP/1.0") {
       client.streaming = true;
       // Never serve a JPEG cached from a previous viewing session.
-      client.last_sequence = encoded;
+      client.last_sequence = interactive ? 0 : encoded.load();
       ++subscribers;
       auto packet = std::make_shared<Packet>();
       packet->bytes.assign(kStreamHeader, kStreamHeader + sizeof(kStreamHeader) - 1);
@@ -241,7 +291,8 @@ struct DebugMjpegServer::Impl {
     } else {
       client.close_after_send = true;
       if (line == "GET / HTTP/1.1" || line == "GET / HTTP/1.0") {
-        Queue(client, Response("text/html; charset=utf-8",
+        if (interactive) Queue(client, Response("text/html; charset=utf-8", kInteractiveDebugPage));
+        else Queue(client, Response("text/html; charset=utf-8",
             "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
             "<title>Vision debug</title><style>body{margin:0;background:#111}"
             "img{display:block;max-width:100%;height:auto;margin:auto}</style>"
@@ -350,8 +401,8 @@ struct DebugMjpegServer::Impl {
   }
 };
 
-DebugMjpegServer::DebugMjpegServer(std::uint16_t port, const char *address)
-    : impl_(std::make_unique<Impl>(port, address)) {}
+DebugMjpegServer::DebugMjpegServer(std::uint16_t port, const char *address, bool interactive)
+    : impl_(std::make_unique<Impl>(port, address, interactive)) {}
 DebugMjpegServer::~DebugMjpegServer() = default;
 bool DebugMjpegServer::RequestFrame() {
   if (!impl_->running || impl_->subscribers == 0) return false;
@@ -360,13 +411,23 @@ bool DebugMjpegServer::RequestFrame() {
   impl_->last_request = now;
   return true;
 }
-void DebugMjpegServer::Submit(const cv::Mat &image) {
-  if (!impl_->running || impl_->subscribers == 0 || image.empty()) return;
+bool DebugMjpegServer::Submit(const cv::Mat &image, std::uint64_t frame_id) {
+  if (!impl_->running || impl_->subscribers == 0 || image.empty()) return false;
   std::unique_lock<std::mutex> lock(impl_->frame_mutex, std::try_to_lock);
-  if (!lock.owns_lock()) { ++impl_->drops; return; }
+  if (!lock.owns_lock()) { ++impl_->drops; return false; }
   impl_->pending = image; // Shallow reference: no raw-image copy on the producer.
+  impl_->pending_id = frame_id;
   lock.unlock();
   impl_->condition.notify_one();
+  return true;
+}
+bool DebugMjpegServer::TakeInput(Input &input) {
+  if (!impl_->interactive) return false;
+  std::unique_lock<std::mutex> lock(impl_->input_mutex, std::try_to_lock);
+  if (!lock.owns_lock() || impl_->inputs.empty()) return false;
+  input = impl_->inputs.front();
+  impl_->inputs.pop_front();
+  return true;
 }
 DebugMjpegServer::Stats DebugMjpegServer::GetStats() const { return impl_->StatsSnapshot(); }
 std::uint16_t DebugMjpegServer::Port() const { return impl_->port; }

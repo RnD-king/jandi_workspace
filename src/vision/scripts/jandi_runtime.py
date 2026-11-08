@@ -12,10 +12,11 @@ import socket
 import subprocess
 import threading
 import time
+from jandi_logs import LogJournal, LogClassifier
 
 
 NAMES = ("camera", "motor", "vision")
-MODES = ("practice", "IRC")
+MODES = ("practice", "IRC", "custom")
 INTERVAL = 5.0
 SERVICES = {name: f"/line_perception_node/{name}"
             for name in ("start", "pause", "resume", "reset")}
@@ -34,12 +35,16 @@ class Plan:
     share: str
     engine: str
     algorithm: str
+    show_debug_view: bool = False
+    terminal_node: bool = False
+    stream_debug_view: bool = True
 
     @classmethod
-    def load(cls, mode, share, workspace=None, core_prefix=None):
+    def load(cls, mode, share, workspace=None, core_prefix=None, *,
+             show_debug_view=False, terminal_node=None, stream_debug_view=True):
         import yaml
         if mode not in MODES:
-            raise ValueError("mode must be practice or IRC (case sensitive)")
+            raise ValueError("unknown JANDI mode")
         share = Path(share).resolve()
         runtime = yaml.safe_load((share / "config/yolo26_runtime.yaml").read_text())
         configured_engine = Path(runtime["yolo26_runtime"]["ros__parameters"]["jetson_engine_path"])
@@ -52,16 +57,20 @@ class Plan:
         algorithm = Path(os.environ.get("VISION_CORE_ALGORITHM_CONFIG") or
                          core / "share/shared_vision_core/config/vision_algorithm.yaml")
         return cls(mode, str(workspace), str(core), str(share), str(engine),
-                   str(algorithm.expanduser().resolve()))
+                   str(algorithm.expanduser().resolve()), bool(show_debug_view),
+                   mode == "practice" if terminal_node is None else bool(terminal_node),
+                   bool(stream_debug_view))
 
     def commands(self):
         params = str(Path(self.share) / "config/vision_params.yaml")
         vision = ["ros2", "run", "vision", "line_perception_node", "--ros-args",
                   "--params-file", params, "-p", f"engine_path:={self.engine}",
-                  "-p", "show_debug_view:=false", "-p", "show_yolo_debug_view:=false",
+                  "-p", f"show_debug_view:={str(self.show_debug_view).lower()}",
+                  "-p", "show_yolo_debug_view:=false",
                   "-p", "rosbag:=false", "-p", "simulate_camera_feedback:=false",
                   "-p", "simulate_decision:=false", "-p", "enable_command_transport:=true",
-                  "-p", f"terminal_node:={'true' if self.mode == 'practice' else 'false'}"]
+                  "-p", f"terminal_node:={str(self.terminal_node).lower()}",
+                  "-p", f"stream_debug_view:={str(self.stream_debug_view).lower()}"]
         # These services are relative names in the C++ node, not ~/private names.
         for name, destination in SERVICES.items():
             vision += ["-r", f"{name}:={destination}"]
@@ -110,6 +119,8 @@ class ProcessManager:
         self.commands = commands
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
+        self.journal = LogJournal(self.directory / "all.jsonl")
+        self.classifiers = {name: LogClassifier() for name in NAMES}
         self.observer = observer
         self.env = env
         self.cwd = cwd
@@ -128,22 +139,24 @@ class ProcessManager:
         self.finished = False
         self.event("manager", "INFO", "자동 중지/서비스 발송/재시작 없음. SSH 종료 시 실행 유지.")
 
-    def event(self, name, level, text):
+    def event(self, name, level, text, journal=True):
         with self.lock:
             self.event_id += 1
             self.events.append({"id": self.event_id, "time": time.strftime("%H:%M:%S"),
                                 "node": name, "level": level, "text": clean_text(text)})
+            if journal:
+                self.journal.write(name, level, text)
 
     def observe_line(self, name, generation, line):
         text = clean_text(line.rstrip())
         with self.lock:
             if generation != self.nodes[name]["generation"]:
                 return
+            level = self.classifiers[name].classify(line)
+            self.journal.write(name, level, line.rstrip("\r\n"))
             self.observer.log(name, text)
-            if re.search(r"\[(?:ERROR|FATAL)\]|Traceback \(most recent", text, re.IGNORECASE):
-                self.event(name, "ERROR", text)
-            elif re.search(r"\[WARN(?:ING)?\]", text, re.IGNORECASE):
-                self.event(name, "WARN", text)
+            if level in ("ERROR", "FATAL", "WARN"):
+                self.event(name, level, text, journal=False)
 
     def follow_output(self, name, generation, path, offset, proc):
         # Children write directly to regular files. If the manager itself
@@ -162,12 +175,30 @@ class ProcessManager:
         except OSError as exc:
             self.event(name, "ERROR", f"로그 읽기 오류: {exc}")
 
+    def follow_manager_output(self):
+        """Include untagged Python/ROS diagnostics from the manager's stderr."""
+        classifier = LogClassifier()
+        path = self.directory / "manager.log"
+        if not path.exists():
+            return
+        try:
+            with path.open(errors="replace") as log:
+                while not self.finished:
+                    line = log.readline()
+                    if line:
+                        self.journal.write("manager", classifier.classify(line), line.rstrip("\r\n"))
+                    else:
+                        time.sleep(0.1)
+        except OSError:
+            pass
+
     def start(self, name):
         item = self.nodes[name]
         self.schedule.pop(name, None)
         if item["process"] is not None and item["process"].poll() is None:
             return f"{name}: 이미 실행 중"
         self.observer.starting(name)
+        self.classifiers[name] = LogClassifier()
         item.update(state="STARTING", exit_code=None, restart=False)
         item["generation"] += 1
         try:
@@ -335,6 +366,7 @@ def serve(plan, directory, observer):
         require_no_survivors(state_path)
         manager = ProcessManager(plan.commands(), directory, observer,
                                  env=plan.environment(), cwd=plan.workspace)
+        threading.Thread(target=manager.follow_manager_output, daemon=True).start()
         address = directory / "manager.sock"
         address.unlink(missing_ok=True)
         # Closing a console/SSH or interrupting ros2 launch does not stop children.

@@ -1,0 +1,111 @@
+<?xml version="1.0"?>
+
+<package format="3">
+
+  <name>camera_overlay</name>
+
+  <version>0.1.0</version>
+
+  <description>
+    Standalone camera overlay, depth/XZ measurement,
+    manual rim geometry visualization,
+    YOLO ball pixel pin tool,
+    and motion calibration tools for BALL, HURDLE, and GOAL.
+  </description>
+
+  <maintainer email="noh@example.com">noh</maintainer>
+
+  <license>Apache-2.0</license>
+
+  <!-- ===================================================== -->
+  <!-- Build System                                          -->
+  <!-- ===================================================== -->
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- ===================================================== -->
+  <!-- ROS 2 Dependencies                                    -->
+  <!-- ===================================================== -->
+
+  <depend>rclcpp</depend>
+
+  <depend>rcl_interfaces</depend>
+
+  <depend>sensor_msgs</depend>
+
+  <depend>message_filters</depend>
+
+  <depend>cv_bridge</depend>
+
+  <depend>ament_index_cpp</depend>
+
+  <!-- ===================================================== -->
+  <!-- OpenCV                                                -->
+  <!-- ===================================================== -->
+
+  <depend>libopencv-dev</depend>
+
+  <!-- ===================================================== -->
+  <!-- YOLO TensorRT Package                                 -->
+  <!-- ===================================================== -->
+
+  <depend>vision</depend>
+
+  <!-- ===================================================== -->
+  <!-- Motion Calibration Node                               -->
+  <!-- ===================================================== -->
+
+  <!--
+    motion_calibration_node
+
+    Supported modes:
+
+      ball:
+        Measure ball pixel displacement (u, v).
+
+      hurdle:
+        Measure LINE offset and heading displacement.
+
+      goal:
+        Measure goal rim position displacement (X, Z).
+
+    The node uses:
+
+      rclcpp
+      sensor_msgs
+      message_filters
+      cv_bridge
+      ament_index_cpp
+      vision
+      OpenCV
+
+    TensorRT and CUDA are linked through CMakeLists.txt.
+
+    shared_vision_core is a separately installed CMake
+    library, not a ROS 2 ament package.
+
+    Therefore, shared_vision_core is resolved using
+    find_package(shared_vision_core CONFIG REQUIRED)
+    inside CMakeLists.txt.
+  -->
+
+  <!-- ===================================================== -->
+  <!-- Launch Dependencies                                   -->
+  <!-- ===================================================== -->
+
+  <exec_depend>launch_ros</exec_depend>
+
+  <exec_depend>launch_xml</exec_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>python3-numpy</test_depend>
+  <test_depend>python3-opencv</test_depend>
+
+  <!-- ===================================================== -->
+  <!-- Export                                                -->
+  <!-- ===================================================== -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+
+</package>
