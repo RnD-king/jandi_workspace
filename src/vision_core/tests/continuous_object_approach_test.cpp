@@ -606,11 +606,14 @@ void NearPixelVotesWithGaps(MissionType mission) {
   }
   Check(d.out.approach_near,"configured nonconsecutive near-v votes did not latch");
 }
-void NearFinalActionSequence(double u,bool left,bool extreme) {
+void NearFinalActionSequence(double u,bool left,bool extreme,double near_v=260) {
   auto c=Config();c.ball.approach_extreme_turn_margin_px=90.0;
-  Driver d(c);d.in.ball_target=Target(u,100);
+  Driver d(c);
+  // Keep center-distance association stable while entering the lower zone:
+  // the test changes v by <=200px, never requiring an identity reset.
+  d.in.ball_target=Target(u,near_v>=c.ball.approach_direct_down_v_px ? 200 : 100);
   d.Warm();d.Block();d.Block();
-  d.in.ball_target=Target(u,260);
+  d.in.ball_target=Target(u,near_v);
   for(int n=0;n<3;++n)d.Tick();
   Check(d.out.approach_near,"near sequence failed to latch three v votes");
   d.Tick({d.current,true,false,true});
@@ -638,9 +641,11 @@ void NearFinalActionSequence(double u,bool left,bool extreme) {
   }
   // A committed near chain must now move forward without an intermediate
   // observation after the 1/2 rotation actions.
-  Check(d.out.command.action==MissionAction::kStepForwardTwo &&
+  const auto expected_step=near_v<c.ball.approach_direct_down_v_px ?
+      MissionAction::kStepForwardTwo : MissionAction::kStepForwardOne;
+  Check(d.out.command.action==expected_step &&
         d.out.command.action_id!=id && d.out.approach_near_final_motion,
-        "near 5-zone did not append two forward steps after the turns");
+        "near side grid did not select 1/2 forward steps from the shared v boundary");
   id=d.out.command.action_id;
   d.Tick({id,true,false,false});
   Check(d.out.active_mission==MissionType::kLine,
@@ -1668,6 +1673,8 @@ int main() {
   FirstBallAdmissionReadyOverwritesInitialMean();
   NearFinalActionSequence(150,true,true); NearFinalActionSequence(240,true,false);
   NearFinalActionSequence(575,false,true); NearFinalActionSequence(500,false,false);
+  NearFinalActionSequence(150,true,true,400); NearFinalActionSequence(240,true,false,400);
+  NearFinalActionSequence(575,false,true,400); NearFinalActionSequence(500,false,false,400);
   NearGoalPreemptsDepthWalk();SoftGoalLossClearsDepthEpisode();HurdleLineLossUsesLineRecovery();
   FarGoalDepthRecovery(false,true);FarGoalDepthRecovery(true,true);
   for(auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {

@@ -158,6 +158,7 @@ public:
     down_search_.ShiftTimers(duration);
     if (contact_next_step_sec_>0.0) contact_next_step_sec_+=duration;
     if (fine_line_observation_started_) fine_line_observation_start_sec_+=duration;
+    if (fine_line_next_action_sec_>0.0) fine_line_next_action_sec_+=duration;
   }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
   void StartTestNear(bool use_continuous_down_sequence=false) { Reset();
@@ -255,6 +256,11 @@ private:
   MissionAction fine_line_pending_action_{MissionAction::kNone};
   MissionAction fine_line_repeat_action_{MissionAction::kNone};
   int fine_line_repeat_remaining_{0}; // Includes the physically pending unit.
+  // Computed from the SAME qualified O/H sample; no observation between
+  // the committed turn batch and the following lateral batch.
+  MissionAction fine_line_next_side_action_{MissionAction::kNone};
+  int fine_line_next_side_remaining_{0};
+  double fine_line_next_action_sec_{0.0}; // Existing post-turn hold.
   bool fine_line_pending_stale_{false};
   double fine_line_observation_start_sec_{0.0};
   std::optional<double> fine_line_last_sample_sec_;
