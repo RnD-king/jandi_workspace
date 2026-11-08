@@ -692,8 +692,6 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
       vision_core::BallController::ModeName(ball_cmd.mode),ball_color);
   std::snprintf(buf,sizeof(buf),"BALL #%d %s",ball_index,ball_index%2 ? "RIGHT" : "LEFT");
   add_row(ball_rows,buf,ball_color);
-  const auto ball_top=bc.ApproachBounds(0,vis.rows);
-  const auto ball_bottom=bc.ApproachBounds(vis.rows-1,vis.rows);
   std::snprintf(buf, sizeof(buf), "GRID center=%.1f top half=%.1f bottom half=%.1f outer margin=%.1f",
       bc.far_u_des_px,bc.approach_top_half_width_px,
       bc.approach_bottom_half_width_px,bc.approach_near_outer_margin_px);

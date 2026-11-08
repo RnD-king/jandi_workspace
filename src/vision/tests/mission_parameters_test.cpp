@@ -13,7 +13,10 @@ int main(int argc,char** argv) {
     base.ball.recovery_walk_turn_max=3;base.goal.recovery_turn_max=3;
     base.goal.edge_margin_px=50;
     base.ball.approach_direct_down_v_px=355;
-    base.ball.approach_left_top_u_px=290;base.ball.approach_right_top_u_px=470;
+    base.ball.far_u_des_px=380;
+    base.ball.approach_top_half_width_px=90;
+    base.ball.approach_bottom_half_width_px=90;
+    base.ball.approach_near_outer_margin_px=60;
     base.hurdle.contact_inter_action_hold_sec=.5;
     rclcpp::NodeOptions options;
     options.parameter_overrides({
@@ -28,8 +31,10 @@ int main(int argc,char** argv) {
         rclcpp::Parameter("hurdle_contact_inter_action_hold_sec",.7),
         rclcpp::Parameter("ball_down_search_inter_action_hold_sec",.6),
         rclcpp::Parameter("hurdle_down_search_inter_action_hold_sec",1.2),
-        rclcpp::Parameter("ball_approach_left_top_u_px",340.0),
-        rclcpp::Parameter("ball_approach_right_top_u_px",520.0),
+        rclcpp::Parameter("ball_far_u_des_px",400.0),
+        rclcpp::Parameter("ball_approach_top_half_width_px",70.0),
+        rclcpp::Parameter("ball_approach_bottom_half_width_px",90.0),
+        rclcpp::Parameter("ball_approach_near_outer_margin_px",55.0),
         rclcpp::Parameter("ball_fine_max_repetitions",2),
         rclcpp::Parameter("ball_fine_right_delta_u_px",-50.0),
         rclcpp::Parameter("ball_fine_right_delta_v_px",3.0)});
@@ -186,34 +191,33 @@ int main(int argc,char** argv) {
     Check(applied.goal.recovery_turn_max==2,"GOAL startup override was lost");
     Check(applied.goal.edge_margin_px==75,"edge margin startup override was lost");
     Check(applied.ball.approach_direct_down_v_px==370,"BALL direct DOWN startup override was lost");
-    Check(applied.ball.approach_left_top_u_px==340 && applied.ball.approach_right_top_u_px==520,
-          "BALL top endpoint startup overrides were lost");
+    Check(applied.ball.far_u_des_px==400 &&
+          applied.ball.approach_top_half_width_px==70 &&
+          applied.ball.approach_bottom_half_width_px==90 &&
+          applied.ball.approach_near_outer_margin_px==55,
+          "BALL centered guide startup overrides were lost");
     Check(vision::ApplyLivePerceptionParameter(
-        rclcpp::Parameter("ball_approach_left_top_u_px",360.0),applied) &&
-        applied.ball.approach_left_top_u_px==360 && applied.ball.approach_right_top_u_px==520,
-        "left top endpoint update changed the other endpoint");
-    Check(vision::ApplyLivePerceptionParameter(
-        rclcpp::Parameter("ball_approach_right_top_u_px",550.0),applied) &&
-        applied.ball.approach_right_top_u_px==550 && applied.ball.approach_left_top_u_px==360,
-        "right top endpoint update changed the other endpoint");
-    for (const auto* name : {"ball_approach_left_top_u_px", "ball_approach_right_top_u_px"}) {
-      for (double bad : {-1.0, std::numeric_limits<double>::quiet_NaN(),
-                          std::numeric_limits<double>::infinity()}) {
+        rclcpp::Parameter("ball_approach_top_half_width_px",40.0),applied) &&
+        applied.ball.approach_top_half_width_px==40 &&
+        applied.ball.approach_bottom_half_width_px==90,
+        "top half width update changed bottom half width");
+    for(const auto* name : {"ball_far_u_des_px",
+                            "ball_approach_top_half_width_px",
+                            "ball_approach_bottom_half_width_px",
+                            "ball_approach_near_outer_margin_px"}) {
+      for(double bad : {-1.0,std::numeric_limits<double>::quiet_NaN(),
+                         std::numeric_limits<double>::infinity()}) {
         bool rejected=false;
         try {vision::ApplyLivePerceptionParameter(rclcpp::Parameter(name,bad),applied);}
-        catch (const std::invalid_argument&) {rejected=true;}
-        Check(rejected,"invalid top endpoint accepted");
+        catch(const std::invalid_argument&) {rejected=true;}
+        Check(rejected,"invalid centered geometry parameter accepted");
       }
-      bool rejected=false;
-      try {vision::ApplyLivePerceptionParameter(rclcpp::Parameter(name,350),applied);}
-      catch (const std::invalid_argument&) {rejected=true;}
-      Check(rejected,"integer top endpoint accepted");
     }
-    node->set_parameter(rclcpp::Parameter("ball_approach_left_top_u_px",520.0));
-    bool crossed=false;
-    try {vision::ReadMissionParameters(*node,applied);} catch (const std::invalid_argument&) {crossed=true;}
-    Check(crossed,"equal/crossed top endpoints accepted at startup");
-    node->set_parameter(rclcpp::Parameter("ball_approach_left_top_u_px",340.0));
+    node->set_parameter(rclcpp::Parameter("ball_approach_top_half_width_px",0.0));
+    bool invalid=false;
+    try {vision::ReadMissionParameters(*node,applied);} catch(const std::invalid_argument&) {invalid=true;}
+    Check(invalid,"zero top half width accepted at startup");
+    node->set_parameter(rclcpp::Parameter("ball_approach_top_half_width_px",70.0));
     vision::ReadMissionParameters(*node,applied);
     Check(applied.hurdle.contact_inter_action_hold_sec==.7,"HURDLE contact hold startup override was lost");
     Check(applied.ball.down_search_inter_action_hold_sec==.6 &&
