@@ -38,6 +38,10 @@ struct Trial {
     c.fine_line_measured_left_turn_deg=left_turn;
     c.fine_line_measured_right_turn_deg=right_turn;
     c.fine_line_measured_side_px=measured_side;
+    // This fixture intentionally exercises small corrections, independent
+    // of the larger production DOWN offset tolerance.
+    c.fine_line_heading_tolerance_deg=8.0;
+    c.fine_line_offset_tolerance_px=20.0;
     if(measured_turn>0 || measured_side>0)
       c.fine_line_offset_tolerance_px=2.0;
     return c;
@@ -104,10 +108,14 @@ void HeadingThenOffset() {
   auto out = t.Observe(Guide(30, 10));
   assert(out.action.action == MissionAction::kTurnRight &&
          out.action.target_yaw_deg == 15);
-  t.Done(MissionAction::kTurnRight);
-  out = t.Observe(Guide(30, 0));
-  assert(out.fine_line_turns == 1 &&
-         out.action.action == MissionAction::kRightSideStep);
+  // Both directions are committed from the first sample. No new O/H
+  // observation is needed between the turn DONE and the lateral request.
+  ActionExecutionFeedback done;done.action_done=true;
+  t.now+=.1;
+  t.controller.OnActualMotionDone(MissionAction::kTurnRight,t.now);
+  out=t.controller.Compute({},640,480,t.now,t.down,done,{});
+  assert(out.fine_line_turns==1 &&
+         out.action.action==MissionAction::kRightSideStep);
   t.Done(MissionAction::kRightSideStep);
   out = t.Observe(Guide(0, 0));
   assert(out.mode == HurdleMode::kFineAdjust && out.fine_line_side_steps == 1);
@@ -153,7 +161,7 @@ void IndependentCorrectionLimits() {
   Trial turns;
   turns.PoseDone();
   for (int i = 0; i < 4; ++i) {
-    const auto out = turns.Observe(Guide(30, 10));
+    const auto out = turns.Observe(Guide(0, 10));
     assert(out.action.action == MissionAction::kTurnRight);
     turns.Done(MissionAction::kTurnRight);
   }
@@ -219,12 +227,14 @@ void CalibratedHeadingThenSideBatches() {
     assert(out.action.action==(n<3 ? MissionAction::kTurnRight : MissionAction::kNone));
     assert(out.fine_line_turns==n);
   }
-  // No early observations before the committed turn batch is complete.
+  // The lateral count was already calculated from the ORIGINAL (30,30)
+  // observation. No new O/H is accepted between the two committed batches.
   t.now+=.25;
-  t.controller.ObserveFineLine(Guide(30,0),640,t.now);
+  t.controller.ObserveFineLine(Guide(0,0),640,t.now);
   out=t.controller.Compute({},640,480,t.now,t.down,{},{});
   assert(out.action.action==MissionAction::kNone);
-  out=t.Observe(Guide(30,0));
+  t.now+=.30;
+  out=t.controller.Compute({},640,480,t.now,t.down,{},{});
   assert(out.action.action==MissionAction::kRightSideStep);
   for(int n=1;n<=3;++n) {
     t.now+=.1;

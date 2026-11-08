@@ -72,7 +72,7 @@ struct Driver {
 void PriorityAndGates() {
   Driver floor;floor.Floor(200);floor.in.hurdle_target=Finish(450);floor.Tick();
   Check(floor.out.command.action==MissionAction::kLineLeftUnit,"valid LINE did not win over finish bbox");
-  for(int points:{0,1,2,3}) {
+  for(int points:{0,1,2}) {
     Driver bbox;bbox.Floor(200,points);bbox.in.hurdle_target=Finish(450);bbox.Tick();
     Check(bbox.out.command.action==MissionAction::kLineStraightUnit,
           "sparse LINE steered toward an object instead of going straight");
@@ -81,6 +81,10 @@ void PriorityAndGates() {
     Check(bbox.out.active_mission==MissionType::kLine && bbox.out.approach_mission==MissionType::kNone,
           "finish entered HURDLE/FINE instead of retaining LINE transport");
   }
+  Driver three;three.Floor(200,3);three.in.hurdle_target=Finish(450);three.Tick();
+  Check(three.out.line_decision_guide && three.out.line_decision_guide->valid &&
+        three.out.command.action==MissionAction::kLineLeftUnit,
+        "three valid floor points must steer with O/H in FINISH mode");
   Driver missing;missing.Tick();
   Check(missing.out.command.action==MissionAction::kLineStraightUnit,"missing LINE and bbox did not go straight");
   Driver outlier;outlier.Floor(200,4);outlier.in.line_centers.back().u=600;
@@ -90,8 +94,8 @@ void PriorityAndGates() {
   outlier.core.config_.line_features.ransac_min_sample_v_gap_px=20;
   outlier.in.hurdle_target=Finish(450);outlier.Tick();
   Check(outlier.out.line_features.n_visible==3 &&
-        outlier.out.command.action==MissionAction::kLineStraightUnit,
-        "three RANSAC inliers incorrectly used an object for steering");
+        outlier.out.command.action==MissionAction::kLineLeftUnit,
+        "three RANSAC inliers did not steer from floor O/H");
   Driver bad;bad.in.hurdle_target=Finish(std::numeric_limits<double>::quiet_NaN());bad.Tick();
   Check(bad.out.command.action==MissionAction::kLineStraightUnit,"invalid finish center was used");
   Driver score;score.core.config_.line_p2p.in_place_turn_score=.01;
