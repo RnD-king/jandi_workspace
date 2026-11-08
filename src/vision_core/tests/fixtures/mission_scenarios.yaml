@@ -60,9 +60,9 @@ vision_algorithm:
     upper_acquire_v_px: 470.0
 
     far_u_des_px: 360.0
-    approach_u_deadband_px: 110
-    approach_left_top_u_px: 250.0 # Vertical legacy fixture: 360-110.
-    approach_right_top_u_px: 470.0 # Vertical legacy fixture: 360+110.
+    approach_top_half_width_px: 110.0 # Vertical fixture: 360 +/- 110.
+    approach_bottom_half_width_px: 110.0
+    approach_near_outer_margin_px: 90.0
 
     approach_short_v_px: 100.0
     approach_two_step_v_px: 240.0

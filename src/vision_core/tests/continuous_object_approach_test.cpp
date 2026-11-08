@@ -87,6 +87,30 @@ struct Driver {
   }
 };
 void Geometry() {
+  // Far guidance and near-grid inner boundaries share a center and slopes;
+  // their outer boundaries differ by a fixed horizontal displacement.
+  BallConfig boundary;
+  boundary.far_u_des_px=380.0;
+  boundary.approach_top_half_width_px=35.0;
+  boundary.approach_bottom_half_width_px=90.0;
+  boundary.approach_near_outer_margin_px=60.0;
+  for(double v : {0.0,120.0,260.0,479.0}) {
+    const auto inner=boundary.ApproachBounds(v,480);
+    const auto outer=boundary.ExtremeApproachBounds(v,480);
+    Check(std::abs(inner.first+inner.second-760.0)<1e-9,
+          "approach inner diagonals lost their shared center");
+    Check(std::abs(outer.first-(inner.first-60.0))<1e-9 &&
+          std::abs(outer.second-(inner.second+60.0))<1e-9,
+          "near grid diagonals are not horizontal parallel offsets");
+  }
+  Check(boundary.ApproachBounds(0,480).first==345.0 &&
+        boundary.ApproachBounds(479,480).second==470.0,
+        "top/bottom ball half-width geometry changed");
+  boundary.far_u_des_px=360.0;
+  Check(boundary.ApproachBounds(0,480).first==325.0 &&
+        boundary.ExtremeApproachBounds(479,480).second==510.0,
+        "recenter did not move both far and near guides");
+
   const Intrinsics k{600,600,320,240};const ApproachCameraPose c{0,.45,0,20,0};
   auto t=Target(320,150);
   auto guide=ObjectApproachGuide(t,false,0,k,c,640,480,320,400,false,0,0);
@@ -607,7 +631,7 @@ void NearPixelVotesWithGaps(MissionType mission) {
   Check(d.out.approach_near,"configured nonconsecutive near-v votes did not latch");
 }
 void NearFinalActionSequence(double u,bool left,bool extreme,double near_v=260) {
-  auto c=Config();c.ball.approach_extreme_turn_margin_px=90.0;
+  auto c=Config();c.ball.approach_near_outer_margin_px=90.0;
   Driver d(c);
   // Keep center-distance association stable while entering the lower zone:
   // the test changes v by <=200px, never requiring an identity reset.

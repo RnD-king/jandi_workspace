@@ -233,8 +233,9 @@ int main(int argc, char **argv) {
   assert(c.hurdle.stable_min_hits == 7);
   assert(c.hurdle.entry_recovery_max_steps == 3);
   assert(c.hurdle.recovery_max_steps == 3);
-  assert(c.ball.approach_left_top_u_px==250.0);
-  assert(c.ball.approach_right_top_u_px==470.0);
+  assert(c.ball.approach_top_half_width_px==110.0);
+  assert(c.ball.approach_bottom_half_width_px==110.0);
+  assert(c.ball.approach_near_outer_margin_px==90.0);
   assert(c.post_motion_observation_sec == 1.0);
   assert(c.object_ready_mean_actions == std::vector<int>({22, 23}));
   assert(defaults.object_ready_mean_actions == c.object_ready_mean_actions);
@@ -334,24 +335,26 @@ int main(int argc, char **argv) {
   calibrated_yaml.replace(delta_pos,delta_from.size(),"right_delta_u_px: -50.0");
   const auto calibrated=LoadText(calibrated_yaml);
   assert(calibrated.ball.fine_motion.right_delta_px.u==-50 && calibrated.ball.fine_motion.HasCalibration());
-  for (const auto* key : {"approach_left_top_u_px: 250.0", "approach_right_top_u_px: 470.0"}) {
+  for (const auto* key : {"approach_top_half_width_px: 110.0",
+                          "approach_bottom_half_width_px: 110.0",
+                          "approach_near_outer_margin_px: 90.0"}) {
     Reject(text.str(),key,"");
     const auto name=std::string(key).substr(0,std::string(key).find(':'));
     for (const auto* value : {"-1.0", ".nan", ".inf", "not_a_number"})
       Reject(text.str(),key,name+": "+value);
   }
-  Reject(text.str(),"approach_left_top_u_px: 250.0","approach_left_top_u_px: 470.0");
-  Reject(text.str(),"approach_left_top_u_px: 250.0","approach_left_top_u_px: 500.0");
+  Reject(text.str(),"approach_top_half_width_px: 110.0","approach_top_half_width_px: 0.0");
+  Reject(text.str(),"approach_bottom_half_width_px: 110.0","approach_bottom_half_width_px: 0.0");
   auto slanted_yaml=text.str();
-  const auto top_pos=slanted_yaml.find("approach_left_top_u_px: 250.0");
+  const auto top_pos=slanted_yaml.find("approach_top_half_width_px: 110.0");
   assert(top_pos!=std::string::npos);
-  slanted_yaml.replace(top_pos,std::string("approach_left_top_u_px: 250.0").size(),
-      "approach_left_top_u_px: 300.0");
+  slanted_yaml.replace(top_pos,std::string("approach_top_half_width_px: 110.0").size(),
+      "approach_top_half_width_px: 50.0");
   const auto slanted=LoadText(slanted_yaml);
-  assert(slanted.ball.approach_left_top_u_px==300.0 &&
-         slanted.ball.approach_right_top_u_px==470.0 &&
+  assert(slanted.ball.approach_top_half_width_px==50.0 &&
+         slanted.ball.approach_bottom_half_width_px==110.0 &&
          slanted.ball.far_u_des_px==c.ball.far_u_des_px &&
-         slanted.ball.approach_u_deadband_px==c.ball.approach_u_deadband_px);
+         slanted.ball.approach_near_outer_margin_px==90.0);
   for (const auto* field : {"ransac_enabled: true", "ransac_min_input_points: 4",
       "ransac_residual_threshold_px: 20.0", "ransac_min_sample_v_gap_px: 20.0",
       "ransac_max_outliers: 2"})
