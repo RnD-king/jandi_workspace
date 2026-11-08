@@ -172,7 +172,7 @@ void LegacyFallback() {
   assert(b.mode==BallMode::kFineAdjustForPickup && b.action.action==MissionAction::kRightSideStep);
   // An unmeasured side never inherits the legacy blind pair when a partial
   // calibration is active and the measured direction cannot help.
-  c.fine_motion.max_repetitions=3;c.fine_motion.forward_delta_px={0,20};
+  c.fine_motion.max_repetitions=3;c.fine_motion.forward_delta_px={0,-20};
   BallController partial(c,3);partial.StartTestExecute();
   partial.UseVerifiedObservation(Target(500,105),std::deque<bool>(10,true),640,480);
   b=partial.Compute({},640,480,0,{CameraMode::kBallView,true},{});
