@@ -381,6 +381,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.ball.fine_side_two_step_margin_px, "ball.fine_side_two_step_margin_px");
   if (c.ball.fine_motion.max_repetitions<1 || c.ball.fine_motion.max_repetitions>3)
     throw std::runtime_error("ball.fine_motion.max_repetitions must be in [1,3]");
+  Nonnegative(c.ball.fine_motion.forward_first_max_lateral_error_px,
+              "ball.fine_motion.forward_first_max_lateral_error_px");
   const std::array<std::pair<const char*,Point2>,4> fine_effects{{
       {"forward",c.ball.fine_motion.forward_delta_px},
       {"backward",c.ball.fine_motion.backward_delta_px},
@@ -756,6 +758,9 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "fine_side_two_step_margin_px", c.ball.fine_side_two_step_margin_px);
   const auto fine_motion=b["fine_motion"];
   Assign(fine_motion,"max_repetitions",c.ball.fine_motion.max_repetitions);
+  if (fine_motion["forward_first_max_lateral_error_px"])
+    Assign(fine_motion,"forward_first_max_lateral_error_px",
+           c.ball.fine_motion.forward_first_max_lateral_error_px);
   Assign(fine_motion,"forward_delta_u_px",c.ball.fine_motion.forward_delta_px.u);
   Assign(fine_motion,"forward_delta_v_px",c.ball.fine_motion.forward_delta_px.v);
   Assign(fine_motion,"backward_delta_u_px",c.ball.fine_motion.backward_delta_px.u);

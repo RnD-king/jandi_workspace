@@ -329,6 +329,7 @@ int main(int argc, char **argv) {
     for (const auto* bad : {".nan",".inf","not_a_number"})
       Reject(text.str(),from,std::string(key)+": "+bad);
   }
+  Reject(text.str(),"max_repetitions: 3","max_repetitions: 4");
   auto calibrated_yaml=text.str();
   const std::string delta_from="right_delta_u_px: 0.0";
   const auto delta_pos=calibrated_yaml.find(delta_from);assert(delta_pos!=std::string::npos);

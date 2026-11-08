@@ -159,6 +159,7 @@ vision_algorithm:
       fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
       fine_motion:
         max_repetitions: 3 # 같은 방향만 최대 3회. 아래 값은 DOWN 화면의 공 중심 변화량.
+        forward_first_max_lateral_error_px: 60.0 # 영역 위쪽이면 전진 우선, 좌우 허용 여유폭(px)
         forward_delta_u_px: -20 # Action 3 1회 후 공의 Δx (오른쪽 +)
         forward_delta_v_px: 42 # Action 3 1회 후 공의 Δy (아래쪽 +)
         backward_delta_u_px: -35 # Action 4

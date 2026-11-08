@@ -65,6 +65,31 @@ void BoundsAndUncalibrated() {
   c.right_delta_px={-50,0};assert(Plan(c,{347.5,105}).repetitions==0); // Already in pickup rectangle.
   assert(PlanBallFineMotion(c,{500,105},310,385,80,130,640,480,1).repetitions==1);
 }
+void ForwardFirstOnMeasuredPolygon() {
+  const PickupPolygon polygon{{380,260},{450,260},{450,338},{380,338}};
+  BallFineMotionConfig c;
+  c.forward_delta_px={-20,42};
+  c.right_delta_px={-60,0};
+  c.left_delta_px={40,15};
+  c.backward_delta_px={-35,-18};
+  c.forward_first_max_lateral_error_px=60;
+  // A single right step reaches closer to the boundary, but forward
+  // approaches the correct vertical band; lateral will be refined AFTER DONE.
+  const auto plan=PlanBallFineMotion(c,{505,250},polygon,640,480,3);
+  assert(plan.action==MissionAction::kStepForwardHalf &&
+         plan.repetitions==2 &&
+         plan.predicted_center_px.u==465 &&
+         plan.predicted_center_px.v==334);
+  // Far outside lateral tolerance: favor measured lateral motion.
+  const auto far=PlanBallFineMotion(c,{590,250},polygon,640,480,3);
+  assert(far.action==MissionAction::kRightSideStep);
+  // If already vertically aligned, the forward-first policy is disabled.
+  const auto aligned=PlanBallFineMotion(c,{505,300},polygon,640,480,3);
+  assert(aligned.action==MissionAction::kRightSideStep);
+  // A configured one-action cap must remain a hard limit.
+  const auto limited=PlanBallFineMotion(c,{505,250},polygon,640,480,1);
+  assert(limited.repetitions<=1);
+}
 void DirectRepeat(MissionAction action) {
   auto c=Config();Point2 start;
   switch(action) {
@@ -177,6 +202,7 @@ void Transport(bool manual,bool pause) {
 }
 int main() {
   CountsAndCrossAxis();BoundsAndUncalibrated();TaperedPickupBounds();LegacyFallback();
+  ForwardFirstOnMeasuredPolygon();
   for (auto action : {MissionAction::kStepForwardHalf,MissionAction::kStepBack,
       MissionAction::kLeftSideStep,MissionAction::kRightSideStep}) DirectRepeat(action);
   Transport(false,false);Transport(true,false);Transport(false,true);
