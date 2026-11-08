@@ -127,7 +127,8 @@ public:
                      bool allow_entry_recovery = true);
   void EnterContinuousRecovery(const ObjectTarget&,const std::deque<bool>&,
                                int width,int height,double now);
-  void EnterContinuousNear(double now);
+  void EnterContinuousNear(double now,
+      MissionAction first_down_unit=MissionAction::kLineStraightUnit);
   const std::deque<bool>& ObservationHits() const { return hit_history_; }
   // Discard all observations made before the most recent motion DONE.
   // The mission phase and last known recovery direction are retained.
@@ -228,6 +229,7 @@ private:
   ObjectObservationWindow observation_window_;
   DownSearchWalk down_search_;
   bool down_approach_fixed_sequence_{false};
+  MissionAction down_initial_line_unit_{MissionAction::kLineStraightUnit};
   bool down_initial_two_pending_{false}, down_initial_two_done_{false};
   bool down_final_one_pending_{false}, down_near_qualified_{false};
   std::deque<bool> down_near_hits_; // Legacy diagnostic history.

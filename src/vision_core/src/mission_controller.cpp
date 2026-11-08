@@ -41,6 +41,7 @@ MissionController::MissionController(const MissionControllerConfig &config)
       line_plan_(config_.line_p2p,config_.line.line_stable_window,config_.line.line_stable_min_hits),
       line_p2p_controller_(config_.line_p2p),
       line_guide_accumulator_(config_.line_p2p),
+      hurdle_down_ready_accumulator_(config_.line_p2p),
       ball_controller_(config_.ball, config_.camera_motion_timeout_sec),
       hurdle_controller_(config_.hurdle, config_.camera_motion_timeout_sec),
       goal_controller_(config_.goal, config_.camera_motion_timeout_sec),
@@ -3287,6 +3288,8 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   config_ = updated;
   line_guide_accumulator_ =
       LineGuideAccumulator(config_.line_p2p);
+  hurdle_down_ready_accumulator_ =
+      LineGuideAccumulator(config_.line_p2p);
   line_p2p_controller_ = LineP2pController(config_.line_p2p);
   line_plan_.UpdateConfig(config_.line_p2p);
   ball_controller_.UpdateTuning(config_.ball);
@@ -3372,6 +3375,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   far_goal_depth_probe_={};
   approach_camera_started_=-1;
   line_plan_.Reset();
+  hurdle_down_ready_accumulator_.Reset();
   candidate_ = {};
   line_ready_handled_id_ = line_auxiliary_id_ = 0;
   line_auxiliary_done_ = line_auxiliary_observing_ = false;

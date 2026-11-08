@@ -286,6 +286,39 @@ MissionFrameResult MissionController::StepPlannedLine(
       output.line_decision_guide=decision;
     }
   }
+  // Read only the LAST extra pre-DOWN LINE unit's own moving O/H through
+  // READY. A queued ACK can precede the previous unit's DONE: start only
+  // once the extra unit becomes the physically pending action.
+  if (automatic_approach && input.advance_line_fsm &&
+      continuous_.mission==MissionType::kHurdle && continuous_.near &&
+      continuous_.near_motion_id!=0 && !continuous_.hurdle_down_ready_finalized) {
+    const auto id=continuous_.near_motion_id;
+    const auto& fb=input.delivery_feedback;
+    if (fb.action_id==id && fb.acknowledged && !fb.done)
+      continuous_.hurdle_down_final_acknowledged=true;
+    if (continuous_.hurdle_down_final_acknowledged &&
+        command_coordinator_.PendingActionId()==id) {
+      if (!hurdle_down_ready_accumulator_.ActiveFor(id))
+        hurdle_down_ready_accumulator_.Begin(id,input.now_sec);
+      hurdle_down_ready_accumulator_.Add(id,input.now_sec,actual_line_guide);
+      if (fb.action_id==id && fb.ready && !fb.done) {
+        const auto mean=hurdle_down_ready_accumulator_.Finish(
+            id,input.now_sec,config_.line_p2p.ready_lead_sec);
+        if (mean && mean->valid) {
+          const auto dir=SteeringDecision(*mean).direction;
+          if (dir==CruiseDirection::kLeft)
+            continuous_.hurdle_down_ready_action=MissionAction::kLineLeftUnit;
+          else if (dir==CruiseDirection::kRight)
+            continuous_.hurdle_down_ready_action=
+                static_cast<MissionAction>(config_.line_p2p.right_unit_action);
+          else if (dir==CruiseDirection::kStraight)
+            continuous_.hurdle_down_ready_action=MissionAction::kLineStraightUnit;
+        }
+        // An invalid READY window falls back straight, not to the OLD block.
+        continuous_.hurdle_down_ready_finalized=true;
+      }
+    }
+  }
   if (input.advance_line_fsm) {
     actual_line_stability_history_.push_back(line_state_==LineState::kNormal &&
         actual_line_guide.valid && std::isfinite(actual_line_guide.offset) &&

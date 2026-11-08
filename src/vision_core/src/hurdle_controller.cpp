@@ -431,7 +431,7 @@ HurdleResult HurdleController::Compute(
           }
           return result;
         }
-        result.action = Locomotion(MissionAction::kLineStraightUnit); // 33
+        result.action = Locomotion(down_initial_line_unit_); // Last extra LINE READY: 32/33/36.
         if (allow_new_body_actions) {
           ClearDownEvidence();
           down_initial_two_pending_ = true;
@@ -881,10 +881,14 @@ void HurdleController::EnterContinuousRecovery(const ObjectTarget& target,
   BeginStepRecovery(now,false);
 }
 
-void HurdleController::EnterContinuousNear(double now) {
+void HurdleController::EnterContinuousNear(double now,MissionAction first_down_unit) {
   Reset();entry_recovery_allowed_=false;
   mode_=HurdleMode::kWaitCameraDown;state_enter_sec_=now;
   down_approach_fixed_sequence_=true;
+  if (first_down_unit==MissionAction::kLineLeftUnit ||
+      first_down_unit==MissionAction::kLineStraightUnit ||
+      first_down_unit==MissionAction::kLineRightUnitTurnFirst)
+    down_initial_line_unit_=first_down_unit;
 }
 
 void HurdleController::UseVerifiedObservation(
@@ -935,6 +939,7 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   recovery_step_action_=MissionAction::kStepForwardOne;
   down_search_.Reset();
   down_approach_fixed_sequence_=false;
+  down_initial_line_unit_=MissionAction::kLineStraightUnit;
   down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
   ClearDownEvidence();
   down_distance_pending_=down_stationary_observing_=down_search_step_pending_=false;

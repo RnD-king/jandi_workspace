@@ -796,10 +796,20 @@ void HurdleAndGoal() {
         "near HURDLE switched before its final unit physically DONE");
   Check(hurdle_unit && h.out.command.action==MissionAction::kLineStraightUnit,
         "HURDLE near did not choose one additional O/H-steered 33 unit");
-  h.Tick({hurdle_unit,true,false,false});h.Tick({hurdle_unit,true,true,false});
+  // The EXTRA unit's observation, not the previous neutral block, must
+  // choose the initial post-DOWN 32/33/36. Queue ACK above is not sampling.
+  h.in.line_centers={{500,450},{500,400},{500,350},{500,300},{500,250}};
+  h.Tick({hurdle_unit,true,false,false});
+  for(int n=0;n<12;++n)h.Tick();
+  h.Tick({hurdle_unit,true,false,true});
+  h.Tick({hurdle_unit,true,true,false});
   Check(h.out.active_mission==MissionType::kHurdle &&
         h.out.command.camera_request==CameraRequest::kDown,
         "HURDLE did not hand off to DOWN after its one extra LINE unit");
+  h.in.camera_feedback={CameraMode::kDown,true};
+  h.Tick();h.Tick();
+  Check(h.out.command.action==MissionAction::kLineRightUnitTurnFirst,
+        "first DOWN motion reused prior LINE O/H instead of extra READY");
 
   c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;c.goal_trial_start_goal=true;
   Driver g(c);g.in.ball_target.reset();g.in.camera_feedback={CameraMode::kGoal,true};
