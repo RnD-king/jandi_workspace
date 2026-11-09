@@ -383,6 +383,31 @@ MissionFrameResult MissionController::StepPlannedLine(
     const auto real=line_p2p_controller_.Compute(actual_line_guide);
     if (real.direction!=CruiseDirection::kNone) last_line_score_=real.error;
   }
+  // READY prebooking means the last block may be issued while the preceding
+  // unit has not DONE. Re-evaluate the gate when the booked unit actually
+  // becomes the current executing unit: completed counts are now accurate.
+  // The floor LINE must still be valid before raising the camera.
+  if (config_.race_round2_fast_enabled && !goal_early_camera_armed_ &&
+      config_.test_mission==MissionType::kNone &&
+      active_mission_==MissionType::kLine && has_ball_ &&
+      config_.enable_goal && post_pickup_goal_line_gate_active_ &&
+      line_valid && line_state_==LineState::kNormal &&
+      goal_controller_.CanEnterFromLine() &&
+      !command_coordinator_.HasQueuedAction()) {
+    const auto pending_id=command_coordinator_.PendingActionId();
+    if (pending_id && line_plan_.LastUnit(pending_id) &&
+        !line_plan_.Done(pending_id) &&
+        post_pickup_line_actions_completed_+1>=approach_goal_retry_after_) {
+      const auto cruise=line_plan_.CruiseFor(pending_id);
+      const bool completing_straight=cruise==MissionAction::kStepForwardFour;
+      if (post_pickup_line_actions_completed_+1>=
+              goal_controller_.RequiredLineWalkActions() ||
+          StraightGoalGateReached(completing_straight ? 1 : 0)) {
+        goal_early_camera_armed_=true;
+        goal_early_camera_action_id_=pending_id;
+      }
+    }
+  }
   ActionRequest request;
   CameraRequest camera = route.camera;
   // Never sacrifice the single READY successor to a simultaneous camera
