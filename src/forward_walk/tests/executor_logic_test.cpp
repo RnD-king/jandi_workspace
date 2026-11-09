@@ -48,6 +48,62 @@ void TestWalkInterActionHold() {
     Require(state.Evaluate(3,1,13)==Admission::Reject, "third command bypassed delayed one-slot queue");
 }
 
+void TestMotorPositionReadRetry() {
+    int reads=0, waits=0, failures=0, recovered=0;
+    const auto read=[&]() -> RawPositions {
+        ++reads;
+        if (reads < 3) throw std::runtime_error("temporary SyncRead timeout");
+        return InitialPose();
+    };
+    const auto on_event=[&](int attempt,int total,bool ok,const char* reason) {
+        Require(total==50,"retry configuration changed unexpectedly");
+        if(ok) {
+            ++recovered;
+            Require(attempt==3,"recovery attempt not reported");
+        } else {
+            ++failures;
+            Require(std::string(reason)=="temporary SyncRead timeout","missing failure reason");
+        }
+    };
+    const auto pose=ReadRawPositionsWithRetry(read,[&]{++waits;},on_event,50);
+    Require(pose==InitialPose(),"retried read returned the wrong encoder snapshot");
+    Require(reads==3 && waits==2 && failures==2 && recovered==1,
+            "transient position read was not retried exactly twice");
+
+    reads=waits=failures=recovered=0;
+    const auto succeeds_on_last=[&]() -> RawPositions {
+        ++reads;
+        if (reads<50) throw std::runtime_error("slow U2D2 recovery");
+        return InitialPose();
+    };
+    const auto last=ReadRawPositionsWithRetry(succeeds_on_last,[&]{++waits;},
+        [&](int attempt,int total,bool ok,const char*) {
+            if(ok) {++recovered;Require(attempt==50 && total==50,"late recovery misreported");}
+            else ++failures;
+        },50);
+    Require(last==InitialPose() && reads==50 && waits==49 && failures==49 && recovered==1,
+            "50th (last allowed) position read was not accepted");
+
+    reads=waits=failures=recovered=0;
+    Rejects([&] {
+        (void)ReadRawPositionsWithRetry([&]() -> RawPositions {
+            ++reads;
+            throw std::runtime_error("persistent SyncRead failure");
+        },[&]{++waits;},[&](int,int,bool ok,const char* error) {
+            if(!ok) {
+                ++failures;
+                Require(std::string(error)=="persistent SyncRead failure","lost final read error");
+            } else ++recovered;
+        },50);
+    });
+    Require(reads==50 && waits==49 && failures==50 && recovered==0,
+            "exhausted position read retried too few/many times or waited after failure");
+    Rejects([&] {
+        (void)ReadRawPositionsWithRetry([&]{return InitialPose();},[]{},
+                                       [](int,int,bool,const char*){},0);
+    });
+}
+
 void TestMotionDoneWatchdog() {
     MotionDoneWatchdog watchdog;
     const auto start = Clock::time_point{} + 10s;
@@ -85,6 +141,7 @@ void TestMotionDoneWatchdog() {
 int main() {
     TestWalkInterActionHold();
     TestMotionDoneWatchdog();
+    TestMotorPositionReadRetry();
     const fs::path temporary = fs::temp_directory_path() / ("jandi_executor_test_" + std::to_string(getpid()));
     fs::create_directories(temporary);
     int groups = 0;
