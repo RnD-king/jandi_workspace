@@ -373,10 +373,12 @@ public:
   double ManualPreviewDurationSec() const;
   bool ManualObservationHasEnoughFrames() const {
     return !decision_observation_active_ || decision_observation_mission_==MissionType::kLine ||
-        decision_object_hits_.size()>=9; // next processed frame completes the 10-frame window
+        decision_object_hits_.size()>=(config_.race_round2_fast_enabled ? 7U : 9U); // next frame completes the window
   }
   bool ManualObservationCanFinish(double now_sec) const {
     return ManualObservationHasEnoughFrames() && (!decision_observation_active_ ||
+        (config_.race_round2_fast_enabled &&
+         (decision_observation_mission_==MissionType::kLine ? decision_line_qualified_ : decision_object_qualified_)) ||
         now_sec + 1e-9 >= decision_observation_start_sec_ + config_.post_motion_observation_sec);
   }
   int RepeatScope() const;
