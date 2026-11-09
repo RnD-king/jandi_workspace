@@ -937,6 +937,7 @@ MissionFrameResult MissionController::StepPlannedLine(
             line_plan_.ObjectOwned(id,continuous_.epoch) &&
             !line_plan_.IsProbe(id) && !line_plan_.ObjectQualified(id);
         if (!finish_course && !decision.valid && !idle && !object_loss &&
+            !early_goal_gate && // GOAL-view pixels cannot invalidate a previously safe LINE unit.
             !route.resume_line_at_ready &&
             !(automatic_approach && continuous_.mission==MissionType::kHurdle &&
               continuous_.near))
