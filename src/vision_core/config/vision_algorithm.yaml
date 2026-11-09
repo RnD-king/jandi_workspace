@@ -400,6 +400,7 @@ vision_algorithm:
       action_ack_timeout_sec: 10.0 # 실행기 ACK를 기다리는 제한 시간 (초)
 
     mission:
+      race_round2_fast_enabled: true # 2회차 고속화 전용; 과거 테스트 fixture는 false
       # 시작 상태·단독 시험
       initial_has_ball: false # 시작할 때 공을 가지고 있는 것으로 설정
       test_mission: 0 # 0 전체 미션, 2 공, 3 골대, 4 허들
