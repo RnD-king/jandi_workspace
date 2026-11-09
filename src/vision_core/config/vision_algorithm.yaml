@@ -47,8 +47,8 @@ vision_algorithm:
       scan_observation_timeout_sec: 2.0
       scan_pause_window: 4
       scan_pause_hits: 2
-      scan_verify_window: 10
-      scan_verify_hits: 5
+      scan_verify_window: 8
+      scan_verify_hits: 4
       scan_body_turn_deg: 15.0
       scan_max_pairs: 3 # LEFT → RIGHT → CENTER 정지 탐색 최대 3묶음, 미발견 시 FINAL HOLD
 
@@ -57,8 +57,8 @@ vision_algorithm:
       enabled: true
       threshold_deg: 20.0
       min_upper_points: 2
-      stable_window: 10
-      stable_min_hits: 5
+      stable_window: 8
+      stable_min_hits: 4
       confirm_extra_sequences: 1
       scan_delay_walk_sequences: 0 # 확정 후 추가 LINE 보행 묶음 없음; CONFIRM 마지막 READY 선예약 보류
       max_scan_yaw_deg: 45
@@ -68,16 +68,16 @@ vision_algorithm:
       center_half_width_px: 50.0
       pause_window: 4
       pause_hits: 2
-      verify_window: 10
-      verify_hits: 5
+      verify_window: 8
+      verify_hits: 4
       head_search_max_attempts: 3
       body_search_max_attempts: 3
       failure_lock_line_blocks: 20
       post_goal_rearm_line_blocks: 3
 
     stability:
-      line_stable_window: 10
-      line_stable_min_hits: 5
+      line_stable_window: 8
+      line_stable_min_hits: 4
 
     walk:
       # 한 LINE 묶음의 32/33/34번 액션 반복 횟수 (좌회전 / 직진 / 우회전)
@@ -94,7 +94,7 @@ vision_algorithm:
 
       # 보행 중 프레임 관측
       ready_lead_sec: 0.20 # 비전 관측 계산과 실행기 READY 발행이 함께 읽는 종료 전 여유 시간
-      observation_start_ratio: 0.0 # ACK부터 마지막 READY까지 전체 프레임으로 10중 5 판정·유효 가이드 평균
+      observation_start_ratio: 0.0 # ACK부터 마지막 READY까지 전체 프레임으로 8중 4 판정·유효 가이드 평균
 
       # Legacy TURN configuration retained for manual/older tests;
       # AUTO staged recovery below has its own independent parameters.
@@ -134,10 +134,10 @@ vision_algorithm:
     control:
       # 단독 시험·LINE에서 공 진입
       test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
-      stable_window: 10
-      stable_min_hits: 5 # 안정 검출 최소 횟수
-      near_v_min_hits: 3 # 근거리 진입: 최근 10프레임 유효 검출 7회, v>=240 3회
-      entry_min_hits: 4 # LINE → BALL 진입
+      stable_window: 8
+      stable_min_hits: 4 # 안정 검출 최소 횟수
+      near_v_min_hits: 2 # 근거리 진입: 최근 8프레임 유효 검출 4회, v>=240 2회
+      entry_min_hits: 3 # LINE → BALL 진입
       lost_frames: 15 # 유실 복구 진입 기준 프레임 수
       upper_acquire_v_px: 470.0 # 공이 있을 조건 (중심 v가 이 값 이하인 프레임을 진입 횟수로 계산)
 
@@ -180,7 +180,7 @@ vision_algorithm:
         - [450, 298]
         - [433, 338]
       pickup_max_attempts: 100
-      pickup_verify_min_hits: 3 # 픽업 DONE 후 stable_window 중 잔존 공 검출 기준; 이상이면 재픽업
+      pickup_verify_min_hits: 2 # 픽업 DONE 후 8프레임 창 중 잔존 공 검출 기준; 이상이면 재픽업
       pickup_shrink_enabled: true # 두 노드 모두 활성화, rqt에서 ON/OFF 조정 가능
       pickup_initial_shrink_percent: 10.0 # 원본 꼭짓점 영역에서 시작부터 가로/세로 10% 축소
       pickup_shrink_percent: 7.0 # 이후 실패 확정마다 기존 7%씩 추가 축소(변경 없음)
@@ -220,9 +220,9 @@ vision_algorithm:
 
     control:
       # LINE에서 허들 진입
-      stable_window: 10
-      stable_min_hits: 7 # 안정 검출 최소 횟수
-      near_v_min_hits: 5 # 근거리 진입: 10프레임 유효 검출 7회, v>=240 5회
+      stable_window: 8
+      stable_min_hits: 6 # 안정 검출 최소 횟수
+      near_v_min_hits: 4 # 근거리 진입: 8프레임 유효 검출 6회, v>=240 4회
       lost_frames: 15 # 유실 복구 진입 기준 프레임 수
       upper_acquire_v_px: 470.0 # 허들이 있을 조건
 
@@ -248,8 +248,8 @@ vision_algorithm:
       fine_line_offset_tolerance_px: 120.0 # |O| 허용 범위 (px)
       fine_line_heading_tolerance_deg: 10.0 # |H| 허용 범위 (도)
       fine_line_observation_sec: 1.0 # 최초 정렬 판단 및 회전+횡이동 묶음의 최종 DONE 이후 정지 관측 (초)
-      fine_line_stable_window: 10
-      fine_line_stable_min_hits: 5
+      fine_line_stable_window: 8
+      fine_line_stable_min_hits: 4
       fine_line_turn_yaw_deg: 15 # 7/8번 회전 1회 요청각 (도)
       fine_line_measured_turn_deg: 0.0 # 방향별 값이 0일 때 쓰는 공통 호환값. 세 값 모두 0이면 단발 관측
       fine_line_measured_left_turn_deg: 11.0 # Action 7: 1회 H 변화량의 크기. 0이면 공통 실측값 사용
@@ -312,9 +312,9 @@ vision_algorithm:
       # 단독 시험·검출 안정성
       trial_start_goal: false # true: 골대 단독 시험을 GOAL 카메라에서 시작, false: 기존 라인 출발
       test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
-      stable_window: 10
-      stable_min_hits: 7 # 안정 검출 최소 횟수
-      near_distance_min_hits: 3 # 같은 관측창에서 근거리 Depth/pose가 유효한 백보드 최소 프레임 수
+      stable_window: 8
+      stable_min_hits: 6 # 안정 검출 최소 횟수
+      near_distance_min_hits: 2 # 같은 관측창에서 근거리 Depth/pose가 유효한 백보드 최소 프레임 수
       lost_frames: 15 # 유실 복구 진입 기준 프레임 수
       smooth_alpha: 0.45
 
@@ -329,8 +329,8 @@ vision_algorithm:
       head_scan_center_half_width_px: 100.0
       head_scan_pause_window: 4
       head_scan_pause_hits: 2
-      head_scan_verify_window: 10
-      head_scan_verify_hits: 5
+      head_scan_verify_window: 8
+      head_scan_verify_hits: 4
       head_scan_move_sec: 0.5
       head_scan_hold_sec: 0.5
       head_scan_return_sec: 0.5
@@ -345,8 +345,8 @@ vision_algorithm:
       auto_approach_half_width_px: 100.0 # 180~380px 직진, 밖은 좌/우회전전진
       approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
       edge_margin_px: 50.0 # GOAL 이미지 경계 보호 구간(px)
-      edge_stable_window: 10 # 연속된 프레임 관측창; 기간 내 한번 충족하면 래치
-      edge_stable_min_hits: 4 # 좌/우 각각 10중4 이상 접촉 시 우선 제자리 2회전
+      edge_stable_window: 8 # 연속된 프레임 관측창; 기간 내 한번 충족하면 래치
+      edge_stable_min_hits: 3 # 좌/우 각각 8중3 이상 접촉 시 우선 제자리 2회전
       approach_short_z_m: 0.8 # GOAL 근거리 진입·FINE 자세 전환 기준; FORWARD 뷰에서는 짧은 보행 선택 기준
       camera_goal_start_z_m: 0.8 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
 
