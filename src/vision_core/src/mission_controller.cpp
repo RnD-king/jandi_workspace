@@ -510,6 +510,7 @@ void MissionController::EnterMission(MissionType mission) {
     hurdle_result_ = {};
     goal_result_ = {};
   } else if (mission == MissionType::kHurdle) {
+    hurdle_down_camera_armed_=false;
     goal_controller_.Reset();
     ball_result_ = {};
     goal_result_ = {};
@@ -3386,6 +3387,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   hurdle_down_ready_accumulator_.Reset();
   candidate_ = {};
   line_ready_handled_id_ = line_auxiliary_id_ = 0;
+  hurdle_down_camera_armed_=false;
   line_auxiliary_done_ = line_auxiliary_observing_ = false;
   line_auxiliary_action_ = MissionAction::kNone;
   if (!preserve_action_ids)
