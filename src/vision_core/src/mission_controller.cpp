@@ -875,13 +875,18 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
   if (decision_observation_mission_ != MissionType::kLine) {
     const bool detected = target && target->has_value();
     decision_object_hits_.push_back(detected);
-    const int window = kFastStationaryWindow;
+    const int window = config_.race_round2_fast_enabled
+        ? kFastStationaryWindow
+        : (decision_observation_mission_==MissionType::kBall ? config_.ball.stable_window :
+           decision_observation_mission_==MissionType::kGoal ? config_.goal.stable_window :
+           config_.hurdle.stable_window);
     while (decision_object_hits_.size()>static_cast<std::size_t>(window))
       decision_object_hits_.pop_front();
     const int original_minimum = decision_observation_mission_==MissionType::kBall ?
         config_.ball.stable_min_hits : decision_observation_mission_==MissionType::kGoal ?
         config_.goal.stable_min_hits : config_.hurdle.stable_min_hits;
-    const int minimum = FastStationaryMinHits(original_minimum);
+    const int minimum = config_.race_round2_fast_enabled
+        ? FastStationaryMinHits(original_minimum) : original_minimum;
     if (decision_object_hits_.size()==static_cast<std::size_t>(window) &&
         std::count(decision_object_hits_.begin(),decision_object_hits_.end(),true)>=minimum) {
       decision_object_qualified_=true;
@@ -898,13 +903,18 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
       decision_goal_near_hits_.push_back(
           detected && GoalNearDistanceSample(input.backboard_center_depth_m,
               input.goal_pose,config_.goal.approach_short_z_m));
-      while (decision_goal_near_hits_.size()>static_cast<std::size_t>(kFastStationaryWindow))
+      while (decision_goal_near_hits_.size()>static_cast<std::size_t>(config_.race_round2_fast_enabled
+            ? kFastStationaryWindow : config_.goal.stable_window))
         decision_goal_near_hits_.pop_front();
-      while (decision_goal_pose_hits_.size()>static_cast<std::size_t>(kFastStationaryWindow))
+      while (decision_goal_pose_hits_.size()>static_cast<std::size_t>(config_.race_round2_fast_enabled
+            ? kFastStationaryWindow : config_.goal.stable_window))
         decision_goal_pose_hits_.pop_front();
-      if (decision_goal_pose_hits_.size()==static_cast<std::size_t>(kFastStationaryWindow) &&
+      if (decision_goal_pose_hits_.size()==static_cast<std::size_t>(config_.race_round2_fast_enabled
+              ? kFastStationaryWindow : config_.goal.stable_window) &&
           std::count(decision_goal_pose_hits_.begin(),decision_goal_pose_hits_.end(),true)>=
-              FastStationaryMinHits(config_.goal.stable_min_hits)) {
+              (config_.race_round2_fast_enabled
+               ? FastStationaryMinHits(config_.goal.stable_min_hits)
+               : config_.goal.stable_min_hits)) {
         decision_goal_pose_qualified_=true;
         decision_qualified_goal_pose_hits_=decision_goal_pose_hits_;
       }
@@ -977,12 +987,16 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
   const bool valid=guide.valid && std::isfinite(guide.offset) &&
       std::isfinite(guide.heading_rad);
   decision_line_hits_.push_back(valid);
-  while (decision_line_hits_.size()>static_cast<std::size_t>(kFastStationaryWindow))
+  while (decision_line_hits_.size()>static_cast<std::size_t>(config_.race_round2_fast_enabled
+      ? kFastStationaryWindow : config_.line.line_stable_window))
     decision_line_hits_.pop_front();
-  if (decision_line_hits_.size()==static_cast<std::size_t>(kFastStationaryWindow) &&
+  if (decision_line_hits_.size()==static_cast<std::size_t>(config_.race_round2_fast_enabled
+      ? kFastStationaryWindow : config_.line.line_stable_window) &&
       std::count(decision_line_hits_.begin(),decision_line_hits_.end(),true)>=
-          std::max(FastStationaryMinHits(config_.line.line_stable_min_hits),
-                   config_.line_p2p.failure_min_valid_samples))
+          (config_.race_round2_fast_enabled
+           ? std::max(FastStationaryMinHits(config_.line.line_stable_min_hits),
+                      config_.line_p2p.failure_min_valid_samples)
+           : config_.line.line_stable_min_hits))
     decision_line_qualified_=true;
   if (valid) {
     ++decision_line_valid_count_;
@@ -995,6 +1009,16 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
 
 bool MissionController::DecisionObservationReady(double now_sec) const {
   if (!decision_observation_active_) return false;
+  if (!config_.race_round2_fast_enabled) {
+    if (now_sec - decision_observation_start_sec_ + 1e-9 <
+        config_.post_motion_observation_sec) return false;
+    if (decision_observation_mission_==MissionType::kLine)
+      return decision_line_hits_.size() >= static_cast<std::size_t>(config_.line.line_stable_window);
+    const int window = decision_observation_mission_==MissionType::kBall
+        ? config_.ball.stable_window : decision_observation_mission_==MissionType::kGoal
+        ? config_.goal.stable_window : config_.hurdle.stable_window;
+    return decision_object_hits_.size() >= static_cast<std::size_t>(window);
+  }
   const bool enough_frames = decision_observation_mission_ == MissionType::kLine
       ? decision_line_hits_.size() >= static_cast<std::size_t>(kFastStationaryWindow)
       : decision_object_hits_.size() >= static_cast<std::size_t>(kFastStationaryWindow);
@@ -1517,10 +1541,10 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         line_head_search_.phase==LineHeadSearch::Phase::kIdle &&
         !(active_mission_==MissionType::kHurdle &&
           (hurdle_controller_.ContinuousDownCameraWait() ||
-           hurdle_controller_.ContinuousDownSearch())) &&
+           (config_.race_round2_fast_enabled && hurdle_controller_.ContinuousDownSearch()))) &&
         !(active_mission_==MissionType::kBall &&
           (ball_result_.mode==BallMode::kWaitCameraDown ||
-           ball_result_.mode==BallMode::kDownSearch)))
+           (config_.race_round2_fast_enabled && ball_result_.mode==BallMode::kDownSearch))))
       BeginDecisionObservation(input.now_sec, active_mission_, true, {});
     if (!decision_observation_active_ && !applied_object_ready_mean &&
         !(goal_edge_guard_.phase==GoalEdgeGuard::Phase::kTurning &&
