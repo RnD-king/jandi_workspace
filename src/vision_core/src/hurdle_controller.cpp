@@ -429,6 +429,7 @@ HurdleResult HurdleController::Compute(
           if (feedback.action_done) {
             down_initial_two_pending_ = false;
             down_initial_two_done_ = true;
+            down_stationary_start_sec_ = now_sec; // Frame-starvation watchdog.
           } else return result;
         } else {
           result.action = Locomotion(down_initial_line_unit_); // 32/33/36.
@@ -442,7 +443,16 @@ HurdleResult HurdleController::Compute(
       if (!down_initial_window_complete_) {
         // If DONE arrives before six camera frames, finish gathering in
         // place. An incomplete sample window is not a detection failure.
-        if (down_v_samples_.size() < 6U) return result;
+        if (down_v_samples_.size() < 6U) {
+          // Missing camera frames cannot be mistaken for an object miss and
+          // must not leave the robot waiting without a bounded failure.
+          if (now_sec - down_stationary_start_sec_ >=
+              std::max(2.0, config_.down_stationary_observation_sec + 1.0)) {
+            mode_ = HurdleMode::kFailed;
+            result.mode = mode_;
+          }
+          return result;
+        }
         down_initial_window_complete_ = true;
         if (down_near_qualified_) {
           // Discovery alone cannot choose a distance or enter FINE.
