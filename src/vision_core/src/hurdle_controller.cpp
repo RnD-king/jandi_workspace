@@ -820,19 +820,20 @@ HurdleResult HurdleController::Compute(
       mode_ = HurdleMode::kReturnCameraToLine;
       post_cross_walk_done_ = false;
       result.mode = mode_;
-      // The physical hurdle is complete; WALK_MODE and FORWARD may start
-      // independently in the same decision without shortening either.
-      result.action = Locomotion(MissionAction::kWalkMode);
+      result.action = config_.race_round2_fast_enabled
+          ? Locomotion(MissionAction::kWalkMode) : ActionRequest{};
       result.camera_request = CameraRequest::kForward;
     }
     return result;
   case HurdleMode::kReturnCameraToLine:
-    if (feedback.action_done) post_cross_walk_done_ = true;
-    if (!post_cross_walk_done_)
-      result.action = Locomotion(MissionAction::kWalkMode);
+    if (config_.race_round2_fast_enabled) {
+      if (feedback.action_done) post_cross_walk_done_ = true;
+      if (!post_cross_walk_done_)
+        result.action = Locomotion(MissionAction::kWalkMode);
+    }
     if (camera.actual_mode != CameraMode::kForward || !camera.settled)
       result.camera_request = CameraRequest::kForward;
-    if (post_cross_walk_done_ &&
+    if ((!config_.race_round2_fast_enabled || post_cross_walk_done_) &&
         camera.actual_mode == CameraMode::kForward && camera.settled) {
       ignore_until_sec_ = now_sec + config_.hurdle_ignore_duration_sec;
       ResetToLine(false);
