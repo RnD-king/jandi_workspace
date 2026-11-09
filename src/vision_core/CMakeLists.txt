@@ -84,6 +84,8 @@ if(BUILD_TESTING)
   add_executable(shared_vision_core_race_round2_fast_test tests/race_round2_fast_test.cpp)
   target_link_libraries(shared_vision_core_race_round2_fast_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_race_round2_fast_test COMMAND shared_vision_core_race_round2_fast_test)
+  set_tests_properties(shared_vision_core_race_round2_fast_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml")
   add_executable(shared_vision_core_stationary_scan_observation_test tests/stationary_scan_observation_test.cpp)
   target_link_libraries(shared_vision_core_stationary_scan_observation_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_stationary_scan_observation_test COMMAND shared_vision_core_stationary_scan_observation_test)
