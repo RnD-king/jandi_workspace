@@ -246,6 +246,7 @@ private:
   int completed_back_steps_{0};
   int completed_contact_steps_{0};
   bool contact_step_pending_{false};
+  bool post_cross_walk_done_{false}; // WALK_MODE must finish alongside FORWARD before LINE resumes.
   double contact_next_step_sec_{0.0};
   TrackedHurdle tracked_;
   double last_seen_u_px_{0.0};
