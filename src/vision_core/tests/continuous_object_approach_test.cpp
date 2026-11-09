@@ -15,6 +15,10 @@ ObjectTarget Target(double u=320,double v=100,int cls=1) {
 }
 MissionControllerConfig Config() {
   auto c=LoadDefaultAlgorithmConfig();
+  Check(std::abs(c.goal.approach_short_z_m-0.87)<1e-9,
+        "production GOAL near threshold must be 0.87m");
+  Check(std::abs(c.goal.camera_goal_start_z_m-0.80)<1e-9,
+        "separate GOAL camera transition threshold must remain 0.80m");
   c.enable_ball=true;c.enable_goal=c.enable_hurdle=false;
   c.initial_has_ball=c.goal_trial_start_goal=false;
   c.test_mission=MissionType::kNone;
