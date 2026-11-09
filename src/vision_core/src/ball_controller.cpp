@@ -1,4 +1,5 @@
 #include "vision_core/ball_controller.hpp"
+#include "vision_core/stationary_window.hpp"
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/cruise_selector.hpp"
@@ -1028,8 +1029,9 @@ void BallController::UseVerifiedObservation(
   hit_history_ = hits;
   while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window))
     hit_history_.pop_front();
-  tracked_.stable = hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
-      std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits;
+  tracked_.stable = FastStationaryQualified(hit_history_, config_.stable_min_hits) ||
+      (hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+       std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits);
   if (mean && tracked_.stable) last_stable_ball_u_ = tracked_.center_px.u;
   lost_count_ = static_cast<int>(std::distance(hit_history_.rbegin(),
       std::find(hit_history_.rbegin(),hit_history_.rend(),true)));
