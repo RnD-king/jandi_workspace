@@ -693,6 +693,59 @@ public:
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
             "[CAMERA INFO] No valid CameraInfo matching RGB size yet; START remains blocked, retrying");
       }
+      // Camera images can keep arriving even when motor 21/22 never sends
+      // encoder-confirmed DONE. Watch the command transaction itself.
+      const auto watch_now = std::chrono::steady_clock::now();
+      if (!simulate_camera_feedback_ && pending_camera_id_ != 0 &&
+          camera_delay_reported_id_ != pending_camera_id_ &&
+          watch_now - pending_camera_started_at_ >= std::chrono::seconds(3)) {
+        RCLCPP_ERROR(get_logger(),
+            "[CAMERA TIMEOUT] id=%llu request=%u ACK=%d, no CAMERA DONE after 3s. Camera remains TRANSITION; inspect forward_walk [CAMERA] encoder logs (motors 21/22).",
+            static_cast<unsigned long long>(pending_camera_id_),
+            static_cast<unsigned int>(pending_camera_request_),
+            camera_acknowledged_ ? 1 : 0);
+        camera_delay_reported_id_ = pending_camera_id_;
+      }
+      // FAST GOAL far approach should not silently stay still with a visible
+      // backboard and valid far depth. This diagnoses both a stuck body ID
+      // and a controller HOLD, without introducing a blind forward motion.
+      const auto& observed = last_debug_result_;
+      const auto& mission = observed.mission;
+      const auto depth = observed.perception.backboard_center_depth_m;
+      const bool goal_far_visible =
+          debug_config_.race_round2_fast_enabled &&
+          run_state_ == RunState::kRunning &&
+          camera_feedback_.settled &&
+          camera_feedback_.actual_mode == vision_core::CameraMode::kGoal &&
+          pending_camera_id_ == 0 &&
+          mission.approach_mission == vision_core::MissionType::kGoal &&
+          !mission.approach_near &&
+          observed.perception.targets.backboard.has_value() &&
+          depth.has_value() && std::isfinite(*depth) &&
+          *depth > debug_config_.goal.approach_short_z_m &&
+          *depth <= debug_config_.backboard_max_depth_m;
+      const auto active_body_id = mission.command.action_id;
+      if (goal_far_visible) {
+        if (!goal_far_watch_active_ || active_body_id != goal_far_watch_action_id_) {
+          goal_far_watch_active_ = true;
+          goal_far_watch_action_id_ = active_body_id;
+          goal_far_watch_started_at_ = watch_now;
+          goal_far_watch_reported_ = false;
+        }
+        if (!goal_far_watch_reported_ &&
+            watch_now - goal_far_watch_started_at_ >= std::chrono::seconds(3)) {
+          RCLCPP_ERROR(get_logger(),
+              "[GOAL FAR STALL] Visible RGB+Depth=%.3fm but no new body action/DONE for >=3s. command_id=%llu control_phase=%u pending_actions=%zu post_observe=%d line_recovery=%d line_phase=%d terminal_hold=%d. Check action ACK/DONE and GOAL routing.",
+              *depth,static_cast<unsigned long long>(active_body_id),
+              static_cast<unsigned int>(mission.command.control_phase),
+              outstanding_actions_.size(),mission.post_motion_observing ? 1:0,
+              mission.line_in_recovery ? 1:0,mission.line_recovery_phase,
+              mission.terminal_hold ? 1:0);
+          goal_far_watch_reported_ = true;
+        }
+      } else {
+        goal_far_watch_active_ = false;
+      }
       LogMissionState(last_debug_result_);
       RCLCPP_INFO(get_logger(), "[HB] frames=%zu imu=%zu action_pub=%zu (last_img_stamp=%.9f)", frames_count_, imu_count_,
                   action_pub_count_, last_img_stamp_sec_);
@@ -1087,6 +1140,7 @@ private:
     }
     outstanding_cameras_.erase(msg->command_id);
     pending_camera_id_ = 0;
+    camera_delay_reported_id_ = 0;
     pending_camera_request_ = vision_core::CameraRequest::kNone;
     camera_acknowledged_ = false;
   }
@@ -1286,6 +1340,8 @@ private:
          request==vision_core::CameraRequest::kGoalScanLeft ||
          request==vision_core::CameraRequest::kGoalScanRight) camera_scan_feedback_={};
       pending_camera_id_ = next_camera_id_++;
+      pending_camera_started_at_ = std::chrono::steady_clock::now();
+      camera_delay_reported_id_ = 0;
       outstanding_cameras_.insert(pending_camera_id_);
       pending_camera_request_ = request;
       camera_acknowledged_ = false;
@@ -1868,6 +1924,11 @@ private:
   double last_camera_done_event_sec_{0.0};
   std::uint64_t next_camera_id_{1};
   std::uint64_t pending_camera_id_{0};
+  std::chrono::steady_clock::time_point pending_camera_started_at_{};
+  std::uint64_t camera_delay_reported_id_{0};
+  bool goal_far_watch_active_{false},goal_far_watch_reported_{false};
+  std::uint64_t goal_far_watch_action_id_{0};
+  std::chrono::steady_clock::time_point goal_far_watch_started_at_{};
   vision_core::CameraRequest pending_camera_request_{
       vision_core::CameraRequest::kNone};
   bool camera_acknowledged_{false};
@@ -1927,6 +1988,8 @@ private:
 } // namespace vision
 
 int main(int argc, char **argv) {
+  // Render ERROR/FATAL in red and WARN in yellow under the launch wrapper.
+  ::setenv("RCUTILS_COLORIZED_OUTPUT", "1", 1);
   rclcpp::init(argc, argv);
   try {
     auto node = std::make_shared<vision::LinePerceptionNode>();
