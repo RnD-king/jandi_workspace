@@ -408,7 +408,7 @@ private:
         // A dedicated WALK-stance motion, played once without yaw repetition.
         // Missing/invalid assets are rejected by PrepareProgram before ACK.
         case vision::msg::ActionCommand::TURN_LEFT_IN_PLACE:
-            return "motions/좌회전_최종__.json";
+            return "motions/좌회전_최종__찐.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_FIVE:
             return "missions/연속걷기.json";
