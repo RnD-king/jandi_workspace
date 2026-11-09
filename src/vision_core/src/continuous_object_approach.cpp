@@ -903,6 +903,9 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       continuous_.near_motion_id=command_coordinator_.QueuedActionId();
       continuous_.near_motion={command_coordinator_.QueuedAction(),
                                ActionCategory::kLocomotion,0,true};
+      // A normal LINE READY had already reserved the required extra unit.
+      // Its ACK is sufficient to allow DOWN to begin in parallel.
+      hurdle_down_camera_armed_=true;
     }
     // A newly committed HURDLE waits for the executing LINE unit's READY
     // window; unlike BALL/GOAL, do not abort its O/H accumulator yet.
