@@ -38,7 +38,7 @@ checks = {
     "failure IDs logged before reset": main.index('action_id=%llu queued_id=%llu camera_id=%llu') < main.index('action_transactions_.Abort();'),
 }
 for action, filename in {
-    'STEP_FORWARD_ONE': 'motions/보행_1걸음_초기X_수정5.json',
+    'STEP_FORWARD_ONE': 'motions/보행_1걸음_초기X_수정3.json',
     'STEP_FORWARD_ONE_ALTERNATE': 'motions/보행_1걸음_초기X_수정5.json',
     'LINE_LEFT_UNIT': 'motions/보행_좌회전전진_20도_최종_초기X_수정.json',
     'LINE_STRAIGHT_UNIT': 'missions/2걸음_1차찐.json',
