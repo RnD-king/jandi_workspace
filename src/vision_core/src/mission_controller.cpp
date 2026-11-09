@@ -1271,7 +1271,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       input.delivery_feedback.action_id == last_command_.action_id &&
       (last_command_.action == MissionAction::kDefaultPoseMode ||
        last_command_.action == MissionAction::kWalkMode);
-  if (pose_done && !input.manual_observation_control)
+  // HURDLE's round-2 return explicitly waits for WALK_MODE and FORWARD
+  // together. A second generic pose-observation gate would only delay LINE
+  // recovery and could ingest frames from the camera transition.
+  if (pose_done && !input.manual_observation_control &&
+      !(config_.race_round2_fast_enabled &&
+        active_mission_==MissionType::kHurdle &&
+        hurdle_result_.mode==HurdleMode::kReturnCameraToLine))
     pose_observation_pending_ = true;
   if (pose_done)
     foot_pose_ = last_command_.action == MissionAction::kWalkMode
@@ -1550,6 +1556,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   } else if (RepeatScope() == 0) {
     if (!decision_observation_active_ &&
         config_.post_motion_observation_sec > 0.0 && camera_settle_edge &&
+        !camera_settled_during_final_line &&
         !input.camera_scan.finished &&
         goal_head_search_.phase==GoalHeadSearch::Phase::kIdle &&
         line_head_search_.phase==LineHeadSearch::Phase::kIdle &&
