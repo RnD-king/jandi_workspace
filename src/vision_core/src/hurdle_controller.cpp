@@ -150,24 +150,25 @@ void HurdleController::UpdateTracker(const std::optional<ObjectTarget> &target,
                                      int image_width, int image_height) {
   const bool detected = target && image_width > 1 && image_height > 1;
   hit_history_.push_back(detected);
-  // Only the initial 33 and missing-object 10 search collect moving evidence.
-  // Detected distance-based 33/10 steps use a NEW stationary window after DONE.
+  // Initial DOWN walk uses 6/3 only until its first complete window.
+  // Subsequent missing-target 10 steps use continuous 8/3, including
+  // their post-DONE 0.3s pauses. Detected distance steps do NOT use moving
+  // v: their next distance decision is always stationary.
   if (mode_ == HurdleMode::kDownSearch && down_approach_fixed_sequence_ &&
       !down_distance_pending_ &&
       (down_initial_two_pending_ || down_initial_two_done_)) {
+    const std::size_t window = down_initial_window_complete_ ?
+        static_cast<std::size_t>(kFastStationaryWindow) : 6U;
     down_v_samples_.push_back(detected ?
         std::optional<double>(target->center_px.v) : std::nullopt);
-    while (down_v_samples_.size() >
-           static_cast<std::size_t>(config_.stable_window))
-      down_v_samples_.pop_front();
-    if (down_v_samples_.size() ==
-        static_cast<std::size_t>(config_.stable_window)) {
+    while (down_v_samples_.size() > window) down_v_samples_.pop_front();
+    if (down_v_samples_.size() == window) {
       int valid = 0;
       double sum_v = 0.0;
       for (const auto& v : down_v_samples_)
         if (v) { ++valid; sum_v += *v; }
       if (valid >= config_.down_search_min_hits) {
-        down_near_qualified_ = true;
+        down_near_qualified_ = true; // latched; last frame need not detect
         down_observed_v_px_ = sum_v / valid;
       }
     }
@@ -407,6 +408,7 @@ HurdleResult HurdleController::Compute(
       mode_ = HurdleMode::kDownSearch;
       down_search_.Reset();
       down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
+      down_initial_window_complete_=false;
       ClearDownEvidence();
       down_distance_pending_=down_stationary_observing_=down_search_step_pending_=false;
       down_stationary_start_sec_=down_search_hold_until_sec_=0.0;
@@ -427,17 +429,32 @@ HurdleResult HurdleController::Compute(
           if (feedback.action_done) {
             down_initial_two_pending_ = false;
             down_initial_two_done_ = true;
-            // Keep the 10/3 moving samples from the INITIAL 33.
-            // Do not use old pose samples or start an extra 1s observation.
+          } else return result;
+        } else {
+          result.action = Locomotion(down_initial_line_unit_); // 32/33/36.
+          if (allow_new_body_actions) {
+            ClearDownEvidence();
+            down_initial_two_pending_ = true;
           }
           return result;
         }
-        result.action = Locomotion(down_initial_line_unit_); // Last extra LINE READY: 32/33/36.
-        if (allow_new_body_actions) {
-          ClearDownEvidence();
-          down_initial_two_pending_ = true;
+      }
+      if (!down_initial_window_complete_) {
+        // If DONE arrives before six camera frames, finish gathering in
+        // place. An incomplete sample window is not a detection failure.
+        if (down_v_samples_.size() < 6U) return result;
+        down_initial_window_complete_ = true;
+        if (down_near_qualified_) {
+          // Discovery alone cannot choose a distance or enter FINE.
+          (void)down_search_.Observe(true, config_.down_search_min_hits,
+              config_.down_search_min_hits, config_.down_search_max_steps,
+              false, false, now_sec, config_.down_search_inter_action_hold_sec);
+          mode_ = HurdleMode::kCoarseAdjust;
+          ClearTracking();
+          result.mode = mode_;
+          return result;
         }
-        return result;
+        ClearDownEvidence(); // 8/3 starts after the initial 6/3 miss.
       }
       if (down_distance_pending_) {
         if (feedback.action_done) {
@@ -457,8 +474,8 @@ HurdleResult HurdleController::Compute(
           return result;
         down_stationary_observing_ = false;
       }
-      // Missing-object search continuously observes through the 10 step
-      // AND the 0.5s post-DONE hold, exactly unlike distance-based steps.
+      // Missing-object search continues through the 10 step and 0.3s
+      // post-DONE interval; detected distance steps use fresh stationary data.
       const auto decision = down_search_.Observe(
           down_near_qualified_,
           down_near_qualified_ ? config_.down_search_min_hits : 0,
@@ -471,25 +488,16 @@ HurdleResult HurdleController::Compute(
             now_sec + config_.down_search_inter_action_hold_sec;
       }
       if (decision == DownSearchWalk::Decision::kMoving ||
-          now_sec + kEpsilon < down_search_hold_until_sec_ ||
+          (decision != DownSearchWalk::Decision::kFound &&
+           now_sec + kEpsilon < down_search_hold_until_sec_) ||
           decision == DownSearchWalk::Decision::kWaiting)
         return result;
-      if (decision == DownSearchWalk::Decision::kFound &&
-          down_observed_v_px_) {
-        const double v = *down_observed_v_px_;
-        if (v >= config_.fine_mode_v_px) {
-          mode_ = HurdleMode::kWaitFinePose;
-          result.mode = mode_;
-          result.action = Locomotion(MissionAction::kDefaultPoseMode);
-          return result;
-        }
-        result.action = Locomotion(v < config_.down_one_step_v_px ?
-            MissionAction::kLineStraightUnit : MissionAction::kStepForwardOne);
-        if (allow_new_body_actions) {
-          down_distance_pending_ = true;
-          down_search_.InvalidateDetection();
-          ClearDownEvidence();
-        }
+      if (decision == DownSearchWalk::Decision::kFound) {
+        // Only the current walk DONE is required; skip its remaining hold.
+        // A fresh stationary 8/n mean must precede any distance decision.
+        mode_ = HurdleMode::kCoarseAdjust;
+        ClearTracking();
+        result.mode = mode_;
         return result;
       }
       if (decision == DownSearchWalk::Decision::kExhausted) {
@@ -544,6 +552,7 @@ HurdleResult HurdleController::Compute(
       down_search_.InvalidateDetection();
       if (!tracked_.visible || !tracked_.stable) {
         mode_ = HurdleMode::kDownSearch;
+        ClearDownEvidence();
         ClearTracking();
         result.mode = mode_;
         result.tracked = {};
@@ -949,6 +958,7 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   down_approach_fixed_sequence_=false;
   down_initial_line_unit_=MissionAction::kLineStraightUnit;
   down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
+  down_initial_window_complete_=false;
   ClearDownEvidence();
   down_distance_pending_=down_stationary_observing_=down_search_step_pending_=false;
   down_stationary_start_sec_=down_search_hold_until_sec_=0.0;
