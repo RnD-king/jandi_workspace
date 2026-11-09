@@ -43,6 +43,7 @@ enum class BallMode {
 };
 
 struct BallConfig {
+  bool race_round2_fast_enabled{false};
   double approach_short_v_px{};
   int down_search_max_steps{};
   double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
