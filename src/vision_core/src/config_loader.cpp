@@ -1024,7 +1024,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(m, "walk_inter_action_hold_sec", c.walk_inter_action_hold_sec);
   Assign(m, "fine_motion_settle_sec", c.fine_motion_settle_sec);
   Assign(m, "post_motion_observation_sec", c.post_motion_observation_sec);
-  Assign(m, "race_round2_fast_enabled", c.race_round2_fast_enabled);
+  if (m["race_round2_fast_enabled"])
+    Assign(m, "race_round2_fast_enabled", c.race_round2_fast_enabled);
   c.ball.race_round2_fast_enabled = c.race_round2_fast_enabled;
   c.hurdle.race_round2_fast_enabled = c.race_round2_fast_enabled;
   c.goal.race_round2_fast_enabled = c.race_round2_fast_enabled;
