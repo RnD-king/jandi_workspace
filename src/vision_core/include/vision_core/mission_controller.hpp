@@ -596,6 +596,7 @@ private:
     bool observe_after_turn{false};
   } candidate_;
   std::uint64_t line_ready_handled_id_{0};
+  bool hurdle_down_camera_armed_{false}; // Send DOWN after the extra 32/33/36 is safely reserved.
   std::uint64_t line_auxiliary_id_{0};
   bool line_auxiliary_done_{false};
   MissionAction line_auxiliary_action_{MissionAction::kNone};
