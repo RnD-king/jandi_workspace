@@ -1,4 +1,5 @@
 #include "vision/scan_frame_guard.hpp"
+#include "vision/camera_info_latch.hpp"
 #include "vision/debug_bag_publisher.hpp"
 #include "vision/debug_mjpeg_server.hpp"
 #include "vision/mission_debug_view.hpp"
@@ -278,11 +279,6 @@ public:
     }
     vision_core::BallConfig ball_cmd_cfg = algorithm_defaults.ball;
 
-    const double fx = get_parameter("fx").as_double();
-    const double fy = get_parameter("fy").as_double();
-    const double cx = get_parameter("cx").as_double();
-    const double cy = get_parameter("cy").as_double();
-
     vision_core::FeatureConfig line_feature_cfg = algorithm_defaults.line_features;
     line_feature_cfg.max_centers = static_cast<int>(get_parameter("max_centers").as_int());
     // Robot LINE alignment is a user-calibrated image reference, not the
@@ -451,8 +447,8 @@ public:
           return response;
         });
 
-    camera_intrinsics_ = {fx, fy, cx, cy};
-
+    // Intrinsics are only accepted from the first valid RGB CameraInfo.
+    // No estimated/default intrinsics are used to enter AUTO.
     // ----------------------------
     // ROS Pub/Sub
     // ----------------------------
@@ -502,6 +498,11 @@ public:
           if (run_state_ != RunState::kWaitStart || !mission_controller_->FeetReadyToStart()) {
             response->success = false;
             response->message = "START requires WAIT_START (RESET when PAUSED)";
+            return;
+          }
+          if (!camera_info_latch_.Ready()) {
+            response->success = false;
+            response->message = "START waiting for the first valid CameraInfo matching the RGB image size";
             return;
           }
           mission_controller_->SetGoalTrialStartGoal(goal_trial_start_goal_pending_);
@@ -686,6 +687,12 @@ public:
     });
     // ---- heartbeat(1Hz) ----
     hb_timer_ = create_wall_timer(std::chrono::seconds(1), [this]() {
+      if (!camera_info_latch_.Ready() &&
+          std::chrono::steady_clock::now() - camera_info_wait_started_ >=
+              std::chrono::seconds(5)) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+            "[CAMERA INFO] No valid CameraInfo matching RGB size yet; START remains blocked, retrying");
+      }
       LogMissionState(last_debug_result_);
       RCLCPP_INFO(get_logger(), "[HB] frames=%zu imu=%zu action_pub=%zu (last_img_stamp=%.9f)", frames_count_, imu_count_,
                   action_pub_count_, last_img_stamp_sec_);
@@ -1385,6 +1392,8 @@ private:
   }
 
   void OnImage(const sensor_msgs::msg::Image::SharedPtr msg) {
+    camera_info_latch_.ObserveImage(msg->width, msg->height);
+    ApplyFirstCameraInfo();
     ++frames_count_;
     last_img_stamp_sec_ =
         static_cast<double>(msg->header.stamp.sec) + static_cast<double>(msg->header.stamp.nanosec) * 1e-9;
@@ -1405,10 +1414,21 @@ private:
     while(scan_depth_frames_.size()>8)scan_depth_frames_.pop_front();
   }
 
+  void ApplyFirstCameraInfo() {
+    if (!camera_info_latch_.Ready() || camera_info_applied_) return;
+    const auto& info = camera_info_latch_.Calibration();
+    camera_intrinsics_ = {info.fx, info.fy, info.cx, info.cy};
+    camera_info_applied_ = true;
+    RCLCPP_INFO(get_logger(),
+        "[CAMERA INFO] First valid calibration latched (%ux%u): fx=%.3f fy=%.3f cx=%.3f cy=%.3f",
+        info.width, info.height, info.fx, info.fy, info.cx, info.cy);
+  }
+
   void OnCameraInfo(const sensor_msgs::msg::CameraInfo::SharedPtr msg) {
-    if (msg->k[0] <= 0.0 || msg->k[4] <= 0.0)
-      return;
-    camera_intrinsics_ = {msg->k[0], msg->k[4], msg->k[2], msg->k[5]};
+    if (camera_info_latch_.Ready()) return;
+    camera_info_latch_.ObserveInfo({
+        msg->width, msg->height, msg->k[0], msg->k[4], msg->k[2], msg->k[5]});
+    ApplyFirstCameraInfo();
   }
 
   void ProcessLatestImage() {
@@ -1427,6 +1447,14 @@ private:
   }
 
   void ProcessImage(const sensor_msgs::msg::Image::SharedPtr &msg) {
+    // The RGB image and its first CameraInfo must agree before perception
+    // can make any mission decision. Never use stale/default intrinsics.
+    if (!camera_info_latch_.Ready()) return;
+    if (!camera_info_latch_.MatchesImage(msg->width, msg->height)) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+          "[CAMERA INFO] RGB resolution changed after initial calibration; restart vision with the new camera configuration");
+      return;
+    }
     const auto t0 = std::chrono::steady_clock::now();
     // A queued image from before START/RESUME must never qualify as fresh
     // stationary evidence. Other states continue to accept processed images.
@@ -1784,6 +1812,10 @@ private:
   std::unique_ptr<YoloTrtEngine> yolo_;
   std::unique_ptr<vision_core::MissionController> mission_controller_;
   vision_core::Intrinsics camera_intrinsics_{};
+  vision::CameraInfoLatch camera_info_latch_;
+  bool camera_info_applied_{false};
+  std::chrono::steady_clock::time_point camera_info_wait_started_{
+      std::chrono::steady_clock::now()};
   vision_core::PerceptionMissionFrameResult last_debug_result_;
   vision_core::MissionControllerConfig debug_config_;
 

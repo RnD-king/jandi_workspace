@@ -266,6 +266,7 @@ vision_algorithm:
       contact_v_px: 220 # 접촉 선 (반걸음)
       contact_steps: 3 # 접촉 보행 반 걸음 횟수
       contact_inter_action_hold_sec: 0.3 # 접촉 보행 DONE 후 다음 접촉 보행까지 정지 시간 (초, 0: 추가 대기 없음)
+      pre_cross_hold_sec: 0.5 # 마지막 접촉 반걸음의 실제 DONE 이후 허들 넘기(16번) 시작 전 자세 유지 (초)
 
       # 허들 넘은 뒤 재진입 방지
       hurdle_ignore_duration_sec: 5.0

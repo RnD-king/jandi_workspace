@@ -13,7 +13,7 @@ static ObjectTarget H(double v) {
 }
 static void ContactWalkHold() {
   auto c=LoadDefaultAlgorithmConfig().hurdle;
-  c.contact_steps=3;c.contact_inter_action_hold_sec=.5;
+  c.contact_steps=3;c.contact_inter_action_hold_sec=.5;c.pre_cross_hold_sec=0;
   c.stable_window=c.stable_min_hits=c.down_search_min_hits=1;
   const CameraFeedback down{CameraMode::kDown,true};
   const auto target=H(.9);
@@ -88,9 +88,65 @@ static void ContactWalkHold() {
   r=controller.Compute({},640,480,7.3,down,done,{});
   assert(r.mode==HurdleMode::kCross && r.action.action==MissionAction::kHurdle);
 }
+static void PreCrossHold() {
+  auto c=LoadDefaultAlgorithmConfig().hurdle;
+  c.contact_steps=3;
+  c.contact_inter_action_hold_sec=.3;
+  c.pre_cross_hold_sec=.5;
+  c.stable_window=c.stable_min_hits=c.down_search_min_hits=1;
+  c.contact_v_px=260;
+  HurdleController controller(c,3);
+  const CameraFeedback down{CameraMode::kDown,true};
+  controller.StartTestExecute();
+  controller.UseVerifiedObservation(H(.9),{true},640,480);
+  ActionExecutionFeedback done;done.action_done=true;
+  auto r=controller.Compute({},640,480,1.0,down,{},{});
+  assert(r.mode==HurdleMode::kContactWalk &&
+         r.action.action==MissionAction::kStepForwardHalf);
+  r=controller.Compute({},640,480,1.1,down,done,{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,1.399,down,{},{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,1.4,down,{},{});
+  assert(r.action.action==MissionAction::kStepForwardHalf);
+  r=controller.Compute({},640,480,1.41,down,done,{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,1.71,down,{},{});
+  assert(r.action.action==MissionAction::kStepForwardHalf);
+  // Last physical DONE starts a fresh 0.5s deadline, not the .3s contact delay.
+  r=controller.Compute({},640,480,1.72,down,done,{});
+  assert(r.mode==HurdleMode::kContactWalk &&
+         r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,1.9,down,done,{});
+  assert(r.action.action==MissionAction::kNone); // Duplicate DONE does not restart the hold.
+  r=controller.Compute({},640,480,2.219,down,{},{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,2.22,down,{},{});
+  assert(r.mode==HurdleMode::kCross &&
+         r.action.action==MissionAction::kHurdle);
+
+  // PAUSE shifts the final hold deadline without inventing a DONE.
+  controller.StartTestExecute();
+  controller.UseVerifiedObservation(H(.9),{true},640,480);
+  r=controller.Compute({},640,480,10.0,down,{},{});
+  r=controller.Compute({},640,480,10.1,down,done,{});
+  r=controller.Compute({},640,480,10.4,down,{},{});
+  r=controller.Compute({},640,480,10.5,down,done,{});
+  r=controller.Compute({},640,480,10.8,down,{},{});
+  r=controller.Compute({},640,480,10.9,down,done,{});
+  assert(r.mode==HurdleMode::kContactWalk);
+  controller.ShiftTimers(2.0);
+  r=controller.Compute({},640,480,13.399,down,{},{});
+  assert(r.action.action==MissionAction::kNone);
+  r=controller.Compute({},640,480,13.4,down,{},{});
+  assert(r.mode==HurdleMode::kCross &&
+         r.action.action==MissionAction::kHurdle);
+}
+
 int main() {
   ContactWalkHold();
-  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle;  c.contact_steps=1; c.down_search_min_hits=1; c.stable_window = c.stable_min_hits = 1;
+  PreCrossHold();
+  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle;  c.contact_steps=1; c.pre_cross_hold_sec=0; c.down_search_min_hits=1; c.stable_window = c.stable_min_hits = 1;
   c.lost_frames = 2;  c.upper_acquire_v_px=480;
   c.approach_two_step_v_px = 360.0;
   c.approach_short_v_px = 312.0;
