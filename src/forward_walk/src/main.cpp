@@ -922,6 +922,8 @@ private:
             return;
         }
         camera_transactions_.active_id = message->command_id;
+        camera_command_started_at_ = std::chrono::steady_clock::now();
+        camera_delay_reported_id_ = 0;
         next_camera_verify_at_={};
         const auto target=camera_motion_->TargetPose();
         RCLCPP_INFO(get_logger(),"[CAMERA] ACK id=%llu request=%u target=(%d,%d) tolerance=%.1f%%",
@@ -1022,6 +1024,21 @@ private:
             !camera_motion_->Active() && !camera_arm_tween_.Active() &&
             !elbow_tween_.Active() && scan_elbow_stage_==ScanElbowStage::kIdle) return;
         const auto now = std::chrono::steady_clock::now();
+        // A normal head transition should finish in about 0.4-0.5s. If
+        // encoder-confirmed DONE is still missing after 3s, report ERROR.
+        // Scan motions have a longer intentional dwell and are excluded.
+        if (camera_transactions_.active_id != 0 &&
+            camera_delay_reported_id_ != camera_transactions_.active_id &&
+            !camera_motion_->ScanActive() &&
+            scan_elbow_stage_ == ScanElbowStage::kIdle &&
+            now - camera_command_started_at_ >= std::chrono::seconds(3)) {
+            const auto target = camera_motion_->TargetPose();
+            RCLCPP_ERROR(get_logger(),
+                "[CAMERA TIMEOUT] id=%llu target=(yaw:%d,pitch:%d), no encoder-confirmed DONE after 3s. Check IDs %d/%d, encoder reads and motor motion; body control will NOT fabricate CAMERA DONE.",
+                static_cast<unsigned long long>(camera_transactions_.active_id),
+                target.yaw,target.pitch,camera_config_.yaw_id,camera_config_.pitch_id);
+            camera_delay_reported_id_ = camera_transactions_.active_id;
+        }
         StartQueuedAction(now);  // 시스템 시각 변경의 영향을 받지 않는 주기 기준
         // gap_ms는 타이머 콜백 사이의 간격이다. 모터 패킷 사이의 간격을 직접 측정한 값은 아니다.
         const double gap_ms = std::chrono::duration<double, std::milli>(now - last_motion_tick_at_).count();
@@ -1360,6 +1377,8 @@ private:
     motion_executor::CameraTransactions camera_transactions_; // 몸과 독립인 카메라 활성/완료 ID 기록
     motion_executor::CameraConfig camera_config_;     // 카메라 모터 ID, 네 자세 tick, 이동/안정화 시간
     std::chrono::steady_clock::time_point next_camera_verify_at_{};
+    std::chrono::steady_clock::time_point camera_command_started_at_{};
+    std::uint64_t camera_delay_reported_id_{0};
     std::unique_ptr<motion_executor::CameraMotion> camera_motion_; // 머리 보간 및 완료 후 자세 유지 상태
     // 마지막으로 전송 호출에 성공한 전체 목표 tick. 실제 encoder 측정값과 구분해야 한다.
     P2PMotionPlayer::RawPositions last_sent_positions_;
@@ -1371,6 +1390,8 @@ private:
 
 int main(int argc, char** argv)
 {
+    // Honor red ERROR / yellow WARN even when launched by a shell wrapper.
+    ::setenv("RCUTILS_COLORIZED_OUTPUT", "1", 1);
     // ROS 초기화 → 노드 생성/시작 자세 재생 → 콜백·타이머 처리 → 종료 순서.
     rclcpp::init(argc, argv);
     rclcpp::spin(std::make_shared<MainNode>());
