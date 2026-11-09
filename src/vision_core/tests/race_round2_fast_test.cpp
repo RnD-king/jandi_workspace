@@ -50,9 +50,12 @@ void StationaryPolicy() {
   assert(FastStationaryMinHits(7) == 7);
   assert(production.line.line_stable_window == 8 && production.line.line_stable_min_hits == 4);
   assert(production.ball.stable_window == 8 && production.ball.stable_min_hits == 4);
+  assert(production.ball.near_v_min_hits == 3);
+  assert(production.ball.pickup_verify_min_hits == 3);
   assert(production.hurdle.stable_window == 8 && production.hurdle.stable_min_hits == 6);
   assert(production.hurdle.near_v_min_hits == 4);
   assert(production.goal.stable_window == 8 && production.goal.stable_min_hits == 6);
+  assert(production.goal.near_distance_min_hits == 3);
   assert(production.goal.edge_stable_window == 8 && production.goal.edge_stable_min_hits == 3);
   const std::deque<bool> hits{true,true,true,false,false,false,false,false};
   assert(FastStationaryQualified(hits,3)); // Last frame is a miss.
