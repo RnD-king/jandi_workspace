@@ -171,6 +171,9 @@ public:
             action == 32 || action == 33 || action == 36;
     }
     void Start(uint64_t id, uint16_t action, Clock::time_point now) {
+        // Called after every body packet; only the FIRST successful write
+        // starts the five-second stopwatch for this physical action ID.
+        if (id != 0 && id == action_id_ && action == action_) return;
         Reset();
         if (id == 0 || !MonitoredAction(action)) return;
         action_id_ = id;
