@@ -221,8 +221,8 @@ vision_algorithm:
     control:
       # LINE에서 허들 진입
       stable_window: 8
-      stable_min_hits: 6 # 안정 검출 최소 횟수
-      near_v_min_hits: 4 # 근거리 진입: 8프레임 유효 검출 6회, v>=240 4회
+      stable_min_hits: 4 # 허들 안정 검출: 최근 8프레임 중 4회
+      near_v_min_hits: 3 # 허들 근거리 확정: 최근 8프레임 중 v>=240 3회
       lost_frames: 15 # 유실 복구 진입 기준 프레임 수
       upper_acquire_v_px: 470.0 # 허들이 있을 조건
 
