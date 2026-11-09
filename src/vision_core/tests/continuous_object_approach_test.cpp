@@ -603,9 +603,11 @@ void NearPixelVotesWithGaps(MissionType mission) {
   auto c=Config();
   c.enable_ball=mission==MissionType::kBall;
   c.enable_hurdle=mission==MissionType::kHurdle;
-  // CTest deliberately uses an older fixture with near_v_min_hits=3.
-  // Explicitly exercise the new production 10/5 hurdle near policy.
-  if(mission==MissionType::kHurdle)c.hurdle.near_v_min_hits=5;
+  // Exercise the production FAST 8/4 stable and 8/3 near-v policy.
+  if(mission==MissionType::kHurdle) {
+    Check(c.hurdle.stable_window==8 && c.hurdle.stable_min_hits==4 &&
+          c.hurdle.near_v_min_hits==3,"FAST hurdle near config drifted");
+  }
   Driver d(c);
   if (mission==MissionType::kHurdle) {
     d.in.ball_target.reset();
@@ -624,11 +626,7 @@ void NearPixelVotesWithGaps(MissionType mission) {
   sample(260);Check(!d.out.approach_near,"two near-v votes entered near");
   sample(std::nullopt);Check(!d.out.approach_near,"missing frame completed near vote");
   sample(260);
-  if(mission==MissionType::kHurdle){
-    Check(!d.out.approach_near,"HURDLE latched before five v>=240 votes");
-    sample(260);sample(260); // Five near votes, seven total valid frames.
-  }
-  Check(d.out.approach_near,"configured nonconsecutive near-v votes did not latch");
+  Check(d.out.approach_near,"configured three nonconsecutive near-v votes did not latch");
 }
 void NearFinalActionSequence(double u,bool left,bool extreme,double near_v=260) {
   auto c=Config();c.ball.approach_near_outer_margin_px=90.0;
