@@ -394,6 +394,15 @@ MissionFrameResult MissionController::StepPlannedLine(
     camera = CameraRequest::kDown;
   // BALL: turn(s) finish first, then the last physical near step can carry
   // BALL_VIEW concurrently. Mission entry still waits for its real DONE.
+  // The last qualifying GOAL unit is already committed. Its camera
+  // motion must not depend on later LINE pixels; body DONE still gates entry.
+  if (camera == CameraRequest::kNone && goal_early_camera_armed_ &&
+      !command_coordinator_.HasQueuedAction() &&
+      command_coordinator_.PendingActionId() == goal_early_camera_action_id_ &&
+      input.allow_new_commands &&
+      input.camera_feedback.actual_mode != CameraMode::kGoal &&
+      input.camera_feedback.actual_mode != CameraMode::kTransition)
+    camera = CameraRequest::kGoal;
   if (camera == CameraRequest::kNone && route.near_final_action &&
       continuous_.mission == MissionType::kBall && continuous_.near &&
       continuous_.near_actions.empty() &&
@@ -796,7 +805,10 @@ MissionFrameResult MissionController::StepPlannedLine(
           line_plan_.CruiseFor(id) == MissionAction::kStepForwardFour ? 1 : 0;
       // The previous block may not have reached sensory DONE yet; count the
       // qualifying block prospectively ONLY to suppress its final READY queue.
-      const bool goal_will_enter = !finish_course && has_ball_ && config_.enable_goal &&
+      const bool early_goal_gate = goal_early_camera_armed_ &&
+          goal_early_camera_action_id_ == id && final_edge;
+      const bool goal_will_enter = early_goal_gate ||
+          (!finish_course && has_ball_ && config_.enable_goal &&
           (!automatic_approach || ((input.camera_feedback.actual_mode==CameraMode::kForward ||
              input.camera_feedback.actual_mode==CameraMode::kBallView) &&
             post_pickup_line_actions_completed_+(line_plan_.Done(id)?0:1)>=approach_goal_retry_after_)) &&
@@ -804,15 +816,16 @@ MissionFrameResult MissionController::StepPlannedLine(
           post_pickup_goal_line_gate_active_ && line_valid && final_edge &&
           (post_pickup_five_step_completed_ ||
            post_pickup_line_actions_completed_ + (line_plan_.Done(id) ? 0 : 1) >=
-               goal_controller_.RequiredLineWalkActions());
+               goal_controller_.RequiredLineWalkActions()));
       // Only the configured number of completed straight blocks satisfies the shortcut.
-      const bool straight_goal = !finish_course && has_ball_ && config_.enable_goal &&
+      const bool straight_goal = early_goal_gate ||
+          (!finish_course && has_ball_ && config_.enable_goal &&
           (!automatic_approach || ((input.camera_feedback.actual_mode==CameraMode::kForward ||
              input.camera_feedback.actual_mode==CameraMode::kBallView) &&
             post_pickup_line_actions_completed_+(line_plan_.Done(id)?0:1)>=approach_goal_retry_after_)) &&
           goal_controller_.CanEnterFromLine() &&
           post_pickup_goal_line_gate_active_ && line_valid && final_edge &&
-          StraightGoalGateReached(completing_straight);
+          StraightGoalGateReached(completing_straight));
       if (final_edge) {
         const double ready_remaining =
             input.delivery_feedback.ready && !input.delivery_feedback.done
@@ -1121,6 +1134,29 @@ MissionFrameResult MissionController::StepPlannedLine(
   if (LinePlan::IsUnit(command.action)) {
     line_plan_.Issued(command,
       command.control_phase == ControlPhase::kWaitingQueuedActionAck ? parent_id : 0);
+    // Latch the pre-camera LINE validity when the FINAL required 32/33/36
+    // is physically issued. The normal configuration has one unit/block;
+    // LastUnit also safely handles changed repetition counts.
+    if (config_.test_mission==MissionType::kNone &&
+        active_mission_==MissionType::kLine &&
+        command.command_type==CommandType::kAction &&
+        command.action_id && !goal_early_camera_armed_ &&
+        post_pickup_goal_line_gate_active_ && has_ball_ &&
+        config_.enable_goal && line_valid &&
+        line_state_==LineState::kNormal &&
+        goal_controller_.CanEnterFromLine() &&
+        post_pickup_line_actions_completed_+1>=approach_goal_retry_after_ &&
+        line_plan_.LastUnit(command.action_id)) {
+      const MissionAction cruise=line_plan_.CruiseFor(command.action_id);
+      const bool last_block=post_pickup_line_actions_completed_+1>=
+          goal_controller_.RequiredLineWalkActions();
+      const bool third_straight=StraightGoalGateReached(
+          cruise==MissionAction::kStepForwardFour ? 1 : 0);
+      if (last_block || third_straight) {
+        goal_early_camera_armed_=true;
+        goal_early_camera_action_id_=command.action_id;
+      }
+    }
     if (line_state_==LineState::kRecoveryForward && line_forward_recovery_pending_ &&
         command.command_type==CommandType::kAction && command.action_id!=0) {
       ++line_forward_recovery_issued_;
