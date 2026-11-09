@@ -100,7 +100,7 @@ vision_algorithm:
       # AUTO staged recovery below has its own independent parameters.
       # 유실 시 정지 관측·방향 탐색
       failure_observation_sec: 2.0 # 라인 복구 대기
-      failure_min_valid_samples: 5 # 정상 LINE 판단에 필요한 최소 유효 O/H 표본 수
+      failure_min_valid_samples: 4 # FAST 8프레임 관측의 최소 유효 O/H 표본(기존 10/5 비율 유지)
       recovery_observation_sec: 1.0 # 두 유실 복구 경로의 회전 후 정지 관측 시간
       visible_recovery_max_turns: 5 # 1순위: 현재 점선 2개 이상, 평균 X 쪽으로 회전
       last_score_recovery_max_turns: 5 # 2순위: 마지막 유효 점수 부호; 0/기록 없음은 정지 관측 5회 후 FINAL HOLD
