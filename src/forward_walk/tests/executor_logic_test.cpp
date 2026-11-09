@@ -48,8 +48,42 @@ void TestWalkInterActionHold() {
     Require(state.Evaluate(3,1,13)==Admission::Reject, "third command bypassed delayed one-slot queue");
 }
 
+void TestMotionDoneWatchdog() {
+    MotionDoneWatchdog watchdog;
+    const auto start = Clock::time_point{} + 10s;
+    for (uint16_t action : {3,4,5,6,7,8,32,33,36})
+        Require(MotionDoneWatchdog::MonitoredAction(action), "missing monitored LINE/FINE action");
+    for (uint16_t action : {1,2,9,10,11,13,14,16,17,18,19,21,22,23,34,35})
+        Require(!MotionDoneWatchdog::MonitoredAction(action),
+                "non-target action must not have a 5s timeout");
+    // A queued ACK alone never arms the watchdog.
+    Require(!watchdog.Check(41,start+100s), "queued ACK started watchdog");
+    watchdog.Start(41,33,start);
+    Require(!watchdog.Check(41,start+4999ms), "watchdog fired before five seconds");
+    Require(!watchdog.Check(42,start+5s), "watchdog misattributed the action ID");
+    const auto overdue = watchdog.Check(41,start+5s);
+    Require(overdue && overdue->action_id==41 && overdue->action==33 &&
+            std::abs(overdue->elapsed_sec-5.0)<1e-9, "missing exact 5s DONE timeout");
+    Require(!watchdog.Check(41,start+6s), "watchdog repeated the ERROR");
+    watchdog.Reset(); // Actual DONE or playback abort ends the transaction.
+    Require(!watchdog.Check(41,start+100s), "DONE did not reset watchdog");
+
+    // A reserved successor gets five fresh seconds only after its own
+    // physical playback starts, not from the preceding READY/queued ACK.
+    const auto actual_start = start+20s;
+    watchdog.Start(42,36,actual_start);
+    Require(!watchdog.Check(42,actual_start+4999ms), "queued time counted");
+    Require(watchdog.Check(42,actual_start+5000ms).has_value(),
+            "queued successor timeout missing");
+    watchdog.Start(43,10,actual_start); // Outside the 9-action allowlist.
+    Require(!watchdog.Check(43,actual_start+20s), "non-target action monitored");
+    watchdog.Start(0,3,actual_start);
+    Require(!watchdog.Check(0,actual_start+20s), "zero ID monitored");
+}
+
 int main() {
     TestWalkInterActionHold();
+    TestMotionDoneWatchdog();
     const fs::path temporary = fs::temp_directory_path() / ("jandi_executor_test_" + std::to_string(getpid()));
     fs::create_directories(temporary);
     int groups = 0;
