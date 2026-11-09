@@ -38,6 +38,11 @@ ActionExecutionFeedback Observed() {
 }
 
 void StationaryPolicy() {
+  const auto production = LoadDefaultAlgorithmConfig();
+  assert(production.race_round2_fast_enabled);
+  assert(production.ball.race_round2_fast_enabled);
+  assert(production.hurdle.race_round2_fast_enabled);
+  assert(production.goal.race_round2_fast_enabled);
   assert(kFastStationaryWindow == 8);
   assert(FastStationaryMinHits(3) == 3);
   assert(FastStationaryMinHits(4) == 3);
