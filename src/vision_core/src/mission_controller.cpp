@@ -7,6 +7,7 @@
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/coordinate_rectifier.hpp"
+#include "vision_core/stationary_window.hpp"
 
 namespace vision_core {
 namespace {
@@ -867,14 +868,13 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
   if (decision_observation_mission_ != MissionType::kLine) {
     const bool detected = target && target->has_value();
     decision_object_hits_.push_back(detected);
-    const int window=decision_observation_mission_==MissionType::kBall ?
-        config_.ball.stable_window : decision_observation_mission_==MissionType::kGoal ?
-        config_.goal.stable_window : config_.hurdle.stable_window;
+    const int window = kFastStationaryWindow;
     while (decision_object_hits_.size()>static_cast<std::size_t>(window))
       decision_object_hits_.pop_front();
-    const int minimum=decision_observation_mission_==MissionType::kBall ?
+    const int original_minimum = decision_observation_mission_==MissionType::kBall ?
         config_.ball.stable_min_hits : decision_observation_mission_==MissionType::kGoal ?
         config_.goal.stable_min_hits : config_.hurdle.stable_min_hits;
+    const int minimum = FastStationaryMinHits(original_minimum);
     if (decision_object_hits_.size()==static_cast<std::size_t>(window) &&
         std::count(decision_object_hits_.begin(),decision_object_hits_.end(),true)>=minimum) {
       decision_object_qualified_=true;
@@ -891,13 +891,13 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
       decision_goal_near_hits_.push_back(
           detected && GoalNearDistanceSample(input.backboard_center_depth_m,
               input.goal_pose,config_.goal.approach_short_z_m));
-      while (decision_goal_near_hits_.size()>static_cast<std::size_t>(config_.goal.stable_window))
+      while (decision_goal_near_hits_.size()>static_cast<std::size_t>(kFastStationaryWindow))
         decision_goal_near_hits_.pop_front();
-      while (decision_goal_pose_hits_.size()>static_cast<std::size_t>(config_.goal.stable_window))
+      while (decision_goal_pose_hits_.size()>static_cast<std::size_t>(kFastStationaryWindow))
         decision_goal_pose_hits_.pop_front();
-      if (decision_goal_pose_hits_.size()==static_cast<std::size_t>(config_.goal.stable_window) &&
+      if (decision_goal_pose_hits_.size()==static_cast<std::size_t>(kFastStationaryWindow) &&
           std::count(decision_goal_pose_hits_.begin(),decision_goal_pose_hits_.end(),true)>=
-              config_.goal.stable_min_hits) {
+              FastStationaryMinHits(config_.goal.stable_min_hits)) {
         decision_goal_pose_qualified_=true;
         decision_qualified_goal_pose_hits_=decision_goal_pose_hits_;
       }
@@ -970,11 +970,11 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
   const bool valid=guide.valid && std::isfinite(guide.offset) &&
       std::isfinite(guide.heading_rad);
   decision_line_hits_.push_back(valid);
-  while (decision_line_hits_.size()>static_cast<std::size_t>(config_.line.line_stable_window))
+  while (decision_line_hits_.size()>static_cast<std::size_t>(kFastStationaryWindow))
     decision_line_hits_.pop_front();
-  if (decision_line_hits_.size()==static_cast<std::size_t>(config_.line.line_stable_window) &&
+  if (decision_line_hits_.size()==static_cast<std::size_t>(kFastStationaryWindow) &&
       std::count(decision_line_hits_.begin(),decision_line_hits_.end(),true)>=
-          config_.line.line_stable_min_hits) decision_line_qualified_=true;
+          FastStationaryMinHits(config_.line.line_stable_min_hits)) decision_line_qualified_=true;
   if (valid) {
     ++decision_line_valid_count_;
     decision_line_offset_sum_ += guide.offset;
@@ -985,19 +985,18 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
 }
 
 bool MissionController::DecisionObservationReady(double now_sec) const {
-  if (!decision_observation_active_ ||
-      now_sec - decision_observation_start_sec_ + 1e-9 <
-          config_.post_motion_observation_sec)
-    return false;
-  if (decision_observation_mission_ == MissionType::kLine)
-    return decision_line_hits_.size() >=
-        static_cast<std::size_t>(config_.line.line_stable_window);
-  // Time and real frames accumulate concurrently. The completed window
-  // validates 10/7 once; controllers reuse that evidence without recollection.
-  const int window=decision_observation_mission_==MissionType::kBall ? config_.ball.stable_window :
-      decision_observation_mission_==MissionType::kGoal ? config_.goal.stable_window :
-      config_.hurdle.stable_window;
-  return decision_object_hits_.size()>=static_cast<std::size_t>(window);
+  if (!decision_observation_active_) return false;
+  const bool enough_frames = decision_observation_mission_ == MissionType::kLine
+      ? decision_line_hits_.size() >= static_cast<std::size_t>(kFastStationaryWindow)
+      : decision_object_hits_.size() >= static_cast<std::size_t>(kFastStationaryWindow);
+  if (!enough_frames) return false;
+  // Qualified windows end immediately; failure still requires the original
+  // full stationary timeout. The last frame need not be a detection.
+  if (decision_observation_mission_ == MissionType::kLine
+          ? decision_line_qualified_ : decision_object_qualified_)
+    return true;
+  return now_sec - decision_observation_start_sec_ + 1e-9 >=
+      config_.post_motion_observation_sec;
 }
 
 std::optional<LineGuide> MissionController::DecisionLineGuide() const {
@@ -1531,8 +1530,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       observation_finished = true;
       if (!decision_observation_camera_only_)
         input.delivery_feedback = deferred_done_;
-      // Object acquisition 10/7 applies only on entry. After DONE one
-      // second of stationary samples defines the next measurement.
+      // Object acquisition 10/7 applies only on entry. After DONE the
+      // dedicated 8/n stationary window can complete early on success.
       if (decision_observation_mission_ != MissionType::kLine) {
         const bool stable_object=decision_object_qualified_;
         // A single last-minute false detection is NOT a stationary mean.
