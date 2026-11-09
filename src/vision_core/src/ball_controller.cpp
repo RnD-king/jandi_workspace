@@ -570,16 +570,19 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     }
     return result;
   case BallMode::kDownSearch: {
-    // DOWN-only 8/3 moving evidence. Keep FORWARD entry 10/5 unchanged.
-    constexpr std::size_t kDownSearchWindow = 8;
+    // Dedicated 8/3 only in round-2; legacy test scenarios retain 10/n.
+    const std::size_t kDownSearchWindow = config_.race_round2_fast_enabled ? 8U :
+        static_cast<std::size_t>(config_.stable_window);
     const auto begin = hit_history_.size() >= kDownSearchWindow
         ? hit_history_.end() - static_cast<std::ptrdiff_t>(kDownSearchWindow)
         : hit_history_.begin();
     const int hits = static_cast<int>(std::count(begin, hit_history_.end(), true));
     // The final frame need not contain a ball. DownSearchWalk latches success
     // while moving and waits for the real action DONE before entering FINE.
-    const bool found = hit_history_.size() >= kDownSearchWindow &&
-        hits >= config_.down_search_min_hits;
+    const bool found = config_.race_round2_fast_enabled
+        ? hit_history_.size() >= kDownSearchWindow &&
+          hits >= config_.down_search_min_hits
+        : tracked_.visible;
     const auto decision=down_search_.Observe(found,hits,
         config_.down_search_min_hits,config_.down_search_max_steps,
         feedback.action_active,feedback.action_done,
@@ -739,7 +742,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     result.action = Mission(MissionAction::kDefaultPosition);
     // Overlap return to the LINE camera with DEFAULT_POSITION. This is only
     // enabled when no explicit post-pickup back-away is configured.
-    if (config_.post_pickup_back_steps == 0 &&
+    if (config_.race_round2_fast_enabled &&
+        config_.post_pickup_back_steps == 0 &&
         (!camera.settled || camera.actual_mode != CameraMode::kForward))
       result.camera_request = CameraRequest::kForward;
     if (feedback.action_done) {
@@ -1035,7 +1039,8 @@ void BallController::UseVerifiedObservation(
   hit_history_ = hits;
   while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window))
     hit_history_.pop_front();
-  tracked_.stable = FastStationaryQualified(hit_history_, config_.stable_min_hits) ||
+  tracked_.stable = (config_.race_round2_fast_enabled &&
+      FastStationaryQualified(hit_history_, config_.stable_min_hits)) ||
       (hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
        std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits);
   if (mean && tracked_.stable) last_stable_ball_u_ = tracked_.center_px.u;
