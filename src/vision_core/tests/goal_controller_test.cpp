@@ -17,18 +17,18 @@ static GoalPoseObservation Pose(double x,double z,double yaw=0) {
 }
 static void NearDistanceUsesEightFrameRatio() {
   auto c=LoadDefaultAlgorithmConfig().goal;
-  assert(c.stable_window==8 && c.stable_min_hits==6 && c.near_distance_min_hits==2);
+  assert(c.stable_window==8 && c.stable_min_hits==6 && c.near_distance_min_hits==3);
   const std::deque<bool> detected{true,true,true,true,true,true,false,false};
-  const std::deque<bool> one_near{true,false,false,false,false,false,false,false};
-  auto two_near=one_near;two_near[1]=true;
-  assert(!GoalNearWindowReady(detected,one_near,c));
-  assert(GoalNearWindowReady(detected,two_near,c));
+  const std::deque<bool> two_near{true,true,false,false,false,false,false,false};
+  auto three_near=two_near;three_near[2]=true;
+  assert(!GoalNearWindowReady(detected,two_near,c));
+  assert(GoalNearWindowReady(detected,three_near,c));
   auto five_detected=detected;five_detected[5]=false;
-  assert(!GoalNearWindowReady(five_detected,two_near,c));
-  auto invalid_near=two_near;invalid_near[1]=false;invalid_near[7]=true;
+  assert(!GoalNearWindowReady(five_detected,three_near,c));
+  auto invalid_near=three_near;invalid_near[2]=false;invalid_near[7]=true;
   assert(!GoalNearWindowReady(detected,invalid_near,c));
   auto short_window=detected;short_window.pop_back();
-  assert(!GoalNearWindowReady(short_window,two_near,c));
+  assert(!GoalNearWindowReady(short_window,three_near,c));
   assert(GoalNearDistanceSample(.5,{},c.approach_short_z_m));
   assert(!GoalNearDistanceSample(0.0,{},c.approach_short_z_m));
   assert(GoalNearDistanceSample(std::nullopt,Pose(0,.5),c.approach_short_z_m));
@@ -38,8 +38,8 @@ static void GoalNearTransitionUsesWindow() {
   const CameraFeedback camera{CameraMode::kGoal,true};
   GoalController goal(c,3);goal.StartTestNear();
   goal.Compute({},{},{},640,480,0,true,camera,{});
-  for(int i=0;i<6;++i) goal.ObserveOnly(Board(),Pose(0,2),640,480,2);
-  goal.ObserveOnly(Board(),Pose(0,.5),640,480,.5);
+  for(int i=0;i<5;++i) goal.ObserveOnly(Board(),Pose(0,2),640,480,2);
+  for(int i=0;i<2;++i) goal.ObserveOnly(Board(),Pose(0,.5),640,480,.5);
   auto r=goal.Compute({},Board(),Pose(0,2),640,480,1,true,camera,{},true,2);
   assert(r.mode!=GoalMode::kWaitFinePose);
   r=goal.Compute({},Board(),Pose(0,.5),640,480,1.1,true,camera,{},true,.5);
