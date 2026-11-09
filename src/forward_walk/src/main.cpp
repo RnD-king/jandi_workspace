@@ -873,6 +873,7 @@ private:
                                      req==vision::msg::CameraCommand::LINE_SCAN_RIGHT;
                 scan_goal_view_=req==vision::msg::CameraCommand::GOAL_SCAN_LEFT ||
                                 req==vision::msg::CameraCommand::GOAL_SCAN_RIGHT;
+                scan_single_point_=!line_scan && !scan_goal_view_; // CURVE only.
                 scan_left_=req==vision::msg::CameraCommand::SCAN_LEFT ||
                            req==vision::msg::CameraCommand::LINE_SCAN_LEFT ||
                            req==vision::msg::CameraCommand::GOAL_SCAN_LEFT;
@@ -880,7 +881,7 @@ private:
                 scan_move_sec_=message->scan_move_sec;
                 scan_hold_sec_=message->scan_hold_sec;
                 scan_return_sec_=message->scan_return_sec;
-                scan_observation_timeout_sec_=(line_scan || scan_goal_view_) ? message->scan_observation_timeout_sec : 0.0;
+                scan_observation_timeout_sec_=message->scan_observation_timeout_sec;
                 if(!std::isfinite(scan_observation_timeout_sec_) || scan_observation_timeout_sec_<0)
                     throw std::invalid_argument("invalid stationary scan timeout");
                 scan_stationary_since_=builtin_interfaces::msg::Time();
@@ -909,7 +910,7 @@ private:
                 }
                 if(targets.empty()) {
                     camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
-                        scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_,scan_observation_timeout_sec_);
+                        scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_,scan_observation_timeout_sec_,scan_single_point_);
                     scan_elbow_stage_=ScanElbowStage::kScanning;
                 } else {
                     elbow_tween_.Start(last_sent_positions_,targets,
@@ -1115,7 +1116,7 @@ private:
         if(scan_elbow_stage_==ScanElbowStage::kExtending && !elbow_tween_.Active()) {
             // Start head scan only after the last arm-extension command is ready.
             camera_motion_->StartScan(scan_left_,scan_yaw_deg_,scan_move_sec_,
-                scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_,scan_observation_timeout_sec_);
+                scan_hold_sec_,scan_return_sec_,last_sent_positions_,now,scan_goal_view_,scan_observation_timeout_sec_,scan_single_point_);
             scan_elbow_stage_=ScanElbowStage::kScanning;
         }
         // camera_result: Idle=재생 없음, Running=다음 단계/안정화 대기,
@@ -1392,6 +1393,7 @@ private:
     bool line_scan_elbows_held_{false}; // Persistent across LEFT/RIGHT pairs until FORWARD.
     int scan_yaw_deg_{0};
     bool scan_goal_view_{false};
+    bool scan_single_point_{false};
     bool scan_left_{true};
     double scan_move_sec_{0.5},scan_hold_sec_{0.5},scan_return_sec_{0.5};
     double scan_observation_timeout_sec_{0};

@@ -131,6 +131,36 @@ int main() {
       completed=watchdog.ConfirmArrival(watchdog.TargetPose(),now);
   }
   assert(completed && watchdog.ScanStopId()==3);
+  // CURVE uses one encoder-confirmed 45-degree stop, never a moving sweep.
+  CameraMotion curve_point(cfg);
+  now+=std::chrono::seconds(10);
+  curve_point.StartScan(true,45,.5,.5,.5,positions,now,false,2.0,true);
+  bool arrived=false;
+  for(int i=0;i<100 && !arrived;++i) {
+    now+=std::chrono::milliseconds(21);
+    if(curve_point.Update(now)==CameraMotion::Result::Verify) {
+      assert(curve_point.ScanState()==CameraMotion::ScanPhase::Settling);
+      assert(!curve_point.ConfirmArrival(curve_point.TargetPose(),now));
+      arrived=true;
+    }
+  }
+  assert(arrived && curve_point.ScanStopId()==1);
+  assert(curve_point.ScanState()==CameraMotion::ScanPhase::Dwell);
+  const auto endpoint=curve_point.ScanCommandedYawDeg();
+  assert(endpoint>44 && endpoint<46);
+  now+=std::chrono::milliseconds(510);
+  curve_point.Update(now);
+  assert(curve_point.ScanState()==CameraMotion::ScanPhase::Dwell);
+  assert(std::abs(curve_point.ScanCommandedYawDeg()-endpoint)<.01);
+  assert(curve_point.ResumeScan(now));
+  assert(curve_point.ScanState()==CameraMotion::ScanPhase::Returning);
+  bool returned=false;
+  for(int i=0;i<100 && !returned;++i) {
+    now+=std::chrono::milliseconds(21);
+    if(curve_point.Update(now)==CameraMotion::Result::Verify)
+      returned=curve_point.ConfirmArrival(cfg.forward,now);
+  }
+  assert(returned && curve_point.ScanStopId()==1);
   // The normal forward/down/goal interpolation remains available.
   camera.Start(1,positions,start);
   assert(!camera.ScanActive());
