@@ -548,11 +548,24 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const bool goal_gate=has_ball_ && config_.enable_goal && post_pickup_goal_line_gate_active_ &&
       (post_pickup_five_step_completed_ || post_pickup_line_actions_completed_>=goal_controller_.RequiredLineWalkActions()) &&
       post_pickup_line_actions_completed_>=approach_goal_retry_after_;
-  if (advance && settled &&
-      (camera.actual_mode==CameraMode::kForward || camera.actual_mode==CameraMode::kBallView) &&
-      goal_gate &&
-      continuous_.mission==MissionType::kNone && line_state_==LineState::kNormal) {
+  // Fast branch: the last required LINE unit was approved while actual
+  // floor LINE was valid, BEFORE moving the head. Its physical DONE (not
+  // current GOAL-view floor pixels) unlocks the GOAL camera observation.
+  const bool early_goal_complete=goal_early_camera_armed_ &&
+      goal_early_camera_action_id_!=0 &&
+      line_plan_.Done(goal_early_camera_action_id_) &&
+      goal_gate && continuous_.mission==MissionType::kNone;
+  if (early_goal_complete ||
+      (advance && settled &&
+       (camera.actual_mode==CameraMode::kForward ||
+        camera.actual_mode==CameraMode::kBallView) &&
+       goal_gate && continuous_.mission==MissionType::kNone &&
+       line_state_==LineState::kNormal)) {
     approach_goal_probe_=true;line_plan_.Abort();
+    if (early_goal_complete) {
+      goal_early_camera_armed_=false;
+      goal_early_camera_action_id_=0;
+    }
   }
   if (approach_goal_probe_) {
     if (!settled || !goal_view) { camera_request(CameraRequest::kGoal);return result; }
