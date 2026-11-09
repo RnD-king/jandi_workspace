@@ -136,6 +136,9 @@ class ProcessManager:
         self.event_id = 0
         self.lock = threading.RLock()
         self.shutdown_requested = False
+        self.emergency_stop_requested = False
+        self.emergency_stage = 0
+        self.emergency_next_signal_at = 0.0
         self.finished = False
         self.event("manager", "INFO", "자동 중지/서비스 발송/재시작 없음. SSH 종료 시 실행 유지.")
 
@@ -239,6 +242,24 @@ class ProcessManager:
         self.event(name, "INFO", "사용자 재시작 요청" if restart else "사용자 종료 요청")
         return f"{name}: 정상 종료 대기"
 
+    def _emergency_signal(self, sig):
+        # Managed groups own independent sessions. Never wait for PAUSE or DONE.
+        for name in ("vision", "motor", "camera"):
+            item = self.nodes[name]
+            proc = item["process"]
+            if proc is None or proc.poll() is not None:
+                continue
+            if item["identity"] is not None and process_identity(proc.pid) != item["identity"]:
+                self.event(name, "ERROR", "긴급종료 PID 재사용 의심: 신호 생략")
+                continue
+            try:
+                os.killpg(proc.pid, sig)
+            except ProcessLookupError:
+                pass
+            except OSError as exc:
+                self.event(name, "ERROR", f"긴급종료 신호 {sig} 전송 실패: {exc}")
+            item["state"] = "STOPPING"
+
     def tick(self):
         with self.lock:
             for name, item in self.nodes.items():
@@ -256,6 +277,17 @@ class ProcessManager:
                            f"프로세스 종료 code={code}" + (" (자동 재시작 없음)" if not expected else ""))
                 if restart and not self.shutdown_requested:
                     self.start(name)
+            if self.emergency_stop_requested:
+                if all(item["process"] is None for item in self.nodes.values()):
+                    self.finished = True
+                    return
+                if self.clock() >= self.emergency_next_signal_at:
+                    # SIGINT -> TERM -> KILL, repeating KILL for survivors.
+                    sig = signal.SIGTERM if self.emergency_stage == 0 else signal.SIGKILL
+                    self._emergency_signal(sig)
+                    self.emergency_stage += 1
+                    self.emergency_next_signal_at = self.clock() + 0.25
+                return
             if self.shutdown_requested:
                 # The user explicitly requested all three stops. Drain process
                 # termination in order; never use mission services here.
@@ -278,7 +310,9 @@ class ProcessManager:
             telemetry = self.observer.snapshot(self.nodes)
             return {"nodes": nodes, "events": list(self.events), "telemetry": telemetry,
                     "services_in": round(self.services_remaining(), 1),
-                    "shutdown_requested": self.shutdown_requested, "finished": self.finished,
+                    "shutdown_requested": self.shutdown_requested,
+                    "emergency_stop_requested": self.emergency_stop_requested,
+                    "finished": self.finished,
                     "log_directory": str(self.directory)}
 
     def services_remaining(self):
@@ -291,6 +325,18 @@ class ProcessManager:
             op = request.get("op")
             if op == "status":
                 return {"ok": True, "status": self.snapshot()}
+            if op == "emergency_stop" and not self.shutdown_requested:
+                self.schedule.clear()
+                self.shutdown_requested = True
+                self.emergency_stop_requested = True
+                for item in self.nodes.values():
+                    item["restart"] = False
+                self.event("manager", "WARN",
+                           "EMERGENCY STOP: managed vision/motor/camera groups")
+                self._emergency_signal(signal.SIGINT)
+                self.emergency_stage = 0
+                self.emergency_next_signal_at = self.clock() + 0.25
+                return {"ok": True, "message": "긴급종료 진행: 비전/모터/카메라 전체 종료"}
             if self.shutdown_requested:
                 return {"ok": False, "message": "전체 종료 진행 중"}
             if op in ("start", "stop", "restart"):
