@@ -183,6 +183,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.hurdle.contact_v_px, "hurdle.contact_v_px");
   PositiveInt(c.hurdle.contact_steps, "hurdle.contact_steps");
   Nonnegative(c.hurdle.contact_inter_action_hold_sec, "hurdle.contact_inter_action_hold_sec");
+  Nonnegative(c.hurdle.pre_cross_hold_sec, "hurdle.pre_cross_hold_sec");
   Positive(c.goal.recovery_observation_sec, "goal.recovery_observation_sec");
   PositiveInt(c.goal.recovery_max_observations, "goal.recovery_max_observations");
   Positive(c.goal.approach_short_z_m, "goal.approach_short_z_m");
@@ -824,6 +825,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "contact_v_px", c.hurdle.contact_v_px);
   Assign(h, "contact_steps", c.hurdle.contact_steps);
   Assign(h, "contact_inter_action_hold_sec", c.hurdle.contact_inter_action_hold_sec);
+  if (h["pre_cross_hold_sec"])
+    Assign(h, "pre_cross_hold_sec", c.hurdle.pre_cross_hold_sec);
 
   Assign(h, "stable_window", c.hurdle.stable_window);
   Assign(h, "stable_min_hits", c.hurdle.stable_min_hits);
