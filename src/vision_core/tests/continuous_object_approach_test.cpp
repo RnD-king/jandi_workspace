@@ -894,6 +894,47 @@ void CameraDrainAndProbe() {
         d.out.command.camera_request==CameraRequest::kBallViewLine,
         "soft GOAL loss without READY mean should use BALL_VIEW without a blind probe");
 }
+void FastGoalCameraStartsWithLastSafeLineUnit() {
+  auto c=Config();
+  c.race_round2_fast_enabled=true;
+  c.enable_ball=false;
+  c.enable_hurdle=false;
+  c.enable_goal=true;
+  c.initial_has_ball=true;
+  c.line_p2p.left_repetitions=c.line_p2p.straight_repetitions=
+      c.line_p2p.right_repetitions=1;
+  c.goal.post_pickup_straight_blocks_required=2;
+  c.goal.post_pickup_walk_fallback_actions=3;
+  c.goal.head_scan_enabled=false;
+  Driver d(c);
+  d.in.ball_target.reset();
+  d.Warm();
+  const auto first=d.current;
+  d.Tick({first,true,false,true});
+  const auto final_unit=d.out.command.action_id;
+  Check(final_unit!=0 && final_unit!=first && LinePlan::IsUnit(d.out.command.action),
+        "FAST GOAL failed to reserve the final LINE unit at READY");
+  d.Tick({final_unit,true,false,false});
+  d.Tick({first,true,true,false});
+  d.current=final_unit;
+  bool camera_before_done=false;
+  for(int i=0;i<15;++i) {
+    d.Tick();
+    camera_before_done |= d.out.command.camera_request==CameraRequest::kGoal;
+    Check(d.out.command.command_type!=CommandType::kAction ||
+          d.out.command.action_id==final_unit,
+          "FAST GOAL booked an extra LINE unit after the carrying gate");
+    if(camera_before_done)break;
+  }
+  Check(camera_before_done,
+        "FAST GOAL did not start the camera while its FINAL LINE unit was moving");
+  d.in.camera_feedback={CameraMode::kTransition,false};
+  d.Tick({final_unit,true,false,true});
+  Check(d.out.command.command_type!=CommandType::kAction ||
+        d.out.command.action_id==final_unit,
+        "FAST GOAL issued another LINE walk after the camera left FORWARD");
+}
+
 void GoalTurnObservationUsesSelectedPath() {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
   c.object_approach.steering_deadband_deg=2.0;
@@ -1703,7 +1744,7 @@ int main() {
   AcquiredGoalLossScansBeforeLineReturn();
   GoalEdgeTenInFourRawBBox();
   GoalStableNewIdentityKeepsApproach();GoalTrueRgbLossAndRangeRejection();
-  Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
+  Geometry();VirtualHeadingOnly();WeightedProbeDirection();SoftLoss(0);SoftLoss(1);SoftLoss(2);ProbeDisabled();ProbeRediscoveryAndLineMemory();PrelockProbeForMission(MissionType::kHurdle);PrelockProbeForMission(MissionType::kGoal);LockAndLoss();NearAndIdentity();HurdleAndGoal();ManualAndReset();CameraDrainAndProbe();FastGoalCameraStartsWithLastSafeLineUnit();GoalTurnObservationUsesSelectedPath();EmptyGoalRetryLimit();FarGoalDepthRecovery(false);FarGoalDepthRecovery(true);
   BallNearMissingReadyTurnsAndCentralFallback(false);
   BallNearMissingReadyTurnsAndCentralFallback(true);
   NearPixelVotesWithGaps(MissionType::kBall);NearPixelVotesWithGaps(MissionType::kHurdle);
