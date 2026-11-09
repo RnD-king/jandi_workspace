@@ -289,6 +289,10 @@ install(FILES scripts/mock_executor_protocol.py
 )
 
 if(BUILD_TESTING)
+  add_executable(vision_camera_info_latch_test tests/camera_info_latch_test.cpp)
+  target_include_directories(vision_camera_info_latch_test PRIVATE include)
+  add_test(NAME vision_camera_info_latch_test COMMAND vision_camera_info_latch_test)
+  set_tests_properties(vision_camera_info_latch_test PROPERTIES LABELS "logic")
   add_executable(vision_scan_frame_guard_test tests/scan_frame_guard_test.cpp)
   target_include_directories(vision_scan_frame_guard_test PRIVATE include)
   add_test(NAME vision_scan_frame_guard_test COMMAND vision_scan_frame_guard_test)
