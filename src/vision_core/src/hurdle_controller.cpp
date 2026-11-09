@@ -787,14 +787,22 @@ HurdleResult HurdleController::Compute(
     result.action = Mission(MissionAction::kHurdle);
     if (feedback.action_done) {
       mode_ = HurdleMode::kReturnCameraToLine;
+      post_cross_walk_done_ = false;
       result.mode = mode_;
-      result.action = {};
+      // The physical hurdle is complete; WALK_MODE and FORWARD may start
+      // independently in the same decision without shortening either.
+      result.action = Locomotion(MissionAction::kWalkMode);
       result.camera_request = CameraRequest::kForward;
     }
     return result;
   case HurdleMode::kReturnCameraToLine:
-    result.camera_request = CameraRequest::kForward;
-    if (camera.actual_mode == CameraMode::kForward && camera.settled) {
+    if (feedback.action_done) post_cross_walk_done_ = true;
+    if (!post_cross_walk_done_)
+      result.action = Locomotion(MissionAction::kWalkMode);
+    if (camera.actual_mode != CameraMode::kForward || !camera.settled)
+      result.camera_request = CameraRequest::kForward;
+    if (post_cross_walk_done_ &&
+        camera.actual_mode == CameraMode::kForward && camera.settled) {
       ignore_until_sec_ = now_sec + config_.hurdle_ignore_duration_sec;
       ResetToLine(false);
       result = {};
@@ -959,6 +967,7 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   down_initial_line_unit_=MissionAction::kLineStraightUnit;
   down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
   down_initial_window_complete_=false;
+  post_cross_walk_done_=false;
   ClearDownEvidence();
   down_distance_pending_=down_stationary_observing_=down_search_step_pending_=false;
   down_stationary_start_sec_=down_search_hold_until_sec_=0.0;
