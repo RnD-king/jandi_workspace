@@ -832,8 +832,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   case BallMode::kForwardRecoveryObserve: {
     if (feedback.action_active && !feedback.action_done) return result;
     const auto status = stationary_recovery_.Observe(
-        target.has_value(), now_sec, kFastStationaryWindow,
-        FastStationaryMinHits(config_.stable_min_hits), config_.recovery_observation_sec, 1, true);
+        target.has_value(), now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec, 1, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = BallMode::kApproachBall;
       forward_recovery_entry_ = false;
@@ -889,8 +889,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       stationary_recovery_.Begin(now_sec);down_recovery_observing_=true;
     }
     const auto status = stationary_recovery_.Observe(
-        target.has_value(), now_sec, kFastStationaryWindow,
-        FastStationaryMinHits(config_.stable_min_hits), config_.recovery_observation_sec, 1, true);
+        target.has_value(), now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec, 1, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = BallMode::kFineAdjustForPickup;
       down_recovery_active_=false;
@@ -913,9 +913,9 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
                           recovery_turn_left_.has_value() &&
                           recovery_walk_turns_completed_ < recovery_walk_turn_limit_;
     const auto status = stationary_recovery_.Observe(
-        target.has_value(), now_sec, kFastStationaryWindow,
-        FastStationaryMinHits(config_.stable_min_hits), config_.recovery_observation_sec,
-        can_turn ? 1 : config_.recovery_max_observations, true);
+        target.has_value(), now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec,
+        can_turn ? 1 : config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = BallMode::kApproachBall;
       recovery_walk_turns_completed_ = 0;
