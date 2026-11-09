@@ -10,11 +10,37 @@
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 namespace motion_executor {
 using RawPositions = std::unordered_map<int, int32_t>;
 using Clock = std::chrono::steady_clock;
 inline constexpr std::chrono::milliseconds kPeriod{20};
+
+// This retries ONLY the initial encoder snapshot, never a body JSON or
+// a Goal Position write. The caller's waiting policy is injected so the
+// bounded behavior can be tested without hardware or real-time sleeps.
+// One initial attempt plus any retries is limited to max_attempts total.
+template <typename Read, typename Wait, typename Notify>
+RawPositions ReadRawPositionsWithRetry(Read read, Wait wait, Notify notify,
+                                      int max_attempts = 50) {
+    if (max_attempts < 1) throw std::invalid_argument("max_attempts must be positive");
+    for (int attempt = 1; attempt <= max_attempts; ++attempt) {
+        std::optional<RawPositions> positions;
+        try {
+            positions = read();
+        } catch (const std::exception& e) {
+            notify(attempt, max_attempts, false, e.what());
+            if (attempt == max_attempts) throw;
+            wait();
+            continue;
+        }
+        if (attempt > 1) notify(attempt, max_attempts, true, "");
+        return std::move(*positions);
+    }
+    throw std::logic_error("unreachable position retry state");
+}
+
 
 // READY is emitted for 11/12/13, 21..25 and LINE units 32..34; the controller's
 // current-action allowlist determines whether it sends a queued successor.
