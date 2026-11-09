@@ -47,6 +47,7 @@ struct LineLossRecoveryConfig {
 };
 
 struct MissionControllerConfig {
+  bool race_round2_fast_enabled{false}; // Production branch enables; old scenario fixtures remain legacy.
   FeatureConfig line_features;
   double ball_view_line_image_center_u{360.0};
   int ball_view_pitch_tick{1750};
