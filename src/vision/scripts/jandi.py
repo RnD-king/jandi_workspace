@@ -92,11 +92,14 @@ def screen(status, plan, page, message, log_view=None):
     else:
         lines += ["1. RealSense   2. 모터   3. 비전 (켜기/끄기/재시작)",
                   "4. START   5. PAUSE   6. RESUME   7. RESET",
-                  "8. 오류·로그   9. 콘솔 나가기(실행 유지)   0. 전체 종료"]
+                  "8. 오류·로그   9. 콘솔 나가기(실행 유지)   0. 전체 종료",
+                  "K. 긴급종료 (확인 없이 관리 중인 전체 노드 중지)"]
         events = [e for e in status["events"] if e["level"] in ("ERROR", "FATAL", "WARN")]
         if events:
             e = events[-1]
             lines += [f"최근 알림 [{e['time']}] {e['node']}: {e['text']}"]
+    if status.get("emergency_stop_requested"):
+        lines.append("EMERGENCY STOP: 전체 노드 종료 진행 중, 자동 재시작 금지")
     return "\n".join(lines + ["", message, "번호를 누르세요. Ctrl+C는 콘솔만 나갑니다."])
 
 
@@ -104,6 +107,8 @@ def key_request(page, key):
     """Pure UI mapping: polling/redrawing/disconnection cannot send a service."""
     if len(key) != 1:
         return page, None
+    if key in ("K", "k"):
+        return "main", {"op": "emergency_stop"}
     if page in NAMES:
         return ("main", {"op": {"1": "start", "2": "stop", "3": "restart"}[key], "node": page}) \
             if key in "123" else ("main" if key == "0" else page, None)

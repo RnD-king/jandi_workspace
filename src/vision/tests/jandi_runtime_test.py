@@ -170,6 +170,35 @@ class RuntimeTest(unittest.TestCase):
         kill.assert_not_called()
 
     @patch("jandi_runtime.os.killpg")
+    def test_emergency_key_stops_all_groups_even_when_busy(self, kill):
+        self.boot()
+        self.observer.allowed = False
+        for page in ("main", "logs", "vision", "motor", "shutdown"):
+            self.assertEqual(console.key_request(page, "K"),
+                             ("main", {"op": "emergency_stop"}))
+        result = self.manager.request({"op": "emergency_stop"})
+        self.assertTrue(result["ok"])
+        self.assertTrue(self.manager.shutdown_requested)
+        self.assertTrue(self.manager.emergency_stop_requested)
+        self.assertEqual(
+            kill.call_args_list[:3],
+            [unittest.mock.call(self.created[i].pid, signal.SIGINT) for i in (2, 1, 0)])
+        self.assertEqual(self.observer.calls, [])
+        self.assertFalse(self.manager.request({"op": "service", "name": "resume"})["ok"])
+        self.advance(.25)
+        self.assertEqual(
+            kill.call_args_list[3:6],
+            [unittest.mock.call(self.created[i].pid, signal.SIGTERM) for i in (2, 1, 0)])
+        self.advance(.25)
+        self.assertEqual(
+            kill.call_args_list[6:9],
+            [unittest.mock.call(self.created[i].pid, signal.SIGKILL) for i in (2, 1, 0)])
+        for child in self.created:
+            child.code = -signal.SIGKILL
+        self.advance(.25)
+        self.assertTrue(self.manager.finished)
+
+    @patch("jandi_runtime.os.killpg")
     def test_manual_full_shutdown_orders_stops_without_services(self, kill):
         self.boot()
         self.assertTrue(self.manager.request({"op": "shutdown"})["ok"])
