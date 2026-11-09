@@ -707,10 +707,8 @@ private:
         current_action_ = message->action;
         active_target_yaw_deg_ = effective_target_yaw_deg;
         motion_in_progress_ = true;
-        // The first real StartPrepared/StartMissionProgram succeeded. An ACK
-        // received for a queued successor does not start this timer.
-        motion_done_watchdog_.Start(message->action_id, message->action,
-                                    std::chrono::steady_clock::now());
+        // Queued ACK and playback preparation are not physical motor output.
+        // The watchdog starts at the first successful body SyncWrite below.
         PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
         EnsureMotionLoop();
     }
@@ -1013,9 +1011,8 @@ private:
                     AbortPlayback("Queued action start failed: " + p2p_player_->Error());
                     return;
                 }
-                // The queued action is now really playing; ACK may have
-                // arrived during the previous action's READY interval.
-                motion_done_watchdog_.Start(queued.id, queued.action, now);
+                // The prior READY may already have ACKed this ID.
+                // Wait for its first successful body SyncWrite before timing.
                 if (!already_acknowledged) PublishActionStatus(queued.id, vision::msg::CommandStatus::ACK);
             }
         } catch (const std::exception& e) {
@@ -1132,6 +1129,12 @@ private:
                 // 몸과 카메라 Goal Position을 쓰는 단일 전송 지점.
                 dxl_->SyncWriteRawPositions(command);
                 const auto written_at = std::chrono::steady_clock::now();
+                if (!body_command.empty() && motion_in_progress_) {
+                    // The first successful motor packet marks ACTUAL playback
+                    // for active 32/33/36 and FINE 3..8; later packets do not restart it.
+                    motion_done_watchdog_.Start(action_transactions_.active_id,
+                                                current_action_, written_at);
+                }
                 // 전송 호출 성공 뒤에만 캐시를 갱신한다. 다음 카메라 이동/몸 유지의 기준이 된다.
                 last_sent_positions_ = std::move(command);
                 // 전송 시작 + 20 ms와 전송 종료 중 늦은 시각까지 기다려 몰아서 전송하지 않는다.
