@@ -50,6 +50,7 @@ struct CurveSearchConfig {
   double scan_move_sec{0.5};
   double scan_hold_sec{0.5};
   double scan_return_sec{0.5};
+  double scan_observation_timeout_sec{2.0}; // 10 fresh frames after encoder arrival.
   double center_half_width_px{50.0};
   int pause_window{4}, pause_hits{2};
   int verify_window{10}, verify_hits{5};

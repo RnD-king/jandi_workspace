@@ -505,53 +505,37 @@ MissionFrameResult MissionController::StepPlannedLine(
     if(phase==CurveSearchState::Phase::kDrain && idle && commands_allowed) {
       if(last_ready_line_guide_ && last_ready_line_guide_->valid)
         curve_.saved_line=last_ready_line_guide_;
-      curve_.center_hits.clear();curve_.object_hits.clear();
+      curve_.observation.Reset();
       curve_.phase=CurveSearchState::Phase::kScan;
       curve_.started=false;
       ++curve_.head_attempts;
       camera=curve_.direction>0 ? CameraRequest::kScanLeft :
                                  CameraRequest::kScanRight;
     } else if(phase==CurveSearchState::Phase::kScan ||
-             phase==CurveSearchState::Phase::kHold) {
+              phase==CurveSearchState::Phase::kHold) {
       const auto& sf=input.camera_scan;
       if(sf.phase!=0) curve_.started=true;
-      const bool seen=input.scan_ball_u.has_value();
-      const bool centered=seen && std::abs(*input.scan_ball_u-
-          (input.image_width*0.5))<=config_.curve_search.center_half_width_px;
-      if(sf.phase==1 || sf.phase==2 || sf.phase==3 || sf.phase==4) {
-        curve_.object_hits.push_back(seen);
-        curve_.center_hits.push_back(centered);
-        while(curve_.object_hits.size()>
-              static_cast<std::size_t>(config_.curve_search.verify_window))
-          curve_.object_hits.pop_front();
-        while(curve_.center_hits.size()>
-              static_cast<std::size_t>(config_.curve_search.pause_window))
-          curve_.center_hits.pop_front();
-      }
-      const int object_votes=std::count(curve_.object_hits.begin(),
-                                       curve_.object_hits.end(),true);
-      if(phase==CurveSearchState::Phase::kScan &&
-          (sf.phase==1 || sf.phase==2 || sf.phase==4) &&
-         curve_.center_hits.size()==static_cast<std::size_t>(config_.curve_search.pause_window) &&
-         std::count(curve_.center_hits.begin(),curve_.center_hits.end(),true)>=
-             config_.curve_search.pause_hits) {
-        camera=CameraRequest::kScanHold;
-        curve_.phase=CurveSearchState::Phase::kHold;
-      } else if(phase==CurveSearchState::Phase::kHold && sf.phase==3) {
-        if(curve_.object_hits.size()==static_cast<std::size_t>(
-               config_.curve_search.verify_window) &&
-           object_votes>=config_.curve_search.verify_hits) {
+      // Motion-phase detections are ignored. Encoder-confirmed stop_id and
+      // fresh image timestamps gate the stationary 10/5 observation.
+      if((sf.phase==2 || sf.phase==3) && sf.stop_id) {
+        const auto verdict=curve_.observation.Observe(
+            sf.stop_id,sf.frame_is_fresh,input.now_sec,input.scan_ball_u.has_value(),
+            config_.curve_search.scan_hold_sec,
+            config_.curve_search.scan_observation_timeout_sec,
+            config_.curve_search.verify_window,config_.curve_search.verify_hits);
+        using Verdict=StationaryScanObservation::Result;
+        if(verdict==Verdict::kConfirmed) {
           curve_.found_yaw=sf.yaw_deg;
           camera=CameraRequest::kScanReturn;
           curve_.phase=CurveSearchState::Phase::kReturnFound;
-        } else if(curve_.object_hits.size()==static_cast<std::size_t>(
-                    config_.curve_search.verify_window)) {
-          curve_.center_hits.clear();
-          camera=CameraRequest::kScanResume;
-          curve_.phase=CurveSearchState::Phase::kScan;
+        } else if(verdict==Verdict::kEmpty || verdict==Verdict::kRejected) {
+          camera=CameraRequest::kScanReturn;
+          curve_.phase=CurveSearchState::Phase::kReturnMiss;
         }
       }
-      if(sf.finished && curve_.started)
+      if(sf.finished && curve_.started &&
+         (curve_.phase==CurveSearchState::Phase::kScan ||
+          curve_.phase==CurveSearchState::Phase::kHold))
         curve_.phase=CurveSearchState::Phase::kReturnMiss;
     } else if(phase==CurveSearchState::Phase::kReturnFound &&
               input.camera_feedback.settled &&
