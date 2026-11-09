@@ -707,6 +707,10 @@ private:
         current_action_ = message->action;
         active_target_yaw_deg_ = effective_target_yaw_deg;
         motion_in_progress_ = true;
+        // The first real StartPrepared/StartMissionProgram succeeded. An ACK
+        // received for a queued successor does not start this timer.
+        motion_done_watchdog_.Start(message->action_id, message->action,
+                                    std::chrono::steady_clock::now());
         PublishActionStatus(message->action_id, vision::msg::CommandStatus::ACK);
         EnsureMotionLoop();
     }
@@ -975,6 +979,7 @@ private:
         elbow_tween_.Cancel();
         scan_elbow_stage_=ScanElbowStage::kIdle;
         action_transactions_.Abort();
+        motion_done_watchdog_.Reset();
         queued_action_.reset();
         queued_action_acknowledged_=false;
         walk_hold_.Reset();
@@ -1008,6 +1013,9 @@ private:
                     AbortPlayback("Queued action start failed: " + p2p_player_->Error());
                     return;
                 }
+                // The queued action is now really playing; ACK may have
+                // arrived during the previous action's READY interval.
+                motion_done_watchdog_.Start(queued.id, queued.action, now);
                 if (!already_acknowledged) PublishActionStatus(queued.id, vision::msg::CommandStatus::ACK);
             }
         } catch (const std::exception& e) {
@@ -1061,6 +1069,15 @@ private:
         if (body_result == P2PMotionPlayer::UpdateResult::kError) {
             AbortPlayback(p2p_player_->Error());
             return;
+        }
+        // Check before publishing DONE, including a playback that only
+        // finishes after the 5s deadline. This never stops motor output.
+        if (const auto timeout = motion_done_watchdog_.Check(
+                action_transactions_.active_id, now)) {
+            RCLCPP_ERROR(get_logger(),
+                "[WALK TIMEOUT] action_id=%llu action=%u elapsed=%.2fs; no DONE within 5s of actual playback start. Check P2P playback, write latency and ACTION DONE.",
+                static_cast<unsigned long long>(timeout->action_id),
+                static_cast<unsigned int>(timeout->action), timeout->elapsed_sec);
         }
         const bool startup_completed = startup_pose_in_progress_ &&
             body_result == P2PMotionPlayer::UpdateResult::kFinished;
@@ -1210,6 +1227,7 @@ private:
                 const auto completed_id = action_transactions_.active_id;  // 방금 끝난 몸 명령의 ID
                 // A의 DONE을 먼저 보낸 뒤, 이미 ACK한 대기 동작 B를 활성 동작으로 올린다.
                 PublishActionStatus(completed_id, vision::msg::CommandStatus::DONE);
+                motion_done_watchdog_.Reset();
                 walk_hold_.Complete(current_action_, now);
                 action_transactions_.CompleteActive();
                 motion_in_progress_ = false;
@@ -1372,6 +1390,7 @@ private:
     motion_executor::ActionTransactions action_transactions_;
     bool queued_action_acknowledged_{false};
     motion_executor::WalkInterActionHold walk_hold_;
+    motion_executor::MotionDoneWatchdog motion_done_watchdog_;
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr timing_parameter_callback_;
     std::optional<QueuedAction> queued_action_;        // 비어 있으면 다음 동작 없음, 값이 있으면 1개 대기
     motion_executor::CameraTransactions camera_transactions_; // 몸과 독립인 카메라 활성/완료 ID 기록
