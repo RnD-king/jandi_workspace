@@ -1484,7 +1484,21 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       active_mission_ == MissionType::kBall &&
       input.camera_feedback.actual_mode == CameraMode::kBallView &&
       ball_result_.mode == BallMode::kWaitCameraDown;
-  if (camera_settle_edge && !immediate_ball_down)
+  // If the camera reaches its target while the previously approved
+  // final LINE unit is still walking, do not impose a new body settle pause.
+  // The camera's encoder-confirmed DONE and the body's actual DONE remain
+  // separate prerequisites of the following mission phase.
+  const bool camera_settled_during_final_line =
+      config_.race_round2_fast_enabled && camera_settle_edge &&
+      active_mission_==MissionType::kLine &&
+      ((continuous_.mission==MissionType::kBall && continuous_.near &&
+        input.camera_feedback.actual_mode==CameraMode::kBallView) ||
+       (continuous_.mission==MissionType::kHurdle && continuous_.near &&
+        input.camera_feedback.actual_mode==CameraMode::kDown) ||
+       (goal_early_camera_armed_ &&
+        input.camera_feedback.actual_mode==CameraMode::kGoal));
+  if (camera_settle_edge && !immediate_ball_down &&
+      !camera_settled_during_final_line)
     settle_until_sec_ = std::max(settle_until_sec_,
                                  input.now_sec + config_.transition_settle_sec);
   previous_camera_settled_ = input.camera_feedback.settled;
