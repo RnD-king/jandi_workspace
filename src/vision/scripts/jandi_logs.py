@@ -9,7 +9,7 @@ import time
 
 FILTERS = {
     "1": (None, None, "전체 모든 로그"),
-    "2": (None, {"ERROR", "FATAL"}, "전체 오류"),
+    "2": (None, {"WARN", "ERROR", "FATAL"}, "전체 경고·오류"),
     "3": ("camera", {"ERROR", "FATAL", "WARN"}, "카메라 오류·경고"),
     "4": ("motor", {"ERROR", "FATAL", "WARN"}, "모터 오류·경고"),
     "5": ("vision", {"ERROR", "FATAL", "WARN"}, "비전 오류·경고"),
