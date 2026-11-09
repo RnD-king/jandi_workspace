@@ -347,7 +347,7 @@ vision_algorithm:
       edge_margin_px: 50.0 # GOAL 이미지 경계 보호 구간(px)
       edge_stable_window: 8 # 연속된 프레임 관측창; 기간 내 한번 충족하면 래치
       edge_stable_min_hits: 3 # 좌/우 각각 8중3 이상 접촉 시 우선 제자리 2회전
-      approach_short_z_m: 0.8 # GOAL 근거리 진입·FINE 자세 전환 기준; FORWARD 뷰에서는 짧은 보행 선택 기준
+      approach_short_z_m: 0.87 # GOAL 근거리 진입·FINE 자세 전환 기준 (87cm); FORWARD 뷰에서는 짧은 보행 선택 기준
       camera_goal_start_z_m: 0.8 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만)
 
       # 투척 위치·방향
