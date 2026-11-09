@@ -385,6 +385,13 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   ActionRequest request;
   CameraRequest camera = route.camera;
+  // Never sacrifice the single READY successor to a simultaneous camera
+  // request. Queue the chosen 32/33/36 first, then start DOWN next frame.
+  if (hurdle_down_camera_armed_ && camera == CameraRequest::kNone &&
+      input.allow_new_commands &&
+      input.camera_feedback.actual_mode != CameraMode::kDown &&
+      input.camera_feedback.actual_mode != CameraMode::kTransition)
+    camera = CameraRequest::kDown;
   const bool line_scan_override=automatic_approach && !finish_course &&
       line_state_==LineState::kRecoveryHeadScan &&
       line_head_search_.phase!=LineHeadSearch::Phase::kIdle;
@@ -1147,8 +1154,14 @@ MissionFrameResult MissionController::StepPlannedLine(
       command.action==route.action.action)
     goal_head_search_.body_action_id=command.action_id;
   if (route.near_final_action && command.command_type==CommandType::kAction &&
-      command.action_id && SameIssuedAction(route.action.action, command.action))
+      command.action_id && SameIssuedAction(route.action.action, command.action)) {
     continuous_.near_motion_id=command.action_id;
+    if (continuous_.mission==MissionType::kHurdle && continuous_.near &&
+        LinePlan::IsUnit(command.action))
+      hurdle_down_camera_armed_=true;
+  }
+  if (command.camera_request==CameraRequest::kDown)
+    hurdle_down_camera_armed_=false;
   if (command.command_type == CommandType::kAction && command.action_id &&
       request.action != MissionAction::kNone && SameIssuedAction(request.action, command.action) &&
       !LinePlan::IsUnit(command.action)) {
