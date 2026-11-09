@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <deque>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -154,6 +155,46 @@ public:
 private:
     double duration_{0.0};
     Clock::time_point until_{};
+};
+
+// Report a missing body DONE only for competition LINE units and FINE motion.
+// Start() must be called after physical playback begins, never at queued ACK.
+class MotionDoneWatchdog {
+public:
+    struct Timeout {
+        uint64_t action_id{};
+        uint16_t action{};
+        double elapsed_sec{};
+    };
+    static bool MonitoredAction(uint16_t action) {
+        return (action >= 3 && action <= 8) ||
+            action == 32 || action == 33 || action == 36;
+    }
+    void Start(uint64_t id, uint16_t action, Clock::time_point now) {
+        Reset();
+        if (id == 0 || !MonitoredAction(action)) return;
+        action_id_ = id;
+        action_ = action;
+        started_ = now;
+    }
+    std::optional<Timeout> Check(uint64_t active_id, Clock::time_point now) {
+        if (action_id_ == 0 || active_id != action_id_ || reported_ ||
+            now - started_ < std::chrono::seconds(5)) return std::nullopt;
+        reported_ = true;  // One ERROR per action, never repeatedly spam the log.
+        return Timeout{action_id_, action_,
+            std::chrono::duration<double>(now - started_).count()};
+    }
+    void Reset() {
+        action_id_ = 0;
+        action_ = 0;
+        started_ = {};
+        reported_ = false;
+    }
+private:
+    uint64_t action_id_{};
+    uint16_t action_{};
+    Clock::time_point started_{};
+    bool reported_{false};
 };
 
 struct CameraPose { int32_t yaw; int32_t pitch; };
