@@ -843,7 +843,7 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kRecoveryStepObserve: {
     if (feedback.action_active && !feedback.action_done) return result;
     const auto status = stationary_recovery_.Observe(target.has_value(),now_sec,
-        kFastStationaryWindow,FastStationaryMinHits(config_.stable_min_hits),config_.recovery_observation_sec,1, true);
+        (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),(config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits),config_.recovery_observation_sec,1, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = recovery_resume_mode_;
       entry_step_recovery_ = false;
@@ -861,8 +861,8 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kRecoveryForward: {
     if (feedback.action_active && !feedback.action_done) return result;
     const auto status=stationary_recovery_.Observe(target.has_value(),now_sec,
-        kFastStationaryWindow,FastStationaryMinHits(config_.stable_min_hits),
-        config_.recovery_observation_sec,config_.recovery_max_observations, true);
+        (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),(config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits),
+        config_.recovery_observation_sec,config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status==StationaryObjectRecovery::Result::kFound) {
       mode_=HurdleMode::kApproach;
       recovery_steps_completed_=0;entry_step_recovery_=false;
@@ -875,8 +875,8 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kRecoveryDown: {
     if (feedback.action_active && !feedback.action_done) return result;
     const auto status = stationary_recovery_.Observe(target.has_value(), now_sec,
-        kFastStationaryWindow, FastStationaryMinHits(config_.stable_min_hits),
-        config_.recovery_observation_sec, config_.recovery_max_observations, true);
+        (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window), (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits),
+        config_.recovery_observation_sec, config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = fine_pose_entered_ ? HurdleMode::kFineAdjust : HurdleMode::kCoarseAdjust;
       recovery_steps_completed_=0;entry_step_recovery_=false;
