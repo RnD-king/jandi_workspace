@@ -712,18 +712,27 @@ public:
       const auto& observed = last_debug_result_;
       const auto& mission = observed.mission;
       const auto depth = observed.perception.backboard_center_depth_m;
+      const bool raw_board_accepted = std::any_of(
+          observed.perception.accepted_object_detections.begin(),
+          observed.perception.accepted_object_detections.end(),
+          [this](const vision_core::Detection& detection) {
+            return detection.class_id == debug_config_.object_targets.backboard_class_id;
+          });
+      const bool tracked_board = observed.perception.targets.backboard.has_value();
+      const bool accepted_far_depth =
+          depth && std::isfinite(*depth) &&
+          *depth > debug_config_.goal.approach_short_z_m &&
+          *depth <= debug_config_.backboard_max_depth_m;
       const bool goal_far_visible =
           debug_config_.race_round2_fast_enabled &&
           run_state_ == RunState::kRunning &&
           camera_feedback_.settled &&
           camera_feedback_.actual_mode == vision_core::CameraMode::kGoal &&
-          pending_camera_id_ == 0 &&
-          mission.approach_mission == vision_core::MissionType::kGoal &&
+          pending_camera_id_ == 0 && mission.has_ball &&
           !mission.approach_near &&
-          observed.perception.targets.backboard.has_value() &&
-          depth.has_value() && std::isfinite(*depth) &&
-          *depth > debug_config_.goal.approach_short_z_m &&
-          *depth <= debug_config_.backboard_max_depth_m;
+          (mission.approach_mission == vision_core::MissionType::kGoal ||
+           (mission.active_mission == vision_core::MissionType::kLine && raw_board_accepted)) &&
+          (accepted_far_depth || (raw_board_accepted && !tracked_board));
       const auto active_body_id = mission.command.action_id;
       if (goal_far_visible) {
         if (!goal_far_watch_active_ || active_body_id != goal_far_watch_action_id_) {
@@ -735,12 +744,13 @@ public:
         if (!goal_far_watch_reported_ &&
             watch_now - goal_far_watch_started_at_ >= std::chrono::seconds(3)) {
           RCLCPP_ERROR(get_logger(),
-              "[GOAL FAR STALL] Visible RGB+Depth=%.3fm but no new body action/DONE for >=3s. command_id=%llu control_phase=%u pending_actions=%zu post_observe=%d line_recovery=%d line_phase=%d terminal_hold=%d. Check action ACK/DONE and GOAL routing.",
-              *depth,static_cast<unsigned long long>(active_body_id),
+              "[GOAL FAR STALL] GOAL RGB accepted=%d tracked=%d selected_depth=%.3fm, but no new body action/DONE for >=3s. command_id=%llu phase=%u pending=%zu observing=%d line_recovery=%d line_phase=%d terminal_hold=%d loss_pending=%d. Check ACK/DONE, tracker and GOAL routing.",
+              raw_board_accepted ? 1:0,tracked_board ? 1:0,depth.value_or(-1.0),
+              static_cast<unsigned long long>(active_body_id),
               static_cast<unsigned int>(mission.command.control_phase),
               outstanding_actions_.size(),mission.post_motion_observing ? 1:0,
               mission.line_in_recovery ? 1:0,mission.line_recovery_phase,
-              mission.terminal_hold ? 1:0);
+              mission.terminal_hold ? 1:0,mission.approach_loss_pending ? 1:0);
           goal_far_watch_reported_ = true;
         }
       } else {
