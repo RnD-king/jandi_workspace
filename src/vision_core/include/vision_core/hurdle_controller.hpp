@@ -46,6 +46,7 @@ struct HurdleConfig {
   double contact_v_px{};
   int contact_steps{};
   double contact_inter_action_hold_sec{};
+  double pre_cross_hold_sec{0.0}; // After last contact DONE, before HURDLE(16).
 
   int stable_window{};
   int stable_min_hits{};
@@ -149,7 +150,9 @@ public:
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
   void UpdateTuning(const HurdleConfig &config) {
     if (contact_next_step_sec_>0.0)
-      contact_next_step_sec_+=config.contact_inter_action_hold_sec-config_.contact_inter_action_hold_sec;
+      contact_next_step_sec_+=completed_contact_steps_>=config_.contact_steps
+          ? config.pre_cross_hold_sec-config_.pre_cross_hold_sec
+          : config.contact_inter_action_hold_sec-config_.contact_inter_action_hold_sec;
     if (mode_==HurdleMode::kDownSearch && config_.down_search_min_hits!=config.down_search_min_hits)
       down_search_.InvalidateDetection();
     config_ = config;
