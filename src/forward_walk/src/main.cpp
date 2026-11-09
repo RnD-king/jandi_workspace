@@ -25,6 +25,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 using namespace std::chrono_literals;
@@ -514,9 +515,36 @@ private:
     bool StartMissionProgram(const std::optional<P2PMotionPlayer::PreparedProgram>& program,
                              std::uint8_t, std::uint16_t action)
     {
-        if(!program) return false;
+        if (!program) return false;
+        // Snapshot the real motor positions once before starting this JSON.
+        // Temporary U2D2/SyncRead failures retry ONLY this read. A queued ACK
+        // can already exist, but no body keyframe or motor write is replayed.
+        constexpr int kMaxPositionReadAttempts = 50;
+        constexpr auto kPositionReadRetryInterval = 20ms;
+        const auto read_started = std::chrono::steady_clock::now();
+        const auto initial_pose = motion_executor::ReadRawPositionsWithRetry(
+            [&]() { return dxl_->GetRawPositions(); },
+            [&]() { std::this_thread::sleep_for(kPositionReadRetryInterval); },
+            [&](int attempt, int total, bool recovered, const char* error) {
+                const double elapsed_ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - read_started).count();
+                if (recovered) {
+                    RCLCPP_INFO(get_logger(),
+                        "[MOTOR READ RECOVERED] action=%u attempt=%d/%d elapsed=%.1fms; starting original motion",
+                        static_cast<unsigned int>(action), attempt, total, elapsed_ms);
+                } else if (attempt == total) {
+                    RCLCPP_ERROR(get_logger(),
+                        "[MOTOR READ FAILED] action=%u attempts=%d/%d elapsed=%.1fms last_error=%s; motion NOT started",
+                        static_cast<unsigned int>(action), attempt, total, elapsed_ms, error);
+                } else {
+                    RCLCPP_WARN(get_logger(),
+                        "[MOTOR READ RETRY] action=%u failed_attempt=%d/%d elapsed=%.1fms reason=%s; retry_in=20ms",
+                        static_cast<unsigned int>(action), attempt, total, elapsed_ms, error);
+                }
+            }, kMaxPositionReadAttempts);
         if(!UsesOutwardArmPose(action)) camera_arm_tween_.Cancel();
-        return p2p_player_->StartPrepared(*program);
+        return p2p_player_->StartPrepared(*program, initial_pose,
+                                           std::chrono::steady_clock::now());
     }
 
     // 요청 각도를 회전 JSON 반복 횟수로 반올림하고 0~최대 반복 횟수로 제한한다.
