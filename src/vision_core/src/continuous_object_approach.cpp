@@ -551,7 +551,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   // Fast branch: the last required LINE unit was approved while actual
   // floor LINE was valid, BEFORE moving the head. Its physical DONE (not
   // current GOAL-view floor pixels) unlocks the GOAL camera observation.
-  const bool early_goal_complete=goal_early_camera_armed_ &&
+  const bool early_goal_complete=config_.race_round2_fast_enabled && goal_early_camera_armed_ &&
       goal_early_camera_action_id_!=0 &&
       line_plan_.Done(goal_early_camera_action_id_) &&
       goal_gate && continuous_.mission==MissionType::kNone;
@@ -905,7 +905,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
                                ActionCategory::kLocomotion,0,true};
       // A normal LINE READY had already reserved the required extra unit.
       // Its ACK is sufficient to allow DOWN to begin in parallel.
-      hurdle_down_camera_armed_=true;
+      if (config_.race_round2_fast_enabled) hurdle_down_camera_armed_=true;
     }
     // A newly committed HURDLE waits for the executing LINE unit's READY
     // window; unlike BALL/GOAL, do not abort its O/H accumulator yet.
