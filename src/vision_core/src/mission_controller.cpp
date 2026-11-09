@@ -496,6 +496,8 @@ void MissionController::EnterMission(MissionType mission) {
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;
   if (mission == MissionType::kBall) {
+    goal_early_camera_armed_=false;
+    goal_early_camera_action_id_=0;
     if(curve_.phase!=CurveSearchState::Phase::kLocked)
       curve_.phase=CurveSearchState::Phase::kIdle;
     // A new pickup starts a fresh GOAL walk gate only after line reacquisition.
@@ -510,12 +512,16 @@ void MissionController::EnterMission(MissionType mission) {
     hurdle_result_ = {};
     goal_result_ = {};
   } else if (mission == MissionType::kHurdle) {
+    goal_early_camera_armed_=false;
+    goal_early_camera_action_id_=0;
     hurdle_down_camera_armed_=false;
     goal_controller_.Reset();
     ball_result_ = {};
     goal_result_ = {};
     has_ball_ = false;
   } else if (mission == MissionType::kGoal) {
+    goal_early_camera_armed_=false;
+    goal_early_camera_action_id_=0;
     goal_shot_done_=false;
     // Do not carry post-pickup booking limits into LINE after the later shot.
     post_pickup_goal_line_gate_active_ = false;
@@ -3388,6 +3394,8 @@ void MissionController::Reset(bool preserve_action_ids) {
   candidate_ = {};
   line_ready_handled_id_ = line_auxiliary_id_ = 0;
   hurdle_down_camera_armed_=false;
+  goal_early_camera_armed_=false;
+  goal_early_camera_action_id_=0;
   line_auxiliary_done_ = line_auxiliary_observing_ = false;
   line_auxiliary_action_ = MissionAction::kNone;
   if (!preserve_action_ids)
