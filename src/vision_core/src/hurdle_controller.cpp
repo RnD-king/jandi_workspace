@@ -470,7 +470,8 @@ HurdleResult HurdleController::Compute(
             now_sec + config_.down_search_inter_action_hold_sec;
       }
       if (decision == DownSearchWalk::Decision::kMoving ||
-          now_sec + kEpsilon < down_search_hold_until_sec_ ||
+          (decision != DownSearchWalk::Decision::kFound &&
+           now_sec + kEpsilon < down_search_hold_until_sec_) ||
           decision == DownSearchWalk::Decision::kWaiting)
         return result;
       if (decision == DownSearchWalk::Decision::kFound &&
