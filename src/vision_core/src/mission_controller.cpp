@@ -7,6 +7,7 @@
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/coordinate_rectifier.hpp"
+#include "vision_core/stationary_window.hpp"
 
 namespace vision_core {
 namespace {
@@ -495,6 +496,8 @@ void MissionController::EnterMission(MissionType mission) {
   ready_line_action_id_ = 0;
   line_failure_pending_done_ = false;
   if (mission == MissionType::kBall) {
+    goal_early_camera_armed_=false;
+    goal_early_camera_action_id_=0;
     if(curve_.phase!=CurveSearchState::Phase::kLocked)
       curve_.phase=CurveSearchState::Phase::kIdle;
     // A new pickup starts a fresh GOAL walk gate only after line reacquisition.
@@ -509,11 +512,16 @@ void MissionController::EnterMission(MissionType mission) {
     hurdle_result_ = {};
     goal_result_ = {};
   } else if (mission == MissionType::kHurdle) {
+    goal_early_camera_armed_=false;
+    goal_early_camera_action_id_=0;
+    hurdle_down_camera_armed_=false;
     goal_controller_.Reset();
     ball_result_ = {};
     goal_result_ = {};
     has_ball_ = false;
   } else if (mission == MissionType::kGoal) {
+    goal_early_camera_armed_=false;
+    goal_early_camera_action_id_=0;
     goal_shot_done_=false;
     // Do not carry post-pickup booking limits into LINE after the later shot.
     post_pickup_goal_line_gate_active_ = false;
@@ -867,14 +875,18 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
   if (decision_observation_mission_ != MissionType::kLine) {
     const bool detected = target && target->has_value();
     decision_object_hits_.push_back(detected);
-    const int window=decision_observation_mission_==MissionType::kBall ?
-        config_.ball.stable_window : decision_observation_mission_==MissionType::kGoal ?
-        config_.goal.stable_window : config_.hurdle.stable_window;
+    const int window = config_.race_round2_fast_enabled
+        ? kFastStationaryWindow
+        : (decision_observation_mission_==MissionType::kBall ? config_.ball.stable_window :
+           decision_observation_mission_==MissionType::kGoal ? config_.goal.stable_window :
+           config_.hurdle.stable_window);
     while (decision_object_hits_.size()>static_cast<std::size_t>(window))
       decision_object_hits_.pop_front();
-    const int minimum=decision_observation_mission_==MissionType::kBall ?
+    const int original_minimum = decision_observation_mission_==MissionType::kBall ?
         config_.ball.stable_min_hits : decision_observation_mission_==MissionType::kGoal ?
         config_.goal.stable_min_hits : config_.hurdle.stable_min_hits;
+    const int minimum = config_.race_round2_fast_enabled
+        ? FastStationaryMinHits(original_minimum) : original_minimum;
     if (decision_object_hits_.size()==static_cast<std::size_t>(window) &&
         std::count(decision_object_hits_.begin(),decision_object_hits_.end(),true)>=minimum) {
       decision_object_qualified_=true;
@@ -891,13 +903,18 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
       decision_goal_near_hits_.push_back(
           detected && GoalNearDistanceSample(input.backboard_center_depth_m,
               input.goal_pose,config_.goal.approach_short_z_m));
-      while (decision_goal_near_hits_.size()>static_cast<std::size_t>(config_.goal.stable_window))
+      while (decision_goal_near_hits_.size()>static_cast<std::size_t>(config_.race_round2_fast_enabled
+            ? kFastStationaryWindow : config_.goal.stable_window))
         decision_goal_near_hits_.pop_front();
-      while (decision_goal_pose_hits_.size()>static_cast<std::size_t>(config_.goal.stable_window))
+      while (decision_goal_pose_hits_.size()>static_cast<std::size_t>(config_.race_round2_fast_enabled
+            ? kFastStationaryWindow : config_.goal.stable_window))
         decision_goal_pose_hits_.pop_front();
-      if (decision_goal_pose_hits_.size()==static_cast<std::size_t>(config_.goal.stable_window) &&
+      if (decision_goal_pose_hits_.size()==static_cast<std::size_t>(config_.race_round2_fast_enabled
+              ? kFastStationaryWindow : config_.goal.stable_window) &&
           std::count(decision_goal_pose_hits_.begin(),decision_goal_pose_hits_.end(),true)>=
-              config_.goal.stable_min_hits) {
+              (config_.race_round2_fast_enabled
+               ? FastStationaryMinHits(config_.goal.stable_min_hits)
+               : config_.goal.stable_min_hits)) {
         decision_goal_pose_qualified_=true;
         decision_qualified_goal_pose_hits_=decision_goal_pose_hits_;
       }
@@ -970,11 +987,17 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
   const bool valid=guide.valid && std::isfinite(guide.offset) &&
       std::isfinite(guide.heading_rad);
   decision_line_hits_.push_back(valid);
-  while (decision_line_hits_.size()>static_cast<std::size_t>(config_.line.line_stable_window))
+  while (decision_line_hits_.size()>static_cast<std::size_t>(config_.race_round2_fast_enabled
+      ? kFastStationaryWindow : config_.line.line_stable_window))
     decision_line_hits_.pop_front();
-  if (decision_line_hits_.size()==static_cast<std::size_t>(config_.line.line_stable_window) &&
+  if (decision_line_hits_.size()==static_cast<std::size_t>(config_.race_round2_fast_enabled
+      ? kFastStationaryWindow : config_.line.line_stable_window) &&
       std::count(decision_line_hits_.begin(),decision_line_hits_.end(),true)>=
-          config_.line.line_stable_min_hits) decision_line_qualified_=true;
+          (config_.race_round2_fast_enabled
+           ? std::max(FastStationaryMinHits(config_.line.line_stable_min_hits),
+                      config_.line_p2p.failure_min_valid_samples)
+           : config_.line.line_stable_min_hits))
+    decision_line_qualified_=true;
   if (valid) {
     ++decision_line_valid_count_;
     decision_line_offset_sum_ += guide.offset;
@@ -985,19 +1008,28 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
 }
 
 bool MissionController::DecisionObservationReady(double now_sec) const {
-  if (!decision_observation_active_ ||
-      now_sec - decision_observation_start_sec_ + 1e-9 <
-          config_.post_motion_observation_sec)
-    return false;
-  if (decision_observation_mission_ == MissionType::kLine)
-    return decision_line_hits_.size() >=
-        static_cast<std::size_t>(config_.line.line_stable_window);
-  // Time and real frames accumulate concurrently. The completed window
-  // validates 10/7 once; controllers reuse that evidence without recollection.
-  const int window=decision_observation_mission_==MissionType::kBall ? config_.ball.stable_window :
-      decision_observation_mission_==MissionType::kGoal ? config_.goal.stable_window :
-      config_.hurdle.stable_window;
-  return decision_object_hits_.size()>=static_cast<std::size_t>(window);
+  if (!decision_observation_active_) return false;
+  if (!config_.race_round2_fast_enabled) {
+    if (now_sec - decision_observation_start_sec_ + 1e-9 <
+        config_.post_motion_observation_sec) return false;
+    if (decision_observation_mission_==MissionType::kLine)
+      return decision_line_hits_.size() >= static_cast<std::size_t>(config_.line.line_stable_window);
+    const int window = decision_observation_mission_==MissionType::kBall
+        ? config_.ball.stable_window : decision_observation_mission_==MissionType::kGoal
+        ? config_.goal.stable_window : config_.hurdle.stable_window;
+    return decision_object_hits_.size() >= static_cast<std::size_t>(window);
+  }
+  const bool enough_frames = decision_observation_mission_ == MissionType::kLine
+      ? decision_line_hits_.size() >= static_cast<std::size_t>(kFastStationaryWindow)
+      : decision_object_hits_.size() >= static_cast<std::size_t>(kFastStationaryWindow);
+  if (!enough_frames) return false;
+  // Qualified windows end immediately; failure still requires the original
+  // full stationary timeout. The last frame need not be a detection.
+  if (decision_observation_mission_ == MissionType::kLine
+          ? decision_line_qualified_ : decision_object_qualified_)
+    return true;
+  return now_sec - decision_observation_start_sec_ + 1e-9 >=
+      config_.post_motion_observation_sec;
 }
 
 std::optional<LineGuide> MissionController::DecisionLineGuide() const {
@@ -1239,7 +1271,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       input.delivery_feedback.action_id == last_command_.action_id &&
       (last_command_.action == MissionAction::kDefaultPoseMode ||
        last_command_.action == MissionAction::kWalkMode);
-  if (pose_done && !input.manual_observation_control)
+  // HURDLE's round-2 return explicitly waits for WALK_MODE and FORWARD
+  // together. A second generic pose-observation gate would only delay LINE
+  // recovery and could ingest frames from the camera transition.
+  if (pose_done && !input.manual_observation_control &&
+      !(config_.race_round2_fast_enabled &&
+        active_mission_==MissionType::kHurdle &&
+        hurdle_result_.mode==HurdleMode::kReturnCameraToLine))
     pose_observation_pending_ = true;
   if (pose_done)
     foot_pose_ = last_command_.action == MissionAction::kWalkMode
@@ -1452,7 +1490,21 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       active_mission_ == MissionType::kBall &&
       input.camera_feedback.actual_mode == CameraMode::kBallView &&
       ball_result_.mode == BallMode::kWaitCameraDown;
-  if (camera_settle_edge && !immediate_ball_down)
+  // If the camera reaches its target while the previously approved
+  // final LINE unit is still walking, do not impose a new body settle pause.
+  // The camera's encoder-confirmed DONE and the body's actual DONE remain
+  // separate prerequisites of the following mission phase.
+  const bool camera_settled_during_final_line =
+      config_.race_round2_fast_enabled && camera_settle_edge &&
+      active_mission_==MissionType::kLine &&
+      ((continuous_.mission==MissionType::kBall && continuous_.near &&
+        input.camera_feedback.actual_mode==CameraMode::kBallView) ||
+       (continuous_.mission==MissionType::kHurdle && continuous_.near &&
+        input.camera_feedback.actual_mode==CameraMode::kDown) ||
+       (goal_early_camera_armed_ &&
+        input.camera_feedback.actual_mode==CameraMode::kGoal));
+  if (camera_settle_edge && !immediate_ball_down &&
+      !camera_settled_during_final_line)
     settle_until_sec_ = std::max(settle_until_sec_,
                                  input.now_sec + config_.transition_settle_sec);
   previous_camera_settled_ = input.camera_feedback.settled;
@@ -1504,13 +1556,16 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   } else if (RepeatScope() == 0) {
     if (!decision_observation_active_ &&
         config_.post_motion_observation_sec > 0.0 && camera_settle_edge &&
+        !camera_settled_during_final_line &&
         !input.camera_scan.finished &&
         goal_head_search_.phase==GoalHeadSearch::Phase::kIdle &&
         line_head_search_.phase==LineHeadSearch::Phase::kIdle &&
         !(active_mission_==MissionType::kHurdle &&
-          hurdle_controller_.ContinuousDownCameraWait()) &&
+          (hurdle_controller_.ContinuousDownCameraWait() ||
+           (config_.race_round2_fast_enabled && hurdle_controller_.ContinuousDownSearch()))) &&
         !(active_mission_==MissionType::kBall &&
-          ball_result_.mode==BallMode::kWaitCameraDown))
+          (ball_result_.mode==BallMode::kWaitCameraDown ||
+           (config_.race_round2_fast_enabled && ball_result_.mode==BallMode::kDownSearch))))
       BeginDecisionObservation(input.now_sec, active_mission_, true, {});
     if (!decision_observation_active_ && !applied_object_ready_mean &&
         !(goal_edge_guard_.phase==GoalEdgeGuard::Phase::kTurning &&
@@ -1531,8 +1586,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       observation_finished = true;
       if (!decision_observation_camera_only_)
         input.delivery_feedback = deferred_done_;
-      // Object acquisition 10/7 applies only on entry. After DONE one
-      // second of stationary samples defines the next measurement.
+      // Object acquisition 10/7 applies only on entry. After DONE the
+      // dedicated 8/n stationary window can complete early on success.
       if (decision_observation_mission_ != MissionType::kLine) {
         const bool stable_object=decision_object_qualified_;
         // A single last-minute false detection is NOT a stationary mean.
@@ -3387,6 +3442,9 @@ void MissionController::Reset(bool preserve_action_ids) {
   hurdle_down_ready_accumulator_.Reset();
   candidate_ = {};
   line_ready_handled_id_ = line_auxiliary_id_ = 0;
+  hurdle_down_camera_armed_=false;
+  goal_early_camera_armed_=false;
+  goal_early_camera_action_id_=0;
   line_auxiliary_done_ = line_auxiliary_observing_ = false;
   line_auxiliary_action_ = MissionAction::kNone;
   if (!preserve_action_ids)

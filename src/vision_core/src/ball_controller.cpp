@@ -1,4 +1,5 @@
 #include "vision_core/ball_controller.hpp"
+#include "vision_core/stationary_window.hpp"
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/cruise_selector.hpp"
@@ -569,8 +570,20 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     }
     return result;
   case BallMode::kDownSearch: {
-    const int hits=static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true));
-    const auto decision=down_search_.Observe(tracked_.visible,hits,
+    // Dedicated 8/3 only in round-2; legacy test scenarios retain 10/n.
+    const std::size_t kDownSearchWindow = config_.race_round2_fast_enabled ? 8U :
+        static_cast<std::size_t>(config_.stable_window);
+    const auto begin = hit_history_.size() >= kDownSearchWindow
+        ? hit_history_.end() - static_cast<std::ptrdiff_t>(kDownSearchWindow)
+        : hit_history_.begin();
+    const int hits = static_cast<int>(std::count(begin, hit_history_.end(), true));
+    // The final frame need not contain a ball. DownSearchWalk latches success
+    // while moving and waits for the real action DONE before entering FINE.
+    const bool found = config_.race_round2_fast_enabled
+        ? hit_history_.size() >= kDownSearchWindow &&
+          hits >= config_.down_search_min_hits
+        : tracked_.visible;
+    const auto decision=down_search_.Observe(found,hits,
         config_.down_search_min_hits,config_.down_search_max_steps,
         feedback.action_active,feedback.action_done,
         now_sec,config_.down_search_inter_action_hold_sec);
@@ -727,6 +740,12 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     return result;
   case BallMode::kStandUpAfterPickup:
     result.action = Mission(MissionAction::kDefaultPosition);
+    // Overlap return to the LINE camera with DEFAULT_POSITION. This is only
+    // enabled when no explicit post-pickup back-away is configured.
+    if (config_.race_round2_fast_enabled &&
+        config_.post_pickup_back_steps == 0 &&
+        (!camera.settled || camera.actual_mode != CameraMode::kForward))
+      result.camera_request = CameraRequest::kForward;
     if (feedback.action_done) {
       if (has_ball_ && config_.post_pickup_back_steps > 0) {
         mode_ = BallMode::kPostPickupBackAway;
@@ -739,7 +758,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
         mode_ = BallMode::kReturnCameraToLine;
         result.mode = mode_;
         result.action = {};
-        result.camera_request = CameraRequest::kForward;
+        result.camera_request = camera.actual_mode == CameraMode::kForward &&
+            camera.settled ? CameraRequest::kNone : CameraRequest::kForward;
       }
     }
     return result;
@@ -812,8 +832,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   case BallMode::kForwardRecoveryObserve: {
     if (feedback.action_active && !feedback.action_done) return result;
     const auto status = stationary_recovery_.Observe(
-        target.has_value(), now_sec, config_.stable_window,
-        config_.stable_min_hits, config_.recovery_observation_sec, 1);
+        target.has_value(), now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec, 1, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = BallMode::kApproachBall;
       forward_recovery_entry_ = false;
@@ -869,8 +889,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       stationary_recovery_.Begin(now_sec);down_recovery_observing_=true;
     }
     const auto status = stationary_recovery_.Observe(
-        target.has_value(), now_sec, config_.stable_window,
-        config_.stable_min_hits, config_.recovery_observation_sec, 1);
+        target.has_value(), now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec, 1, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = BallMode::kFineAdjustForPickup;
       down_recovery_active_=false;
@@ -893,9 +913,9 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
                           recovery_turn_left_.has_value() &&
                           recovery_walk_turns_completed_ < recovery_walk_turn_limit_;
     const auto status = stationary_recovery_.Observe(
-        target.has_value(), now_sec, config_.stable_window,
-        config_.stable_min_hits, config_.recovery_observation_sec,
-        can_turn ? 1 : config_.recovery_max_observations);
+        target.has_value(), now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec,
+        can_turn ? 1 : config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = BallMode::kApproachBall;
       recovery_walk_turns_completed_ = 0;
@@ -1019,8 +1039,10 @@ void BallController::UseVerifiedObservation(
   hit_history_ = hits;
   while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window))
     hit_history_.pop_front();
-  tracked_.stable = hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
-      std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits;
+  tracked_.stable = (config_.race_round2_fast_enabled &&
+      FastStationaryQualified(hit_history_, config_.stable_min_hits)) ||
+      (hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+       std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits);
   if (mean && tracked_.stable) last_stable_ball_u_ = tracked_.center_px.u;
   lost_count_ = static_cast<int>(std::distance(hit_history_.rbegin(),
       std::find(hit_history_.rbegin(),hit_history_.rend(),true)));

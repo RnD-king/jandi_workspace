@@ -47,6 +47,7 @@ struct LineLossRecoveryConfig {
 };
 
 struct MissionControllerConfig {
+  bool race_round2_fast_enabled{false}; // Production branch enables; old scenario fixtures remain legacy.
   FeatureConfig line_features;
   double ball_view_line_image_center_u{360.0};
   int ball_view_pitch_tick{1750};
@@ -372,10 +373,12 @@ public:
   double ManualPreviewDurationSec() const;
   bool ManualObservationHasEnoughFrames() const {
     return !decision_observation_active_ || decision_observation_mission_==MissionType::kLine ||
-        decision_object_hits_.size()>=9; // next processed frame completes the 10-frame window
+        decision_object_hits_.size()>=(config_.race_round2_fast_enabled ? 7U : 9U); // next frame completes the window
   }
   bool ManualObservationCanFinish(double now_sec) const {
     return ManualObservationHasEnoughFrames() && (!decision_observation_active_ ||
+        (config_.race_round2_fast_enabled &&
+         (decision_observation_mission_==MissionType::kLine ? decision_line_qualified_ : decision_object_qualified_)) ||
         now_sec + 1e-9 >= decision_observation_start_sec_ + config_.post_motion_observation_sec);
   }
   int RepeatScope() const;
@@ -596,6 +599,9 @@ private:
     bool observe_after_turn{false};
   } candidate_;
   std::uint64_t line_ready_handled_id_{0};
+  bool hurdle_down_camera_armed_{false}; // Send DOWN after the extra 32/33/36 is safely reserved.
+  bool goal_early_camera_armed_{false}; // LINE validity/gate latched before camera moves.
+  std::uint64_t goal_early_camera_action_id_{0}; // Last physically issued LINE unit.
   std::uint64_t line_auxiliary_id_{0};
   bool line_auxiliary_done_{false};
   MissionAction line_auxiliary_action_{MissionAction::kNone};

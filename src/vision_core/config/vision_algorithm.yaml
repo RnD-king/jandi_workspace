@@ -151,9 +151,9 @@ vision_algorithm:
       approach_near_outer_margin_px: 80.0 # 근거리 격자 바깥 사선 평행이동 간격 (상단·하단 동일)
 
       # DOWN 1걸음 탐색
-      down_search_min_hits: 3 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
+      down_search_min_hits: 3 # DOWN 이동 탐색: 최근 8프레임 중 3회 검출
       down_search_max_steps: 10 # DOWN 탐색 최대 전진 동작 횟수
-      down_search_inter_action_hold_sec: 0.0 # 단독 1걸음 모션 끝의 0.5초 유지 사용; DONE 후 추가 대기 없음
+      down_search_inter_action_hold_sec: 0.3 # BALL DOWN 미검출 시 다음 10번 보행 전 대기; 발견 시 생략
 
       # DOWN 접근·미세조정
       fine_side_two_step_margin_px: 100.0 # 픽업 좌우 경계 밖 초과 거리(px): 이 값 이상이면 옆걸음 2회 연속
@@ -233,10 +233,10 @@ vision_algorithm:
       approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
 
       # DOWN 1걸음 탐색
-      down_search_min_hits: 3 # DOWN: 10프레임 중 허들 검출 3회 (v 하한 없음)
+      down_search_min_hits: 3 # DOWN: 초기 6/3, 이후 이동 중 미검출 탐색 8/3 (v 하한 없음)
       down_search_min_v_px: 80.0 # Legacy, AUTO DOWN에서는 적용하지 않음
       down_search_max_steps: 10 # 미검출 10번 탐색 한도, 최초 33번/거리별 접근은 제외
-      down_search_inter_action_hold_sec: 0.5 # 미검출 탐색 10번: 이동 중+DONE 후 0.5초 연속 관측
+      down_search_inter_action_hold_sec: 0.3 # HURDLE DOWN 미검출 탐색 10번: 이동 중+DONE 후 0.3초 연속 관측
       down_stationary_observation_sec: 1.0 # 검출 후 33/10번: DONE 후 신규 정지 관측
 
       # DOWN 접근·미세조정
@@ -400,6 +400,7 @@ vision_algorithm:
       action_ack_timeout_sec: 10.0 # 실행기 ACK를 기다리는 제한 시간 (초)
 
     mission:
+      race_round2_fast_enabled: true # 2회차 고속화 전용; 과거 테스트 fixture는 false
       # 시작 상태·단독 시험
       initial_has_ball: false # 시작할 때 공을 가지고 있는 것으로 설정
       test_mission: 0 # 0 전체 미션, 2 공, 3 골대, 4 허들

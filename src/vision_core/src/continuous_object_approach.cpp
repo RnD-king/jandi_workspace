@@ -548,11 +548,24 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const bool goal_gate=has_ball_ && config_.enable_goal && post_pickup_goal_line_gate_active_ &&
       (post_pickup_five_step_completed_ || post_pickup_line_actions_completed_>=goal_controller_.RequiredLineWalkActions()) &&
       post_pickup_line_actions_completed_>=approach_goal_retry_after_;
-  if (advance && settled &&
-      (camera.actual_mode==CameraMode::kForward || camera.actual_mode==CameraMode::kBallView) &&
-      goal_gate &&
-      continuous_.mission==MissionType::kNone && line_state_==LineState::kNormal) {
+  // Fast branch: the last required LINE unit was approved while actual
+  // floor LINE was valid, BEFORE moving the head. Its physical DONE (not
+  // current GOAL-view floor pixels) unlocks the GOAL camera observation.
+  const bool early_goal_complete=config_.race_round2_fast_enabled && goal_early_camera_armed_ &&
+      goal_early_camera_action_id_!=0 &&
+      line_plan_.Done(goal_early_camera_action_id_) &&
+      goal_gate && continuous_.mission==MissionType::kNone;
+  if (early_goal_complete ||
+      (advance && settled &&
+       (camera.actual_mode==CameraMode::kForward ||
+        camera.actual_mode==CameraMode::kBallView) &&
+       goal_gate && continuous_.mission==MissionType::kNone &&
+       line_state_==LineState::kNormal)) {
     approach_goal_probe_=true;line_plan_.Abort();
+    if (early_goal_complete) {
+      goal_early_camera_armed_=false;
+      goal_early_camera_action_id_=0;
+    }
   }
   if (approach_goal_probe_) {
     if (!settled || !goal_view) { camera_request(CameraRequest::kGoal);return result; }
@@ -890,6 +903,9 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       continuous_.near_motion_id=command_coordinator_.QueuedActionId();
       continuous_.near_motion={command_coordinator_.QueuedAction(),
                                ActionCategory::kLocomotion,0,true};
+      // A normal LINE READY had already reserved the required extra unit.
+      // Its ACK is sufficient to allow DOWN to begin in parallel.
+      if (config_.race_round2_fast_enabled) hurdle_down_camera_armed_=true;
     }
     // A newly committed HURDLE waits for the executing LINE unit's READY
     // window; unlike BALL/GOAL, do not abort its O/H accumulator yet.

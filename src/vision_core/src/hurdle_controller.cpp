@@ -1,4 +1,5 @@
 #include "vision_core/hurdle_controller.hpp"
+#include "vision_core/stationary_window.hpp"
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/cruise_selector.hpp"
@@ -149,24 +150,26 @@ void HurdleController::UpdateTracker(const std::optional<ObjectTarget> &target,
                                      int image_width, int image_height) {
   const bool detected = target && image_width > 1 && image_height > 1;
   hit_history_.push_back(detected);
-  // Only the initial 33 and missing-object 10 search collect moving evidence.
-  // Detected distance-based 33/10 steps use a NEW stationary window after DONE.
+  // Initial DOWN walk uses 6/3 only until its first complete window.
+  // Subsequent missing-target 10 steps use continuous 8/3, including
+  // their post-DONE 0.3s pauses. Detected distance steps do NOT use moving
+  // v: their next distance decision is always stationary.
   if (mode_ == HurdleMode::kDownSearch && down_approach_fixed_sequence_ &&
       !down_distance_pending_ &&
       (down_initial_two_pending_ || down_initial_two_done_)) {
+    const std::size_t window = !config_.race_round2_fast_enabled
+        ? static_cast<std::size_t>(config_.stable_window)
+        : down_initial_window_complete_ ? static_cast<std::size_t>(kFastStationaryWindow) : 6U;
     down_v_samples_.push_back(detected ?
         std::optional<double>(target->center_px.v) : std::nullopt);
-    while (down_v_samples_.size() >
-           static_cast<std::size_t>(config_.stable_window))
-      down_v_samples_.pop_front();
-    if (down_v_samples_.size() ==
-        static_cast<std::size_t>(config_.stable_window)) {
+    while (down_v_samples_.size() > window) down_v_samples_.pop_front();
+    if (down_v_samples_.size() == window) {
       int valid = 0;
       double sum_v = 0.0;
       for (const auto& v : down_v_samples_)
         if (v) { ++valid; sum_v += *v; }
       if (valid >= config_.down_search_min_hits) {
-        down_near_qualified_ = true;
+        down_near_qualified_ = true; // latched; last frame need not detect
         down_observed_v_px_ = sum_v / valid;
       }
     }
@@ -406,6 +409,7 @@ HurdleResult HurdleController::Compute(
       mode_ = HurdleMode::kDownSearch;
       down_search_.Reset();
       down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
+      down_initial_window_complete_=false;
       ClearDownEvidence();
       down_distance_pending_=down_stationary_observing_=down_search_step_pending_=false;
       down_stationary_start_sec_=down_search_hold_until_sec_=0.0;
@@ -426,17 +430,43 @@ HurdleResult HurdleController::Compute(
           if (feedback.action_done) {
             down_initial_two_pending_ = false;
             down_initial_two_done_ = true;
-            // Keep the 10/3 moving samples from the INITIAL 33.
-            // Do not use old pose samples or start an extra 1s observation.
+            down_stationary_start_sec_ = now_sec; // Frame-starvation watchdog.
+            if (!config_.race_round2_fast_enabled) return result;
+          } else return result;
+        } else {
+          result.action = Locomotion(down_initial_line_unit_); // 32/33/36.
+          if (allow_new_body_actions) {
+            ClearDownEvidence();
+            down_initial_two_pending_ = true;
           }
           return result;
         }
-        result.action = Locomotion(down_initial_line_unit_); // Last extra LINE READY: 32/33/36.
-        if (allow_new_body_actions) {
-          ClearDownEvidence();
-          down_initial_two_pending_ = true;
+      }
+      if (config_.race_round2_fast_enabled && !down_initial_window_complete_) {
+        // If DONE arrives before six camera frames, finish gathering in
+        // place. An incomplete sample window is not a detection failure.
+        if (down_v_samples_.size() < 6U) {
+          // Missing camera frames cannot be mistaken for an object miss and
+          // must not leave the robot waiting without a bounded failure.
+          if (now_sec - down_stationary_start_sec_ >=
+              std::max(2.0, config_.down_stationary_observation_sec + 1.0)) {
+            mode_ = HurdleMode::kFailed;
+            result.mode = mode_;
+          }
+          return result;
         }
-        return result;
+        down_initial_window_complete_ = true;
+        if (down_near_qualified_) {
+          // Discovery alone cannot choose a distance or enter FINE.
+          (void)down_search_.Observe(true, config_.down_search_min_hits,
+              config_.down_search_min_hits, config_.down_search_max_steps,
+              false, false, now_sec, config_.down_search_inter_action_hold_sec);
+          mode_ = HurdleMode::kCoarseAdjust;
+          ClearTracking();
+          result.mode = mode_;
+          return result;
+        }
+        ClearDownEvidence(); // 8/3 starts after the initial 6/3 miss.
       }
       if (down_distance_pending_) {
         if (feedback.action_done) {
@@ -456,8 +486,8 @@ HurdleResult HurdleController::Compute(
           return result;
         down_stationary_observing_ = false;
       }
-      // Missing-object search continuously observes through the 10 step
-      // AND the 0.5s post-DONE hold, exactly unlike distance-based steps.
+      // Missing-object search continues through the 10 step and 0.3s
+      // post-DONE interval; detected distance steps use fresh stationary data.
       const auto decision = down_search_.Observe(
           down_near_qualified_,
           down_near_qualified_ ? config_.down_search_min_hits : 0,
@@ -470,25 +500,35 @@ HurdleResult HurdleController::Compute(
             now_sec + config_.down_search_inter_action_hold_sec;
       }
       if (decision == DownSearchWalk::Decision::kMoving ||
-          now_sec + kEpsilon < down_search_hold_until_sec_ ||
+          ((!config_.race_round2_fast_enabled ||
+            decision != DownSearchWalk::Decision::kFound) &&
+           now_sec + kEpsilon < down_search_hold_until_sec_) ||
           decision == DownSearchWalk::Decision::kWaiting)
         return result;
-      if (decision == DownSearchWalk::Decision::kFound &&
-          down_observed_v_px_) {
-        const double v = *down_observed_v_px_;
-        if (v >= config_.fine_mode_v_px) {
-          mode_ = HurdleMode::kWaitFinePose;
-          result.mode = mode_;
-          result.action = Locomotion(MissionAction::kDefaultPoseMode);
+      if (decision == DownSearchWalk::Decision::kFound) {
+        if (!config_.race_round2_fast_enabled && down_observed_v_px_) {
+          // Legacy controller fixture: moving detection directly determines
+          // the next v-based distance step. Production FAST requires stationarity.
+          const double v=*down_observed_v_px_;
+          if (v >= config_.fine_mode_v_px) {
+            mode_=HurdleMode::kWaitFinePose; result.mode=mode_;
+            result.action=Locomotion(MissionAction::kDefaultPoseMode);
+            return result;
+          }
+          result.action=Locomotion(v < config_.down_one_step_v_px ?
+              MissionAction::kLineStraightUnit : MissionAction::kStepForwardOne);
+          if (allow_new_body_actions) {
+            down_distance_pending_=true;
+            down_search_.InvalidateDetection();
+            ClearDownEvidence();
+          }
           return result;
         }
-        result.action = Locomotion(v < config_.down_one_step_v_px ?
-            MissionAction::kLineStraightUnit : MissionAction::kStepForwardOne);
-        if (allow_new_body_actions) {
-          down_distance_pending_ = true;
-          down_search_.InvalidateDetection();
-          ClearDownEvidence();
-        }
+        // FAST: discovery only. A fresh stationary 8/n mean must precede
+        // every distance decision. No blind 10/33 based on moving v.
+        mode_=HurdleMode::kCoarseAdjust;
+        ClearTracking();
+        result.mode=mode_;
         return result;
       }
       if (decision == DownSearchWalk::Decision::kExhausted) {
@@ -543,6 +583,7 @@ HurdleResult HurdleController::Compute(
       down_search_.InvalidateDetection();
       if (!tracked_.visible || !tracked_.stable) {
         mode_ = HurdleMode::kDownSearch;
+        if (config_.race_round2_fast_enabled) ClearDownEvidence();
         ClearTracking();
         result.mode = mode_;
         result.tracked = {};
@@ -777,14 +818,23 @@ HurdleResult HurdleController::Compute(
     result.action = Mission(MissionAction::kHurdle);
     if (feedback.action_done) {
       mode_ = HurdleMode::kReturnCameraToLine;
+      post_cross_walk_done_ = false;
       result.mode = mode_;
-      result.action = {};
+      result.action = config_.race_round2_fast_enabled
+          ? Locomotion(MissionAction::kWalkMode) : ActionRequest{};
       result.camera_request = CameraRequest::kForward;
     }
     return result;
   case HurdleMode::kReturnCameraToLine:
-    result.camera_request = CameraRequest::kForward;
-    if (camera.actual_mode == CameraMode::kForward && camera.settled) {
+    if (config_.race_round2_fast_enabled) {
+      if (feedback.action_done) post_cross_walk_done_ = true;
+      if (!post_cross_walk_done_)
+        result.action = Locomotion(MissionAction::kWalkMode);
+    }
+    if (camera.actual_mode != CameraMode::kForward || !camera.settled)
+      result.camera_request = CameraRequest::kForward;
+    if ((!config_.race_round2_fast_enabled || post_cross_walk_done_) &&
+        camera.actual_mode == CameraMode::kForward && camera.settled) {
       ignore_until_sec_ = now_sec + config_.hurdle_ignore_duration_sec;
       ResetToLine(false);
       result = {};
@@ -815,7 +865,7 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kRecoveryStepObserve: {
     if (feedback.action_active && !feedback.action_done) return result;
     const auto status = stationary_recovery_.Observe(target.has_value(),now_sec,
-        config_.stable_window,config_.stable_min_hits,config_.recovery_observation_sec,1);
+        (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),(config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits),config_.recovery_observation_sec,1, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = recovery_resume_mode_;
       entry_step_recovery_ = false;
@@ -833,8 +883,8 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kRecoveryForward: {
     if (feedback.action_active && !feedback.action_done) return result;
     const auto status=stationary_recovery_.Observe(target.has_value(),now_sec,
-        config_.stable_window,config_.stable_min_hits,
-        config_.recovery_observation_sec,config_.recovery_max_observations);
+        (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),(config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits),
+        config_.recovery_observation_sec,config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status==StationaryObjectRecovery::Result::kFound) {
       mode_=HurdleMode::kApproach;
       recovery_steps_completed_=0;entry_step_recovery_=false;
@@ -847,8 +897,8 @@ HurdleResult HurdleController::Compute(
   case HurdleMode::kRecoveryDown: {
     if (feedback.action_active && !feedback.action_done) return result;
     const auto status = stationary_recovery_.Observe(target.has_value(), now_sec,
-        config_.stable_window, config_.stable_min_hits,
-        config_.recovery_observation_sec, config_.recovery_max_observations);
+        (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window), (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits),
+        config_.recovery_observation_sec, config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = fine_pose_entered_ ? HurdleMode::kFineAdjust : HurdleMode::kCoarseAdjust;
       recovery_steps_completed_=0;entry_step_recovery_=false;
@@ -905,8 +955,9 @@ void HurdleController::UseVerifiedObservation(
   hit_history_ = hits;
   while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window))
     hit_history_.pop_front();
-  tracked_.stable = hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
-      std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits;
+  tracked_.stable = FastStationaryQualified(hit_history_, config_.stable_min_hits) ||
+      (hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+       std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits);
   lost_count_ = static_cast<int>(std::distance(hit_history_.rbegin(),
       std::find(hit_history_.rbegin(),hit_history_.rend(),true)));
   verified_observation_pending_ = true;
@@ -947,6 +998,8 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   down_approach_fixed_sequence_=false;
   down_initial_line_unit_=MissionAction::kLineStraightUnit;
   down_initial_two_pending_=down_initial_two_done_=down_final_one_pending_=false;
+  down_initial_window_complete_=false;
+  post_cross_walk_done_=false;
   ClearDownEvidence();
   down_distance_pending_=down_stationary_observing_=down_search_step_pending_=false;
   down_stationary_start_sec_=down_search_hold_until_sec_=0.0;

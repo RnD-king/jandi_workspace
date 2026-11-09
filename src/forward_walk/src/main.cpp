@@ -151,7 +151,7 @@ public:
         camera_config_.goal.yaw = declare_parameter<int>("camera_goal_yaw_tick", 2054);
         camera_config_.goal.pitch = declare_parameter<int>("camera_goal_pitch_tick", 966);
         // The core owns transition settling after camera DONE; no default extra executor wait.
-        camera_config_.move_sec = declare_parameter<double>("camera_move_duration_sec", 0.5);
+        camera_config_.move_sec = declare_parameter<double>("camera_move_duration_sec", 0.4);
         const double legacy_camera_settle=declare_parameter<double>("camera_settle_sec",0.0);
         if (legacy_camera_settle != 0.0)
             throw std::invalid_argument("camera_settle_sec is replaced by mission.transition_settle_sec; leave it at zero");
@@ -367,7 +367,7 @@ private:
             return "motions/보행_왼발만앞에.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_ONE:
-            return "motions/보행_1걸음_초기X_수정5.json";
+            return "motions/보행_1걸음_초기X_수정3.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_ONE_ALTERNATE:
             return "motions/보행_1걸음_초기X_수정5.json";

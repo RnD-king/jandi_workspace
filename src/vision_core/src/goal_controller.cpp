@@ -1,4 +1,5 @@
 #include "vision_core/goal_controller.hpp"
+#include "vision_core/stationary_window.hpp"
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/cruise_selector.hpp"
@@ -841,9 +842,9 @@ GoalResult GoalController::Compute(
     return result;
   case GoalMode::kFineRecovery: {
     const auto status = stationary_recovery_.Observe(
-        backboard.has_value() && pose_valid, now_sec, config_.stable_window,
-        config_.stable_min_hits, config_.recovery_observation_sec,
-        config_.recovery_max_observations);
+        backboard.has_value() && pose_valid, now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec,
+        config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       recovery_turns_completed_ = 0;
       recovery_exhausted_ = false;
@@ -1061,9 +1062,9 @@ GoalResult GoalController::Compute(
     if (feedback.action_active && !feedback.action_done)
       return result;
     const auto status = stationary_recovery_.Observe(
-        backboard.has_value(), now_sec, config_.stable_window,
-        config_.stable_min_hits, config_.recovery_observation_sec,
-        config_.recovery_max_observations);
+        backboard.has_value(), now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec,
+        config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = GoalMode::kSearch;
       recovery_turns_completed_=0;recovery_exhausted_=false;
@@ -1107,10 +1108,14 @@ void GoalController::UseVerifiedObservation(
   while (fine_enter_history_.size() > static_cast<std::size_t>(config_.stable_window)) fine_enter_history_.pop_front();
   while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window)) hit_history_.pop_front();
   while (pose_hit_history_.size() > static_cast<std::size_t>(config_.stable_window)) pose_hit_history_.pop_front();
-  tracked_.stable = hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
-      std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits;
-  tracked_pose_.stable = pose_hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
-      std::count(pose_hit_history_.begin(), pose_hit_history_.end(), true) >= config_.stable_min_hits;
+  tracked_.stable = (config_.race_round2_fast_enabled &&
+      FastStationaryQualified(hit_history_, config_.stable_min_hits)) ||
+      (hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+       std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits);
+  tracked_pose_.stable = (config_.race_round2_fast_enabled &&
+      FastStationaryQualified(pose_hit_history_, config_.stable_min_hits)) ||
+      (pose_hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+       std::count(pose_hit_history_.begin(), pose_hit_history_.end(), true) >= config_.stable_min_hits);
   if (mean && tracked_.stable) last_stable_u_px_ = tracked_.center_px.u;
   fine_pose_window_.clear();
   if (pose.valid && tracked_.stable && tracked_pose_.stable) fine_pose_window_.push_back(pose);

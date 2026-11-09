@@ -32,6 +32,7 @@ enum class HurdleMode {
 };
 
 struct HurdleConfig {
+  bool race_round2_fast_enabled{false};
   double approach_short_v_px{};
   int pre_down_extra_forward_steps{2}; // Additional physical steps after the existing near 2-step.
   int down_search_max_steps{10};
@@ -234,6 +235,7 @@ private:
   bool down_approach_fixed_sequence_{false};
   MissionAction down_initial_line_unit_{MissionAction::kLineStraightUnit};
   bool down_initial_two_pending_{false}, down_initial_two_done_{false};
+  bool down_initial_window_complete_{false}; // 6/3 solely after initial DOWN walk.
   bool down_final_one_pending_{false}, down_near_qualified_{false};
   std::deque<bool> down_near_hits_; // Legacy diagnostic history.
   std::deque<std::optional<double>> down_v_samples_;
@@ -245,6 +247,7 @@ private:
   int completed_back_steps_{0};
   int completed_contact_steps_{0};
   bool contact_step_pending_{false};
+  bool post_cross_walk_done_{false}; // WALK_MODE must finish alongside FORWARD before LINE resumes.
   double contact_next_step_sec_{0.0};
   TrackedHurdle tracked_;
   double last_seen_u_px_{0.0};

@@ -11,11 +11,18 @@ public:
   enum class Result { kWaiting, kFound, kRetry, kFailed };
   void Begin(double now) { completed_ = 0; BeginWindow(now); }
   Result Observe(bool detected, double now, int window, int min_hits,
-                 double duration, int max_observations) {
+                 double duration, int max_observations,
+                 bool early_success = false) {
     hits_.push_back(detected);
     while (hits_.size() > static_cast<std::size_t>(window)) hits_.pop_front();
     if (hits_.size()==static_cast<std::size_t>(window) &&
         std::count(hits_.begin(),hits_.end(),true)>=min_hits) qualified_=true;
+    // Early success is opt-in. Failure still waits for the existing
+    // time budget AND a complete fresh window; no last-frame requirement.
+    if (early_success && qualified_) {
+      ++completed_;
+      return Result::kFound;
+    }
     if (Elapsed(now) + 1e-9 < duration || hits_.size()<static_cast<std::size_t>(window))
       return Result::kWaiting;
     ++completed_;
