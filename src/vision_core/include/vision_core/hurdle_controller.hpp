@@ -234,6 +234,7 @@ private:
   bool down_approach_fixed_sequence_{false};
   MissionAction down_initial_line_unit_{MissionAction::kLineStraightUnit};
   bool down_initial_two_pending_{false}, down_initial_two_done_{false};
+  bool down_initial_window_complete_{false}; // 6/3 solely after initial DOWN walk.
   bool down_final_one_pending_{false}, down_near_qualified_{false};
   std::deque<bool> down_near_hits_; // Legacy diagnostic history.
   std::deque<std::optional<double>> down_v_samples_;
