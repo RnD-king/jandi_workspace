@@ -121,7 +121,7 @@ void DistanceStepsOnlyReobserveAfterDone() {
           r.action.action==MissionAction::kDefaultPoseMode,
           "stationary v>=240 did not enter FINE without a final 10");
 }
-void MissingSearchContinuouslyObservesAndHoldsHalfSecond() {
+void MissingSearchSkipsHoldWhenFoundDuringMotion() {
   auto config=LoadDefaultAlgorithmConfig().hurdle;
   config.stable_window=10;config.stable_min_hits=7;
   config.down_search_min_hits=3;
@@ -134,19 +134,67 @@ void MissingSearchContinuouslyObservesAndHoldsHalfSecond() {
   auto r=t.Tick();
   Require(r.action.action==MissionAction::kStepForwardOne,
           "missing first 33 should search with motion 10");
-  for(int i=0;i<10;++i)
+  for(int i=0;i<10;++i) {
     r=t.Tick(i>=7 ? Seen(239) : std::nullopt,Running());
-  Require(r.action.action==MissionAction::kNone,
-          "missing search chose a new step while 10 still active");
-  t.Tick(Seen(239),Done());
-  for(int i=0;i<4;++i) {
+    Require(r.action.action==MissionAction::kNone,
+            "missing search chose a new step while 10 still active");
+  }
+  r=t.Tick(Seen(239),Done());
+  Require(r.action.action==MissionAction::kStepForwardOne,
+          "qualified moving target should skip the remaining hold at DONE");
+  for(int i=0;i<5;++i) {
     r=t.Tick(Seen(239));
     Require(r.action.action==MissionAction::kNone,
-            "missing search skipped the 0.5s continuous observation hold");
+            "distance-based successor was reissued without its DONE");
+  }
+}
+void MissingSearchSkipsHoldWhenFoundDuringWait() {
+  auto config=LoadDefaultAlgorithmConfig().hurdle;
+  config.stable_window=10;config.stable_min_hits=7;
+  config.down_search_min_hits=3;
+  config.down_search_inter_action_hold_sec=.5;
+  config.down_one_step_v_px=120;
+  config.fine_mode_v_px=240;
+  Trial t(config);t.Start();
+  for(int i=0;i<10;++i)t.Tick({},Running());
+  t.Tick({},Done());
+  Require(t.Tick().action.action==MissionAction::kStepForwardOne,
+          "missing first 33 should search with motion 10");
+  for(int i=0;i<10;++i)t.Tick({},Running());
+  auto r=t.Tick({},Done());
+  Require(r.action.action==MissionAction::kNone,
+          "missing target should not skip the post-DONE hold");
+  for(int i=0;i<2;++i) {
+    r=t.Tick(Seen(239));
+    Require(r.action.action==MissionAction::kNone,
+            "search should wait until the detection window qualifies");
   }
   r=t.Tick(Seen(239));
   Require(r.action.action==MissionAction::kStepForwardOne,
-          "moving search missed a qualified 120<=v<240 target after hold");
+          "qualified target during hold should immediately issue distance step");
+}
+void MissingSearchKeepsHoldWhenTargetAbsent() {
+  auto config=LoadDefaultAlgorithmConfig().hurdle;
+  config.stable_window=10;config.stable_min_hits=7;
+  config.down_search_min_hits=3;
+  config.down_search_inter_action_hold_sec=.5;
+  Trial t(config);t.Start();
+  for(int i=0;i<10;++i)t.Tick({},Running());
+  t.Tick({},Done());
+  Require(t.Tick().action.action==MissionAction::kStepForwardOne,
+          "missing first 33 should search with motion 10");
+  for(int i=0;i<10;++i)t.Tick({},Running());
+  auto r=t.Tick({},Done());
+  Require(r.action.action==MissionAction::kNone,
+          "missing target should not skip hold immediately after DONE");
+  for(int i=0;i<4;++i) {
+    r=t.Tick();
+    Require(r.action.action==MissionAction::kNone,
+            "missing target should keep the 0.5s hold");
+  }
+  r=t.Tick({}, {}, .11);
+  Require(r.action.action==MissionAction::kStepForwardOne,
+          "missing target should issue next search step after full hold");
 }
 void DownIgnoresOutOfRangeDepthButForwardDoesNot() {
   auto c=LoadDefaultAlgorithmConfig();
@@ -182,6 +230,8 @@ int main() {
   FirstTwoMovingVotes(120,MissionAction::kStepForwardOne);
   FirstTwoMovingVotes(240,MissionAction::kDefaultPoseMode);
   DistanceStepsOnlyReobserveAfterDone();
-  MissingSearchContinuouslyObservesAndHoldsHalfSecond();
+  MissingSearchSkipsHoldWhenFoundDuringMotion();
+  MissingSearchSkipsHoldWhenFoundDuringWait();
+  MissingSearchKeepsHoldWhenTargetAbsent();
   DownIgnoresOutOfRangeDepthButForwardDoesNot();
 }
