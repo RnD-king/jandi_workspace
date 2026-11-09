@@ -1022,8 +1022,8 @@ void GoalStableNewIdentityKeepsApproach() {
   d.in.camera_feedback={CameraMode::kGoal,true};
   d.in.backboard_target=Target(320,100,3);
   d.in.backboard_track_id=1;
-  d.in.backboard_entry_track_hits=7;
-  d.in.backboard_entry_track_frames=10;
+  d.in.backboard_entry_track_hits=6;
+  d.in.backboard_entry_track_frames=8;
   d.in.backboard_center_depth_m=2.0;
   d.in.goal_pose={true,0,2,0,1};
   for(int n=0;n<14;++n)d.Tick();
@@ -1032,7 +1032,7 @@ void GoalStableNewIdentityKeepsApproach() {
         "GOAL initial ID was not acquired");
   const auto first=d.out.command.action_id;
   Check(first,"GOAL first motion was not issued");
-  // Give the physical first block its complete 10/7 window and final
+  // Give the physical first block its complete 8/6 window and final
   // READY.  A bare DONE with no READY would trigger a separate post-DONE
   // observation and could (correctly) mark an unqualified block lost.
   d.Tick({first,true,false,false});
@@ -1047,12 +1047,12 @@ void GoalStableNewIdentityKeepsApproach() {
   Check(blocks==1,"GOAL first qualified block DONE not counted");
   d.in.backboard_target=Target(375,100,3);
   d.in.backboard_track_id=2;
-  d.in.backboard_entry_track_hits=6; // New ID not yet stable.
-  d.in.backboard_entry_track_frames=10;
+  d.in.backboard_entry_track_hits=5; // New FAST ID is not yet 8/6 stable.
+  d.in.backboard_entry_track_frames=8;
   d.Tick();
   Check(d.out.approach_track_id==1,
         "unstable GOAL ID replacement was adopted immediately");
-  d.in.backboard_entry_track_hits=7;
+  d.in.backboard_entry_track_hits=6;
   d.Tick();
   if(!(d.out.approach_track_id==2 && d.out.approach_missing_frames==0 &&
        d.out.approach_completed_blocks==blocks &&
