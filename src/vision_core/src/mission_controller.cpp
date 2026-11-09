@@ -3339,8 +3339,7 @@ void MissionController::ClearObservationEvidence() {
   // reuses visual evidence collected before the pause.
   curve_.frame_directions.clear();
   curve_.block_curve_direction=0;
-  curve_.center_hits.clear();
-  curve_.object_hits.clear();
+  curve_.observation.Reset();
   approach_evidence_={};
   continuous_.hits.clear();continuous_.pose_hits.clear();continuous_.near_hits.clear();
   continuous_.missing=0;
