@@ -842,9 +842,9 @@ GoalResult GoalController::Compute(
     return result;
   case GoalMode::kFineRecovery: {
     const auto status = stationary_recovery_.Observe(
-        backboard.has_value() && pose_valid, now_sec, kFastStationaryWindow,
-        FastStationaryMinHits(config_.stable_min_hits), config_.recovery_observation_sec,
-        config_.recovery_max_observations, true);
+        backboard.has_value() && pose_valid, now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec,
+        config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       recovery_turns_completed_ = 0;
       recovery_exhausted_ = false;
@@ -1062,9 +1062,9 @@ GoalResult GoalController::Compute(
     if (feedback.action_active && !feedback.action_done)
       return result;
     const auto status = stationary_recovery_.Observe(
-        backboard.has_value(), now_sec, kFastStationaryWindow,
-        FastStationaryMinHits(config_.stable_min_hits), config_.recovery_observation_sec,
-        config_.recovery_max_observations, true);
+        backboard.has_value(), now_sec, (config_.race_round2_fast_enabled ? kFastStationaryWindow : config_.stable_window),
+        (config_.race_round2_fast_enabled ? FastStationaryMinHits(config_.stable_min_hits) : config_.stable_min_hits), config_.recovery_observation_sec,
+        config_.recovery_max_observations, config_.race_round2_fast_enabled);
     if (status == StationaryObjectRecovery::Result::kFound) {
       mode_ = GoalMode::kSearch;
       recovery_turns_completed_=0;recovery_exhausted_=false;
