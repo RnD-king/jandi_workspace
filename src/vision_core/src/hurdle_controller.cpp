@@ -753,9 +753,15 @@ HurdleResult HurdleController::Compute(
     if (feedback.action_done && contact_step_pending_) {
       contact_step_pending_=false;
       ++completed_contact_steps_;
-      contact_next_step_sec_=now_sec+config_.contact_inter_action_hold_sec;
+      // Final contact DONE starts a separate pre-cross hold. Earlier DONEs
+      // keep their existing inter-contact delay.
+      contact_next_step_sec_=now_sec+
+          (completed_contact_steps_>=config_.contact_steps
+              ? config_.pre_cross_hold_sec
+              : config_.contact_inter_action_hold_sec);
     }
     if (completed_contact_steps_>=config_.contact_steps) {
+      if (now_sec+kEpsilon<contact_next_step_sec_) return result;
       contact_next_step_sec_=0.0;
       mode_=HurdleMode::kCross; result.mode=mode_;
       result.action=Mission(MissionAction::kHurdle); return result;
