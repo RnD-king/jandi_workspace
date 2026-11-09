@@ -2676,7 +2676,8 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
           input.image_width, input.image_height, config_.goal.stable_window,
           std::numeric_limits<double>::infinity(), active_mission_ == MissionType::kGoal ||
               continuous_.mission==MissionType::kGoal, board_recovery,
-          input.manual_ready_mean && active_mission_ == MissionType::kGoal, input.backboard_target_id);
+          input.manual_ready_mean && active_mission_ == MissionType::kGoal, input.backboard_target_id,
+          config_.goal.stable_min_hits);
   const auto hurdle = camera_moving || !manual_hurdle_identity_valid ? ObjectAssociationSelection{} :
       hurdle_target_tracker_.Observe(
           ExtractObjectTargetCandidates(detections, config_.object_targets.hurdle_class_id,
@@ -2998,19 +2999,11 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
     if (!selected && (hurdle_target_tracker_.Locked() || hurdle_target_tracker_.Reacquiring()))
       hurdle_target_tracker_.Reset();
   }
-  if (config_.backboard_candidate_tracking.enabled) {
-    if (continuous_.mission==MissionType::kGoal && continuous_.locked &&
-        backboard_target_tracker_.TargetId()==continuous_.id) backboard_target_tracker_.Lock();
-    if (active_mission_ == MissionType::kGoal && goal_result_.tracked.stable &&
-        goal_result_.mode != GoalMode::kWaitCameraGoal && goal_result_.mode != GoalMode::kRecoveryTurn &&
-        goal_result_.mode != GoalMode::kRecoveryForwardStep && goal_result_.mode != GoalMode::kRecoveryExtraTurn &&
-        goal_result_.mode != GoalMode::kRecoverySearch && goal_result_.mode != GoalMode::kFineRecovery &&
-        goal_result_.mode != GoalMode::kCoarseRecovery)
-      backboard_target_tracker_.Lock();
-    if (active_mission_ != MissionType::kGoal && continuous_.mission!=MissionType::kGoal &&
-        (backboard_target_tracker_.Locked() || backboard_target_tracker_.Reacquiring()))
-      backboard_target_tracker_.Reset();
-  }
+  if (config_.backboard_candidate_tracking.enabled &&
+      active_mission_ != MissionType::kGoal &&
+      continuous_.mission != MissionType::kGoal &&
+      (backboard_target_tracker_.Locked() || backboard_target_tracker_.Reacquiring()))
+    backboard_target_tracker_.Reset(); // GOAL identities are never permanently locked.
   output.perception.hurdle_tracks = hurdle_target_tracker_.Tracks();
   output.perception.backboard_tracks = backboard_target_tracker_.Tracks();
   output.perception.hurdle_target_id = hurdle_target_tracker_.TargetId();

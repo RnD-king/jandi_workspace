@@ -1,4 +1,6 @@
 #include "vision_core/object_association_tracker.hpp"
+#include "vision_core/object_target_tracker.hpp"
+#include <limits>
 
 #ifdef NDEBUG
 #undef NDEBUG
@@ -107,12 +109,40 @@ void TestMissingKeepsOnlyIdentityForFiveFrames() {
   assert(new_identity.detection_index == 6);
 }
 
+void TestUnlockedGoalReplacementWaitsForStableNewId() {
+  ObjectTargetTracker tracker;
+  ObjectCandidateTrackingConfig cfg{};
+  cfg.enabled = true;
+  cfg.max_center_distance_px = 60.0;
+  cfg.max_size_log_ratio = 0.5;
+  cfg.missing_frame_limit = 20;
+  cfg.max_tracks = 4;
+  const auto observe = [&](const std::vector<ObjectTargetCandidate>& detections) {
+    return tracker.Observe(detections, cfg, Config(), 640, 480, 10,
+        std::numeric_limits<double>::infinity(), true, false, false, 0, 7);
+  };
+  for (int frame=0;frame<10;++frame)
+    assert(observe({Candidate(0, 100, 170, 40, 40)}).target);
+  const auto old_id=tracker.TargetId();
+  assert(old_id && !tracker.Locked());
+  for (int frame=0;frame<6;++frame) {
+    const auto result=observe({Candidate(1, 390, 170, 40, 40)});
+    assert(!result.target);
+    assert(tracker.TargetId()==old_id);
+  }
+  const auto replacement=observe({Candidate(1, 390, 170, 40, 40)});
+  assert(replacement.target && replacement.detection_index==1);
+  assert(tracker.TargetId()!=old_id && !tracker.Locked());
+  assert(observe({Candidate(1, 390, 170, 40, 40)}).target);
+}
+
 } // namespace
 
 int main() {
   TestConfidenceFiltersOnlyAndDoesNotRankAssociation();
   TestCenterAndSafeSizeChangeAreTheOnlyScoreTerms();
   TestMissingKeepsOnlyIdentityForFiveFrames();
+  TestUnlockedGoalReplacementWaitsForStableNewId();
   std::cout << "object association tracker tests passed\n";
   return 0;
 }

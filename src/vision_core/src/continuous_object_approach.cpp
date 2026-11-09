@@ -125,7 +125,7 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
           input.image_width,input.image_height,input.now_sec,true);
     goal_result_.mode=route.near ? GoalMode::kWaitFinePose : GoalMode::kApproach;
     goal_result_.active=true;
-    backboard_target_tracker_.Lock();
+    // GOAL retains candidate tracking throughout recovery; no permanent ID lock.
   }
   if (!route.near) {
     recovering_approach_=route;recovering_approach_->mission_started=true;
@@ -406,6 +406,32 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const bool advance=input.advance_line_fsm && input.allow_new_mission_entry;
   const bool settled=camera.settled && camera.actual_mode!=CameraMode::kTransition;
   const bool goal_view=camera.actual_mode==CameraMode::kGoal;
+  // Adopt a newly stable, Depth-valid GOAL identity before edge/scan states
+  // can return early. NEVER inherit stale READY coordinates or old ID votes.
+  const bool stable_board = goal_view && camera.settled &&
+      input.backboard_target && input.backboard_track_id &&
+      input.backboard_entry_track_hits.value_or(0)>=config_.goal.stable_min_hits &&
+      input.backboard_entry_track_frames.value_or(0)>=config_.goal.stable_window &&
+      input.backboard_center_depth_m && std::isfinite(*input.backboard_center_depth_m) &&
+      *input.backboard_center_depth_m>=config_.backboard_min_depth_m &&
+      *input.backboard_center_depth_m<=config_.backboard_max_depth_m;
+  if (continuous_.mission==MissionType::kGoal && stable_board &&
+      input.backboard_track_id!=continuous_.id) {
+    continuous_.id=input.backboard_track_id;
+    continuous_.last=input.backboard_target;
+    continuous_.last_ready_center.reset();
+    continuous_.hits.clear();continuous_.near_hits.clear();
+    continuous_.pose_hits.clear();continuous_.good_hits.clear();
+    continuous_.missing=0;continuous_.loss_pending=false;
+    goal_rgb_missing_frames_=goal_tracking_unusable_frames_=0;
+    approach_evidence_[1]={};
+    // An already-issued camera/body motion is not interrupted. At a settled
+    // post-turn observation, a fresh stable ID releases the obsolete search.
+    if (idle && input.camera_scan.phase==0 &&
+        (goal_head_search_.phase==GoalHeadSearch::Phase::kReobserve ||
+         goal_head_search_.phase==GoalHeadSearch::Phase::kBodyTurn))
+      goal_head_search_={};
+  }
   // A stationary 10/4 raw-bbox edge guard always precedes Depth recovery.
   if(goal_view && input.raw_backboard_observation_available && has_ball_ &&
      !input.backboard_image_out_of_depth_range &&
@@ -684,28 +710,10 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
   const std::size_t i=continuous_.mission==MissionType::kBall ? 0 :
                       continuous_.mission==MissionType::kGoal ? 1 : 2;
   auto target=targets[i];
-  // GOAL follows the currently stable RGB+Depth backboard rather than
-  // permanently pinning a lost tracker ID. Do NOT inherit old-ID READY
-  // centers or detection windows; keep completed physical block counts and
-  // the bounded recovery budgets across identity replacement.
-  if(i==1 && !continuous_.near && target && ids[i] && continuous_.id &&
-     ids[i]!=continuous_.id) {
-    const bool stable_replacement=
-        input.backboard_entry_track_hits.value_or(0)>=config_.goal.stable_min_hits &&
-        input.backboard_entry_track_frames.value_or(0)>=config_.goal.stable_window;
-    if(stable_replacement) {
-      continuous_.id=ids[i];
-      continuous_.last.reset();
-      continuous_.last_ready_center.reset();
-      continuous_.hits.clear();
-      continuous_.near_hits.clear();
-      continuous_.pose_hits.clear();
-      continuous_.good_hits.clear();
-      continuous_.missing=0;
-      continuous_.loss_pending=false;
-      goal_tracking_unusable_frames_=0;
-    } else target.reset();
-  }
+  // All GOAL replacement decisions were made before early scan returns.
+  // An unqualified alternate ID cannot steer an ongoing approach.
+  if (i==1 && target && ids[i] && continuous_.id && ids[i]!=continuous_.id)
+    target.reset();
   if (target && continuous_.last &&
       ((ids[i] && continuous_.id && ids[i]!=continuous_.id) ||
        !same_target(*continuous_.last,*target,i))) target.reset();

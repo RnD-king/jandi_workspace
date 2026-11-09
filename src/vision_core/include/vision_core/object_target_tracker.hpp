@@ -13,7 +13,8 @@ public:
       const std::vector<ObjectTargetCandidate>& detections,
       const ObjectCandidateTrackingConfig& config, const ObjectAssociationConfig& weights,
       int width, int height, int window, double max_entry_v,
-      bool active, bool recovery, bool manual_mean = false, std::uint64_t mean_id = 0) {
+      bool active, bool recovery, bool manual_mean = false, std::uint64_t mean_id = 0,
+       int stable_replacement_hits = 0) {
     identity_changed_ = false;
     auto association = weights;
     if (config.enabled) {
@@ -46,6 +47,25 @@ public:
     reacquiring_ = active;
     candidates_.Update(detections, config, weights, window, max_entry_v);
     const auto* chosen = active ? candidates_.Find(id_) : nullptr;
+    // GOAL only: do not pin an old invisible ID, and do not promote an
+    // alternative track until its OWN full-window evidence is stable.
+    if (active && stable_replacement_hits > 0 && id_ &&
+        (!chosen || !chosen->detection_index)) {
+      const BallCandidateTrack* promoted = nullptr;
+      for (const auto& track : candidates_.Tracks()) {
+        if (track.id == id_ || !track.detection_index ||
+            track.hits.size() < static_cast<std::size_t>(window) ||
+            track.HitCount() < stable_replacement_hits) continue;
+        if (!promoted || track.HitCount() > promoted->HitCount() ||
+            (track.HitCount() == promoted->HitCount() &&
+             track.id < promoted->id)) promoted = &track;
+      }
+      if (promoted) chosen = promoted;
+      else {
+        selected_ = chosen ? std::optional<BallCandidateTrack>(*chosen) : std::nullopt;
+        return {};
+      }
+    }
     if (!chosen) chosen = candidates_.Best();
     const auto next_id = chosen ? chosen->id : 0;
     identity_changed_ = next_id != id_;
