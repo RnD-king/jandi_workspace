@@ -1516,9 +1516,11 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         goal_head_search_.phase==GoalHeadSearch::Phase::kIdle &&
         line_head_search_.phase==LineHeadSearch::Phase::kIdle &&
         !(active_mission_==MissionType::kHurdle &&
-          hurdle_controller_.ContinuousDownCameraWait()) &&
+          (hurdle_controller_.ContinuousDownCameraWait() ||
+           hurdle_controller_.ContinuousDownSearch())) &&
         !(active_mission_==MissionType::kBall &&
-          ball_result_.mode==BallMode::kWaitCameraDown))
+          (ball_result_.mode==BallMode::kWaitCameraDown ||
+           ball_result_.mode==BallMode::kDownSearch)))
       BeginDecisionObservation(input.now_sec, active_mission_, true, {});
     if (!decision_observation_active_ && !applied_object_ready_mean &&
         !(goal_edge_guard_.phase==GoalEdgeGuard::Phase::kTurning &&
