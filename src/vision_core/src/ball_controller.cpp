@@ -569,8 +569,17 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     }
     return result;
   case BallMode::kDownSearch: {
-    const int hits=static_cast<int>(std::count(hit_history_.begin(),hit_history_.end(),true));
-    const auto decision=down_search_.Observe(tracked_.visible,hits,
+    // DOWN-only 8/3 moving evidence. Keep FORWARD entry 10/5 unchanged.
+    constexpr std::size_t kDownSearchWindow = 8;
+    const auto begin = hit_history_.size() >= kDownSearchWindow
+        ? hit_history_.end() - static_cast<std::ptrdiff_t>(kDownSearchWindow)
+        : hit_history_.begin();
+    const int hits = static_cast<int>(std::count(begin, hit_history_.end(), true));
+    // The final frame need not contain a ball. DownSearchWalk latches success
+    // while moving and waits for the real action DONE before entering FINE.
+    const bool found = hit_history_.size() >= kDownSearchWindow &&
+        hits >= config_.down_search_min_hits;
+    const auto decision=down_search_.Observe(found,hits,
         config_.down_search_min_hits,config_.down_search_max_steps,
         feedback.action_active,feedback.action_done,
         now_sec,config_.down_search_inter_action_hold_sec);
