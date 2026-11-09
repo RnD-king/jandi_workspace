@@ -101,15 +101,16 @@ int main() {
   in.camera_feedback={CameraMode::kTransition,false};
   in.camera_scan.phase=1;in.camera_scan.command_id=10;in.camera_scan.yaw_deg=25;
   in.scan_ball_u=320;
-  bool hold=false;
-  for(int i=0;i<5;++i) {
-    tick();
-    if(out.command.camera_request==CameraRequest::kScanHold) hold=true;
-  }
-  assert(hold);
-  in.camera_scan.phase=3;
-  bool returning=false;
   for(int i=0;i<12;++i) {
+    tick();
+    assert(out.command.camera_request!=CameraRequest::kScanHold);
+    assert(out.command.camera_request!=CameraRequest::kScanReturn);
+  }
+  in.camera_scan.phase=2;
+  in.camera_scan.stop_id=1;
+  in.camera_scan.frame_is_fresh=true;
+  bool returning=false;
+  for(int i=0;i<15;++i) {
     tick();
     if(out.command.camera_request==CameraRequest::kScanReturn) {returning=true;break;}
   }

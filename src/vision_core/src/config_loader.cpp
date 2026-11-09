@@ -256,6 +256,9 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     Positive(c.curve_search.scan_move_sec,"curve_search.scan_move_sec");
     Nonnegative(c.curve_search.scan_hold_sec,"curve_search.scan_hold_sec");
     Positive(c.curve_search.scan_return_sec,"curve_search.scan_return_sec");
+    Positive(c.curve_search.scan_observation_timeout_sec,"curve_search.scan_observation_timeout_sec");
+    if(c.curve_search.scan_observation_timeout_sec<c.curve_search.scan_hold_sec)
+      throw std::runtime_error("curve scan timeout must cover stationary hold");
     Positive(c.curve_search.center_half_width_px,"curve_search.center_half_width_px");
     PositiveInt(c.curve_search.head_search_max_attempts,"curve_search.head_search_max_attempts");
     PositiveInt(c.curve_search.body_search_max_attempts,"curve_search.body_search_max_attempts");
@@ -676,6 +679,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     Assign(cs,"scan_move_sec",c.curve_search.scan_move_sec);
     Assign(cs,"scan_hold_sec",c.curve_search.scan_hold_sec);
     Assign(cs,"scan_return_sec",c.curve_search.scan_return_sec);
+    if(cs["scan_observation_timeout_sec"])
+      Assign(cs,"scan_observation_timeout_sec",c.curve_search.scan_observation_timeout_sec);
     Assign(cs,"center_half_width_px",c.curve_search.center_half_width_px);
     Assign(cs,"pause_window",c.curve_search.pause_window);
     Assign(cs,"pause_hits",c.curve_search.pause_hits);

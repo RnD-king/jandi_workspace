@@ -1388,7 +1388,8 @@ private:
           line_scan ? line_recovery_config_.scan_return_sec : curve_search_config_.scan_return_sec);
     message.scan_observation_timeout_sec=static_cast<float>(goal_scan
         ? goal_scan_config_.head_scan_observation_timeout_sec :
-          line_scan ? line_recovery_config_.scan_observation_timeout_sec : 0.0);
+          line_scan ? line_recovery_config_.scan_observation_timeout_sec :
+                      curve_search_config_.scan_observation_timeout_sec);
     camera_cmd_pub_->publish(message);
   }
 
@@ -1586,7 +1587,10 @@ private:
         (pending_camera_request_==vision_core::CameraRequest::kGoalScanLeft ||
          pending_camera_request_==vision_core::CameraRequest::kGoalScanRight)
             ? goal_scan_config_.head_scan_observation_timeout_sec
-            : line_recovery_config_.scan_observation_timeout_sec);
+            : (pending_camera_request_==vision_core::CameraRequest::kScanLeft ||
+               pending_camera_request_==vision_core::CameraRequest::kScanRight)
+                ? curve_search_config_.scan_observation_timeout_sec
+                : line_recovery_config_.scan_observation_timeout_sec);
     // 3) YOLO 추론
     std::vector<Detection> dets;
 

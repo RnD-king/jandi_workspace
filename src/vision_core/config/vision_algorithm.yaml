@@ -65,6 +65,7 @@ vision_algorithm:
       scan_move_sec: 0.5
       scan_hold_sec: 0.5
       scan_return_sec: 0.5
+      scan_observation_timeout_sec: 2.0 # 45도 정지 도착 후 최소 0.5초 및 10프레임 중 5회 관측
       center_half_width_px: 50.0
       pause_window: 4
       pause_hits: 2
