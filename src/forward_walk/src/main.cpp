@@ -367,7 +367,7 @@ private:
             return "motions/보행_왼발만앞에.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_ONE:
-            return "motions/보행_1걸음_초기X_수정5.json";
+            return "motions/보행_1걸음_초기X_수정3.json";
 
         case vision::msg::ActionCommand::STEP_FORWARD_ONE_ALTERNATE:
             return "motions/보행_1걸음_초기X_수정5.json";
