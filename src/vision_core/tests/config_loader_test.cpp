@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <yaml-cpp/yaml.h>
@@ -666,6 +667,21 @@ int main(int argc, char **argv) {
     try {(void)LoadText(YAML::Dump(root));}
     catch(const std::runtime_error&) {rejected=true;}
     assert(rejected);
+  }
+  // The final-contact hold is separate from inter-contact pacing.
+  {
+    auto root=GroupedFixture(text.str());
+    root["vision_algorithm"]["hurdle"]["control"]["pre_cross_hold_sec"]=0.5;
+    const auto loaded=LoadText(YAML::Dump(root));
+    assert(loaded.hurdle.pre_cross_hold_sec==0.5);
+    for(const double bad : {-0.1, std::numeric_limits<double>::quiet_NaN()}) {
+      auto invalid=loaded;
+      invalid.hurdle.pre_cross_hold_sec=bad;
+      bool rejected=false;
+      try {vision_core::ValidateAlgorithmConfig(invalid);}
+      catch (const std::runtime_error&) {rejected=true;}
+      assert(rejected);
+    }
   }
   auto relaxed_association = c;
   relaxed_association.object_association.max_center_distance_norm = 1.2;
