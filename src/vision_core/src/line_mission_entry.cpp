@@ -392,6 +392,17 @@ MissionFrameResult MissionController::StepPlannedLine(
       input.camera_feedback.actual_mode != CameraMode::kDown &&
       input.camera_feedback.actual_mode != CameraMode::kTransition)
     camera = CameraRequest::kDown;
+  // BALL: turn(s) finish first, then the last physical near step can carry
+  // BALL_VIEW concurrently. Mission entry still waits for its real DONE.
+  if (camera == CameraRequest::kNone && route.near_final_action &&
+      continuous_.mission == MissionType::kBall && continuous_.near &&
+      continuous_.near_actions.empty() &&
+      (route.action.action == MissionAction::kStepForwardOne ||
+       route.action.action == MissionAction::kStepForwardTwo) &&
+      input.allow_new_commands &&
+      input.camera_feedback.actual_mode != CameraMode::kBallView &&
+      input.camera_feedback.actual_mode != CameraMode::kTransition)
+    camera = CameraRequest::kBallView;
   const bool line_scan_override=automatic_approach && !finish_course &&
       line_state_==LineState::kRecoveryHeadScan &&
       line_head_search_.phase!=LineHeadSearch::Phase::kIdle;
