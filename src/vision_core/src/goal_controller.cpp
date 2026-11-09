@@ -1,4 +1,5 @@
 #include "vision_core/goal_controller.hpp"
+#include "vision_core/stationary_window.hpp"
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/cruise_selector.hpp"
@@ -1107,10 +1108,12 @@ void GoalController::UseVerifiedObservation(
   while (fine_enter_history_.size() > static_cast<std::size_t>(config_.stable_window)) fine_enter_history_.pop_front();
   while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window)) hit_history_.pop_front();
   while (pose_hit_history_.size() > static_cast<std::size_t>(config_.stable_window)) pose_hit_history_.pop_front();
-  tracked_.stable = hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
-      std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits;
-  tracked_pose_.stable = pose_hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
-      std::count(pose_hit_history_.begin(), pose_hit_history_.end(), true) >= config_.stable_min_hits;
+  tracked_.stable = FastStationaryQualified(hit_history_, config_.stable_min_hits) ||
+      (hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+       std::count(hit_history_.begin(), hit_history_.end(), true) >= config_.stable_min_hits);
+  tracked_pose_.stable = FastStationaryQualified(pose_hit_history_, config_.stable_min_hits) ||
+      (pose_hit_history_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+       std::count(pose_hit_history_.begin(), pose_hit_history_.end(), true) >= config_.stable_min_hits);
   if (mean && tracked_.stable) last_stable_u_px_ = tracked_.center_px.u;
   fine_pose_window_.clear();
   if (pose.valid && tracked_.stable && tracked_pose_.stable) fine_pose_window_.push_back(pose);
