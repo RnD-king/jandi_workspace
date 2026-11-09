@@ -275,7 +275,8 @@ public:
     void StartScan(bool left, int max_yaw_deg, double move_sec,
                    double hold_sec, double return_sec,
                    const RawPositions& base, Clock::time_point now,
-                   bool goal_view = false, double observation_timeout_sec = 0.0) {
+                   bool goal_view = false, double observation_timeout_sec = 0.0,
+                   bool single_point_scan = false) {
         if(active_) throw std::runtime_error("camera already active");
         if(max_yaw_deg<1 || max_yaw_deg>90 || move_sec<=0 || hold_sec<0 || return_sec<=0 ||
             !std::isfinite(move_sec) || !std::isfinite(hold_sec) || !std::isfinite(return_sec))
@@ -289,6 +290,7 @@ public:
         scan_far_={proposed,scan_origin_.pitch};
         scan_move_sec_=move_sec;scan_hold_sec_=hold_sec;scan_return_sec_=return_sec;
         point_scan_=observation_timeout_sec>0;
+        single_point_scan_=point_scan_ && single_point_scan;
         observation_timeout_sec_=observation_timeout_sec;
         point_index_=left ? 0 : 1;
         scan_amplitude_=std::abs(proposed-scan_origin_.yaw);
@@ -317,6 +319,7 @@ public:
     bool ResumeScan(Clock::time_point now) {
         if(point_scan_) {
             if(scan_phase_!=ScanPhase::Dwell && scan_phase_!=ScanPhase::Paused) return false;
+            if(single_point_scan_) return ReturnScan(now); // CURVE: one verified stop.
             if(++point_index_>2) { scan_phase_=ScanPhase::Verify; return true; }
             const CameraPose next{point_index_==1 ? scan_origin_.yaw-scan_amplitude_ :
                                                      scan_origin_.yaw,scan_origin_.pitch};
@@ -352,7 +355,7 @@ public:
     }
     explicit CameraMotion(CameraConfig config = {}) : config_(config) { config_.Validate(); }
     void Start(uint8_t request, const RawPositions& base, Clock::time_point now) {
-        point_scan_=false;
+        point_scan_=single_point_scan_=false;
         const auto target = config_.Target(request);
         current_ = {base.at(config_.yaw_id), base.at(config_.pitch_id)};
         scan_phase_=ScanPhase::None;
@@ -458,7 +461,7 @@ private:
         return Result::Command;
     }
     ScanPhase scan_phase_{ScanPhase::None};
-    bool point_scan_{false};
+    bool point_scan_{false}, single_point_scan_{false};
     int point_index_{0},scan_amplitude_{0};
     uint32_t scan_stop_id_{0};
     double observation_timeout_sec_{0};
