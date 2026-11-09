@@ -3010,7 +3010,10 @@ int MissionController::RepeatScope() const {
         ball_result_.mode == BallMode::kPostPickupLineRecovery)
       return 200 + static_cast<int>(ball_result_.mode);
   } else if (active_mission_ == MissionType::kHurdle) {
+    // FINE line alignment owns the fresh 1s observation after each complete
+    // turn/side batch. Keep real DONEs flowing without a generic gate between units.
     if (hurdle_result_.mode == HurdleMode::kDownSearch ||
+        hurdle_result_.mode == HurdleMode::kFineLineAlign ||
         hurdle_result_.mode == HurdleMode::kRecoveryStep ||
         hurdle_result_.mode == HurdleMode::kContactWalk)
       return 400 + static_cast<int>(hurdle_result_.mode);
