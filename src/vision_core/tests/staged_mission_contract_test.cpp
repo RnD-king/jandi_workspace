@@ -175,8 +175,18 @@ void NearStageStopsBeforeMission(MissionType mission) {
   t.Commit(MissionAction::kDefaultPoseMode);t.Done();
   assert(t.out.foot_pose==FootPose::kFine);
   if(mission==MissionType::kHurdle) {
-    // A valid DOWN line must allow alignment to finish without search steps.
-    for(int i=0;i<35 && t.out.hurdle.mode!=HurdleMode::kFineAdjust;++i)t.Tick();
+    // FINE line alignment owns post-batch observations; its repeat scope
+    // must prevent the generic post-DONE gate from splitting a correction batch.
+    bool saw_fine_line_align = false;
+    for(int i=0;i<35 && t.out.hurdle.mode!=HurdleMode::kFineAdjust;++i) {
+      t.Tick();
+      if (t.out.hurdle.mode == HurdleMode::kFineLineAlign) {
+        saw_fine_line_align = true;
+        assert(t.out.repeat_scope ==
+               400 + static_cast<int>(HurdleMode::kFineLineAlign));
+      }
+    }
+    assert(saw_fine_line_align);
     assert(t.out.hurdle.mode==HurdleMode::kFineAdjust);
     assert(!t.out.trial_complete); // v>=contact is not yet a test boundary.
     assert(t.Preview().command.action==MissionAction::kStepForwardHalf);
