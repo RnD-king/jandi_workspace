@@ -59,6 +59,7 @@ void TestMotionDoneWatchdog() {
     // A queued ACK alone never arms the watchdog.
     Require(!watchdog.Check(41,start+100s), "queued ACK started watchdog");
     watchdog.Start(41,33,start);
+    watchdog.Start(41,33,start+3s); // A later successful packet must NOT reset the start time.
     Require(!watchdog.Check(41,start+4999ms), "watchdog fired before five seconds");
     Require(!watchdog.Check(42,start+5s), "watchdog misattributed the action ID");
     const auto overdue = watchdog.Check(41,start+5s);
