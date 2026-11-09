@@ -981,7 +981,9 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
     decision_line_hits_.pop_front();
   if (decision_line_hits_.size()==static_cast<std::size_t>(kFastStationaryWindow) &&
       std::count(decision_line_hits_.begin(),decision_line_hits_.end(),true)>=
-          FastStationaryMinHits(config_.line.line_stable_min_hits)) decision_line_qualified_=true;
+          std::max(FastStationaryMinHits(config_.line.line_stable_min_hits),
+                   config_.line_p2p.failure_min_valid_samples))
+    decision_line_qualified_=true;
   if (valid) {
     ++decision_line_valid_count_;
     decision_line_offset_sum_ += guide.offset;
