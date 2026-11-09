@@ -737,6 +737,11 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     return result;
   case BallMode::kStandUpAfterPickup:
     result.action = Mission(MissionAction::kDefaultPosition);
+    // Overlap return to the LINE camera with DEFAULT_POSITION. This is only
+    // enabled when no explicit post-pickup back-away is configured.
+    if (config_.post_pickup_back_steps == 0 &&
+        (!camera.settled || camera.actual_mode != CameraMode::kForward))
+      result.camera_request = CameraRequest::kForward;
     if (feedback.action_done) {
       if (has_ball_ && config_.post_pickup_back_steps > 0) {
         mode_ = BallMode::kPostPickupBackAway;
@@ -749,7 +754,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
         mode_ = BallMode::kReturnCameraToLine;
         result.mode = mode_;
         result.action = {};
-        result.camera_request = CameraRequest::kForward;
+        result.camera_request = camera.actual_mode == CameraMode::kForward &&
+            camera.settled ? CameraRequest::kNone : CameraRequest::kForward;
       }
     }
     return result;
