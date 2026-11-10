@@ -319,7 +319,11 @@ def build_release(cfg,version,repo,roots,force=False):
     core=release/'core';ros=release/'ros';build=release/'build'
     release.mkdir(parents=True)
     log=release/'build.log';env=ros_environment(cfg,core=core)
-    jobs=str(cfg.get('jobs',2))
+    jobs=int(cfg.get('jobs',2))
+    if jobs<1:raise RuntimeError('jobs는 1 이상이어야 합니다.')
+    jobs=str(jobs)
+    env['CMAKE_BUILD_PARALLEL_LEVEL']=jobs
+    env['MAKEFLAGS']='-j'+jobs
     commands=[['cmake','-S',roots['vision_core'],'-B',build/'core','-DCMAKE_BUILD_TYPE=Release',
                '-DBUILD_TESTING=OFF',f'-DCMAKE_INSTALL_PREFIX={core}'],
               ['cmake','--build',build/'core','-j'+jobs],['cmake','--install',build/'core'],

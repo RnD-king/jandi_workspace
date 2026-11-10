@@ -86,6 +86,8 @@ class DeployTest(unittest.TestCase):
         commands=[]
         def fake_call(command,**kwargs):
             self.assertFalse(manifest.exists());commands.append(command)
+            self.assertEqual(kwargs['env']['CMAKE_BUILD_PARALLEL_LEVEL'],'2')
+            self.assertEqual(kwargs['env']['MAKEFLAGS'],'-j2')
             if command[0]=='colcon':
                 ros=Path(command[command.index('--install-base')+1]);fixture_release(ros.parent)
             return subprocess.CompletedProcess(command,0)
