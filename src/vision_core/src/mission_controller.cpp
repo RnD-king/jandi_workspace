@@ -971,8 +971,8 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
       decision_pose_cos_sum_ += std::cos(input.goal_pose.yaw_rad);
       ++decision_pose_count_;
     }
-    // The GOAL post-FINE pose/step observation simultaneously judges edge
-    // clipping (raw bbox 10/4). Do not start a second stationary 1s window.
+    // The GOAL post-FINE pose/step observation also checks the raw bbox
+    // center against the boundary lines. Reuse that observation window.
     if (decision_observation_mission_==MissionType::kGoal &&
         active_mission_==MissionType::kGoal &&
         config_.test_mission==MissionType::kNone &&
@@ -1984,7 +1984,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     if (before == GoalMode::kHeadingRecovery)
       line_action = ComputeMissionLineRecovery(input, action_feedback,
                                                &line_reference_valid, &output);
-    // The same raw-bbox 10/4 guard covers FINE, with FINE turn assets.
+    // The same raw-bbox-center guard covers FINE, with FINE turn assets.
     ActionRequest edge_action;
     // A raw-bbox guard may observe between commands, but must NEVER
     // consume a matching DONE owned by GoalController (notably DEFAULT_POSE).
@@ -2249,9 +2249,10 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       TestExecutionReady())
     test_execution_started_ = true;
   if(goal_edge_turn_step && output.command.command_type==CommandType::kAction &&
-     output.command.action_id!=0 && output.command.action==request.action)
+     output.command.action_id!=0 && output.command.action==request.action) {
     goal_edge_guard_.action_id=output.command.action_id;
-  else if(active_mission_==MissionType::kGoal && input.raw_backboard_observation_available &&
+    goal_controller_.ClearObservationHistory();
+  } else if(active_mission_==MissionType::kGoal && input.raw_backboard_observation_available &&
           output.command.command_type==CommandType::kAction && output.command.action_id!=0 &&
           goal_edge_guard_.phase==GoalEdgeGuard::Phase::kIdle)
     ClearGoalEdgeObservation();
@@ -2316,6 +2317,14 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 
 void MissionController::PopulateDiagnostics(MissionFrameResult &output,
                                             double now) const {
+  output.goal.shoot_verifying=goal_controller_.ShootVerificationActive();
+  if (output.goal.shoot_verifying) {
+    output.post_motion_observing=true;
+    output.post_motion_elapsed_sec=goal_controller_.ShootVerificationElapsed(now);
+    output.post_motion_window_frames=goal_controller_.DetectionFrames();
+    output.post_motion_frames=output.post_motion_window_frames;
+    output.post_motion_valid=goal_controller_.DetectionHits();
+  }
   output.stationary_scan_observing=
       goal_head_search_.phase==GoalHeadSearch::Phase::kReobserve ||
       line_head_search_.phase==LineHeadSearch::Phase::kReobserve;

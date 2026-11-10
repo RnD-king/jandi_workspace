@@ -156,6 +156,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.goal.depth_recovery_max_steps, "goal.depth_recovery_max_steps");
   PositiveInt(c.goal.far_depth_probe_max_attempts,"goal.far_depth_probe_max_attempts");
   Nonnegative(c.goal.edge_margin_px, "goal.edge_margin_px");
+  Positive(c.goal.shoot_verification_sec, "goal.shoot_verification_sec");
   PositiveInt(c.goal.edge_stable_window,"goal.edge_stable_window");
   PositiveInt(c.goal.edge_stable_min_hits,"goal.edge_stable_min_hits");
   if(c.goal.edge_stable_min_hits>c.goal.edge_stable_window)
@@ -923,6 +924,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(g, "approach_short_z_m", c.goal.approach_short_z_m);
   Assign(g, "camera_goal_start_z_m", c.goal.camera_goal_start_z_m);
   Assign(g, "post_shoot_back_steps", c.goal.post_shoot_back_steps);
+  Assign(g, "shoot_verification_sec", c.goal.shoot_verification_sec);
 
   Assign(g, "stable_window", c.goal.stable_window);
   Assign(g, "stable_min_hits", c.goal.stable_min_hits);

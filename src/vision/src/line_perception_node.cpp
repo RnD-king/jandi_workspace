@@ -1576,7 +1576,9 @@ private:
     const bool stationary_scan=camera_scan_feedback_.stop_id &&
         (camera_scan_feedback_.phase==2 || camera_scan_feedback_.phase==3);
     const double capture_sec=StampSeconds(msg->header);
-    const bool stationary_observation=stationary_scan || last_debug_result_.mission.stationary_scan_observing;
+    const bool stationary_observation=stationary_scan ||
+        last_debug_result_.mission.stationary_scan_observing ||
+        last_debug_result_.mission.goal.shoot_verifying;
     if(stationary_observation) {
       if(!std::isfinite(capture_sec) || capture_sec<=last_stationary_capture_sec_) return;
       last_stationary_capture_sec_=capture_sec;

@@ -83,6 +83,7 @@ struct GoalConfig {
   GoalFineMotionConfig fine_motion;
   double position_tolerance_m{};
   double shoot_yaw_limit_deg{};
+  double shoot_verification_sec{};
   double recovery_center_tolerance_px{};
   bool head_scan_enabled{true};
   int head_scan_max_yaw_deg{25};
@@ -153,12 +154,13 @@ struct GoalResult {
   GoalPoseObservation fine_decision_pose;
   bool fine_decision_pose_used{false};
   double shoot_yaw_rad{0.0};
+  bool shoot_verifying{false};
   ActionRequest action;
 };
 
 class GoalController {
 public:
-  // AUTO uses a raw-bbox, observation-window edge guard outside this FSM.
+  // AUTO uses a raw-bbox-center, observation-window boundary guard outside this FSM.
   void SetExternalEdgeGuard(bool enabled) { external_edge_guard_=enabled; }
   struct DepthRecoveryResult {
     ActionRequest action;
@@ -202,6 +204,10 @@ public:
   void SetHasBall(bool has_ball);
   void UpdateBallState(const BallResult &ball_result);
   bool HasBall() const { return has_ball_; }
+  bool ShootVerificationActive() const { return shoot_verification_active_; }
+  double ShootVerificationElapsed(double now) const {
+    return shoot_verification_active_ ? std::max(0.0, now-shoot_verification_start_sec_) : 0.0;
+  }
   bool ExecutionObservationReady() const {
     return tracked_.visible && tracked_.stable && tracked_pose_.visible && tracked_pose_.stable &&
         hit_history_.size()>=static_cast<std::size_t>(config_.stable_window) &&
@@ -270,7 +276,10 @@ public:
     return FineAction(pose);
   }
   GoalFineMotionPlan PlanFineMotion(const GoalPoseObservation &pose) const;
-  void ShiftTimers(double duration) { state_enter_sec_+=duration; }
+  void ShiftTimers(double duration) {
+    state_enter_sec_+=duration;
+    if (shoot_verification_active_) shoot_verification_start_sec_+=duration;
+  }
   void Reset();
 
 private:
@@ -314,6 +323,8 @@ private:
   TrackedGoalPose tracked_pose_;
   double state_enter_sec_{0.0};
   double shoot_yaw_rad_{0.0};
+  bool shoot_verification_active_{false};
+  double shoot_verification_start_sec_{0.0};
   MissionAction fine_repeat_action_{MissionAction::kNone};
   int fine_repeat_remaining_{0};
   bool fine_repeat_pending_{false};
