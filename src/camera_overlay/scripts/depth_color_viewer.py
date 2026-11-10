@@ -1,7 +1,7 @@
 #!/usr/bin/python3 -s
 """Depth colour view and explicit camera-only controls; never opens a device.
 HTTP workers only exchange snapshots/queued input. ROS services run on the node thread.
-Exposure changes are temporary. Edit the shared RealSense launch for startup values.
+Exposure changes are temporary. Edit the driver rs_launch.py for startup values.
 """
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -74,7 +74,7 @@ body{background:#181818;color:#eee;font:16px sans-serif;max-width:1000px;margin:
 <div>Exposure <input id="exposure" type="range" disabled><input id="exposureValue" type="number" disabled></div>
 <div>Gain <input id="gain" type="range" disabled><input id="gainValue" type="number" disabled></div>
 <button id="apply" disabled>Apply manual values</button><button id="refresh">Read camera</button>
-<p>Changes apply to the running camera only. Startup values: ~/.config/jandi/realsense.launch.py</p>
+<p>Changes apply to the running camera only. Startup values: realsense2_camera/launch/rs_launch.py</p>
 <pre id="status"></pre><script>
 const $=id=>document.getElementById(id);let frame=0,objectURL=null,busy=false,dirty=false;
 async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

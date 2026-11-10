@@ -237,17 +237,22 @@ class RuntimeTest(unittest.TestCase):
         self.assertIsNone(console.key_request("main", "0")[1])
         self.assertEqual(console.key_request("shutdown", "1")[1], {"op": "shutdown"})
 
-    def test_plan_uses_explicit_options_and_shared_launch_without_yaml(self):
+    def test_plan_uses_explicit_options_and_standard_camera_launch(self):
         with patch.dict(os.environ, {}, clear=True):
             plan = runtime.Plan.load(SCRIPTS.parent)
             self.assertEqual(plan.workspace, "/home/rnd/jandi")
             self.assertEqual(plan.engine, "/home/rnd/jandi/src/dataset/best_1029.engine")
             self.assertEqual(plan.environment()["ROS_DOMAIN_ID"], "22")
+        with patch.dict(os.environ,{'JANDI_CAMERA_LAUNCH':'/obsolete.launch.py','JANDI_CAMERA_CONFIG':'/obsolete.yaml'}):
+            legacy=runtime.Plan.load(SCRIPTS.parent)
+            self.assertEqual(legacy.commands()['camera'],['ros2','launch','realsense2_camera','rs_launch.py'])
+            self.assertNotIn('JANDI_CAMERA_LAUNCH',legacy.environment())
+            self.assertNotIn('JANDI_CAMERA_CONFIG',legacy.environment())
         a = plan.commands()
         self.assertIn("terminal_node:=false",a["vision"])
         enabled = runtime.Plan.load(SCRIPTS.parent,terminal_node=True)
         self.assertIn("terminal_node:=true",enabled.commands()["vision"])
-        self.assertEqual(a["camera"],["ros2","launch",plan.camera_launch])
+        self.assertEqual(a["camera"],["ros2","launch","realsense2_camera","rs_launch.py"])
         self.assertNotIn("config_file:=", " ".join(a["camera"]))
         self.assertNotIn("mode",plan.__dict__)
         for service,path in runtime.SERVICES.items():

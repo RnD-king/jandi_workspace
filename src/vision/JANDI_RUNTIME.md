@@ -18,13 +18,15 @@
 0 → 1은 전체 정상 종료, K → 1은 기존 긴급종료다. 0/Esc로 확인을 취소할 수 있다.
 실행 중인 버전의 업데이트와 MAIN/FAST 동시 실행은 거부한다.
 
-노출의 시작값은 `~/.config/jandi/realsense.launch.py` 상단 세 항목을 직접 수정한다.
-재빌드는 필요 없고 카메라 재시작 시 적용된다. 기존 카메라 YAML은 읽지 않는다.
+노출의 시작값은 기존 `realsense2_camera/launch/rs_launch.py`의 마지막 parameters 딕셔너리에서
+직접 수정한다. 추가 카메라 launch/YAML override는 없다.
+확인된 PC/Jetson은 소스 링크 설치로 재빌드 없이 카메라 재시작 때 적용된다.
 
 ```bash
-~/jandi_camera.sh       # 카메라만 실행
-~/jandi_depth.sh main   # 다른 터미널에서 Depth HTTP 뷰어
+ros2 launch realsense2_camera rs_launch.py
+# 별도 터미널에서 ROS 환경과 사용할 camera_overlay 설치본을 source한 뒤:
+ros2 run camera_overlay depth_color_viewer
 ```
 
-Jetson 뷰어: http://192.168.0.133:8081
+Jetson 뷰어: http://192.168.0.133:8081, PC: http://localhost:8081.
 노출 실시간 변경은 재빌드·카메라 재시작 없이 적용하며 파일을 자동 수정하지 않는다.
