@@ -7,16 +7,28 @@
 
 ## 실행
 
-새 배포 도구로 설치했다면:
+카메라는 별도 터미널에서 기존 명령으로 실행한다.
 
 ```bash
-~/jandi_camera.sh      # 카메라가 아직 꺼져 있을 때, 터미널 1
-~/jandi_depth.sh main  # 터미널 2
+ros2 launch realsense2_camera rs_launch.py
 ```
 
-Jetson HTTP: `http://192.168.0.133:8081`. 카메라가 기존 JANDI에서 실행 중이면 뷰어만 실행한다.
-`~/jandi_depth.sh fast`로 FAST에 설치된 같은 도구를 선택할 수 있다.
-기본은 headless HTTP다. PC 로컬 화면을 추가하려면 `~/jandi_depth.sh main --opencv`.
+뷰어 터미널에서 ROS 환경과 camera_overlay 설치본을 source한 뒤 노드만 실행한다.
+
+```bash
+# Jetson MAIN 설치 예시 (FAST는 jandi_fast로 변경)
+source /opt/ros/humble/setup.bash
+source ~/realsense_ws/install/setup.bash
+source ~/jandi_main/install/local_setup.bash
+export ROS_DOMAIN_ID=22
+ros2 run camera_overlay depth_color_viewer
+```
+
+PC도 같은 노드 명령을 사용한다. 사용하던 ROS 환경에 `~/jandi_main/install/local_setup.bash`
+또는 이 패키지를 빌드한 워크스페이스를 source한다.
+Jetson HTTP: `http://192.168.0.133:8081`, PC: `http://localhost:8081`.
+카메라가 이미 실행 중이면 뷰어만 실행한다. 기본은 headless HTTP다.
+로컬 화면 추가: `ros2 run camera_overlay depth_color_viewer --ros-args -p show_debug_view:=true`.
 
 직접 ROS 환경을 선택한 터미널에서는:
 
@@ -50,8 +62,11 @@ OpenCV 화면에서는 클릭 측정·우클릭 해제·q/Esc 종료를 지원�
 HTTP는 LAN에서 접근 가능한 인터페이스로 제공하며 별도 로그인은 없다.
 
 실시간 변경은 파일에 저장하지 않는다. 다음 실행 기본값은
-`~/.config/jandi/realsense.launch.py` 상단 DEPTH_AUTO_EXPOSURE / DEPTH_EXPOSURE / DEPTH_GAIN을
-직접 수정한 뒤 카메라를 재시작한다. MAIN/FAST가 같은 파일을 사용하며 재빌드는 필요 없다.
+기존 RealSense `rs_launch.py`의 마지막 parameters 딕셔너리에서
+`depth_module.enable_auto_exposure`, `depth_module.exposure`, `depth_module.gain`을 직접 수정한 뒤
+카메라를 재시작한다. 사용자 PC와 확인된 Jetson 모두 소스 링크 설치로 재빌드는 필요 없다.
+Jetson 소스는 `~/realsense_ws/src/realsense-ros/realsense2_camera/launch/rs_launch.py`다.
+JANDI는 같은 기본 RealSense 런치를 실행하며 별도 카메라 launch/YAML을 적용하지 않는다.
 
 ## 검사 범위
 

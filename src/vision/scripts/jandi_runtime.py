@@ -38,7 +38,6 @@ class Plan:
     stream_debug_view: bool = True
     version: str = ""
     release: str = ""
-    camera_launch: str = ""
 
     @classmethod
     def load(cls, share, workspace=None, core_prefix=None, *,
@@ -55,15 +54,11 @@ class Plan:
         core = core.expanduser().resolve()
         algorithm = Path(os.environ.get("VISION_CORE_ALGORITHM_CONFIG") or
                          core / "share/shared_vision_core/config/vision_algorithm.yaml")
-        camera=Path(os.environ.get("JANDI_CAMERA_LAUNCH") or "~/.config/jandi/realsense.launch.py").expanduser()
-        if not camera.is_file() and not os.environ.get("JANDI_CAMERA_LAUNCH"):
-            camera=share/"launch/realsense.launch.py"
-        if not camera.is_file():raise ValueError("RealSense launch file missing: "+str(camera))
         return cls(str(workspace), str(core), str(share), str(engine),
                    str(algorithm.expanduser().resolve()), bool(show_debug_view),
                    bool(terminal_node),
                    bool(stream_debug_view), os.environ.get("JANDI_VERSION","legacy"),
-                   os.environ.get("JANDI_RELEASE",""),str(camera.resolve()))
+                   os.environ.get("JANDI_RELEASE",""))
 
     def commands(self):
         params = str(Path(self.share) / "config/vision_params.yaml")
@@ -79,7 +74,7 @@ class Plan:
         for name, destination in SERVICES.items():
             vision += ["-r", f"{name}:={destination}"]
         return {
-            "camera": ["ros2", "launch", self.camera_launch],
+            "camera": ["ros2", "launch", "realsense2_camera", "rs_launch.py"],
             "motor": ["ros2", "run", "forward_walk", "main_node"],
             "vision": vision,
         }
@@ -90,7 +85,7 @@ class Plan:
         env["JANDI_VERSION"]=self.version
         env["JANDI_RELEASE"]=self.release
         env.pop("JANDI_CAMERA_CONFIG",None)
-        env["JANDI_CAMERA_LAUNCH"]=self.camera_launch
+        env.pop("JANDI_CAMERA_LAUNCH",None)
         env["VISION_CORE_ROOT"] = self.core_prefix
         env["VISION_CORE_ALGORITHM_CONFIG"] = self.algorithm
         env["LD_LIBRARY_PATH"] = str(Path(self.core_prefix) / "lib") + (

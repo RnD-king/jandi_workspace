@@ -132,21 +132,35 @@ class DeployTest(unittest.TestCase):
         self.assertEqual(result,('fast',True,True,False))
         self.assertNotIn('PRACTICE',output.getvalue());self.assertNotIn('실행 모드',output.getvalue())
 
-    def test_install_migrates_yaml_to_shared_launch_and_preserves_user_edits(self):
+    def test_install_retires_overrides_and_only_unmodified_helper_wrappers(self):
         d.CONFIG_DIR.mkdir(parents=True)
         old=d.CONFIG_DIR/'old.yaml';old.write_text('old user settings')
-        d.atomic_json(d.CONFIG_DIR/'deployment.json',{'machine':'pc','selected':'main','camera_config':str(old)})
+        launch=d.CONFIG_DIR/'realsense.launch.py';launch.write_text('# user old launch')
+        d.atomic_json(d.CONFIG_DIR/'deployment.json',{'machine':'pc','selected':'main','camera_config':str(old),'camera_launch':str(launch)})
+        target=self.root/'tools/jandi_deploy.py'
+        original='#!/usr/bin/env bash\n# JANDI versioned entrypoint\nset -euo pipefail\nexec /usr/bin/python3 '+str(target)+' camera --machine pc "$@"\n'
+        (self.root/'jandi_camera.sh').write_text(original)
+        (self.root/'jandi_depth.sh').write_text('# user modified helper')
         with patch.object(d,'TOOLS_DIR',self.root/'tools'),contextlib.redirect_stdout(io.StringIO()):
             d.install('pc')
-            launch=d.CONFIG_DIR/'realsense.launch.py'
-            self.assertIn('DEPTH_EXPOSURE = 5000',launch.read_text())
             config=json.loads((d.CONFIG_DIR/'deployment.json').read_text())
-            self.assertNotIn('camera_config',config);self.assertEqual(config['camera_launch'],str(launch))
-            launch.write_text('# user camera launch')
+            self.assertNotIn('camera_config',config);self.assertNotIn('camera_launch',config)
             d.install('pc')
-            self.assertEqual(launch.read_text(),'# user camera launch')
         self.assertEqual(old.read_text(),'old user settings')
-        self.assertTrue((self.root/'jandi_depth.sh').is_file())
+        self.assertEqual(launch.read_text(),'# user old launch')
+        self.assertFalse((self.root/'jandi_camera.sh').exists())
+        self.assertTrue(any(x.read_text()==original for x in d.STATE_DIR.glob('script-originals/*/jandi_camera.sh')))
+        self.assertEqual((self.root/'jandi_depth.sh').read_text(),'# user modified helper')
+
+    def test_jetson_install_detects_actual_realsense_workspace(self):
+        prefix=self.root/'realsense_ws/install/realsense2_camera'
+        setup=prefix/'share/realsense2_camera/local_setup.bash'
+        setup.parent.mkdir(parents=True);setup.write_text('# existing driver')
+        with patch.object(d,'TOOLS_DIR',self.root/'tools'),contextlib.redirect_stdout(io.StringIO()):
+            d.install('jetson')
+        cfg=json.loads((d.CONFIG_DIR/'deployment.json').read_text())
+        self.assertIn(str(prefix),cfg['dependency_prefixes'])
+        self.assertFalse((d.CONFIG_DIR/'realsense.launch.py').exists())
 
     def test_backup_branch_is_not_an_accepted_version(self):
         with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
