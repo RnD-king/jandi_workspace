@@ -230,10 +230,10 @@ struct CameraPose { int32_t yaw; int32_t pitch; };
 struct CameraConfig {
     int yaw_id{21};
     int pitch_id{22};
-    CameraPose forward{2077, 1537};
-    CameraPose down{2036, 2013};
-    CameraPose goal{2054, 966};
-    CameraPose ball_view{2036, 1750};
+    CameraPose forward{2048, 1537};
+    CameraPose down{2048, 2013};
+    CameraPose goal{2048, 966};
+    CameraPose ball_view{2048, 1750};
     double move_sec{0.5};
     double settle_sec{0.0};
     double position_tolerance_ratio{0.10};

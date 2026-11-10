@@ -438,11 +438,11 @@ int main() {
         auto overflowing_config = config;
         overflowing_config.move_sec = 1e308;
         Rejects([&] { overflowing_config.Validate(); });
-        Require(config.Target(1).yaw==2036 && config.Target(1).pitch==2013 &&
-                config.Target(2).yaw==2077 && config.Target(2).pitch==1537 &&
-                config.Target(3).yaw==2054 && config.Target(3).pitch==966 &&
-                config.Target(9).yaw==2036 && config.Target(9).pitch==1750 &&
-                config.Target(10).yaw==2036 && config.Target(10).pitch==1750,
+        Require(config.Target(1).yaw==2048 && config.Target(1).pitch==2013 &&
+                config.Target(2).yaw==2048 && config.Target(2).pitch==1537 &&
+                config.Target(3).yaw==2048 && config.Target(3).pitch==966 &&
+                config.Target(9).yaw==2048 && config.Target(9).pitch==1750 &&
+                config.Target(10).yaw==2048 && config.Target(10).pitch==1750,
                 "four camera poses and two BALL_VIEW arm policies");
         Rejects([&] { config.Target(0); });
         CameraMotion camera(config);
@@ -454,11 +454,11 @@ int main() {
         camera.Merge(base);
         Require(!camera.Active() && camera.OverrideEnabled(), "FORWARD hold started an active camera command");
         for (int id : Dxl::MotorIds()) {
-            Require(base.at(id)==(id==21?2077:id==22?1537:2048), "FORWARD hold changed body or missed calibrated head pose");
+            Require(base.at(id)==(id==21?2048:id==22?1537:2048), "FORWARD hold changed body or missed calibrated head pose");
         }
         auto startup_body = InitialPose();
         camera.Merge(startup_body);
-        Require(startup_body.at(21)==2077 && startup_body.at(22)==1537, "body overwrote startup FORWARD hold");
+        Require(startup_body.at(21)==2048 && startup_body.at(22)==1537, "body overwrote startup FORWARD hold");
         Require(camera.Update(t0)==CameraMotion::Result::Idle, "FORWARD hold generated fake camera activity");
         camera.Start(3, base, t0);
         Require(camera.Update(t0) == CameraMotion::Result::Command, "camera did not start");
@@ -470,16 +470,16 @@ int main() {
         auto now=t0+90ms;
         for (int i=2;i<25;++i) { now+=20ms; camera.Update(now); }
         camera.Merge(base);
-        Require(base.at(21)==2054 && base.at(22)==966, "camera target not reached");
+        Require(base.at(21)==2048 && base.at(22)==966, "camera target not reached");
         Require(camera.Update(now+20ms)==CameraMotion::Result::Verify && camera.Active(), "camera completed without encoder verification");
-        Require(!camera.ConfirmArrival({2054,1200}) && camera.Active(),"out-of-range pitch was accepted");
+        Require(!camera.ConfirmArrival({2048,1200}) && camera.Active(),"out-of-range pitch was accepted");
         Require(!camera.ConfirmArrival({1800,966}),"out-of-range yaw was accepted");
-        Require(!camera.ConfirmArrival({2054,-1}),"invalid encoder value was accepted");
+        Require(!camera.ConfirmArrival({2048,-1}),"invalid encoder value was accepted");
         Require(camera.ConfirmArrival({2259,1062}),"target-value ten-percent tolerance was not inclusive");
         Require(camera.Update(now+220ms)==CameraMotion::Result::Idle, "completed camera emitted completion again");
         auto next_body = InitialPose(); camera.Merge(next_body);
         for (int id : Dxl::MotorIds()) {
-            Require(next_body.at(id)==(id==21?2054:id==22?966:2048), "override changed body motor or was cleared after DONE");
+            Require(next_body.at(id)==(id==21?2048:id==22?966:2048), "override changed body motor or was cleared after DONE");
         }
         Require(!camera.Active() && camera.OverrideEnabled(), "persistent override lost");
         pass("camera calibration, encoder-gated completion, target-relative tolerance and persistent merge");

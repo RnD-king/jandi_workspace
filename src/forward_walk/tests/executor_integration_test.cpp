@@ -149,7 +149,7 @@ int main() {
               !node->camera_motion_->Active(),"startup status or FORWARD hold state mismatch");
         for(std::size_t i=0;i+1<Dxl::packets.size();++i)
             Check(Dxl::packets[i].at(21)==2048&&Dxl::packets[i].at(22)==2048,"camera override began before startup completed");
-        Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537,"startup FORWARD goal was not transmitted");
+        Check(Dxl::current.at(21)==2048&&Dxl::current.at(22)==1537,"startup FORWARD goal was not transmitted");
         Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"startup missed symmetric arm targets");
         Check(Dxl::packets.front().at(15)>1379&&Dxl::packets.front().at(15)<2048&&
               Dxl::packets.front().at(16)>2048&&Dxl::packets.front().at(16)<2765,
@@ -190,7 +190,7 @@ int main() {
         std::cout<<"PASS health fault context, communication loss, recovery and read-only monitoring\n";
 
         pump([&]{return node->action_transactions_.completed.Contains(9001);});flush();
-        Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537,"ordinary P2P JSON overwrote FORWARD head pose");
+        Check(Dxl::current.at(21)==2048&&Dxl::current.at(22)==1537,"ordinary P2P JSON overwrote FORWARD head pose");
         Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,"LINE walking missed arm pose override");
         Check(Dxl::current.at(13)==2048,"LINE arm override changed ID 13");
         Check(Dxl::current.at(19)==1968,"walking did not override ID19");
@@ -239,7 +239,7 @@ int main() {
               "ordinary DEFAULT_POSE_MODE inherited the bench timing override");
         Check(Dxl::current.at(0)==2248 && Dxl::current.at(15)==1379 &&
               Dxl::current.at(16)==2765 && Dxl::current.at(19)==1968 &&
-              Dxl::current.at(21)==2054 && Dxl::current.at(22)==966,
+              Dxl::current.at(21)==2048 && Dxl::current.at(22)==966,
               "ordinary action lost JSON/arm/gripper behavior or overwrote the fixed GOAL camera hold");
         std::cout<<"PASS fixed full-body shoot pose, one interpolation, duplicate/busy handling and persistent GOAL hold\n";
 
@@ -318,7 +318,7 @@ int main() {
         Check(Count(cameras,1001,Status::ACK)==2&&Count(cameras,1001,Status::DONE)==1,"camera duplicate lifecycle mismatch");
         Check(Count(cameras,2002,Status::ACK)==0&&Count(cameras,0,Status::ACK)==0&&
               Count(cameras,9000,Status::ACK)==0,"invalid/busy camera ACKed");
-        Check(Dxl::current.at(21)==2054&&Dxl::current.at(22)==966,"persistent GOAL overwritten by body");
+        Check(Dxl::current.at(21)==2048&&Dxl::current.at(22)==966,"persistent GOAL overwritten by body");
         Check(Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,
               "queued LINE program ignored camera-GOAL lowered arm targets");
         action(1001,11);camera(1001,3);flush();
@@ -492,7 +492,7 @@ int main() {
                       "idle camera changed a non-arm body joint");
         Check(Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,
               "FORWARD camera did not simultaneously raise arms");
-        Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537&&
+        Check(Dxl::current.at(21)==2048&&Dxl::current.at(22)==1537&&
               node->motion_loop_timer_->is_canceled(),"idle camera final pose/timer mismatch");
         for(std::size_t i=1;i<Dxl::packet_times.size();++i)
             Check(Dxl::packet_times[i]-Dxl::packet_times[i-1]>=19ms,"body/camera writer compressed packets");
@@ -508,24 +508,24 @@ int main() {
               "BALL_VIEW did not load the shared YAML pitch calibration");
         camera(2004,10);
         pump([&]{return node->camera_transactions_.completed.Contains(2004);});flush();
-        Check(Dxl::current.at(21)==2036&&
+        Check(Dxl::current.at(21)==2048&&
               Dxl::current.at(22)==ball_view_pitch_tick&&
               Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,
               "BALL_VIEW_LINE did not hold outward shoulders with configured pitch");
         camera(2005,9);
         pump([&]{return node->camera_transactions_.completed.Contains(2005);});flush();
-        Check(Dxl::current.at(21)==2036&&
+        Check(Dxl::current.at(21)==2048&&
               Dxl::current.at(22)==ball_view_pitch_tick&&
               Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,
               "BALL_VIEW did not lower shoulders without moving the head");
         camera(2006,1);
         pump([&]{return node->camera_transactions_.completed.Contains(2006);});flush();
-        Check(Dxl::current.at(21)==2036&&Dxl::current.at(22)==2013&&
+        Check(Dxl::current.at(21)==2048&&Dxl::current.at(22)==2013&&
               Dxl::current.at(15)==1071&&Dxl::current.at(16)==3073,
               "original HURDLE DOWN pose was altered");
         camera(2007,2);
         pump([&]{return node->camera_transactions_.completed.Contains(2007);});flush();
-        Check(Dxl::current.at(21)==2077&&Dxl::current.at(22)==1537&&
+        Check(Dxl::current.at(21)==2048&&Dxl::current.at(22)==1537&&
               Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,
               "FORWARD return from BALL_VIEW/DOWN failed");
         // Aborted command must recover from the LAST SUCCESSFUL arm pose,
@@ -580,7 +580,7 @@ int main() {
         pump([&]{return !node->camera_motion_->Active();});Dxl::fail_write=false;flush();
         Check(Count(cameras,4001,Status::ACK)==1&&Count(cameras,4001,Status::DONE)==0&&
               node->camera_transactions_.active_id==0,"failed writer produced fake camera DONE");
-        Check(Dxl::current.at(21)==2077 && Dxl::current.at(22)==1537 &&
+        Check(Dxl::current.at(21)==2048 && Dxl::current.at(22)==1537 &&
               node->camera_arm_forward_,
               "failed DOWN camera write incorrectly retained the uncommitted DOWN arm mode");
         // A failed normal BODY write also must not fabricate DONE.
@@ -596,7 +596,7 @@ int main() {
               "normal body write recovery lost FORWARD shoulder goals");
         std::cout<<"PASS queued-start/write failures stop consistently without fake DONE\n";
         // Neither elapsed playback nor a failed read is camera completion.
-        Dxl::measured={{21,2077},{22,1537}};
+        Dxl::measured={{21,2048},{22,1537}};
         camera(61001,1);
         const auto verify_start=std::chrono::steady_clock::now();
         pump([&]{return std::chrono::steady_clock::now()-verify_start>300ms;});flush();
@@ -605,7 +605,7 @@ int main() {
         camera(61001,1);flush();
         Check(Count(cameras,61001,Status::ACK)==2 && Count(cameras,61001,Status::DONE)==0,
               "duplicate ACK bypassed encoder verification");
-        Dxl::measured={{21,2036},{22,2013}};Dxl::fail_camera_read=true;
+        Dxl::measured={{21,2048},{22,2013}};Dxl::fail_camera_read=true;
         const auto failed_read_at=std::chrono::steady_clock::now();
         pump([&]{return std::chrono::steady_clock::now()-failed_read_at>200ms;});flush();
         Check(Count(cameras,61001,Status::DONE)==0,"failed encoder read emitted DONE");
@@ -620,7 +620,7 @@ int main() {
 
         // Reverse failure: head really is DOWN; an uncommitted FORWARD
         // camera request must not reopen shoulders during the next walk.
-        Check(Dxl::current.at(21)==2036 && Dxl::current.at(22)==2013,
+        Check(Dxl::current.at(21)==2048 && Dxl::current.at(22)==2013,
               "reverse aborted-camera fixture did not start from DOWN");
         camera(62001,2);
         Dxl::fail_write=true;
@@ -669,7 +669,7 @@ int main() {
             if (!(node->scan_elbow_stage_==MainNode::ScanElbowStage::kIdle &&
                   Dxl::current.at(side.second)==home &&
                   Dxl::current.at(side.second==17?18:17)==other &&
-                  Dxl::current.at(21)==2077 &&
+                  Dxl::current.at(21)==2048 &&
                   Dxl::current.at(22)==1537 &&
                   Count(cameras,id,Status::ACK)==1 && Count(cameras,id,Status::DONE)==1)) {
                 std::cerr<<"Curve scan failure: id="<<id

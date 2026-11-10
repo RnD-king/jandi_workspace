@@ -27,10 +27,11 @@ update는 최신 소스 YAML을 가져온다. 로컬 미커밋 수정이 있으�
 직접 ROS 노드를 실행하는 경우에는 해당 소스 파일을 VISION_CORE_ALGORITHM_CONFIG로 지정한다.
 엔진 선택용 yolo26_runtime.yaml도 선택 버전의 소스 파일을 읽는다.
 
-### 이전 홈 튜닝 방식에서 한 번 전환하기
+### 배포 도구 갱신 (소스 YAML 전환·증분 빌드 적용)
 
 홈 명령은 ~/.local/share/jandi-tools/jandi_deploy.py 복사본을 실행하므로
-소스만 업데이트하는 것으로는 기존 배포 도구가 바뀌지 않는다. 이번 전환 때 한 번 갱신한다.
+소스만 업데이트하는 것으로는 기존 배포 도구가 바뀌지 않는다. 소스 YAML 선택이나 증분 빌드처럼
+배포 도구 코드가 변경된 경우 해당 복사본도 한 번 갱신한다.
 이 명령은 도구만 설치하고 빌드·노드를 실행하지 않는다.
 
 PC에서 수정한 소스의 도구를 설치한 뒤 두 버전을 push한다:
@@ -55,6 +56,13 @@ git -C ~/jandi archive origin/main src/vision/scripts/jandi_deploy.py | tar -x -
 이후 일반 알고리즘 값 변경은 기존 push/update 흐름만 사용한다. 배포 도구 코드 자체가
 변경되는 경우에는 위와 같이 도구 복사본도 갱신해야 한다. 배포 도구를 PC에 설치하면
 현재 정상 Release를 재빌드하지 않아도 시작 시 새 소스 YAML 선택 방식이 적용된다.
+
+보행 조향 게인은 `line.walk.offset_gain: 0.2`, `heading_gain: 0.4`다.
+유실복구의 별도 게인과 조향 임계값은 유지한다. 두 보행 게인은 이전 값의 0.8배다.
+MAIN/FAST의 모든 모션 JSON과 기본 FORWARD/DOWN/GOAL/BALL_VIEW 및 슈팅 테스트 자세의
+21번 yaw는 2048로 통일한다. 22번 pitch와 다른 관절·타이밍은 유지한다.
+목 탐색은 JSON이 아닌 C++에서 만들며, 설정 중심 2048에 기존 탐색각의 tick 차이를 더한다.
+탐색 각도·방향·순서·복귀 로직은 유지한다. 카메라 기본값 C++ 변경은 빌드 후 적용된다.
 
 기본 가중치:
 
@@ -145,8 +153,8 @@ MAIN/FAST 각각 Git worktree와 build/install을 사용하고, 기존 `~/jandi`
 ```text
 ~/jandi_main/src/                    MAIN 소스 worktree
 ~/jandi_fast/src/                    FAST 소스 worktree
-~/jandi_main/releases/<빌드ID>/      MAIN core/ros/build/log
-~/jandi_fast/releases/<빌드ID>/      FAST core/ros/build/log
+~/jandi_main/releases/<기존ID>/      MAIN 증분 core/ros/build/log
+~/jandi_fast/releases/<기존ID>/      FAST 증분 core/ros/build/log
 ~/jandi_main/current.json            MAIN의 core+ROS 경로 한 묶음
 ~/jandi_fast/current.json            FAST의 core+ROS 경로 한 묶음
 ~/jandi_main/install                 성공한 MAIN ROS 설치본의 편의 링크
@@ -156,19 +164,36 @@ MAIN/FAST 각각 Git worktree와 build/install을 사용하고, 기존 `~/jandi`
 ```
 
 실행은 편의 링크 두 개를 조합하지 않고 **current.json 하나**를 읽는다.
-새 최종 경로에 처음부터 설치하고, 전체 성공 후 current.json을 원자적으로 전환한다.
-빌드 중간 실패는 이전 성공 설치본에 영향을 주지 않는다. 실패 로그는 새 release에 남는다.
-같은 소스와 빌드 설정이며 필수 파일·설치 파일 해시가 정상인 경우 빌드를 생략한다.
-설치 파일 누락·변조, 알고리즘 소스 YAML 변경, 빌드 설정 변경은 생략하지 않는다.
+MAIN/FAST는 서로 다른 빌드·설치 위치를 유지한다. 매 업데이트마다 새 Release를 만들지 않고,
+현재 설치본의 `build/core`, `build/ros`, `core`, `ros` 경로를 그대로 재사용한다.
+기존 설치본의 빌드 디렉터리가 남아 있으면 그 캐시도 바로 이어 쓰므로 전환을 위한
+전체 재빌드를 강제하지 않는다. 처음 설치하거나 재사용할 캐시가 없으면 해당 버전의
+`releases/incremental/`에 작업공간을 만든다. 설치 경로를 옮기지 않아 CMake 캐시·링크 경로를 유지한다.
+폴더 이름이 이전 커밋 ID여도 실제 설치 커밋은 `current.json`의 commit으로 확인한다.
+
+새 커밋이면 CMake/colcon 빌드 절차를 실행하되, 기존 오브젝트와 의존성 정보로 필요한 부분만
+컴파일한다. 문서·Python·YAML만 바꾼 경우에도 절차는 호출될 수 있지만 변경 없는 C++ 파일을
+처음부터 다시 컴파일하도록 캐시를 지우지는 않는다. 같은 소스와 설정이며 파일 검증이 정상이면
+절차 자체도 생략한다. `--force`는 이 생략을 해제하며 기존 캐시를 삭제하지 않는다.
+
+설치를 같은 위치에 갱신하므로 core 설치 후 ROS 실패 시 파일 일부가 이미 바뀔 수 있다.
+빌드 시작 전에 작업공간에 `building.json`을 기록하고, 설치·검사·성공 기록까지 모두 끝나야
+이 표시를 제거한다. 실패·중단·전원 차단 후에는 예전 성공 기록이 남아 있어도 해당 버전을
+실행하지 않는다. 다른 버전 설치는 영향을 받지 않는다. 같은 update 명령을 다시 실행하면
+같은 캐시로 재시도한다. 정상 종료한 JANDI에서만 업데이트할 수 있다.
 
 ```bash
+~/jandi_update.sh main
+~/jandi_update.sh fast
+# 같은 소스여도 빌드 절차를 다시 실행할 때:
 ~/jandi_update.sh main --force
-~/jandi_update.sh fast --force
 python3 ~/.local/share/jandi-tools/jandi_deploy.py status
 ```
 
-이전 설치본으로 복귀할 때는 전체 종료 후 이전 release의 `complete.json`을 확인하여
-같은 버전의 `current.json`으로 복사한다. core와 ROS 경로를 따로 편집하지 않는다.
+로그는 작업공간 `build.log`에 커밋·시간 헤더와 함께 누적한다. 새 설치가 생길 때마다
+이전 빌드 폴더를 생성하지 않는다. 이미 남아 있는 예전 Release와 백업 브랜치는 삭제하지 않는다.
+재사용 중인 설치 폴더의 `complete.json`은 최신 성공 기록으로 갱신된다. 이전 manifest만
+복사해도 과거 바이너리로 돌아가는 것은 아니므로, 그 방법으로 롤백하지 않는다.
 
 실행 중인 버전의 업데이트는 거부한다. 버전 변경은 기존 콘솔에서 전체 종료한 뒤 한다.
 SSH 재연결 후 `run_jandi.sh`는 실행 중인 기존 콘솔에 연결하고 새 노드를 만들지 않는다.
@@ -207,7 +232,7 @@ PC 초기 명령 설치:
 python3 ~/my_cv/src/vision/scripts/jandi_deploy.py install --machine pc
 ```
 
-PC도 Release 실행본은 `~/jandi_main`, `~/jandi_fast`의 독립 release를 사용한다.
+PC도 Release 실행본과 증분 빌드 캐시는 `~/jandi_main`, `~/jandi_fast`로 분리한다.
 기존 `~/my_cv/install`, `~/vision_core/install`은 삭제·교체하지 않는다.
 
 ## 엔진 경로: yolo26_runtime.yaml 한 곳에서 관리

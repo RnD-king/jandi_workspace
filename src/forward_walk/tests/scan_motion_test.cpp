@@ -8,9 +8,19 @@
 using namespace motion_executor;
 int main() {
   CameraConfig cfg;
+  assert(cfg.forward.yaw==2048 && cfg.down.yaw==2048 &&
+         cfg.goal.yaw==2048 && cfg.ball_view.yaw==2048);
   CameraMotion camera(cfg);
   RawPositions positions{{21,cfg.forward.yaw},{22,cfg.forward.pitch}};
   const auto start=Clock::now();
+  // Scan endpoints use the configured center, not the last commanded yaw.
+  auto off_center=positions;off_center.at(21)=2171;
+  CameraMotion centered_scan(cfg);
+  centered_scan.StartScan(true,45,.5,.5,.5,off_center,start);
+  assert(centered_scan.TargetPose().yaw==2560);
+  CameraMotion centered_right(cfg);
+  centered_right.StartScan(false,45,.5,.5,.5,off_center,start);
+  assert(centered_right.TargetPose().yaw==1536);
   assert(IsReadyWalkAction(34) && IsReadyWalkAction(36) && !IsReadyWalkAction(35));
   WalkInterActionHold walk_hold;walk_hold.SetDuration(.2);walk_hold.Complete(36,start);
   assert(walk_hold.Waiting(start+std::chrono::milliseconds(100)));
@@ -86,6 +96,7 @@ int main() {
   CameraMotion points(cfg);
   auto now=start+std::chrono::seconds(30);
   points.StartScan(true,25,.5,.5,.5,positions,now,true,2.0);
+  assert(points.TargetPose().yaw==2048+std::lround(25*4096.0/360.0));
   assert(!points.HoldScan());
   int stops=0;bool crossed_zero=false;bool wrong_encoder_checked=false;
   for(int tick=0;tick<500 && stops<3;++tick) {
