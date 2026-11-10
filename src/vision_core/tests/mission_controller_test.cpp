@@ -538,7 +538,7 @@ int main() {
   assert(r.ball.mode==BallMode::kFailed);
 
   camera_config.enable_ball=false; camera_config.enable_hurdle=true;
-  camera_config.hurdle.down_search_min_hits=1; camera_config.hurdle.stable_window=camera_config.hurdle.stable_min_hits=1;
+  camera_config.hurdle.down_search_min_hits=1; camera_config.hurdle.stable_window=camera_config.hurdle.stable_min_hits=1; camera_config.hurdle.down_v_min_hits=camera_config.hurdle.down_two_step_min_hits=camera_config.hurdle.contact_v_min_hits=1;
 
   camera_config.hurdle.upper_acquire_v_px=480;
 
@@ -1231,7 +1231,7 @@ int main() {
   // must be set when consuming verified READY evidence at DONE.
   auto hurdle_ready_cfg=ready_cfg;
   hurdle_ready_cfg.enable_ball=false; hurdle_ready_cfg.enable_hurdle=true;
-  hurdle_ready_cfg.hurdle.down_search_min_hits=1; hurdle_ready_cfg.hurdle.stable_window=hurdle_ready_cfg.hurdle.stable_min_hits=1;
+  hurdle_ready_cfg.hurdle.down_search_min_hits=1; hurdle_ready_cfg.hurdle.stable_window=hurdle_ready_cfg.hurdle.stable_min_hits=1; hurdle_ready_cfg.hurdle.down_v_min_hits=hurdle_ready_cfg.hurdle.down_two_step_min_hits=hurdle_ready_cfg.hurdle.contact_v_min_hits=1;
   hurdle_ready_cfg.hurdle.upper_acquire_v_px=480;
   MissionController hurdle_ready(hurdle_ready_cfg);
   AdmitObjectAtRest(hurdle_ready, Ball(.5,.3), MissionType::kHurdle);

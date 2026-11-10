@@ -243,11 +243,37 @@ void ExecuteStageNeedsRealPoseAndStableReadiness(MissionType mission) {
     input.now_sec+=.12;held=outside.Step(input);assert(held.command.action_id==0);
   }
   input.allow_new_body_actions=true;input.now_sec+=.12;held=outside.Step(input);
-  assert(held.command.action_id==0);
-  assert(!held.test_ready && !held.test_executing);
+  if (mission == MissionType::kHurdle) {
+    // Once the real contact vote has qualified, later lower v cannot revoke COMMIT.
+    assert(held.command.action_id!=0 && held.command.action==MissionAction::kStepForwardHalf);
+    assert(held.test_executing);
+  } else {
+    assert(held.command.action_id==0);
+    assert(!held.test_ready && !held.test_executing);
+  }
   t.Commit(mission==MissionType::kBall ? MissionAction::kPickBall :
       mission==MissionType::kGoal ? MissionAction::kShoot : MissionAction::kStepForwardHalf);
   assert(t.out.command.action_id>id);
+}
+void HurdleStationaryGatePreservesRawVotes() {
+  for (bool manual : {false,true}) {
+    for (int high : {2,3}) {
+      Trial t(MissionType::kHurdle,3);
+      t.in.manual_observation_control=manual;
+      t.PrepareStage(MissionType::kHurdle,3);
+      for (int i=0;i<10;++i) {
+        t.in.hurdle_target=Target(320,i<high ? 408 : 0);
+        t.Tick();
+      }
+      assert(t.out.hurdle.tracked.center_px.v<408);
+      assert(t.out.test_ready==(high==3));
+      if (high==3) {
+        t.in.hurdle_target.reset();
+        t.Commit(MissionAction::kStepForwardHalf);
+        assert(t.out.hurdle.mode==HurdleMode::kContactWalk);
+      }
+    }
+  }
 }
 void WeightedCoordinatesUseHistory() {
   ObjectObservationWindow w;
@@ -309,7 +335,7 @@ void FineAdjustmentUsesFreshEqualMeans() {
   g=goal.Compute({},Target(),{true,0,.5,0,1},640,480,1.4,false,
                  goal_camera,{},false);
   assert(b.action.action==MissionAction::kNone);
-  assert(h.action.action==MissionAction::kNone);
+  assert(h.action.action==MissionAction::kStepForwardHalf); // Contact vote remains committed across DONE.
   assert(g.action.action==MissionAction::kNone);
 }
 
@@ -448,6 +474,7 @@ void RejectZeroObservation() {
 }
 }
 int main() {
+  HurdleStationaryGatePreservesRawVotes();
   for(auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {
     FarStageStopsAtBoundary(mission);NearStageStopsBeforeMission(mission);
     ExecuteStageNeedsRealPoseAndStableReadiness(mission);

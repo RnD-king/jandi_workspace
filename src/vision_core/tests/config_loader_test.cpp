@@ -620,6 +620,12 @@ int main(int argc, char **argv) {
   assert(rejected_goal);
   assert(c.goal.post_pickup_straight_blocks_required == 1);
   assert(c.goal.post_pickup_walk_fallback_actions == 3);
+  for (const auto* field : {"down_v_min_hits: 3", "down_two_step_min_hits: 7", "contact_v_min_hits: 3"}) {
+    const std::string from(field), key=from.substr(0,from.find(':'));
+    Reject(text.str(),from,"");
+    for (const auto* value : {"0","-1","11","not_an_int"})
+      Reject(text.str(),from,key+": "+value);
+  }
   Reject(text.str(), "post_pickup_straight_blocks_required: 1", "");
   Reject(text.str(), "post_pickup_straight_blocks_required: 1",
          "post_pickup_straight_blocks_required: -1");

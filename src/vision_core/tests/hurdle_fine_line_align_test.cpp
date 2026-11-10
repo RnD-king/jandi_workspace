@@ -33,7 +33,7 @@ struct Trial {
                  double left_turn=0.0,double right_turn=0.0)
       : controller([&] {
     auto c = LoadDefaultAlgorithmConfig().hurdle;
-    c.stable_window = c.stable_min_hits = c.down_search_min_hits = 1;
+    c.stable_window = c.stable_min_hits = c.down_search_min_hits = 1; c.down_v_min_hits=c.down_two_step_min_hits=c.contact_v_min_hits=1;
     c.fine_line_measured_turn_deg=measured_turn;
     c.fine_line_measured_left_turn_deg=left_turn;
     c.fine_line_measured_right_turn_deg=right_turn;

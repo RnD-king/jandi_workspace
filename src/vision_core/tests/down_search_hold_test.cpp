@@ -140,7 +140,8 @@ void FailedSearchConfirmationResumes(bool partial_hits) {
   tick(2.2);assert(r.action.action==MissionAction::kStepForwardOne);
   for(int i=0;i<7;++i)tick(2.4+.1*i,t,{false,true,false});
   tick(3.2,{}, {true,false,false});assert(r.mode==HurdleMode::kCoarseAdjust);
-  h.UseVerifiedObservation(t,std::deque<bool>(10,true),640,480);tick(4.3,{}, {false,false,true});
+  const std::deque<std::optional<double>> raw_v(10,t.center_px.v);
+  h.UseVerifiedObservation(t,std::deque<bool>(10,true),640,480,&raw_v);tick(4.3,{}, {false,false,true});
   assert(r.action.action==MissionAction::kStepForwardTwo && h.DownSearchStepsRemaining()==1);
   h.UseVerifiedObservation({},std::deque<bool>(10,false),640,480);tick(5.4,{}, {false,false,true});
   assert(r.mode==HurdleMode::kRecoveryStep);

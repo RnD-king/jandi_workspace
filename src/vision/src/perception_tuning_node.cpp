@@ -1162,10 +1162,14 @@ private:
     if (!qualified_start) return std::nullopt;
 
     result.manual_object_hits.clear();
+    result.manual_hurdle_v_samples.clear();
     result.manual_pose_hits.clear();
     result.manual_near_hits.clear();
     for (std::size_t j = *qualified_start; j < *qualified_start+stable_window; ++j) {
       result.manual_object_hits.push_back(valid_target(*window[j]));
+      const auto& raw = target_of(*window[j]);
+      result.manual_hurdle_v_samples.push_back(valid_target(*window[j]) && raw && std::isfinite(raw->center_px.v)
+          ? std::optional<double>(raw->center_px.v) : std::nullopt);
       const auto& pose=window[j]->prepared.goal_pose;
       result.manual_pose_hits.push_back(valid_target(*window[j]) && pose.valid &&
           std::isfinite(pose.x_m) && std::isfinite(pose.z_m) && pose.z_m>0 &&

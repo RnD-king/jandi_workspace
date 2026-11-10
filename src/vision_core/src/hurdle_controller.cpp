@@ -11,6 +11,12 @@ namespace vision_core {
 namespace {
 constexpr double kEpsilon = 1e-9;
 double Denom(double value) { return std::max(value, 1e-6); }
+int VHits(const std::deque<std::optional<double>>& samples,
+          double threshold, bool below = false) {
+  return static_cast<int>(std::count_if(samples.begin(), samples.end(),
+      [=](const auto& v) { return v && std::isfinite(*v) &&
+          (below ? *v < threshold : *v >= threshold); }));
+}
 double MeasuredTurnDeg(const HurdleConfig &config, MissionAction action) {
   const double directional = action == MissionAction::kTurnLeft
       ? config.fine_line_measured_left_turn_deg : config.fine_line_measured_right_turn_deg;
@@ -62,6 +68,8 @@ double HurdleController::Clamp(double value, double low, double high) {
 }
 
 void HurdleController::BeginFineLineObservation(double now_sec) {
+  v_samples_.clear();
+  fine_v_ready_ = false;
   fine_line_history_.clear();
   fine_line_fresh_.reset();
   fine_line_qualified_ = false;
@@ -147,9 +155,17 @@ void HurdleController::FinishFineLineAlign(HurdleResult &result) {
 }
 
 void HurdleController::UpdateTracker(const std::optional<ObjectTarget> &target,
-                                     int image_width, int image_height) {
+                                     int image_width, int image_height, bool collect_v) {
   const bool detected = target && image_width > 1 && image_height > 1;
   hit_history_.push_back(detected);
+  const std::optional<double> raw_v = detected && std::isfinite(target->center_px.v)
+      ? std::optional<double>(target->center_px.v) : std::nullopt;
+  if (collect_v) {
+    v_samples_.push_back(raw_v);
+    while (v_samples_.size() > static_cast<std::size_t>(config_.stable_window))
+      v_samples_.pop_front();
+    UpdateVQualifications();
+  }
   // Initial DOWN walk uses 6/3 only until its first complete window.
   // Subsequent missing-target 10 steps use continuous 8/3, including
   // their post-DONE 0.3s pauses. Detected distance steps do NOT use moving
@@ -160,17 +176,21 @@ void HurdleController::UpdateTracker(const std::optional<ObjectTarget> &target,
     const std::size_t window = !config_.race_round2_fast_enabled
         ? static_cast<std::size_t>(config_.stable_window)
         : down_initial_window_complete_ ? static_cast<std::size_t>(kFastStationaryWindow) : 6U;
-    down_v_samples_.push_back(detected ?
-        std::optional<double>(target->center_px.v) : std::nullopt);
+    if (collect_v) down_v_samples_.push_back(raw_v);
     while (down_v_samples_.size() > window) down_v_samples_.pop_front();
     if (down_v_samples_.size() == window) {
       int valid = 0;
-      double sum_v = 0.0;
       for (const auto& v : down_v_samples_)
-        if (v) { ++valid; sum_v += *v; }
+        if (v && std::isfinite(*v)) ++valid;
       if (valid >= config_.down_search_min_hits) {
         down_near_qualified_ = true; // latched; last frame need not detect
-        down_observed_v_px_ = sum_v / valid;
+        // Once proximity qualifies, later low/missing frames cannot undo it.
+        down_fine_qualified_ = down_fine_qualified_ ||
+            (down_v_samples_.size() >= static_cast<std::size_t>(config_.stable_window) &&
+             VHits(down_v_samples_, config_.fine_mode_v_px) >= config_.down_v_min_hits);
+        down_two_step_qualified_ =
+            VHits(down_v_samples_, config_.down_one_step_v_px, true) >=
+            config_.down_two_step_min_hits;
       }
     }
   }
@@ -260,7 +280,10 @@ HurdleResult HurdleController::Compute(
   verified_observation_pending_ = false;
   if (!verified && mode_ == HurdleMode::kFineAdjust && feedback.action_done)
     ClearTracking();
-  if (!verified && mode_ != HurdleMode::kWaitCameraDown &&
+  if (!verified &&
+      !((mode_ == HurdleMode::kFineLineAlign || mode_ == HurdleMode::kCoarseAdjust) &&
+        (feedback.action_active || feedback.action_done)) &&
+      mode_ != HurdleMode::kWaitCameraDown &&
       mode_ != HurdleMode::kReturnCameraToLine &&
       !(mode_ == HurdleMode::kFineLineAlign &&
         (camera.actual_mode != CameraMode::kDown || !camera.settled)) &&
@@ -294,9 +317,6 @@ HurdleResult HurdleController::Compute(
     result.fine_line_offset_px = reported_line->offset_px;
     result.fine_line_heading_deg = reported_line->heading_deg;
   }
-  if (fine_line_monitoring_ && tracked_.visible &&
-      tracked_.center_px.v >= config_.contact_v_px)
-    fine_line_close_ = true;
   switch (mode_) {
   case HurdleMode::kLineFollow:
     return result;
@@ -405,6 +425,7 @@ HurdleResult HurdleController::Compute(
       fine_line_last_valid_.reset();
       fine_line_fresh_.reset();
       fine_line_close_ = false;
+      contact_v_ready_ = false;
       last_seen_u_px_ = config_.target_u_px;
       mode_ = HurdleMode::kDownSearch;
       down_search_.Reset();
@@ -474,7 +495,7 @@ HurdleResult HurdleController::Compute(
           down_stationary_observing_ = true;
           down_stationary_start_sec_ = now_sec;
           ClearTracking();
-          ClearDownEvidence(); // No walking frames in the 1s stationary mean.
+          ClearDownEvidence(); // No walking frames in the fresh stationary vote window.
         }
         return result;
       }
@@ -506,16 +527,15 @@ HurdleResult HurdleController::Compute(
           decision == DownSearchWalk::Decision::kWaiting)
         return result;
       if (decision == DownSearchWalk::Decision::kFound) {
-        if (!config_.race_round2_fast_enabled && down_observed_v_px_) {
+        if (!config_.race_round2_fast_enabled) {
           // Legacy controller fixture: moving detection directly determines
           // the next v-based distance step. Production FAST requires stationarity.
-          const double v=*down_observed_v_px_;
-          if (v >= config_.fine_mode_v_px) {
+          if (down_fine_qualified_) {
             mode_=HurdleMode::kWaitFinePose; result.mode=mode_;
             result.action=Locomotion(MissionAction::kDefaultPoseMode);
             return result;
           }
-          result.action=Locomotion(v < config_.down_one_step_v_px ?
+          result.action=Locomotion(down_two_step_qualified_ ?
               MissionAction::kLineStraightUnit : MissionAction::kStepForwardOne);
           if (allow_new_body_actions) {
             down_distance_pending_=true;
@@ -524,7 +544,7 @@ HurdleResult HurdleController::Compute(
           }
           return result;
         }
-        // FAST: discovery only. A fresh stationary 8/n mean must precede
+        // FAST: discovery only. A fresh stationary 8/n vote window must precede
         // every distance decision. No blind 10/33 based on moving v.
         mode_=HurdleMode::kCoarseAdjust;
         ClearTracking();
@@ -596,10 +616,13 @@ HurdleResult HurdleController::Compute(
       }
       return result;
     }
-    if (tracked_.center_px.v >= config_.fine_mode_v_px) {
+    if (v_samples_.size() < static_cast<std::size_t>(config_.stable_window))
+      return result;
+    if (fine_v_ready_) {
       mode_=HurdleMode::kWaitFinePose; result.mode=mode_;
       result.action=Locomotion(MissionAction::kDefaultPoseMode);
-    } else result.action=Locomotion(tracked_.center_px.v < config_.down_one_step_v_px
+    } else result.action=Locomotion(VHits(v_samples_, config_.down_one_step_v_px, true) >=
+        config_.down_two_step_min_hits
         ? MissionAction::kStepForwardTwo : MissionAction::kStepForwardOne);
     return result;
   case HurdleMode::kWaitFinePose:
@@ -769,6 +792,19 @@ HurdleResult HurdleController::Compute(
   }
   case HurdleMode::kFineAdjust: {
     if (feedback.action_active && !feedback.action_done) return result;
+    // A confirmed contact vote is an irreversible decision for this hurdle.
+    // It survives later low/missing v, but never bypasses an active motion.
+    if (contact_v_ready_) {
+      if (allow_new_body_actions) {
+        mode_ = HurdleMode::kContactWalk;
+        completed_contact_steps_ = 0;
+        contact_step_pending_ = true;
+        contact_next_step_sec_ = 0.0;
+      }
+      result.mode = mode_;
+      result.action = Locomotion(MissionAction::kStepForwardHalf);
+      return result;
+    }
     if (!tracked_.visible) {
       if (lost_count_>=config_.lost_frames) {
         BeginStepRecovery(now_sec,false);result.mode=mode_;result.tracked={};
@@ -776,18 +812,7 @@ HurdleResult HurdleController::Compute(
       return result;
     }
     if (!ExecutionObservationReady()) return result;
-    if (tracked_.center_px.v>=config_.contact_v_px) {
-      if (allow_new_body_actions) {
-        mode_=HurdleMode::kContactWalk;
-        completed_contact_steps_=0;
-        contact_step_pending_=true;
-        contact_next_step_sec_=0.0;
-      }
-      result.mode=mode_;
-      result.action=Locomotion(MissionAction::kStepForwardHalf);
-    } else {
-      result.action=Locomotion(MissionAction::kStepForwardHalf);
-    }
+    result.action = Locomotion(MissionAction::kStepForwardHalf);
     return result;
   }
   case HurdleMode::kContactWalk:
@@ -949,9 +974,16 @@ void HurdleController::EnterContinuousNear(double now,MissionAction first_down_u
 
 void HurdleController::UseVerifiedObservation(
     const std::optional<ObjectTarget>& mean, const std::deque<bool>& hits,
-    int width, int height) {
+    int width, int height,
+    const std::deque<std::optional<double>>* raw_v_samples) {
+  // Replacing the displayed coordinate mean must not synthesize v votes.
+  const auto raw = raw_v_samples ? *raw_v_samples : v_samples_;
   ClearTracking();
-  UpdateTracker(mean, width, height);
+  UpdateTracker(mean, width, height, false);
+  v_samples_ = raw;
+  while (v_samples_.size() > static_cast<std::size_t>(config_.stable_window))
+    v_samples_.pop_front();
+  UpdateVQualifications();
   hit_history_ = hits;
   while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window))
     hit_history_.pop_front();
@@ -969,14 +1001,25 @@ void HurdleController::ClearObservationHistory() {
   stationary_recovery_.DiscardDetections();
 }
 
+void HurdleController::UpdateVQualifications() {
+  if (v_samples_.size() < static_cast<std::size_t>(config_.stable_window)) return;
+  fine_v_ready_ = fine_v_ready_ ||
+      VHits(v_samples_, config_.fine_mode_v_px) >= config_.down_v_min_hits;
+  const bool contact = VHits(v_samples_, config_.contact_v_px) >= config_.contact_v_min_hits;
+  if (fine_line_monitoring_ && contact) fine_line_close_ = true;
+  if (fine_pose_entered_ && contact) contact_v_ready_ = true;
+}
+
 void HurdleController::ClearDownEvidence() {
   down_near_qualified_ = false;
   down_near_hits_.clear();
   down_v_samples_.clear();
-  down_observed_v_px_.reset();
+  down_fine_qualified_ = down_two_step_qualified_ = false;
 }
 
 void HurdleController::ClearTracking() {
+  v_samples_.clear();
+  fine_v_ready_ = false;
   verified_observation_pending_ = false;
   observation_window_.Clear();
   hit_history_.clear();
@@ -1017,6 +1060,7 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   fine_line_fresh_.reset();
   fine_line_monitoring_ = fine_line_observing_ = fine_line_observation_started_ = false;
   fine_line_close_ = false;
+  contact_v_ready_ = false;
   fine_line_pending_action_=fine_line_repeat_action_=
       fine_line_next_side_action_=MissionAction::kNone;
   fine_line_repeat_remaining_=fine_line_next_side_remaining_=0;

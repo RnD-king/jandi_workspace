@@ -206,10 +206,13 @@ void TestStationaryRecoveryAndNoHurdleCentering() {
   for(int i=1;i<10;++i)
     h=hurdle.Compute(Target(.05,.9),640,480,now+=.1,down,{},StraightLine(),false);
   assert(h.action.action==MissionAction::kStepForwardHalf);
+  // This scenario tests uncommitted loss recovery; separately discard the confirmed contact.
+  hurdle.InvalidateTargetIdentity();
   for(int i=0;i<6;++i)h=hurdle.Compute({},640,480,now+=.1,down,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kRecoveryDown);
   for(int i=0;i<12;++i)h=hurdle.Compute(Target(.95,.7),640,480,now+=.1,down,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kFineAdjust && hurdle.RecoveryObservationsCompleted()==1);
+  hurdle.InvalidateTargetIdentity(); // Test loss before committing to contact again.
   for(int i=0;i<10;++i)h=hurdle.Compute({},640,480,now+=.1,down,{},StraightLine(),false);
   assert(h.mode==HurdleMode::kRecoveryDown);
   for(int i=0;i<60 && h.mode!=HurdleMode::kFailed;++i) {

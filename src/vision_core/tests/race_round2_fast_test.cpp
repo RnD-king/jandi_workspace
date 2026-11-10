@@ -118,8 +118,9 @@ void HurdleMovingDiscoveryNeedsStationaryVerification() {
   r=hurdle.Compute({},640,480,.55,down,Done(),{});
   assert(r.mode==HurdleMode::kCoarseAdjust);
   assert(r.action.action==MissionAction::kNone);
-  // A moving v>=220 cannot enter FINE. Only the stationary fresh mean can.
-  hurdle.UseVerifiedObservation(Seen(300),std::deque<bool>(8,true),640,480);
+  // A moving v>=220 cannot enter FINE. Only fresh stationary raw votes can.
+  const std::deque<std::optional<double>> raw_v(8,300.0);
+  hurdle.UseVerifiedObservation(Seen(300),std::deque<bool>(8,true),640,480,&raw_v);
   r=hurdle.Compute({},640,480,.65,down,Observed(),{});
   assert(r.mode==HurdleMode::kWaitFinePose);
   assert(r.action.action==MissionAction::kDefaultPoseMode);

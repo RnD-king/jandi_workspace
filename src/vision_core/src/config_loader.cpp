@@ -451,6 +451,12 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   HitsWithinWindow(c.hurdle.down_search_min_hits,c.hurdle.stable_window,
                    "hurdle.down_search_min_hits","hurdle.stable_window");
   PositiveInt(c.hurdle.near_v_min_hits, "hurdle.near_v_min_hits");
+  HitsWithinWindow(c.hurdle.down_v_min_hits,c.hurdle.stable_window,
+                  "hurdle.down_v_min_hits","hurdle.stable_window");
+  HitsWithinWindow(c.hurdle.down_two_step_min_hits,c.hurdle.stable_window,
+                  "hurdle.down_two_step_min_hits","hurdle.stable_window");
+  HitsWithinWindow(c.hurdle.contact_v_min_hits,c.hurdle.stable_window,
+                  "hurdle.contact_v_min_hits","hurdle.stable_window");
   HitsWithinWindow(c.hurdle.stable_min_hits, c.hurdle.stable_window,
                    "hurdle.stable_min_hits", "hurdle.stable_window");
   PositiveInt(c.hurdle.lost_frames, "hurdle.lost_frames");
@@ -828,6 +834,9 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
 
   const auto h = a["hurdle"];
   Assign(h, "ready_observation_end_weight", c.hurdle.ready_observation_end_weight);
+  Assign(h, "down_v_min_hits", c.hurdle.down_v_min_hits);
+  Assign(h, "down_two_step_min_hits", c.hurdle.down_two_step_min_hits);
+  Assign(h, "contact_v_min_hits", c.hurdle.contact_v_min_hits);
   Assign(h, "down_one_step_v_px", c.hurdle.down_one_step_v_px);
   Assign(h, "fine_mode_v_px", c.hurdle.fine_mode_v_px);
   Assign(h, "approach_short_v_px", c.hurdle.approach_short_v_px);

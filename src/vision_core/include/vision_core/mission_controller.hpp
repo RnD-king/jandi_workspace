@@ -177,6 +177,7 @@ struct MissionFrameInput {
   bool begin_manual_observation{false};
   // Real 10-frame evidence accompanying a manual READY average.
   std::deque<bool> manual_object_hits, manual_pose_hits, manual_near_hits;
+  std::deque<std::optional<double>> manual_hurdle_v_samples;
   bool manual_ready_mean{false};
   // 단발 튜닝처럼 여러 프레임에서 집계한 guide로 이번 LINE 판단만 수행한다.
   std::optional<LineGuide> line_decision_guide_override;
@@ -298,6 +299,7 @@ struct PerceptionFrameInput {
   bool begin_manual_observation{false};
   // Real 10-frame evidence accompanying a manual READY average.
   std::deque<bool> manual_object_hits, manual_pose_hits, manual_near_hits;
+  std::deque<std::optional<double>> manual_hurdle_v_samples;
   std::uint64_t ball_target_id{0}; // Identity of a validated MANUAL READY mean.
   std::uint64_t hurdle_target_id{0}, backboard_target_id{0};
   // PerceptionFrameInput only: one synthetic 40%-to-READY object mean.
@@ -694,6 +696,7 @@ private:
     std::optional<double> center_depth_m;
     GoalPoseObservation pose;
     std::deque<bool> hits, pose_hits, near_hits;
+    std::deque<std::optional<double>> hurdle_v_samples;
   };
   std::uint64_t moving_object_action_id_{0};
   CameraMode moving_object_camera_{CameraMode::kForward};
@@ -751,6 +754,7 @@ private:
   double settle_until_sec_{0.0};
   std::uint64_t last_settle_done_id_{0};
   std::deque<bool> decision_object_hits_;
+  std::deque<std::optional<double>> decision_hurdle_v_samples_;
   std::deque<bool> decision_qualified_object_hits_;
   bool decision_object_qualified_{false};
   std::deque<bool> decision_goal_pose_hits_;
