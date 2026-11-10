@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Versioned JANDI source synchronization, immutable installs and launch selection.
+"""Versioned JANDI source synchronization, incremental builds and launch selection.
 No command here sends robot services. Only explicit `run` starts the existing launcher.
 """
 from __future__ import annotations
@@ -327,10 +327,11 @@ def release_paths(version):
     return root,root/'current.json'
 
 
-def valid_release(data):
+def valid_release(data,*,allow_pending=False):
     if not isinstance(data,dict) or data.get('version') not in BRANCHES:return False
     if not all(isinstance(data.get(k),str) and data[k] for k in ('core','ros')):return False
     if Path(data['core']).parent!=Path(data['ros']).parent:return False
+    if not allow_pending and (Path(data['core']).parent/'building.json').exists():return False
     if not isinstance(data.get('artifacts',{}),dict):return False
     paths=[Path(data['core'])/'lib/libshared_vision_core.so',
            Path(data['core'])/'libexec/shared_vision_core/config_check',
@@ -352,6 +353,18 @@ def fingerprint(commit,cfg,roots):
     return h.hexdigest()
 
 
+
+def incremental_directory(root,version,previous):
+    """Keep existing CMake paths so caches, objects and installed prefixes stay reusable."""
+    if isinstance(previous,dict) and previous.get('version')==version and all(
+            isinstance(previous.get(k),str) for k in ('release','core','ros')):
+        release=Path(previous['release'])
+        if (release.parent==root/'releases' and Path(previous['core'])==release/'core' and
+                Path(previous['ros'])==release/'ros' and (release/'build').is_dir()):
+            return release
+    return root/'releases/incremental'
+
+
 def build_release(cfg,version,repo,roots,force=False):
     commit=git(repo,'rev-parse','HEAD');stamp=fingerprint(commit,cfg,roots)
     root,current=release_paths(version)
@@ -359,10 +372,10 @@ def build_release(cfg,version,repo,roots,force=False):
     if not force and valid_release(previous) and previous.get('version')==version and previous.get('fingerprint')==stamp:
         source_algorithm_config(roots,previous['core'],ros_environment(cfg,previous['ros'],previous['core']))
         print(f'[{version.upper()}] 같은 소스의 정상 설치본이 있습니다. 빌드 생략.');return previous
-    # Build into its final immutable prefix. Never move an installed tree with embedded RPATHs.
-    release=root/'releases'/f'{commit[:12]}-{time.time_ns()}'
+    # Reuse the version's build/install paths, including caches from an older release.
+    release=incremental_directory(root,version,previous)
     core=release/'core';ros=release/'ros';build=release/'build'
-    release.mkdir(parents=True)
+    release.mkdir(parents=True,exist_ok=True)
     log=release/'build.log';env=ros_environment(cfg,core=core)
     jobs=int(cfg.get('jobs',2))
     if jobs<1:raise RuntimeError('jobs는 1 이상이어야 합니다.')
@@ -376,22 +389,30 @@ def build_release(cfg,version,repo,roots,force=False):
                '--build-base',build/'ros','--install-base',ros,'--executor','sequential',
                '--cmake-args','-DCMAKE_BUILD_TYPE=Release','-DBUILD_TESTING=OFF',f'-DSHARED_VISION_CORE_ROOT={core}',
                *cfg.get('cmake_args',[])]]
+    # In-place install can change core before ROS finishes. Keep this marker across
+    # errors, SIGKILL and power loss; no previous success record may bypass it.
+    pending=release/'building.json'
+    atomic_json(pending,{'version':version,'commit':commit,'started_at':datetime.now().isoformat()})
     try:
-        with log.open('w') as stream:
+        with log.open('a') as stream:
+            stream.write('\n=== '+datetime.now().isoformat()+' '+version.upper()+' '+commit+' (incremental) ===\n')
+            stream.flush()
             for index,command in enumerate(commands,1):
                 print(f'[{version.upper()}] 빌드 {index}/{len(commands)} — {log}',flush=True)
                 call(command,env=env,cwd=release,stdout=stream,stderr=subprocess.STDOUT)
         if fingerprint(commit,cfg,roots)!=stamp:raise RuntimeError('빌드 중 소스가 변경됐습니다. 설치본을 활성화하지 않습니다.')
         data={'version':version,'branch':BRANCHES[version],'commit':commit,'fingerprint':stamp,
-              'core':str(core),'ros':str(ros),'release':str(release),'completed_at':datetime.now().isoformat()}
-        if not valid_release(data):raise RuntimeError('필수 설치 파일이 누락됐습니다.')
+              'core':str(core),'ros':str(ros),'release':str(release),'build_mode':'incremental',
+              'completed_at':datetime.now().isoformat()}
+        if not valid_release(data,allow_pending=True):raise RuntimeError('필수 설치 파일이 누락됐습니다.')
         source_algorithm_config(roots,core,env)
         data['artifacts']={str(p):hashlib.sha256(p.read_bytes()).hexdigest()
             for prefix in (core,ros) for p in prefix.rglob('*')
             if p.is_file() and '__pycache__' not in p.parts and p.suffix!='.pyc'}
-        # Both paths become visible in one manifest replacement, only after all installs succeed.
+        # Publish success only after every install and validation has completed.
         atomic_json(release/'complete.json',data)
         atomic_json(current,data)
+        pending.unlink()
         # Compatibility aliases are conveniences only. Launch always reads the atomic manifest.
         for link,target in ((root/'install',ros),(HOME_DIR/('vision_core_'+version)/'install',core)):
             if link.exists() and not link.is_symlink():
@@ -404,7 +425,7 @@ def build_release(cfg,version,repo,roots,force=False):
                 print('편의 링크를 갱신하지 못했습니다. current.json 설치본은 정상입니다: '+str(error),file=sys.stderr)
         print(f'[{version.upper()}] 설치 완료: {commit[:12]}');return data
     except Exception:
-        print('업데이트 실패. 기존 current.json과 설치본을 유지합니다. 로그: '+str(log),file=sys.stderr)
+        print('업데이트 실패. 이 버전은 설치 미완료로 실행을 차단합니다. 같은 명령으로 재시도하세요. 로그: '+str(log),file=sys.stderr)
         raise
 
 
@@ -442,6 +463,8 @@ def start(cfg,args):
     _,current=release_paths(version)
     if not current.exists():raise RuntimeError(f'{version.upper()} 설치본이 없습니다. jandi_update.sh {version}')
     data=json.loads(current.read_text())
+    if isinstance(data,dict) and isinstance(data.get('core'),str) and (Path(data['core']).parent/'building.json').exists():
+        raise RuntimeError(version.upper()+' 이전 업데이트가 완료되지 않아 실행을 차단합니다. ~/jandi_update.sh '+version+' 로 재시도하세요.')
     if not valid_release(data) or data.get('version')!=version:raise RuntimeError('설치본 버전이 다르거나 불완전합니다. 업데이트 또는 --force 재빌드가 필요합니다.')
     env=ros_environment(cfg,data['ros'],data['core'])
     env.update(JANDI_VERSION=version,JANDI_RELEASE=data['release'])

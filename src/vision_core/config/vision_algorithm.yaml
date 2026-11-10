@@ -88,8 +88,8 @@ vision_algorithm:
       right_unit_action: 36 # 34 기존: 직진→우회전, 36 신규: 우회전→직진; 변경 후 노드 재시작
 
       # 보행 방향·제자리 회전 판단
-      offset_gain: 0.25 # 위치 오차 가중치 (직선 O 보정 완화)
-      heading_gain: 0.50 # 직선 방향각 보정 우선
+      offset_gain: 0.2 # 위치 오차 가중치 (직선 O 보정 완화)
+      heading_gain: 0.4 # 직선 방향각 보정 우선
       steering_deadband: 0.08 # |라인 점수|가 이 값보다 작으면 직진, 크면 회전
       in_place_turn_score: 0.5 # |라인 점수|가 이 값보다 크면 WALK 제자리 회전 1회 후 재관측
 

@@ -143,13 +143,13 @@ public:
         // 카메라 yaw=좌우 회전, pitch=상하 회전. 자세 값은 각도가 아니라 encoder tick이다.
         camera_config_.yaw_id = declare_parameter<int>("camera_yaw_motor_id", 21);
         camera_config_.pitch_id = declare_parameter<int>("camera_pitch_motor_id", 22);
-        camera_config_.forward.yaw = declare_parameter<int>("camera_forward_yaw_tick", 2077);
+        camera_config_.forward.yaw = declare_parameter<int>("camera_forward_yaw_tick", 2048);
         camera_config_.forward.pitch = declare_parameter<int>("camera_forward_pitch_tick", 1537);
-        camera_config_.down.yaw = declare_parameter<int>("camera_down_yaw_tick", 2036);
+        camera_config_.down.yaw = declare_parameter<int>("camera_down_yaw_tick", 2048);
         camera_config_.down.pitch = declare_parameter<int>("camera_down_pitch_tick", 2013);
         // Shared algorithm YAML controls BALL_VIEW pitch only; yaw reuses DOWN.
         camera_config_.ball_view={camera_config_.down.yaw,algorithm.ball_view_pitch_tick};
-        camera_config_.goal.yaw = declare_parameter<int>("camera_goal_yaw_tick", 2054);
+        camera_config_.goal.yaw = declare_parameter<int>("camera_goal_yaw_tick", 2048);
         camera_config_.goal.pitch = declare_parameter<int>("camera_goal_pitch_tick", 966);
         // The core owns transition settling after camera DONE; no default extra executor wait.
         camera_config_.move_sec = declare_parameter<double>("camera_move_duration_sec", 0.4);
@@ -785,7 +785,7 @@ private:
         active_target_yaw_deg_=0;
         shoot_pose_in_progress_=true;
         motion_in_progress_=true;
-        RCLCPP_INFO(get_logger(),"[SHOOT POSE] ACK id=%llu duration=%.2fs head=(2054,966)",
+        RCLCPP_INFO(get_logger(),"[SHOOT POSE] ACK id=%llu duration=%.2fs head=(2048,966)",
                     static_cast<unsigned long long>(request->action_id),request->duration_sec);
         PublishActionStatus(request->action_id,vision::msg::CommandStatus::ACK);
         EnsureMotionLoop();

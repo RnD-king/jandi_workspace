@@ -115,6 +115,101 @@ class DeployTest(unittest.TestCase):
             self.assertEqual(call.call_count,1)
             self.assertEqual(Path(call.call_args[0][0][0]).name,'config_check')
 
+    def test_incremental_build_adopts_cache_and_keeps_paths_across_commits_and_force(self):
+        root,manifest=d.release_paths('main')
+        old=fixture_release(root/'releases/old-build-id')
+        cache=Path(old['release'])/'build/core/CMakeCache.txt'
+        cache.parent.mkdir(parents=True);cache.write_text('existing cached compilation')
+        ros_cache=Path(old['release'])/'build/ros/vision/unchanged.o'
+        ros_cache.parent.mkdir(parents=True);ros_cache.write_bytes(b'existing object')
+        log=Path(old['release'])/'build.log';log.write_text('previous build log\n')
+        d.atomic_json(manifest,old);roots=fixture_roots(self.root/'sources')
+        build_paths=[];real=d.call
+        def fake_build(command,**kwargs):
+            if Path(command[0]).name=='config_check':return real(command,**kwargs)
+            self.assertTrue((Path(old['release'])/'building.json').is_file())
+            self.assertFalse(d.valid_release(old))
+            self.assertEqual(cache.read_text(),'existing cached compilation')
+            self.assertEqual(ros_cache.read_bytes(),b'existing object')
+            if command[0]=='cmake' and '-B' in command:
+                build_paths.append(Path(command[command.index('-B')+1]))
+            if command[0]=='colcon':
+                self.assertEqual(Path(command[command.index('--build-base')+1]),Path(old['release'])/'build/ros')
+                self.assertEqual(Path(command[command.index('--install-base')+1]),Path(old['ros']))
+            return subprocess.CompletedProcess(command,0)
+        with patch.object(d,'ros_environment',return_value={}),patch.object(d,'call',side_effect=fake_build):
+            for commit,force in [('b'*40,False),('c'*40,False),('c'*40,True)]:
+                with patch.object(d,'git',return_value=commit):
+                    updated=d.build_release({'machine':'pc'},'main',self.root,roots,force)
+                self.assertEqual(updated['commit'],commit)
+                self.assertEqual(updated['release'],old['release'])
+                self.assertEqual(updated['core'],old['core']);self.assertEqual(updated['ros'],old['ros'])
+                self.assertTrue(d.valid_release(updated))
+                self.assertFalse((Path(old['release'])/'building.json').exists())
+        self.assertEqual(build_paths,[cache.parent]*3)
+        self.assertEqual(list((root/'releases').iterdir()),[Path(old['release'])])
+        self.assertTrue(log.read_text().startswith('previous build log\n'))
+
+    def test_partial_incremental_install_blocks_start_and_resumes_same_cache(self):
+        root,manifest=d.release_paths('main');old=fixture_release(root/'releases/old-build-id')
+        cache=Path(old['release'])/'build/core/cached.o'
+        cache.parent.mkdir(parents=True);cache.write_bytes(b'reusable object')
+        library=Path(old['core'])/'lib/libshared_vision_core.so'
+        old['artifacts']={str(library):hashlib.sha256(library.read_bytes()).hexdigest()}
+        d.atomic_json(manifest,old);before=manifest.read_bytes()
+        roots=fixture_roots(self.root/'sources');real=d.call
+        other=fixture_release(d.release_paths('fast')[0]/'releases/fast-old');other['version']='fast'
+        other_file=Path(other['core'])/'lib/libshared_vision_core.so';other_bytes=other_file.read_bytes()
+        d.atomic_json(d.release_paths('fast')[1],other)
+        def fail_after_core_install(command,**kwargs):
+            if command[0]=='cmake' and '--install' in command:library.write_bytes(b'new core installed')
+            if command[0]=='colcon':raise subprocess.CalledProcessError(1,command)
+            return subprocess.CompletedProcess(command,0)
+        with patch.object(d,'git',return_value='b'*40),patch.object(d,'ros_environment',return_value={}), \
+             patch.object(d,'call',side_effect=fail_after_core_install):
+            with self.assertRaises(subprocess.CalledProcessError):
+                d.build_release({'machine':'pc'},'main',self.root,roots)
+        self.assertEqual(manifest.read_bytes(),before)
+        self.assertEqual(library.read_bytes(),b'new core installed')
+        self.assertFalse(d.valid_release(old));self.assertTrue(d.valid_release(other))
+        self.assertEqual(other_file.read_bytes(),other_bytes)
+        pending=Path(old['release'])/'building.json';self.assertTrue(pending.is_file())
+        with patch.object(d,'load_config',return_value={'machine':'pc'}), \
+             patch.object(d,'active_plan',return_value=None),patch.object(d,'call') as call:
+            with self.assertRaisesRegex(RuntimeError,'완료되지'):d.main(['run','main','--no-menu'])
+            call.assert_not_called()
+        def recover(command,**kwargs):
+            if Path(command[0]).name=='config_check':return real(command,**kwargs)
+            self.assertTrue(pending.exists());self.assertEqual(cache.read_bytes(),b'reusable object')
+            if command[0]=='colcon':self.assertEqual(Path(command[command.index('--install-base')+1]),Path(old['ros']))
+            return subprocess.CompletedProcess(command,0)
+        with patch.object(d,'git',return_value='b'*40),patch.object(d,'ros_environment',return_value={}), \
+             patch.object(d,'call',side_effect=recover):
+            updated=d.build_release({'machine':'pc'},'main',self.root,roots)
+        self.assertEqual(updated['release'],old['release']);self.assertTrue(d.valid_release(updated))
+        self.assertFalse(pending.exists());self.assertEqual(json.loads(manifest.read_text())['commit'],'b'*40)
+
+    def test_interrupted_first_build_reuses_work_directory_and_pending_blocks_old_stamp(self):
+        roots=fixture_roots(self.root/'sources');root,manifest=d.release_paths('main')
+        with patch.object(d,'git',return_value='a'*40),patch.object(d,'ros_environment',return_value={}), \
+             patch.object(d,'call',side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):d.build_release({'machine':'pc'},'main',self.root,roots)
+        working=root/'releases/incremental';self.assertTrue((working/'building.json').is_file())
+        self.assertFalse(manifest.exists())
+        data=fixture_release(working)
+        self.assertFalse(d.valid_release(data),'pending build bypassed by intact installed files')
+        cache=working/'build/core/retained.o';cache.parent.mkdir(parents=True);cache.write_bytes(b'partial cached object')
+        real=d.call
+        def resume(command,**kwargs):
+            self.assertEqual(cache.read_bytes(),b'partial cached object')
+            if Path(command[0]).name=='config_check':return real(command,**kwargs)
+            return subprocess.CompletedProcess(command,0)
+        with patch.object(d,'git',return_value='a'*40),patch.object(d,'ros_environment',return_value={}), \
+             patch.object(d,'call',side_effect=resume):
+            updated=d.build_release({'machine':'pc'},'main',self.root,roots)
+        self.assertEqual(Path(updated['release']),working);self.assertTrue(d.valid_release(updated))
+        self.assertEqual(list((root/'releases').iterdir()),[working])
+
     def test_mixed_core_and_ros_releases_are_rejected(self):
         a=fixture_release(self.root/'a');b=fixture_release(self.root/'b')
         a['ros']=b['ros']

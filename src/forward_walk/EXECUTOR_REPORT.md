@@ -127,11 +127,11 @@ body의 새 목표가 없으면 마지막으로 성공한 full packet을 base로
 |---|---:|
 | camera_yaw_motor_id | 21 |
 | camera_pitch_motor_id | 22 |
-| camera_forward_yaw_tick | 2077 |
+| camera_forward_yaw_tick | 2048 |
 | camera_forward_pitch_tick | 1537 |
-| camera_down_yaw_tick | 2036 |
+| camera_down_yaw_tick | 2048 |
 | camera_down_pitch_tick | 2013 |
-| camera_goal_yaw_tick | 2054 |
+| camera_goal_yaw_tick | 2048 |
 | camera_goal_pitch_tick | 966 |
 | camera_move_duration_sec | 0.5 |
 | camera_settle_sec | 0.2 |

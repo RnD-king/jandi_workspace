@@ -9,7 +9,7 @@ The other workspace packages (`vision`, `vision_core`, etc.) have not been chang
 - Every LINE mission action uses the symmetric arm-target override: ID 15 = 1379, ID 16 = 2765 by default. All non-LINE missions use original JSON arms after restoration; entering LINE opens arms before the requested action.
 - Action 11 (STEP_FORWARD_LEFT_THREE): `missions/직진_좌회전_3번.json` (three repeats).
 - Action 12 (STEP_FORWARD_RIGHT_THREE): `missions/직진_우회전_3번.json` (three repeats). Action 24/25 maps the two-repeat alternatives; action 26 maps the right one-repeat mission.
-- Preserve camera ID 21/22 calibration: FORWARD 2077/1537, DOWN 2036/2013, GOAL 2054/966. In particular, `motions/보행_왼발만앞에.json` remains the original from `jandi_workspace`, not the upstream 10.12.1 variant.
+- Camera yaw ID 21 is centered at 2048 in all motion JSONs and default FORWARD/DOWN/GOAL/BALL_VIEW poses. Pitch ID 22 retains FORWARD 1537, DOWN 2013, GOAL 966, BALL_VIEW 1750. Scan angles and sequencing remain unchanged around the new center. In `motions/보행_왼발만앞에.json`, other joints retain the original `jandi_workspace` motion, not the upstream 10.12.1 variant.
 - Actions 11/12/13 and 21–26 emit READY once before DONE **for every mission** (LINE/BALL/GOAL/HURDLE). The speculative one-slot queue is allowed **only** for LINE-to-LINE actions 11/12/13 and 21–26; a non-LINE READY does not allow early queuing.
 - Preserve existing `ready_lead_sec` (default 0.25 seconds), ACK/DONE, camera/Action ID separation, 50 Hz writer, and pre-validation of queued programs.
 - `dynamixel_device` ROS parameter allows choosing the adapter (default `/dev/jandi_dxl`). The optional udev rule targets FTDI serial FT9BTGLH and must be adjusted for any other adapter.

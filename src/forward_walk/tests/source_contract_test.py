@@ -128,11 +128,11 @@ checks['READY one-slot queue (current A only)'] = all((
     'mission ==' not in admission,
     'action ==' not in admission,
 ))
-checks['preserved camera calibration'] = all(
+checks['centered camera yaw and preserved pitch calibration'] = all(
     needle in main for needle in (
-        '"camera_forward_yaw_tick", 2077', '"camera_forward_pitch_tick", 1537',
-        '"camera_down_yaw_tick", 2036', '"camera_down_pitch_tick", 2013',
-        '"camera_goal_yaw_tick", 2054', '"camera_goal_pitch_tick", 966'
+        '"camera_forward_yaw_tick", 2048', '"camera_forward_pitch_tick", 1537',
+        '"camera_down_yaw_tick", 2048', '"camera_down_pitch_tick", 2013',
+        '"camera_goal_yaw_tick", 2048', '"camera_goal_pitch_tick", 966'
     )
 )
 # LINE loss head scan: LEFT/RIGHT scans keep elbows extended across pairs.
