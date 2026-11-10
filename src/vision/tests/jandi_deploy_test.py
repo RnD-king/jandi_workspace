@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -16,7 +17,7 @@ import jandi_deploy as d
 
 
 def fixture_release(root):
-    data={'core':str(root/'core'),'ros':str(root/'ros'),'commit':'a'*40,'version':'main'}
+    data={'core':str(root/'core'),'ros':str(root/'ros'),'commit':'a'*40,'version':'main','release':str(root)}
     for path in [root/'core/lib/libshared_vision_core.so',root/'core/share/shared_vision_core/config/vision_algorithm.yaml',
                  root/'ros/local_setup.bash',root/'ros/vision/lib/vision/line_perception_node',
                  root/'ros/vision/lib/vision/run_jandi',root/'ros/forward_walk/lib/forward_walk/main_node']:
@@ -48,10 +49,11 @@ class DeployTest(unittest.TestCase):
         with patch.dict(os.environ,{'AMENT_PREFIX_PATH':'/wrong','CMAKE_PREFIX_PATH':'/wrong',
              'LD_LIBRARY_PATH':'/wrong','PYTHONPATH':'/wrong','VISION_CORE_ROOT':'/wrong',
              'VISION_CORE_ALGORITHM_CONFIG':'/wrong','SHARED_VISION_CORE_ROOT':'/wrong','JANDI_VERSION':'fast',
+             'YOLO26_ENGINE_PATH':'/wrong.engine','YOLO26_RUNTIME_CONFIG':'/wrong.yaml',
              'PATH':'/home/u/jandi_fast/install/bin:/usr/bin'},clear=True):
             env=d.clean_environment()
         for key in ('AMENT_PREFIX_PATH','CMAKE_PREFIX_PATH','LD_LIBRARY_PATH','PYTHONPATH',
-                    'VISION_CORE_ROOT','VISION_CORE_ALGORITHM_CONFIG','SHARED_VISION_CORE_ROOT','JANDI_VERSION'):
+                    'VISION_CORE_ROOT','VISION_CORE_ALGORITHM_CONFIG','SHARED_VISION_CORE_ROOT','JANDI_VERSION','YOLO26_ENGINE_PATH','YOLO26_RUNTIME_CONFIG'):
             self.assertNotIn(key,env)
         self.assertEqual(env['PATH'],'/usr/bin');self.assertEqual(env['ROS_DOMAIN_ID'],'22')
 
@@ -136,7 +138,7 @@ class DeployTest(unittest.TestCase):
         d.CONFIG_DIR.mkdir(parents=True)
         old=d.CONFIG_DIR/'old.yaml';old.write_text('old user settings')
         launch=d.CONFIG_DIR/'realsense.launch.py';launch.write_text('# user old launch')
-        d.atomic_json(d.CONFIG_DIR/'deployment.json',{'machine':'pc','selected':'main','camera_config':str(old),'camera_launch':str(launch)})
+        d.atomic_json(d.CONFIG_DIR/'deployment.json',{'machine':'pc','selected':'main','camera_config':str(old),'camera_launch':str(launch),'engine':'/obsolete.engine'})
         target=self.root/'tools/jandi_deploy.py'
         original='#!/usr/bin/env bash\n# JANDI versioned entrypoint\nset -euo pipefail\nexec /usr/bin/python3 '+str(target)+' camera --machine pc "$@"\n'
         (self.root/'jandi_camera.sh').write_text(original)
@@ -144,7 +146,7 @@ class DeployTest(unittest.TestCase):
         with patch.object(d,'TOOLS_DIR',self.root/'tools'),contextlib.redirect_stdout(io.StringIO()):
             d.install('pc')
             config=json.loads((d.CONFIG_DIR/'deployment.json').read_text())
-            self.assertNotIn('camera_config',config);self.assertNotIn('camera_launch',config)
+            self.assertNotIn('camera_config',config);self.assertNotIn('camera_launch',config);self.assertNotIn('engine',config)
             d.install('pc')
         self.assertEqual(old.read_text(),'old user settings')
         self.assertEqual(launch.read_text(),'# user old launch')
@@ -160,7 +162,43 @@ class DeployTest(unittest.TestCase):
             d.install('jetson')
         cfg=json.loads((d.CONFIG_DIR/'deployment.json').read_text())
         self.assertIn(str(prefix),cfg['dependency_prefixes'])
+        self.assertNotIn('engine',cfg)
         self.assertFalse((d.CONFIG_DIR/'realsense.launch.py').exists())
+
+    def test_start_reads_selected_source_runtime_and_preflight_blocks_missing_engine(self):
+        cfg={'machine':'jetson','selected':'main','repositories':{v:str(self.root/('repo-'+v)) for v in ['main','fast']},'engine':'/obsolete-deployment.engine'}
+        bindings={}
+        for version in ['main','fast']:
+            runtime=Path(cfg['repositories'][version])/'src/vision/config/yolo26_runtime.yaml'
+            runtime.parent.mkdir(parents=True)
+            engine=self.root/(version+'.engine');engine.write_bytes(b'fake model; never loaded')
+            runtime.write_text(json.dumps({'yolo26_runtime':{'ros__parameters':{'pc_engine_path':str(engine),'jetson_engine_path':str(engine)}}}))
+            data=fixture_release(self.root/('release-'+version));data['version']=version
+            lib=Path(data['ros'])/'vision/lib/vision'
+            for name in ['jandi_runtime.py','jandi_logs.py']:
+                shutil.copy2(Path(d.__file__).parent/name,lib/name)
+            d.atomic_json(d.release_paths(version)[1],data)
+            bindings[version]=(runtime,engine)
+        real_call=d.call;calls=[]
+        def fake_backend(command,**kwargs):
+            calls.append((command,dict(kwargs.get('env',{}))))
+            if '-c' in command:return real_call(command,**kwargs) # real read-only resolver, no ROS init
+            self.assertEqual(Path(command[1]).name,'run_jandi')
+            return subprocess.CompletedProcess(command,0)
+        with patch.object(d,'load_config',return_value=cfg),patch.object(d,'active_plan',return_value=None), \
+             patch.object(d,'ros_environment',side_effect=lambda *args:d.clean_environment()),patch.object(d,'call',side_effect=fake_backend):
+            for version in ['main','fast']:
+                calls.clear();self.assertEqual(d.main(['run',version,'--no-menu']),0)
+                self.assertEqual(len(calls),2)
+                self.assertEqual(calls[-1][1]['YOLO26_RUNTIME_CONFIG'],str(bindings[version][0]))
+                self.assertNotIn('YOLO26_ENGINE_PATH',calls[-1][1])
+            runtime,engine=bindings['main']
+            new_engine=self.root/'changed.engine';new_engine.write_bytes(b'new fake model')
+            runtime.write_text(runtime.read_text().replace(str(engine),str(new_engine)))
+            calls.clear();self.assertEqual(d.main(['run','main','--no-menu']),0)
+            new_engine.unlink();calls.clear()
+            with self.assertRaises(subprocess.CalledProcessError):d.main(['run','main','--no-menu'])
+            self.assertEqual(len(calls),1,'missing engine started the backend')
 
     def test_backup_branch_is_not_an_accepted_version(self):
         with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
