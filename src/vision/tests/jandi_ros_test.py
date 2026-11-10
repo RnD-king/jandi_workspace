@@ -21,7 +21,7 @@ from vision.msg import ActionCommand, CameraCommand, CommandStatus
 class RosTest(unittest.TestCase):
     def test_discovery_manual_services_and_real_done_tracking(self):
         observer = RosObserver(str(ROOT / "config/vision_params.yaml"))
-        params = Plan.load("practice", ROOT).commands()["vision"]
+        params = Plan.load(ROOT).commands()["vision"]
         remaps = []
         for index, arg in enumerate(params):
             if arg == "-r":

@@ -116,12 +116,37 @@ class DeployTest(unittest.TestCase):
             d.synchronize({'machine':'pc'},'fast')
         for name,root in roots.items():self.assertEqual((root/'source.cpp').read_bytes(),name.encode())
 
-    def test_legacy_background_mode_maps_to_explicit_mode(self):
+    def test_background_uses_explicit_flags_without_mode(self):
         with patch.object(d,'load_config',return_value={'machine':'pc','selected':'main'}), \
              patch.object(d,'start',return_value=0) as start:
-            self.assertEqual(d.main(['run','--machine','pc','--background','custom']),0)
+            self.assertEqual(d.main(['run','--machine','pc','--background','--no-menu','--terminal']),0)
         args=start.call_args[0][1]
-        self.assertEqual(args.mode,'custom');self.assertTrue(args.background)
+        self.assertTrue(args.no_menu);self.assertTrue(args.terminal);self.assertTrue(args.background)
+        self.assertFalse(hasattr(args,'mode'))
+
+    def test_menu_has_version_and_three_flags_only(self):
+        with patch.object(d.sys.stdin,'isatty',return_value=True), \
+             patch('builtins.input',side_effect=['1','3','4','5','']), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            result=d.choose_start('main')
+        self.assertEqual(result,('fast',True,True,False))
+        self.assertNotIn('PRACTICE',output.getvalue());self.assertNotIn('실행 모드',output.getvalue())
+
+    def test_install_migrates_yaml_to_shared_launch_and_preserves_user_edits(self):
+        d.CONFIG_DIR.mkdir(parents=True)
+        old=d.CONFIG_DIR/'old.yaml';old.write_text('old user settings')
+        d.atomic_json(d.CONFIG_DIR/'deployment.json',{'machine':'pc','selected':'main','camera_config':str(old)})
+        with patch.object(d,'TOOLS_DIR',self.root/'tools'),contextlib.redirect_stdout(io.StringIO()):
+            d.install('pc')
+            launch=d.CONFIG_DIR/'realsense.launch.py'
+            self.assertIn('DEPTH_EXPOSURE = 5000',launch.read_text())
+            config=json.loads((d.CONFIG_DIR/'deployment.json').read_text())
+            self.assertNotIn('camera_config',config);self.assertEqual(config['camera_launch'],str(launch))
+            launch.write_text('# user camera launch')
+            d.install('pc')
+            self.assertEqual(launch.read_text(),'# user camera launch')
+        self.assertEqual(old.read_text(),'old user settings')
+        self.assertTrue((self.root/'jandi_depth.sh').is_file())
 
     def test_backup_branch_is_not_an_accepted_version(self):
         with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):

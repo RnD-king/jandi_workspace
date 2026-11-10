@@ -25,19 +25,35 @@ class LaunchTest(unittest.TestCase):
         with patch.object(launch_file, "get_package_prefix", return_value="/target/install/vision"):
             description = launch_file.generate_launch_description()
         arguments = [x for x in description.entities if isinstance(x, DeclareLaunchArgument)]
-        self.assertEqual([x.name for x in arguments], ["mode", "show_debug_view", "terminal_node",
+        self.assertEqual([x.name for x in arguments], ["show_debug_view", "terminal_node",
                                                      "stream_debug_view", "workspace", "core_prefix"])
-        self.assertEqual(arguments[0].choices, ["custom", "practice", "IRC"])
         processes = [x for x in description.entities if isinstance(x, ExecuteProcess)]
         self.assertEqual(len(processes), 1)
-        for mode in ("practice", "IRC"):
+        for terminal in ("false", "true"):
             context = LaunchContext()
-            context.launch_configurations.update(mode=mode, workspace="/home/rnd/jandi", core_prefix="/home/rnd/vision_core/install")
-            context.launch_configurations.update(show_debug_view="false", terminal_node="false", stream_debug_view="true")
+            context.launch_configurations.update(workspace="/home/rnd/jandi", core_prefix="/home/rnd/vision_core/install")
+            context.launch_configurations.update(show_debug_view="false", terminal_node=terminal, stream_debug_view="true")
             command = [perform_substitutions(context, part) for part in processes[0].cmd]
-            self.assertEqual(command[:3], ["/target/install/vision/lib/vision/run_jandi", "--background", mode])
+            self.assertEqual(command[:2], ["/target/install/vision/lib/vision/run_jandi", "--background"])
             self.assertNotIn("robot_bringup", " ".join(command))
             self.assertEqual(command[command.index("--stream-debug-view") + 1], "true")
+
+    def test_shared_camera_launch_forwards_exactly_three_exposure_defaults(self):
+        spec=importlib.util.spec_from_file_location("shared_camera_launch",ROOT/"launch/realsense.launch.py")
+        camera=importlib.util.module_from_spec(spec);spec.loader.exec_module(camera)
+        from launch.actions import IncludeLaunchDescription
+        with patch.object(camera,"get_package_share_directory",return_value="/driver/share/realsense2_camera"):
+            description=camera.generate_launch_description()
+        declarations=[x for x in description.entities if isinstance(x,DeclareLaunchArgument)]
+        self.assertEqual([x.name for x in declarations],["depth_module.enable_auto_exposure","depth_module.exposure","depth_module.gain"])
+        context=LaunchContext()
+        defaults={x.name:perform_substitutions(context,x.default_value) for x in declarations}
+        self.assertEqual(defaults,{"depth_module.enable_auto_exposure":"false","depth_module.exposure":"5000","depth_module.gain":"16"})
+        context.launch_configurations.update(defaults)
+        include=next(x for x in description.entities if isinstance(x,IncludeLaunchDescription))
+        actual={name:value.perform(context) for name,value in include.launch_arguments}
+        self.assertEqual(actual,defaults)
+        self.assertNotIn("config_file",actual)
 
     def test_install_rules_and_declared_runtime_dependencies(self):
         cmake = (ROOT / "CMakeLists.txt").read_text()

@@ -237,26 +237,21 @@ class RuntimeTest(unittest.TestCase):
         self.assertIsNone(console.key_request("main", "0")[1])
         self.assertEqual(console.key_request("shutdown", "1")[1], {"op": "shutdown"})
 
-    def test_plan_reuses_configuration_and_modes_only_differ_in_terminal(self):
-        share = SCRIPTS.parent
+    def test_plan_uses_explicit_options_and_shared_launch_without_yaml(self):
         with patch.dict(os.environ, {}, clear=True):
-            practice = runtime.Plan.load("practice", share)
-            irc = runtime.Plan.load("IRC", share)
-            self.assertEqual(practice.workspace, "/home/rnd/jandi")
-            self.assertEqual(practice.engine, "/home/rnd/jandi/src/dataset/best_1029.engine")
-            env = practice.environment()
-            self.assertEqual(env["ROS_DOMAIN_ID"], "22")
-        a, b = practice.commands(), irc.commands()
-        differences = [(x, y) for x, y in zip(a["vision"], b["vision"]) if x != y]
-        self.assertEqual(differences, [("terminal_node:=true", "terminal_node:=false")])
-        self.assertEqual(a["camera"], ["ros2", "launch", "realsense2_camera", "rs_launch.py", "config_file:="+practice.camera_config])
-        self.assertEqual(a["motor"], b["motor"])
-        for service, path in runtime.SERVICES.items():
-            self.assertIn(f"{service}:={path}", a["vision"])
-        self.assertNotIn("inference_hz", " ".join(a["vision"]))
-        self.assertNotIn("vision_terminal_node", " ".join(sum(a.values(), [])))
-        with self.assertRaises(ValueError):
-            runtime.Plan.load("irc", share)
+            plan = runtime.Plan.load(SCRIPTS.parent)
+            self.assertEqual(plan.workspace, "/home/rnd/jandi")
+            self.assertEqual(plan.engine, "/home/rnd/jandi/src/dataset/best_1029.engine")
+            self.assertEqual(plan.environment()["ROS_DOMAIN_ID"], "22")
+        a = plan.commands()
+        self.assertIn("terminal_node:=false",a["vision"])
+        enabled = runtime.Plan.load(SCRIPTS.parent,terminal_node=True)
+        self.assertIn("terminal_node:=true",enabled.commands()["vision"])
+        self.assertEqual(a["camera"],["ros2","launch",plan.camera_launch])
+        self.assertNotIn("config_file:=", " ".join(a["camera"]))
+        self.assertNotIn("mode",plan.__dict__)
+        for service,path in runtime.SERVICES.items():
+            self.assertIn(f"{service}:={path}",a["vision"])
 
     def test_survivor_pid_reuse_and_private_directory(self):
         path = Path(self.temp.name) / "state.json"
@@ -275,7 +270,7 @@ class RuntimeTest(unittest.TestCase):
         with patch.dict(os.environ, {"YOLO26_ENGINE_PATH": "/models/custom.engine",
                                     "VISION_CORE_ROOT": "/opt/custom-core",
                                     "VISION_CORE_ALGORITHM_CONFIG": "/config/operator.yaml"}):
-            plan = runtime.Plan.load("IRC", SCRIPTS.parent)
+            plan = runtime.Plan.load(SCRIPTS.parent)
         self.assertEqual(plan.engine, "/models/custom.engine")
         self.assertEqual(plan.workspace, "/home/rnd/jandi")
         self.assertEqual(plan.core_prefix, "/opt/custom-core")
@@ -333,7 +328,7 @@ r.serve(FakePlan(), {self.temp.name!r}, Observer())
             try:
                 output = b""
                 deadline = time.monotonic() + 3
-                while b"JANDI practice" not in output:
+                while b"JANDI | VERSION=" not in output:
                     if select.select([master], [], [], .1)[0]:
                         output += os.read(master, 65536)
                     if time.monotonic() > deadline:

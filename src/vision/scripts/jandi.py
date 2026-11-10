@@ -11,7 +11,7 @@ import termios
 import time
 import tty
 
-from jandi_runtime import MODES, NAMES, Plan, private_directory, rpc, serve
+from jandi_runtime import NAMES, Plan, private_directory, rpc, serve
 from jandi_logs import FILTERS, LogView
 
 
@@ -24,12 +24,12 @@ def background(plan, directory):
     try:
         response = rpc(directory, {"op": "status"})
         if response.get("plan") != plan.__dict__:
-            raise RuntimeError("다른 모드/경로의 JANDI가 실행 중입니다. 기존 콘솔에서 0번으로 종료하세요.")
+            raise RuntimeError("다른 설정/경로의 JANDI가 실행 중입니다. 기존 콘솔에서 0번으로 종료하세요.")
         return
     except (ConnectionError, FileNotFoundError, ConnectionRefusedError):
         pass
     log = directory / "manager.log"
-    cmd = [sys.executable, str(Path(__file__).resolve()), "--serve", plan.mode,
+    cmd = [sys.executable, str(Path(__file__).resolve()), "--serve",
            "--workspace", plan.workspace, "--core-prefix", plan.core_prefix,
            "--state-dir", str(directory)]
     for name in ("show_debug_view", "terminal_node", "stream_debug_view"):
@@ -50,7 +50,7 @@ def background(plan, directory):
 
 
 def screen(status, plan, page, message, log_view=None):
-    lines = [f"JANDI {plan['mode']} | VERSION={plan.get('version','legacy').upper()} | ROS_DOMAIN_ID=22 | SSH 종료 시 계속 실행", ""]
+    lines = [f"JANDI | VERSION={plan.get('version','legacy').upper()} | ROS_DOMAIN_ID=22 | SSH 종료 시 계속 실행", ""]
     lines.append("옵션: " + " / ".join(
         f"{label}={'ON' if plan.get(name, False) else 'OFF'}" for name, label in (
             ("show_debug_view", "OpenCV"), ("terminal_node", "터미널"),
@@ -227,9 +227,10 @@ def boolean(value):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", nargs="?", choices=(*MODES, "attach"))
+    parser.add_argument("command", nargs="?", choices=("attach",))
+    parser.add_argument("--no-menu", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--show-debug-view", type=boolean, default=False)
-    parser.add_argument("--terminal-node", type=boolean, default=None)
+    parser.add_argument("--terminal-node", type=boolean, default=False)
     parser.add_argument("--stream-debug-view", type=boolean, default=True)
     parser.add_argument("--workspace")
     parser.add_argument("--core-prefix")
@@ -239,7 +240,7 @@ def main(argv=None):
     group.add_argument("--background", action="store_true", help="start backend without a console")
     args = parser.parse_args(argv)
     directory = private_directory(args.state_dir)
-    if args.mode is None and not args.serve and not args.background:
+    if args.command is None and not args.serve and not args.background and not args.no_menu:
         try:
             existing = rpc(directory, {"op": "status"})
         except (ConnectionError, OSError):
@@ -252,14 +253,13 @@ def main(argv=None):
             print("취소했습니다. 노드를 시작하지 않았습니다.")
             return
         args.show_debug_view, args.terminal_node, args.stream_debug_view = options
-    args.mode = args.mode or "custom"
-    if args.mode == "attach":
+    if args.command == "attach":
         if args.serve or args.background:
             parser.error("attach cannot start a backend")
         console(directory)
         return
     from ament_index_python.packages import get_package_share_directory
-    plan = Plan.load(args.mode, get_package_share_directory("vision"), args.workspace, args.core_prefix,
+    plan = Plan.load(get_package_share_directory("vision"), args.workspace, args.core_prefix,
                      show_debug_view=args.show_debug_view, terminal_node=args.terminal_node,
                      stream_debug_view=args.stream_debug_view)
     if args.serve:
