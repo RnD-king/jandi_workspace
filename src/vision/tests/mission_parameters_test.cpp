@@ -13,7 +13,7 @@ int main(int argc,char** argv) {
     base.ball.recovery_walk_turn_max=3;base.goal.recovery_turn_max=3;
     base.goal.edge_margin_px=50;
     base.ball.approach_direct_down_v_px=355;
-    base.ball.far_u_des_px=380;
+    base.ball.approach_top_center_u_px=base.ball.approach_bottom_center_u_px=380;
     base.ball.approach_top_half_width_px=90;
     base.ball.approach_bottom_half_width_px=90;
     base.ball.approach_near_outer_margin_px=60;
@@ -31,7 +31,7 @@ int main(int argc,char** argv) {
         rclcpp::Parameter("hurdle_contact_inter_action_hold_sec",.7),
         rclcpp::Parameter("ball_down_search_inter_action_hold_sec",.6),
         rclcpp::Parameter("hurdle_down_search_inter_action_hold_sec",1.2),
-        rclcpp::Parameter("ball_far_u_des_px",400.0),
+        rclcpp::Parameter("ball_approach_top_center_u_px",400.0),
         rclcpp::Parameter("ball_approach_top_half_width_px",70.0),
         rclcpp::Parameter("ball_approach_bottom_half_width_px",90.0),
         rclcpp::Parameter("ball_approach_near_outer_margin_px",55.0),
@@ -207,7 +207,7 @@ int main(int argc,char** argv) {
     Check(applied.goal.recovery_turn_max==2,"GOAL startup override was lost");
     Check(applied.goal.edge_margin_px==75,"edge margin startup override was lost");
     Check(applied.ball.approach_direct_down_v_px==370,"BALL direct DOWN startup override was lost");
-    Check(applied.ball.far_u_des_px==400 &&
+    Check(applied.ball.approach_top_center_u_px==400 &&
           applied.ball.approach_top_half_width_px==70 &&
           applied.ball.approach_bottom_half_width_px==90 &&
           applied.ball.approach_near_outer_margin_px==55,
@@ -217,7 +217,7 @@ int main(int argc,char** argv) {
         applied.ball.approach_top_half_width_px==40 &&
         applied.ball.approach_bottom_half_width_px==90,
         "top half width update changed bottom half width");
-    for(const auto* name : {"ball_far_u_des_px",
+    for(const auto* name : {"ball_approach_top_center_u_px",
                             "ball_approach_top_half_width_px",
                             "ball_approach_bottom_half_width_px",
                             "ball_approach_near_outer_margin_px"}) {

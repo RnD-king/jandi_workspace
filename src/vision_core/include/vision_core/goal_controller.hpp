@@ -49,6 +49,7 @@ struct GoalFineMotionPlan {
 };
 
 struct GoalConfig {
+  double ready_observation_end_weight{3.0};
   double edge_margin_px{};
   int edge_stable_window{10};
   int edge_stable_min_hits{4};

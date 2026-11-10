@@ -355,7 +355,7 @@ int main(int argc, char **argv) {
   const auto slanted=LoadText(slanted_yaml);
   assert(slanted.ball.approach_top_half_width_px==50.0 &&
          slanted.ball.approach_bottom_half_width_px==110.0 &&
-         slanted.ball.far_u_des_px==c.ball.far_u_des_px &&
+         slanted.ball.approach_top_center_u_px==c.ball.approach_top_center_u_px &&
          slanted.ball.approach_near_outer_margin_px==90.0);
   for (const auto* field : {"ransac_enabled: true", "ransac_min_input_points: 4",
       "ransac_residual_threshold_px: 20.0", "ransac_min_sample_v_gap_px: 20.0",

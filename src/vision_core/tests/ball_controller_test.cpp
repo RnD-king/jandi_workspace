@@ -50,7 +50,7 @@ int main() {
   BallConfig c=LoadDefaultAlgorithmConfig().ball;   c.entry_min_hits=1; c.down_search_min_hits=1; c.stable_window = c.stable_min_hits = 1;
   c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   c.fine_side_two_step_margin_px=1e6; // Isolate legacy single-step decisions.
-  c.lost_frames = 2;  c.far_u_des_px = 320.0;
+  c.lost_frames = 2;  c.approach_top_center_u_px=c.approach_bottom_center_u_px=320.0;
   c.approach_bottom_half_width_px = 32.0; c.upper_acquire_v_px = 480.0;
   c.approach_top_half_width_px=32.0; // Vertical scenario.
   c.approach_short_v_px = 300.0;

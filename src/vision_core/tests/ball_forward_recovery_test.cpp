@@ -13,7 +13,7 @@ ObjectTarget Target(double u) {
 }
 BallConfig Configuration() {
   auto c=LoadDefaultAlgorithmConfig().ball;
-  c.far_u_des_px=320;c.recovery_center_tolerance_px=50;
+  c.approach_top_center_u_px=c.approach_bottom_center_u_px=320;c.recovery_center_tolerance_px=50;
   c.entry_min_hits=6;c.stable_window=10;c.stable_min_hits=7;c.lost_frames=3;
   c.recovery_max_steps=2;c.entry_recovery_max_steps=3;
   c.recovery_observation_sec=1;c.recovery_max_observations=2;
@@ -115,7 +115,7 @@ void EntryExhaustionResumesLine() {
   c.enable_ball=true;c.initial_has_ball=false;c.goal_trial_start_goal=false;
   c.test_mission=MissionType::kNone;c.transition_settle_sec=0;
   c.ball.entry_recovery_max_steps=1;
-  MissionController core(c);AdmitObjectAtRest(core,Target(c.ball.far_u_des_px-120));
+  MissionController core(c);AdmitObjectAtRest(core,Target(c.ball.approach_top_center_u_px-120));
   MissionFrameInput f;f.image_width=640;f.image_height=480;
   f.camera_feedback={CameraMode::kForward,true};f.command_transport_enabled=true;
   f.manual_observation_control=true;f.begin_manual_observation=true;

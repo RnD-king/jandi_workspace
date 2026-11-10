@@ -139,6 +139,7 @@ struct MissionFrameInput {
   int image_width{0};
   int image_height{0};
   double now_sec{0.0};
+  std::optional<double> frame_capture_sec;
   CameraFeedback camera_feedback;
   CameraScanFeedback camera_scan;
   std::optional<double> scan_ball_u; // filtered YOLO candidate, independent of FORWARD tracker
@@ -277,6 +278,7 @@ struct PerceptionFrameInput {
   int image_width{0};
   int image_height{0};
   double now_sec{0.0};
+  std::optional<double> frame_capture_sec;
   CameraFeedback camera_feedback;
   CameraScanFeedback camera_scan;
   bool command_transport_enabled{false};
@@ -488,14 +490,17 @@ private:
   } goal_head_search_;
   bool approach_goal_probe_{false}, approach_return_ball_view_{false};
   struct GoalEdgeGuard {
-    enum class Phase { kIdle, kTurning, kReobserve };
+    enum class Phase { kIdle, kPending, kTurning, kReobserve };
     Phase phase{Phase::kIdle};
     bool observing{false}, ready{false}, left_qualified{false}, right_qualified{false};
     bool turn_left{false};
     int turns_completed{0};
     std::uint64_t action_id{0};
     double observation_start_sec{0.0};
-    std::deque<bool> left_hits,right_hits;
+    std::deque<bool> left_hits,right_hits,seen_hits;
+    std::uint64_t sample_action_id{0};
+    bool sample_ready_closed{false};
+    double last_sample_sec{-1.0};
   } goal_edge_guard_;
   // Returns true while the protected GOAL observation/turn takes priority.
   bool PrepareGoalEdgeGuard(const MissionFrameInput&,bool idle,ActionRequest&);
@@ -607,6 +612,7 @@ private:
   bool fresh_after_search_{false};
   bool decision_observation_restart_pending_{false};
   int line_guard_turns_completed_{0};
+  bool finish_line_started_{false}, finish_line_straight_only_{false};
   bool test_setup_camera_started_{false}, test_failed_{false};
   bool test_setup_pose_done_{false};
   bool goal_start_camera_pending_{false};

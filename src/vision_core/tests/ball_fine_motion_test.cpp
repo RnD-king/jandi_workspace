@@ -123,7 +123,7 @@ void DirectRepeat(MissionAction action) {
     case MissionAction::kLeftSideStep:start={200,105};c.fine_motion.left_delta_px={40,0};break;
     default:start={500,105};c.fine_motion.right_delta_px={-50,0};break;
   }
-  const int execute=action==MissionAction::kStepForwardHalf ? 3 : 2;
+  const int execute=3;
   BallController ball(c,3);ball.StartTestExecute();
   const CameraFeedback down{CameraMode::kBallView,true};
   ball.UseVerifiedObservation(Target(start.u,start.v),std::deque<bool>(10,true),640,480);
@@ -197,21 +197,24 @@ void Transport(bool manual,bool pause) {
     if(out.ball.mode==BallMode::kFineMotionRepeat) break;
   }
   assert(out.command.action==MissionAction::kRightSideStep &&
-         out.ball.fine_motion_repetitions==2 && out.repeat_sequence);
+         out.ball.fine_motion_repetitions==3 && out.repeat_sequence);
   const auto a=out.command.action_id;
   f.manual_observation_control=manual;
   f.allow_new_commands=f.allow_new_body_actions=!pause;
   f.now_sec+=.1;f.delivery_feedback={a,true,true,false};out=core.Step(f);
   if(pause) {
-    assert(out.command.action_id==0 && out.ball.fine_motion_remaining==1);
+    assert(out.command.action_id==0 && out.ball.fine_motion_remaining==2);
     f.now_sec+=.01;out=core.Step(f);
-    assert(out.ball.fine_motion_remaining==1);
+    assert(out.ball.fine_motion_remaining==2);
     f.allow_new_commands=f.allow_new_body_actions=true;
     f.delivery_feedback={};f.now_sec+=.01;out=core.Step(f);
   }
   const auto b=out.command.action_id;
   assert(b && b!=a && out.command.action==MissionAction::kRightSideStep);
   f.now_sec+=.05;f.delivery_feedback={b,true,true,false};out=core.Step(f);
+  const auto third=out.command.action_id;
+  assert(third && third!=b && out.command.action==MissionAction::kRightSideStep);
+  f.now_sec+=.05;f.delivery_feedback={third,true,true,false};out=core.Step(f);
   assert(out.command.action_id==0 && !out.repeat_sequence &&
          out.ball.fine_motion_remaining==0);
   const auto done_at=f.now_sec;

@@ -45,7 +45,7 @@ MissionController::MissionController(const MissionControllerConfig &config)
           config_.line_p2p.failure_min_valid_samples,
           config_.line_p2p.observation_start_ratio,
           config_.line.line_stable_window,
-          config_.line.line_stable_min_hits),
+          config_.line.line_stable_min_hits,config_.hurdle.ready_observation_end_weight),
       ball_controller_(config_.ball, config_.camera_motion_timeout_sec),
       hurdle_controller_(config_.hurdle, config_.camera_motion_timeout_sec),
       goal_controller_(config_.goal, config_.camera_motion_timeout_sec),
@@ -208,19 +208,24 @@ ActionRequest MissionController::ComputeLineAction(
     const LineGuide &guide, const MissionFrameInput &input, bool action_active,
     bool action_done, bool *reference_valid, bool append_stability) {
   if (FinishCourseEnabled(input)) {
-    // Finish-only loss policy: keep the shared block/READY transport, but do
-    // not start stationary searches or in-place recovery turns past the course.
     if (action_active || !input.camera_feedback.settled ||
         input.camera_feedback.actual_mode!=CameraMode::kForward) return {};
-    const auto decision=line_p2p_controller_.Compute(guide);
-    MissionAction action=MissionAction::kStepForwardFour;
-    if (decision.applicable &&
-        std::abs(decision.error)<=config_.line_p2p.in_place_turn_score) {
-      if (decision.direction==CruiseDirection::kLeft) action=MissionAction::kStepForwardLeft;
-      else if (decision.direction==CruiseDirection::kRight) action=MissionAction::kStepForwardRight;
+    const bool usable=guide.valid && std::isfinite(guide.offset) &&
+        std::isfinite(guide.heading_rad);
+    if (finish_line_straight_only_ || !usable) {
+      line_state_=LineState::kNormal;
+      return LineLocomotion(MissionAction::kStepForwardFour,true);
     }
-    return LineLocomotion(action,true);
+    // Reuse ordinary score steering, its WALK turn assets and turn budget.
+    auto request=CruiseAction(guide,true);
+    if (line_state_==LineState::kFinalHold) {
+      finish_line_straight_only_=true;
+      line_state_=LineState::kNormal;
+      request=LineLocomotion(MissionAction::kStepForwardFour,true);
+    }
+    return request;
   }
+
   if (!line_observation_active_ && (line_state_ == LineState::kFailureObserve ||
                                     line_state_ == LineState::kRecoveryObserve))
     BeginObservation(line_state_, input.now_sec);
@@ -677,9 +682,9 @@ void MissionController::TrackMovingObjectReadyWindow(
     mean.target = *sample->target;
     ++hits;
     const double weight =
-        active_mission_ == MissionType::kGoal
-            ? 1.0
-            : 1.0 + 2.0 * std::clamp((sample->now_sec - cutoff) /
+        1.0 + ((active_mission_ == MissionType::kBall ? config_.ball.ready_observation_end_weight :
+                active_mission_ == MissionType::kGoal ? config_.goal.ready_observation_end_weight :
+                config_.hurdle.ready_observation_end_weight)-1.0) * std::clamp((sample->now_sec - cutoff) /
                                          std::max(1e-9, ready_sec - cutoff),
                                      0.0, 1.0);
     total_weight += weight;
@@ -2759,7 +2764,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
               LinePlan::IsUnit(last_command_.action) &&
               !input.delivery_feedback.done;
           const double weight=moving_line ?
-              1.0+2.0*static_cast<double>(index)/
+              1.0+(config_.ball.ready_observation_end_weight-1.0)*static_cast<double>(index)/
                   static_cast<double>(std::max<std::size_t>(1,size-1)) : 1.0;
           sum.u+=weight*point->u;sum.v+=weight*point->v;
           weight_sum+=weight;
@@ -2846,6 +2851,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   prepared.image_width = input.image_width;
   prepared.image_height = input.image_height;
   prepared.now_sec = input.now_sec;
+  prepared.frame_capture_sec = input.frame_capture_sec;
   prepared.camera_feedback = input.camera_feedback;
   prepared.camera_scan = input.camera_scan;
   if (input.camera_scan.phase != 0 && !ball_candidates.empty()) {
@@ -3163,7 +3169,8 @@ void MissionController::SetLivePerceptionTuning(
   auto updated = config_;
   updated.ball.approach_direct_down_v_px =
       candidate.ball.approach_direct_down_v_px;
-  updated.ball.far_u_des_px = candidate.ball.far_u_des_px;
+  updated.ball.approach_top_center_u_px = candidate.ball.approach_top_center_u_px;
+  updated.ball.approach_bottom_center_u_px = candidate.ball.approach_bottom_center_u_px;
   updated.ball.approach_top_half_width_px = candidate.ball.approach_top_half_width_px;
   updated.ball.approach_bottom_half_width_px = candidate.ball.approach_bottom_half_width_px;
   updated.ball.approach_near_outer_margin_px = candidate.ball.approach_near_outer_margin_px;
@@ -3294,7 +3301,7 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
       LineGuideAccumulator(config_.line_p2p.failure_min_valid_samples,
           config_.line_p2p.observation_start_ratio,
           config_.line.line_stable_window,
-          config_.line.line_stable_min_hits);
+          config_.line.line_stable_min_hits,config_.hurdle.ready_observation_end_weight);
   line_p2p_controller_ = LineP2pController(config_.line_p2p);
   line_plan_.UpdateConfig(config_.line_p2p);
   ball_controller_.UpdateTuning(config_.ball);
@@ -3335,6 +3342,11 @@ bool MissionController::UpdateLineP2pTuning(const LineP2pConfig &line_p2p) {
 }
 
 void MissionController::ClearObservationEvidence() {
+  // Keep issued correction actions and READY closure, discard pre-pause visual votes.
+  goal_edge_guard_.left_hits.clear();goal_edge_guard_.right_hits.clear();
+  goal_edge_guard_.seen_hits.clear();
+  goal_edge_guard_.left_qualified=goal_edge_guard_.right_qualified=false;
+  goal_edge_guard_.observing=goal_edge_guard_.ready=false;
   // PAUSE/RESUME preserves course stage and completed action counters, never
   // reuses visual evidence collected before the pause.
   curve_.frame_directions.clear();
@@ -3446,6 +3458,7 @@ void MissionController::Reset(bool preserve_action_ids) {
   decision_observation_active_ = false;
   decision_observation_restart_pending_ = false;
   line_guard_turns_completed_ = 0;
+  finish_line_started_=finish_line_straight_only_=false;
   settle_until_sec_ = 0.0;
   last_settle_done_id_ = 0;
   decision_observation_camera_only_ = false;

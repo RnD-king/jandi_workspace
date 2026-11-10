@@ -38,6 +38,9 @@ class Plan:
     show_debug_view: bool = False
     terminal_node: bool = False
     stream_debug_view: bool = True
+    version: str = ""
+    release: str = ""
+    camera_config: str = ""
 
     @classmethod
     def load(cls, mode, share, workspace=None, core_prefix=None, *,
@@ -56,10 +59,23 @@ class Plan:
         core = core.expanduser().resolve()
         algorithm = Path(os.environ.get("VISION_CORE_ALGORITHM_CONFIG") or
                          core / "share/shared_vision_core/config/vision_algorithm.yaml")
+        camera=Path(os.environ.get("JANDI_CAMERA_CONFIG") or "~/.config/jandi/realsense_depth.yaml").expanduser()
+        if not camera.is_file() and not os.environ.get("JANDI_CAMERA_CONFIG"):
+            camera=share/"config/realsense_depth.yaml"
+        settings=yaml.safe_load(camera.read_text())
+        allowed={"depth_module.enable_auto_exposure","depth_module.exposure","depth_module.gain"}
+        if not isinstance(settings,dict) or set(settings)!=allowed:
+            raise ValueError("카메라 YAML에는 Depth 수동 노출 세 항목만 허용합니다")
+        if settings["depth_module.enable_auto_exposure"] is not False:
+            raise ValueError("Depth 자동 노출은 false여야 합니다")
+        for name in ("depth_module.exposure","depth_module.gain"):
+            if type(settings[name]) is not int or settings[name]<=0:
+                raise ValueError(name+" must be a positive integer")
         return cls(mode, str(workspace), str(core), str(share), str(engine),
                    str(algorithm.expanduser().resolve()), bool(show_debug_view),
                    mode == "practice" if terminal_node is None else bool(terminal_node),
-                   bool(stream_debug_view))
+                   bool(stream_debug_view), os.environ.get("JANDI_VERSION","legacy"),
+                   os.environ.get("JANDI_RELEASE",""),str(camera.resolve()))
 
     def commands(self):
         params = str(Path(self.share) / "config/vision_params.yaml")
@@ -75,7 +91,8 @@ class Plan:
         for name, destination in SERVICES.items():
             vision += ["-r", f"{name}:={destination}"]
         return {
-            "camera": ["ros2", "launch", "realsense2_camera", "rs_launch.py"],
+            "camera": ["ros2", "launch", "realsense2_camera", "rs_launch.py"] +
+                (["config_file:="+self.camera_config] if self.camera_config else []),
             "motor": ["ros2", "run", "forward_walk", "main_node"],
             "vision": vision,
         }
@@ -83,6 +100,9 @@ class Plan:
     def environment(self):
         env = dict(os.environ)
         env["ROS_DOMAIN_ID"] = "22"
+        env["JANDI_VERSION"]=self.version
+        env["JANDI_RELEASE"]=self.release
+        env["JANDI_CAMERA_CONFIG"]=self.camera_config
         env["VISION_CORE_ROOT"] = self.core_prefix
         env["VISION_CORE_ALGORITHM_CONFIG"] = self.algorithm
         env["LD_LIBRARY_PATH"] = str(Path(self.core_prefix) / "lib") + (
@@ -402,8 +422,17 @@ def rpc(directory, request, timeout=5.0):
 
 def serve(plan, directory, observer):
     import fcntl
+    from contextlib import ExitStack
     directory = private_directory(directory)
-    with (directory / "manager.lock").open("a") as lock:
+    with ExitStack() as stack:
+        if getattr(plan,"version",""):
+            global_directory=private_directory(Path(f"/tmp/jandi-{os.getuid()}"))
+            version_lock=stack.enter_context((global_directory/"version.lock").open("a"))
+            try: fcntl.flock(version_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError("다른 MAIN/FAST 관리자가 실행 중입니다. 전체 종료 후 실행하세요.")
+            require_no_survivors(global_directory/"state.json")
+        lock=stack.enter_context((directory/"manager.lock").open("a"))
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:

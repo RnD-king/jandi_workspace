@@ -131,7 +131,12 @@ void CheckConfiguration(const std::string& path) {
   CheckField(fine_motion,"right_delta_v_px",c.ball.fine_motion.right_delta_px.v,"ball.fine_motion");
   FIELD(ball, lost_frames);
   FIELD(ball, upper_acquire_v_px);
-  FIELD(ball, far_u_des_px);
+  FIELD(ball, approach_top_center_u_px);
+  FIELD(ball, approach_bottom_center_u_px);
+  FIELD(line_p2p, ready_observation_end_weight);
+  FIELD(ball, ready_observation_end_weight);
+  FIELD(hurdle, ready_observation_end_weight);
+  FIELD(goal, ready_observation_end_weight);
   FIELD(ball, approach_top_half_width_px);
   FIELD(ball, approach_bottom_half_width_px);
   FIELD(ball, approach_near_outer_margin_px);

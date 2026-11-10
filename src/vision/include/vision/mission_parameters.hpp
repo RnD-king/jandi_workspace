@@ -86,7 +86,8 @@ inline void DeclareMissionParameters(rclcpp::Node& node,
   node.declare_parameter<int>("ball_down_search_max_steps",c.ball.down_search_max_steps);
   node.declare_parameter<double>("ball_down_search_inter_action_hold_sec",c.ball.down_search_inter_action_hold_sec);
   node.declare_parameter<double>("ball_approach_direct_down_v_px",c.ball.approach_direct_down_v_px);
-  node.declare_parameter<double>("ball_far_u_des_px",c.ball.far_u_des_px);
+  node.declare_parameter<double>("ball_approach_top_center_u_px",c.ball.approach_top_center_u_px);
+  node.declare_parameter<double>("ball_approach_bottom_center_u_px",c.ball.approach_bottom_center_u_px);
   node.declare_parameter<double>("ball_approach_top_half_width_px",c.ball.approach_top_half_width_px);
   node.declare_parameter<double>("ball_approach_bottom_half_width_px",c.ball.approach_bottom_half_width_px);
   node.declare_parameter<double>("ball_approach_near_outer_margin_px",c.ball.approach_near_outer_margin_px);
@@ -174,11 +175,13 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
   };
   c.ball.down_search_max_steps=turns("ball_down_search_max_steps");
   c.ball.approach_direct_down_v_px=node.get_parameter("ball_approach_direct_down_v_px").as_double();
-  c.ball.far_u_des_px=node.get_parameter("ball_far_u_des_px").as_double();
+  c.ball.approach_top_center_u_px=node.get_parameter("ball_approach_top_center_u_px").as_double();
+  c.ball.approach_bottom_center_u_px=node.get_parameter("ball_approach_bottom_center_u_px").as_double();
   c.ball.approach_top_half_width_px=node.get_parameter("ball_approach_top_half_width_px").as_double();
   c.ball.approach_bottom_half_width_px=node.get_parameter("ball_approach_bottom_half_width_px").as_double();
   c.ball.approach_near_outer_margin_px=node.get_parameter("ball_approach_near_outer_margin_px").as_double();
-  if (!std::isfinite(c.ball.far_u_des_px) || c.ball.far_u_des_px<0.0 ||
+  if (!std::isfinite(c.ball.approach_bottom_center_u_px) || c.ball.approach_bottom_center_u_px<0.0 ||
+      !std::isfinite(c.ball.approach_top_center_u_px) || c.ball.approach_top_center_u_px<0.0 ||
       !std::isfinite(c.ball.approach_top_half_width_px) ||
       c.ball.approach_top_half_width_px<=0.0 ||
       !std::isfinite(c.ball.approach_bottom_half_width_px) ||
@@ -269,7 +272,7 @@ inline bool ApplyLivePerceptionParameter(const rclcpp::Parameter& p,
       throw std::invalid_argument(name+" must be nonnegative");
     *setting.second=p.as_double();return true;
   }
-  if (name=="ball_far_u_des_px" ||
+  if (name=="ball_approach_bottom_center_u_px" || name=="ball_approach_top_center_u_px" ||
       name=="ball_approach_top_half_width_px" ||
       name=="ball_approach_bottom_half_width_px" ||
       name=="ball_approach_near_outer_margin_px") {
@@ -279,7 +282,8 @@ inline bool ApplyLivePerceptionParameter(const rclcpp::Parameter& p,
         !std::isfinite(p.as_double()) ||
         (half_width ? p.as_double()<=0.0 : p.as_double()<0.0))
       throw std::invalid_argument(name+" must be a finite valid geometry parameter");
-    if (name=="ball_far_u_des_px") c.ball.far_u_des_px=p.as_double();
+    if (name=="ball_approach_top_center_u_px") c.ball.approach_top_center_u_px=p.as_double();
+    else if (name=="ball_approach_bottom_center_u_px") c.ball.approach_bottom_center_u_px=p.as_double();
     else if (name=="ball_approach_top_half_width_px")
       c.ball.approach_top_half_width_px=p.as_double();
     else if (name=="ball_approach_bottom_half_width_px")

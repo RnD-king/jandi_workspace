@@ -17,7 +17,7 @@ void BallMiddleLoss(int zone) {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
   c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
-  c.far_u_des_px=380;c.approach_bottom_half_width_px=90;
+  c.approach_top_center_u_px=c.approach_bottom_center_u_px=380;c.approach_bottom_half_width_px=90;
   c.approach_top_half_width_px=90;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
   const double u=zone==4?200:zone==6?550:380;
@@ -81,7 +81,7 @@ void BallZoneEightOneStepThenDown() {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
   c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
-  c.far_u_des_px=380;c.approach_bottom_half_width_px=90;
+  c.approach_top_center_u_px=c.approach_bottom_center_u_px=380;c.approach_bottom_half_width_px=90;
   c.approach_top_half_width_px=90;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
   c.approach_direct_down_v_px=355;
@@ -172,7 +172,7 @@ void BallTurnDisabled() {
   auto c=LoadDefaultAlgorithmConfig().ball;
   c.stable_window=c.stable_min_hits=c.entry_min_hits=c.down_search_min_hits=1;
   c.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
-  c.far_u_des_px=380;c.approach_bottom_half_width_px=90;
+  c.approach_top_center_u_px=c.approach_bottom_center_u_px=380;c.approach_bottom_half_width_px=90;
   c.approach_top_half_width_px=90;
   c.approach_short_v_px=100;c.approach_two_step_v_px=240;
   c.recovery_walk_turn_max=0;c.entry_recovery_max_steps=0;

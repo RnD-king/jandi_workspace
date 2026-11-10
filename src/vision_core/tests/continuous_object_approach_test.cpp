@@ -1,3 +1,4 @@
+#include <filesystem>
 #include "vision_core/config_loader.hpp"
 #include "vision_core/mission_controller.hpp"
 #include <cmath>
@@ -15,10 +16,11 @@ ObjectTarget Target(double u=320,double v=100,int cls=1) {
 }
 MissionControllerConfig Config() {
   auto c=LoadDefaultAlgorithmConfig();
-  Check(std::abs(c.goal.approach_short_z_m-0.87)<1e-9,
+  const auto production=LoadAlgorithmConfig((std::filesystem::path(__FILE__).parent_path().parent_path()/"config/vision_algorithm.yaml").string());
+  Check(std::abs(production.goal.approach_short_z_m-0.87)<1e-9,
         "production GOAL near threshold must be 0.87m");
-  Check(std::abs(c.goal.camera_goal_start_z_m-0.87)<1e-9 &&
-        std::abs(c.goal.camera_goal_start_z_m-c.goal.approach_short_z_m)<1e-9,
+  Check(std::abs(production.goal.camera_goal_start_z_m-0.87)<1e-9 &&
+        std::abs(production.goal.camera_goal_start_z_m-production.goal.approach_short_z_m)<1e-9,
         "GOAL camera transition and near thresholds must both be 0.87m");
   c.enable_ball=true;c.enable_goal=c.enable_hurdle=false;
   c.initial_has_ball=c.goal_trial_start_goal=false;
@@ -95,7 +97,7 @@ void Geometry() {
   // Far guidance and near-grid inner boundaries share a center and slopes;
   // their outer boundaries differ by a fixed horizontal displacement.
   BallConfig boundary;
-  boundary.far_u_des_px=380.0;
+  boundary.approach_top_center_u_px=boundary.approach_bottom_center_u_px=380.0;
   boundary.approach_top_half_width_px=35.0;
   boundary.approach_bottom_half_width_px=90.0;
   boundary.approach_near_outer_margin_px=60.0;
@@ -111,7 +113,7 @@ void Geometry() {
   Check(boundary.ApproachBounds(0,480).first==345.0 &&
         boundary.ApproachBounds(479,480).second==470.0,
         "top/bottom ball half-width geometry changed");
-  boundary.far_u_des_px=360.0;
+  boundary.approach_top_center_u_px=boundary.approach_bottom_center_u_px=360.0;
   Check(boundary.ApproachBounds(0,480).first==325.0 &&
         boundary.ExtremeApproachBounds(479,480).second==510.0,
         "recenter did not move both far and near guides");
@@ -1107,6 +1109,7 @@ void GoalEdgeTenInFourRawBBox() {
     d.in.camera_feedback={CameraMode::kGoal,true};
     d.in.backboard_image_without_depth=true;
     d.in.raw_backboard_observation_available=true;
+    d.Tick(); // Establish the initial GOAL view before collecting its fresh edge window.
     for(int n=0;n<22;++n){
       // Four edge frames early in the window and a centered bbox afterwards.
       d.in.raw_backboard_target=Target(n<4?(left_turn?20:620):320);

@@ -20,6 +20,7 @@ struct LineP2pConfig {
   double steering_deadband{};
   double in_place_turn_score{}; // Above this absolute O/H score, turn once in WALK.
   double ready_lead_sec{}; // Matches the motion executor's READY remaining time.
+  double ready_observation_end_weight{3.0};
   double observation_start_ratio{}; // Fraction of estimated LINE block duration, in [0,1).
   // 판단 실패 또는 recovery 회전 뒤 stationary re-observation 시간이다.
   double failure_observation_sec{};
@@ -45,7 +46,7 @@ private:
   LineP2pConfig config_;
 };
 
-// Keep the configured start-to-READY window; later valid guides get 1->3 weight.
+// Keep the configured start-to-READY window and normalized configurable time weights.
 struct LineWindowStats {
   std::uint64_t action_id{0};
   std::size_t total_frames{0}, valid_frames{0}, window_frames{0}, used_frames{0};
@@ -59,7 +60,7 @@ public:
   explicit LineGuideAccumulator(const LineP2pConfig &config);
   LineGuideAccumulator(int minimum_valid_samples, double observation_start_ratio);
   LineGuideAccumulator(int minimum_valid_samples, double observation_start_ratio,
-                       int window, int required_hits);
+                       int window, int required_hits, double end_weight = 3.0);
   void Begin(std::uint64_t action_id, double now_sec);
   void Add(std::uint64_t action_id, double now_sec, const LineGuide &guide);
   void AddCenter(std::uint64_t action_id, double now_sec, std::optional<Point2> center);
@@ -91,6 +92,7 @@ private:
   std::optional<LineWindowStats> last_stats_;
   int minimum_valid_samples_;
   double observation_start_ratio_;
+  double end_weight_{3.0};
   int window_{10}, required_hits_{5};
 };
 

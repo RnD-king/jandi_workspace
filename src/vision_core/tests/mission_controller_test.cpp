@@ -151,7 +151,7 @@ static void TestNearBallTurnThenDown() {
   config.ball.entry_min_hits=1; config.ball.down_search_min_hits=1; config.ball.stable_window=config.ball.stable_min_hits=1;
   config.ball.pickup_verify_min_hits=1; // This fixture uses a one-frame window.
   config.ball.upper_acquire_v_px=480;
-  config.ball.far_u_des_px=320;
+  config.ball.approach_top_center_u_px=config.ball.approach_bottom_center_u_px=320;
   config.ball.approach_bottom_half_width_px=32;
   config.ball.approach_top_half_width_px=32;
   config.ball.approach_short_v_px=300;
