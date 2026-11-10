@@ -94,9 +94,9 @@ if(BUILD_TESTING)
   file(READ ${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml invalid_algorithm)
   string(REGEX REPLACE "ready_observation_end_weight:[^\n]*" "ready_observation_end_weight: -1.0"
     invalid_algorithm "${invalid_algorithm}")
-  file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/invalid_algorithm.yaml "${invalid_algorithm}")
+  file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/operator_invalid_algorithm.yaml "${invalid_algorithm}")
   add_test(NAME shared_vision_core_config_check_invalid
-    COMMAND shared_vision_core_config_check ${CMAKE_CURRENT_BINARY_DIR}/invalid_algorithm.yaml)
+    COMMAND shared_vision_core_config_check ${CMAKE_CURRENT_BINARY_DIR}/operator_invalid_algorithm.yaml)
   set_tests_properties(shared_vision_core_config_check_invalid PROPERTIES WILL_FAIL TRUE)
   add_executable(shared_vision_core_hurdle_voting_test tests/hurdle_voting_test.cpp)
   target_link_libraries(shared_vision_core_hurdle_voting_test PRIVATE shared_vision_core)
