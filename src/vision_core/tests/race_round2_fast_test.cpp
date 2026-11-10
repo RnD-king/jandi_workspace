@@ -56,7 +56,7 @@ void StationaryPolicy() {
   assert(production.hurdle.near_v_min_hits == 3);
   assert(production.goal.stable_window == 8 && production.goal.stable_min_hits == 6);
   assert(production.goal.near_distance_min_hits == 3);
-  assert(production.goal.edge_stable_window == 8 && production.goal.edge_stable_min_hits == 3);
+  assert(production.goal.edge_stable_window == 8 && production.goal.edge_stable_min_hits == 5);
   const std::deque<bool> hits{true,true,true,false,false,false,false,false};
   assert(FastStationaryQualified(hits,3)); // Last frame is a miss.
   assert(!FastStationaryQualified(hits,5));

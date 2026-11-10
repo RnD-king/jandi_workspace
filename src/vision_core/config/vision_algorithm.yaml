@@ -95,6 +95,7 @@ vision_algorithm:
 
       # 보행 중 프레임 관측
       ready_lead_sec: 0.20 # 비전 관측 계산과 실행기 READY 발행이 함께 읽는 종료 전 여유 시간
+      ready_observation_end_weight: 1.0 # 시작 1 → READY 끝 가중치; 1: 균등, 3: 기존
       observation_start_ratio: 0.0 # ACK부터 마지막 READY까지 전체 프레임으로 8중 4 판정·유효 가이드 평균
 
       # Legacy TURN configuration retained for manual/older tests;
@@ -133,6 +134,7 @@ vision_algorithm:
       max_tracks: 16
 
     control:
+      ready_observation_end_weight: 1.0
       # 단독 시험·LINE에서 공 진입
       test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
       stable_window: 8
@@ -143,7 +145,8 @@ vision_algorithm:
       upper_acquire_v_px: 470.0 # 공이 있을 조건 (중심 v가 이 값 이하인 프레임을 진입 횟수로 계산)
 
       # FORWARD 접근
-      far_u_des_px: 400.0 # FORWARD 사선 및 근거리 격자의 공통 중심선
+      approach_top_center_u_px: 400.0 # 사다리꼴 위쪽 중심
+      approach_bottom_center_u_px: 400.0 # 사다리꼴 아래쪽 중심
       approach_top_half_width_px: 45.0 # 화면 위쪽(v=0) 반폭
       approach_bottom_half_width_px: 100.0 # 화면 아래쪽(v=height-1) 반폭
       approach_short_v_px: 100.0 # 위 가로선 (4걸음)
@@ -220,6 +223,7 @@ vision_algorithm:
       max_tracks: 16
 
     control:
+      ready_observation_end_weight: 3.0
       # LINE에서 허들 진입
       stable_window: 8
       stable_min_hits: 4 # 허들 안정 검출: 최근 8프레임 중 4회
@@ -310,6 +314,7 @@ vision_algorithm:
         max_depth_m: 2.50 # 백보드 최대 거리
 
     control:
+      ready_observation_end_weight: 1.0
       # 단독 시험·검출 안정성
       trial_start_goal: false # true: 골대 단독 시험을 GOAL 카메라에서 시작, false: 기존 라인 출발
       test_mission_index: 1 # 단독 시험 순서: 홀수 RIGHT, 짝수 LEFT
@@ -346,8 +351,8 @@ vision_algorithm:
       auto_approach_half_width_px: 100.0 # 180~380px 직진, 밖은 좌/우회전전진
       approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
       edge_margin_px: 50.0 # GOAL 이미지 경계 보호 구간(px)
-      edge_stable_window: 8 # 연속된 프레임 관측창; 기간 내 한번 충족하면 래치
-      edge_stable_min_hits: 3 # 좌/우 각각 8중3 이상 접촉 시 우선 제자리 2회전
+      edge_stable_window: 8 # 원거리 이동 READY / 근거리 정지 관측
+      edge_stable_min_hits: 5 # 최근 8프레임 중 같은 쪽 접촉 5회
       approach_short_z_m: 0.87 # GOAL 근거리 진입·FINE 자세 전환 기준 (87cm); FORWARD 뷰에서는 짧은 보행 선택 기준
       camera_goal_start_z_m: 0.87 # FORWARD 접근에서 GOAL 카메라 전환 기준 (골 튜닝 노드만); GOAL 근거리 기준과 동일
 

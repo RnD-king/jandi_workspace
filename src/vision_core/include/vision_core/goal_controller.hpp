@@ -49,6 +49,7 @@ struct GoalFineMotionPlan {
 };
 
 struct GoalConfig {
+  double ready_observation_end_weight{3.0};
   bool race_round2_fast_enabled{false};
   double edge_margin_px{};
   int edge_stable_window{10};

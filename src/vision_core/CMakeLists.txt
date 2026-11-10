@@ -351,6 +351,16 @@ if(BUILD_TESTING)
   set_tests_properties(shared_vision_core_finish_line_test PROPERTIES
     ENVIRONMENT "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
 
+  add_executable(shared_vision_core_ready_weight_geometry_test tests/ready_weight_geometry_test.cpp)
+  target_link_libraries(shared_vision_core_ready_weight_geometry_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_ready_weight_geometry_test COMMAND shared_vision_core_ready_weight_geometry_test)
+  set_tests_properties(shared_vision_core_ready_weight_geometry_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
+  add_executable(shared_vision_core_goal_edge_ready_test tests/goal_edge_ready_test.cpp)
+  target_link_libraries(shared_vision_core_goal_edge_ready_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_goal_edge_ready_test COMMAND shared_vision_core_goal_edge_ready_test)
+  set_tests_properties(shared_vision_core_goal_edge_ready_test PROPERTIES ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${VISION_CORE_TEST_CONFIG}")
   get_property(_logic_tests DIRECTORY PROPERTY TESTS)
   add_executable(shared_vision_core_continuous_object_approach_test tests/continuous_object_approach_test.cpp)
   target_link_libraries(shared_vision_core_continuous_object_approach_test PRIVATE shared_vision_core)

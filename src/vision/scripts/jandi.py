@@ -50,7 +50,7 @@ def background(plan, directory):
 
 
 def screen(status, plan, page, message, log_view=None):
-    lines = [f"JANDI {plan['mode']} | ROS_DOMAIN_ID=22 | SSH 종료 시 계속 실행", ""]
+    lines = [f"JANDI {plan['mode']} | VERSION={plan.get('version','legacy').upper()} | ROS_DOMAIN_ID=22 | SSH 종료 시 계속 실행", ""]
     lines.append("옵션: " + " / ".join(
         f"{label}={'ON' if plan.get(name, False) else 'OFF'}" for name, label in (
             ("show_debug_view", "OpenCV"), ("terminal_node", "터미널"),
@@ -83,6 +83,9 @@ def screen(status, plan, page, message, log_view=None):
             for record in records:
                 text = "".join(c for c in record["text"] if c == '\t' or c.isprintable())
                 lines.append(f"{record['time']} {record['level']} {record['node']}: {text}")
+    elif page.startswith("emergency:"):
+        lines += ["EMERGENCY STOP", "정말 긴급종료하시겠습니까?",
+                  "1. 긴급종료 실행", "0. 취소", "Esc: 취소"]
     elif page.startswith("confirm:"):
         lines += [f"{page.split(':')[1].upper()} 서비스 전송 대기",
                   "Enter: 한 번 전송 / Esc 또는 0: 취소"]
@@ -93,7 +96,7 @@ def screen(status, plan, page, message, log_view=None):
         lines += ["1. RealSense   2. 모터   3. 비전 (켜기/끄기/재시작)",
                   "4. START   5. PAUSE   6. RESUME   7. RESET",
                   "8. 오류·로그   9. 콘솔 나가기(실행 유지)   0. 전체 종료",
-                  "K. 긴급종료 (확인 없이 관리 중인 전체 노드 중지)"]
+                  "K. 긴급종료 확인 (1: 실행 / 0·Esc: 취소)"]
         events = [e for e in status["events"] if e["level"] in ("ERROR", "FATAL", "WARN")]
         if events:
             e = events[-1]
@@ -108,7 +111,11 @@ def key_request(page, key):
     if len(key) != 1:
         return page, None
     if key in ("K", "k"):
-        return "main", {"op": "emergency_stop"}
+        return (page if page.startswith("emergency:") else "emergency:"+page), None
+    if page.startswith("emergency:"):
+        if key=="1":
+            return "main", {"op":"emergency_stop"}
+        return (page[len("emergency:"):] if key in ("0","\x1b") else page), None
     if page in NAMES:
         return ("main", {"op": {"1": "start", "2": "stop", "3": "restart"}[key], "node": page}) \
             if key in "123" else ("main" if key == "0" else page, None)
@@ -163,7 +170,8 @@ def console(directory):
             if log_view is not None:
                 log_view.move(key)
             page, request = key_request(page, key)
-            if request is not None:
+            if request is not None and not (request.get("op")=="emergency_stop" and
+                                             response["status"].get("emergency_stop_requested")):
                 try:
                     reply = rpc(directory, request)
                     message = reply.get("message", "")

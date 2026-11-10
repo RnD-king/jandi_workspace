@@ -16,7 +16,7 @@ const LinePlan::Block* LinePlan::Find(std::uint64_t id) const {
   for (const auto& block : blocks_) if (block.id == id) return &block;
   return nullptr;
 }
-ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner, bool probe) {
+ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner, bool probe, double end_weight) {
   if (!IsCruise(cruise)) return {};
   // Retain recent IDs for idempotent late feedback, without unbounded growth.
   while (blocks_.size() >= 32 && blocks_.front().reported) {
@@ -33,7 +33,9 @@ ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner, bool pr
            MissionAction::kLineStraightUnit;
   const int count = left ? config_.left_repetitions :
       right ? config_.right_repetitions : config_.straight_repetitions;
-  blocks_.emplace_back(next_block_++, cruise, unit, count, config_,window_,required_hits_);
+  auto observation_config=config_;
+  if (end_weight>0.0) observation_config.ready_observation_end_weight=end_weight;
+  blocks_.emplace_back(next_block_++, cruise, unit, count, observation_config,window_,required_hits_);
   blocks_.back().owner=owner;
   blocks_.back().probe=probe;
   return UnitRequest(unit);
@@ -71,6 +73,9 @@ void LinePlan::Feedback(const CommandDeliveryFeedback& feedback, double now, dou
   if (!block) return;
   if (!unit.done && feedback.acknowledged && !feedback.done && !feedback.ready) {
     unit.acknowledged = true;
+    if (!unit.start && unit.parent==0) unit.start=now;
+    else if (!unit.start && unit.parent_start_estimate)
+      unit.start=std::max(now,*unit.parent_start_estimate);
     if (unit.ordinal == 1 && !block->start) {
       if (unit.parent == 0) block->start = now;
       else if (unit.parent_start_estimate)
@@ -81,10 +86,11 @@ void LinePlan::Feedback(const CommandDeliveryFeedback& feedback, double now, dou
   unit.done = true;
   ++block->completed;
   for (auto& successor : units_) {
-    if (successor.second.parent != feedback.action_id || successor.second.ordinal != 1) continue;
+    if (successor.second.parent != feedback.action_id) continue;
     auto* next = Find(successor.second.block);
     successor.second.parent_start_estimate = now + std::max(0.0, hold);
-    if (next && !next->start && successor.second.acknowledged)
+    if (successor.second.acknowledged) successor.second.start=successor.second.parent_start_estimate;
+    if (next && !next->start && successor.second.ordinal==1 && successor.second.acknowledged)
       next->start = successor.second.parent_start_estimate;
   }
 }
@@ -121,7 +127,7 @@ void LinePlan::ObserveObject(double now, std::uint64_t owner, bool visible,
   }
 }
 void LinePlan::AttachBallEntry(std::uint64_t action_id, std::uint64_t epoch,
-                               std::optional<Point2> admission_mean, double now) {
+                               std::optional<Point2> admission_mean, double now, double end_weight) {
   if (!epoch) return;
   const auto it=units_.find(action_id);
   auto* block=it==units_.end()?nullptr:Find(it->second.block);
@@ -131,6 +137,8 @@ void LinePlan::AttachBallEntry(std::uint64_t action_id, std::uint64_t epoch,
   if (block->ball_entry_epoch) return; // One admission per physical block.
   block->ball_entry_epoch=epoch;
   block->ball_entry_seed=admission_mean;
+  block->ball_entry_centers=LineGuideAccumulator(config_.failure_min_valid_samples,
+      config_.observation_start_ratio,window_,required_hits_,end_weight);
   block->ball_entry_centers.Begin(block->id,*block->start);
   block->ball_entry_centers.AddCenter(block->id,now,admission_mean);
 }
@@ -291,7 +299,6 @@ void LinePlan::ClearEvidence() {
 void LinePlan::Reset() { blocks_.clear(); units_.clear(); next_block_ = 1; }
 std::optional<double> LinePlan::StartEstimate(std::uint64_t id) const {
   const auto it = units_.find(id);
-  const auto* block = it == units_.end() ? nullptr : Find(it->second.block);
-  return block ? block->start : std::nullopt;
+  return it==units_.end() ? std::nullopt : it->second.start;
 }
 } // namespace vision_core

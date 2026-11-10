@@ -18,7 +18,7 @@ void Run(bool goal) {
   c.initial_has_ball=c.goal_trial_start_goal=goal;c.test_mission=MissionType::kNone;
   c.transition_settle_sec=c.fine_motion_settle_sec=0;c.post_motion_observation_sec=1;
   c.line_features.image_center_u=320;
-  c.ball.far_u_des_px=320;c.ball.approach_top_half_width_px=90;c.ball.approach_bottom_half_width_px=90;
+  c.ball.approach_top_center_u_px=c.ball.approach_bottom_center_u_px=320;c.ball.approach_top_half_width_px=90;c.ball.approach_bottom_half_width_px=90;
   c.ball.approach_direct_down_v_px=480;c.ball.down_search_min_hits=1;
   c.ball.fine_motion={};c.ball.fine_side_two_step_margin_px=1e6;
   c.ball.pickup_u1_px=300;c.ball.pickup_u2_px=340;c.ball.pickup_v1_px=100;c.ball.pickup_v2_px=150;

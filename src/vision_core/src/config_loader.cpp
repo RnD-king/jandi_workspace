@@ -350,6 +350,10 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (c.line_p2p.in_place_turn_score <= c.line_p2p.steering_deadband)
     throw std::runtime_error("line_p2p.in_place_turn_score must exceed steering_deadband");
   Nonnegative(c.line_p2p.ready_lead_sec, "line_p2p.ready_lead_sec");
+  for (double weight : {c.line_p2p.ready_observation_end_weight,
+       c.ball.ready_observation_end_weight,c.hurdle.ready_observation_end_weight,
+       c.goal.ready_observation_end_weight})
+    Positive(weight,"ready_observation_end_weight");
   Nonnegative(c.line_p2p.observation_start_ratio, "line_p2p.observation_start_ratio");
   if (c.line_p2p.observation_start_ratio >= 1.0)
     throw std::runtime_error("line_p2p.observation_start_ratio must be in [0,1)");
@@ -374,7 +378,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   HitsWithinWindow(c.ball.stable_min_hits, c.ball.stable_window,
                    "ball.stable_min_hits", "ball.stable_window");
   PositiveInt(c.ball.lost_frames, "ball.lost_frames");
-  Nonnegative(c.ball.far_u_des_px, "ball.far_u_des_px");
+  Nonnegative(c.ball.approach_top_center_u_px, "ball.approach_top_center_u_px");
+  Nonnegative(c.ball.approach_bottom_center_u_px, "ball.approach_bottom_center_u_px");
   Nonnegative(c.ball.approach_top_half_width_px, "ball.approach_top_half_width_px");
   Nonnegative(c.ball.approach_bottom_half_width_px, "ball.approach_bottom_half_width_px");
   Nonnegative(c.ball.approach_near_outer_margin_px, "ball.approach_near_outer_margin_px");
@@ -730,6 +735,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(lp,"in_place_turn_score",c.line_p2p.in_place_turn_score);
   Assign(lp, "ready_lead_sec", c.line_p2p.ready_lead_sec);
   Assign(lp, "observation_start_ratio", c.line_p2p.observation_start_ratio);
+  Assign(lp, "ready_observation_end_weight", c.line_p2p.ready_observation_end_weight);
   Assign(lp, "failure_observation_sec", c.line_p2p.failure_observation_sec);
   Assign(lp, "recovery_observation_sec", c.line_p2p.recovery_observation_sec);
   Assign(lp, "failure_min_valid_samples", c.line_p2p.failure_min_valid_samples);
@@ -738,6 +744,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(lp, "recovery_max_turns", c.line_p2p.recovery_max_turns);
 
   const auto b = a["ball"];
+  Assign(b, "ready_observation_end_weight", c.ball.ready_observation_end_weight);
   Assign(b, "test_mission_index", c.test_ball_mission_index);
   Assign(b, "approach_short_v_px", c.ball.approach_short_v_px);
   Assign(b, "down_search_max_steps", c.ball.down_search_max_steps);
@@ -756,7 +763,15 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b,"down_search_min_hits",c.ball.down_search_min_hits);
   Assign(b, "entry_min_hits", c.ball.entry_min_hits);
   Assign(b, "lost_frames", c.ball.lost_frames);
-  Assign(b, "far_u_des_px", c.ball.far_u_des_px);
+  if (b["far_u_des_px"]) {
+    if (b["approach_top_center_u_px"] || b["approach_bottom_center_u_px"])
+      throw std::runtime_error("BALL legacy center cannot be mixed with top/bottom centers");
+    Assign(b,"far_u_des_px",c.ball.approach_top_center_u_px);
+    c.ball.approach_bottom_center_u_px=c.ball.approach_top_center_u_px;
+  } else {
+    Assign(b,"approach_top_center_u_px",c.ball.approach_top_center_u_px);
+    Assign(b,"approach_bottom_center_u_px",c.ball.approach_bottom_center_u_px);
+  }
   Assign(b, "approach_top_half_width_px", c.ball.approach_top_half_width_px);
   Assign(b, "approach_bottom_half_width_px", c.ball.approach_bottom_half_width_px);
   Assign(b, "approach_near_outer_margin_px", c.ball.approach_near_outer_margin_px);
@@ -812,6 +827,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "recovery_center_tolerance_px", c.ball.recovery_center_tolerance_px);
 
   const auto h = a["hurdle"];
+  Assign(h, "ready_observation_end_weight", c.hurdle.ready_observation_end_weight);
   Assign(h, "down_one_step_v_px", c.hurdle.down_one_step_v_px);
   Assign(h, "fine_mode_v_px", c.hurdle.fine_mode_v_px);
   Assign(h, "approach_short_v_px", c.hurdle.approach_short_v_px);
@@ -867,6 +883,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "fine_line_max_search_steps", c.hurdle.fine_line_max_search_steps);
 
   const auto g = a["goal"];
+  Assign(g, "ready_observation_end_weight", c.goal.ready_observation_end_weight);
   // Existing unmodified fixtures preserve their LINE anchor; the production
   // GOAL AUTO YAML explicitly selects the 310px experimental reference.
   c.goal.auto_approach_reference_u_px=c.line_features.image_center_u;

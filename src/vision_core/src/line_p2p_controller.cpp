@@ -34,7 +34,10 @@ LineGuideAccumulator::LineGuideAccumulator(int minimum_valid_samples)
 
 LineGuideAccumulator::LineGuideAccumulator(const LineP2pConfig &config)
     : LineGuideAccumulator(config.failure_min_valid_samples,
-                           config.observation_start_ratio) {}
+                           config.observation_start_ratio,
+                           LoadDefaultAlgorithmConfig().line.line_stable_window,
+                           LoadDefaultAlgorithmConfig().line.line_stable_min_hits,
+                           config.ready_observation_end_weight) {}
 
 LineGuideAccumulator::LineGuideAccumulator(int minimum_valid_samples,
                                          double observation_start_ratio)
@@ -43,10 +46,12 @@ LineGuideAccumulator::LineGuideAccumulator(int minimum_valid_samples,
           LoadDefaultAlgorithmConfig().line.line_stable_min_hits) {}
 LineGuideAccumulator::LineGuideAccumulator(int minimum_valid_samples,
                                          double observation_start_ratio,
-                                         int window, int required_hits)
+                                         int window, int required_hits, double end_weight)
     : minimum_valid_samples_(minimum_valid_samples),
       observation_start_ratio_(observation_start_ratio),
-      window_(window), required_hits_(required_hits) {
+      window_(window), required_hits_(required_hits), end_weight_(end_weight) {
+  if (!std::isfinite(end_weight) || end_weight <= 0.0)
+    throw std::invalid_argument("READY end weight must be finite and positive");
   if (minimum_valid_samples < 1) throw std::invalid_argument("minimum LINE samples must be positive");
   if (window < 1 || required_hits < 1 || required_hits > window)
     throw std::invalid_argument("LINE sequence hits must be within its window");
@@ -114,7 +119,7 @@ LineGuideAccumulator::Finish(std::uint64_t action_id, double now_sec,
     ++stats.used_frames;
     const double phase = span > 1e-9
         ? Clamp((sample.now_sec - cutoff) / span, 0.0, 1.0) : 1.0;
-    const double weight = 1.0 + 2.0 * phase;
+    const double weight = 1.0 + (end_weight_ - 1.0) * phase;
     offset_sum += weight * sample.guide.offset;
     heading_sum += weight * sample.guide.heading_rad;
     if (sample.guide.curvature_valid && std::isfinite(sample.guide.curvature_rad)) {
@@ -182,7 +187,7 @@ std::optional<Point2> LineGuideAccumulator::FinishCenter(
     if (sample.now_sec<cutoff || sample.now_sec>end_sec) continue;
     ++stats.used_frames;
     const double phase=span>1e-9 ? Clamp((sample.now_sec-cutoff)/span,0.0,1.0):1.0;
-    const double weight=1.0+2.0*phase;
+    const double weight=1.0+(end_weight_-1.0)*phase;
     sum.u+=weight*sample.center.u;sum.v+=weight*sample.center.v;
     weight_sum+=weight;
   }

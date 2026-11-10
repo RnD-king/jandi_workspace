@@ -620,7 +620,7 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     std::snprintf(buf,sizeof(buf),"PIXEL ZONES: %s | GOAL=%.0f+/−%.0f BALL bottom=%.0f+/−%.0f",
         mission_result.approach_mission==vision_core::MissionType::kGoal?"GOAL":"BALL",
         config.goal.auto_approach_center_u_px,config.goal.auto_approach_half_width_px,
-        config.ball.far_u_des_px,config.ball.approach_bottom_half_width_px);
+        config.ball.ApproachCenter(ball_cmd.tracked.center_px.v,vis.rows),config.ball.approach_bottom_half_width_px);
   else
     std::snprintf(buf,sizeof(buf),
         "reference=%.1fpx  Ko=%.3f  Kh=%.3f  deadband=%.4f  turn>%.3f",
@@ -692,8 +692,8 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
       vision_core::BallController::ModeName(ball_cmd.mode),ball_color);
   std::snprintf(buf,sizeof(buf),"BALL #%d %s",ball_index,ball_index%2 ? "RIGHT" : "LEFT");
   add_row(ball_rows,buf,ball_color);
-  std::snprintf(buf, sizeof(buf), "GRID center=%.1f top half=%.1f bottom half=%.1f outer margin=%.1f",
-      bc.far_u_des_px,bc.approach_top_half_width_px,
+  std::snprintf(buf, sizeof(buf), "GRID center top/bottom=%.1f/%.1f top half=%.1f bottom half=%.1f outer margin=%.1f",
+      bc.approach_top_center_u_px,bc.approach_bottom_center_u_px,bc.approach_top_half_width_px,
       bc.approach_bottom_half_width_px,bc.approach_near_outer_margin_px);
   add_row(ball_approach_rows,buf,ball_color);
   std::snprintf(buf,sizeof(buf),"ZONE 8: 2-step v=[%.1f,%.1f)",

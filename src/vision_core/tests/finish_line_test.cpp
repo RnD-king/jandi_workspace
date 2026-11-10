@@ -102,7 +102,32 @@ void PriorityAndGates() {
   // Recreate the steering controller as a real matching configuration would.
   score.core.line_p2p_controller_=LineP2pController(score.core.config_.line_p2p);
   score.Floor(600);score.Tick();
-  Check(score.out.command.action==MissionAction::kLineStraightUnit,"finish started score recovery instead of straight");
+  Check(score.out.command.action==MissionAction::kStepForwardRightOneHurdle,
+        "finish did not reuse ordinary right score recovery");
+  const auto turn=score.out.command.action_id;
+  score.Tick({turn,true,false,false});
+  score.Tick({turn,true,true,false});
+  Check(score.core.line_guard_turns_completed_==1 && score.out.post_motion_observing,
+        "finish turn lost its DONE count or fresh observation");
+  score.Floor(600,2);score.Tick();
+  Check(score.out.command.action==MissionAction::kLineStraightUnit && !score.out.post_motion_observing,
+        "sparse finish evidence did not leave score observation for straight walking");
+  Driver sparse_done;sparse_done.core.config_.line_p2p.in_place_turn_score=.01;
+  sparse_done.Floor(600);sparse_done.Tick();const auto sparse_turn=sparse_done.out.command.action_id;
+  sparse_done.Tick({sparse_turn,true,false,false});sparse_done.Floor(600,2);
+  sparse_done.Tick({sparse_turn,true,true,false});
+  Check(sparse_done.core.line_guard_turns_completed_==1 &&
+        sparse_done.out.command.action==MissionAction::kLineStraightUnit,
+        "sparse finish evidence erased an actually completed turn");
+  Driver exhausted;exhausted.Floor(600);
+  exhausted.core.line_guard_turns_completed_=exhausted.core.config_.line_p2p.recovery_max_turns;
+  exhausted.core.config_.line_p2p.in_place_turn_score=.01;
+  exhausted.Tick();
+  Check(exhausted.out.command.action==MissionAction::kLineStraightUnit &&
+        exhausted.core.finish_line_straight_only_,"finish turn exhaustion did not latch straight");
+  Driver flat;flat.in.line_centers={{100,300},{200,302},{300,304}};flat.Tick();
+  Check(flat.out.command.action==MissionAction::kLineStraightUnit,
+        "invalid three-point fit did not use finish straight fallback");
   for(const auto stage:std::vector<std::pair<int,int>>{{0,5},{1,5},{2,1},{2,3},{2,4}}) {
     Driver normal(stage.first,stage.second);normal.Floor(200,3);normal.Tick();
     Check(!normal.core.FinishCourseEnabled(normal.in),"partial finish gate was accepted");

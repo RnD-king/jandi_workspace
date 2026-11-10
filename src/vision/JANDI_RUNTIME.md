@@ -1,3 +1,5 @@
+> MAIN/FAST 독립 설치·버전 선택·공통 카메라 설정은 [JANDI_DUAL_INSTALL.md](JANDI_DUAL_INSTALL.md)를 우선 적용합니다. 아래 단일 설치 등록 절차는 이전 운영 방식입니다. 긴급종료는 K → 확인 화면 → 1로 실행합니다.
+
 # Jetson 통합 실행과 숫자 메뉴
 
 Jetson Orin Nano에서만 카메라·추론·미션 판단·모터 실행을 함께 구동한다.

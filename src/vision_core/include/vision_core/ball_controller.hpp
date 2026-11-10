@@ -43,6 +43,7 @@ enum class BallMode {
 };
 
 struct BallConfig {
+  double ready_observation_end_weight{3.0};
   bool race_round2_fast_enabled{false};
   double approach_short_v_px{};
   int down_search_max_steps{};
@@ -61,16 +62,22 @@ struct BallConfig {
   int down_search_min_hits{}; // DOWN search only, within stable_window.
   int entry_min_hits{}; // LINE entry only; independent of FINE stability.
   int lost_frames{};
-  double far_u_des_px{};
+  double approach_top_center_u_px{};
+  double approach_bottom_center_u_px{};
   double approach_top_half_width_px{};
   double approach_bottom_half_width_px{};
   double approach_near_outer_margin_px{60.0}; // Constant horizontal shift: identical inner/outer slopes.
-  // The far and near grids share this center and the same two inner diagonals.
+  // Far/near/recovery share both interpolated center and inner diagonals.
+  double ApproachCenter(double v,int image_height) const {
+    const double t=std::clamp(v/std::max(1,image_height-1),0.0,1.0);
+    return approach_top_center_u_px+t*(approach_bottom_center_u_px-approach_top_center_u_px);
+  }
   std::pair<double,double> ApproachBounds(double v, int image_height) const {
     const double t=std::clamp(v/std::max(1,image_height-1),0.0,1.0);
     const double half_width=approach_top_half_width_px+
         t*(approach_bottom_half_width_px-approach_top_half_width_px);
-    return {far_u_des_px-half_width,far_u_des_px+half_width};
+    const double center=ApproachCenter(v,image_height);
+    return {center-half_width,center+half_width};
   }
   std::pair<double,double> ExtremeApproachBounds(double v,int image_height) const {
     const auto inner=ApproachBounds(v,image_height);
@@ -307,6 +314,8 @@ private:
   int completed_contact_steps_{0};
   TrackedBall tracked_;
   double last_seen_u_px_{0.0};
+  double last_seen_v_px_{0.0};
+  int last_image_height_{480};
   std::optional<double> last_stable_ball_u_;
   std::optional<Point2> last_down_center_;
   MissionAction down_recovery_action_{MissionAction::kNone};

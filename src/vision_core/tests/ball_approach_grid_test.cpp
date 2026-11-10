@@ -11,7 +11,7 @@ using namespace vision_core;
 namespace {
 BallConfig Config() {
   auto c=LoadDefaultAlgorithmConfig().ball;
-  c.far_u_des_px=380;
+  c.approach_top_center_u_px=c.approach_bottom_center_u_px=380;
   c.approach_top_half_width_px=70;
   c.approach_bottom_half_width_px=90;
   c.approach_near_outer_margin_px=60;
@@ -50,7 +50,7 @@ void Bounds() {
   bottom=c.ApproachBounds(959,960);middle=c.ApproachBounds(479.5,960);
   assert(bottom.first==290 && bottom.second==470);
   assert(middle.first==285 && middle.second==475);
-  c.far_u_des_px=360;
+  c.approach_top_center_u_px=c.approach_bottom_center_u_px=360;
   assert(c.ApproachBounds(0,480).first==260);
   assert(c.ExtremeApproachBounds(0,480).first==200);
 }

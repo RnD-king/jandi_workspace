@@ -14,7 +14,7 @@ BallConfig Config() {
   c.pickup_u1_px=300;c.pickup_u2_px=400;c.pickup_v1_px=100;c.pickup_v2_px=150;
   c.down_recovery_max_actions=3;c.recovery_observation_sec=1;
   // FORWARD centerline deliberately disagrees with the pickup rectangle.
-  c.far_u_des_px=100;c.fine_side_two_step_margin_px=1e6;
+  c.approach_top_center_u_px=c.approach_bottom_center_u_px=100;c.fine_side_two_step_margin_px=1e6;
   return c;
 }
 struct Driver {

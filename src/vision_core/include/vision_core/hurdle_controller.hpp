@@ -32,6 +32,7 @@ enum class HurdleMode {
 };
 
 struct HurdleConfig {
+  double ready_observation_end_weight{3.0};
   bool race_round2_fast_enabled{false};
   double approach_short_v_px{};
   int pre_down_extra_forward_steps{2}; // Additional physical steps after the existing near 2-step.

@@ -224,7 +224,7 @@ int main() {
         "GOAL far AUTO edge margin absent while shared LINE plan is active");
   m.approach_mission=vision_core::MissionType::kNone;
 
-  c.ball.far_u_des_px=380;
+  c.ball.approach_top_center_u_px=c.ball.approach_bottom_center_u_px=380;
   c.ball.approach_top_half_width_px=90;c.ball.approach_bottom_half_width_px=90;
   c.ball.approach_near_outer_margin_px=60;
   c.ball.approach_short_v_px=100;c.ball.approach_two_step_v_px=240;

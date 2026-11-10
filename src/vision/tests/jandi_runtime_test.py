@@ -174,8 +174,12 @@ class RuntimeTest(unittest.TestCase):
         self.boot()
         self.observer.allowed = False
         for page in ("main", "logs", "vision", "motor", "shutdown"):
-            self.assertEqual(console.key_request(page, "K"),
-                             ("main", {"op": "emergency_stop"}))
+            confirm,request=console.key_request(page,"K")
+            self.assertEqual((confirm,request),("emergency:"+page,None))
+            self.assertEqual(console.key_request(confirm,"K"),(confirm,None))
+            for cancel in ("0","\x1b"):
+                self.assertEqual(console.key_request(confirm,cancel),(page,None))
+            self.assertEqual(console.key_request(confirm,"1"),("main",{"op":"emergency_stop"}))
         result = self.manager.request({"op": "emergency_stop"})
         self.assertTrue(result["ok"])
         self.assertTrue(self.manager.shutdown_requested)
@@ -245,7 +249,7 @@ class RuntimeTest(unittest.TestCase):
         a, b = practice.commands(), irc.commands()
         differences = [(x, y) for x, y in zip(a["vision"], b["vision"]) if x != y]
         self.assertEqual(differences, [("terminal_node:=true", "terminal_node:=false")])
-        self.assertEqual(a["camera"], ["ros2", "launch", "realsense2_camera", "rs_launch.py"])
+        self.assertEqual(a["camera"], ["ros2", "launch", "realsense2_camera", "rs_launch.py", "config_file:="+practice.camera_config])
         self.assertEqual(a["motor"], b["motor"])
         for service, path in runtime.SERVICES.items():
             self.assertIn(f"{service}:={path}", a["vision"])

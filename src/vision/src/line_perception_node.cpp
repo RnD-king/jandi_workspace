@@ -1684,6 +1684,7 @@ private:
     perception_input.pitch_rad = pitch;
     perception_input.image_width = bgr.cols;
     perception_input.image_height = bgr.rows;
+    perception_input.frame_capture_sec = capture_sec;
     // Freeze mission timers during PAUSED, including camera/object
     // observation deadlines, without changing ROS camera timestamps.
     perception_input.now_sec =

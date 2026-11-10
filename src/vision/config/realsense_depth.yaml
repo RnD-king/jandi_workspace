@@ -1,0 +1,5 @@
+# Shared MAIN/FAST driver config_file map. Exposure is in microseconds.
+# Values are initial experiment settings; restart the camera after editing.
+depth_module.enable_auto_exposure: false
+depth_module.exposure: 5000
+depth_module.gain: 16

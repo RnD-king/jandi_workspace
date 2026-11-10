@@ -90,6 +90,7 @@ double BallController::Clamp(double value, double low, double high) {
 
 void BallController::UpdateTracker(const std::optional<ObjectTarget> &target,
                                    int image_width, int image_height) {
+  last_image_height_=image_height;
   const bool detected = target && image_width > 1 && image_height > 1;
   hit_history_.push_back(detected);
   recent_ball_u_.push_back(
@@ -121,6 +122,7 @@ void BallController::UpdateTracker(const std::optional<ObjectTarget> &target,
         mean.area_px / Denom(double(image_width) * image_height), 0.0, 1.0);
     tracked_.confidence = mean.confidence;
     last_seen_u_px_ = tracked_.center_px.u;
+    last_seen_v_px_ = tracked_.center_px.v;
     if (mode_==BallMode::kDownSearch || mode_==BallMode::kCoarseAdjust ||
         mode_==BallMode::kWaitFinePose || mode_==BallMode::kFineAdjustForPickup ||
         mode_==BallMode::kFineSidePair || mode_==BallMode::kFineMotionRepeat ||
@@ -225,7 +227,7 @@ ActionRequest BallController::FineActionAt(Point2 center) const {
 }
 
 ActionRequest BallController::RecoveryAction() const {
-  const double error = last_seen_u_px_ - config_.far_u_des_px;
+  const double error = last_seen_u_px_ - config_.ApproachCenter(last_seen_v_px_,last_image_height_);
   if (std::abs(error) <= config_.recovery_center_tolerance_px)
     return {};
   return Locomotion(
@@ -242,7 +244,7 @@ void BallController::BeginForwardRecovery(double now, std::optional<double> u,
   recovery_turn_search_exhausted_ = false;
   recovery_turn_left_.reset();
   if (u && std::isfinite(*u)) {
-    const double offset = *u - config_.far_u_des_px;
+    const double offset = *u - config_.ApproachCenter(last_seen_v_px_,last_image_height_);
     if (std::abs(offset) > config_.recovery_center_tolerance_px)
       recovery_turn_left_ = offset < 0.0;
   }
@@ -556,7 +558,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     result.camera_request = CameraRequest::kBallView;
     if (camera.actual_mode == CameraMode::kBallView && camera.settled) {
       ClearTracking(); // Start fine control with fresh DOWN-view evidence.
-      last_seen_u_px_ = config_.far_u_des_px;
+      last_seen_u_px_ = config_.ApproachCenter(last_seen_v_px_,last_image_height_);
       mode_ = BallMode::kDownSearch;
       last_down_center_.reset();
       down_search_.Reset();
@@ -646,10 +648,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
               pickup.pickup_top_inset_px);
       if (plan.action!=MissionAction::kNone) {
         result.action=Locomotion(plan.action);
-        // Keep forward's full measured sequence; make BACK/LEFT/RIGHT
-        // reobserve one motion earlier (1->1, 2->1, 3->2).
-        const int execute=plan.action==MissionAction::kStepForwardHalf
-            ? plan.repetitions : std::max(1,plan.repetitions-1);
+        // Execute the planner's full safe prefix, then reobserve.
+        const int execute=plan.repetitions;
         if (execute>1 && allow_new_body_actions && allow_fine_pair) {
           fine_side_action_=plan.action;
           fine_side_remaining_=fine_repeat_total_=execute;

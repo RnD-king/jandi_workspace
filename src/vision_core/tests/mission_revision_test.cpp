@@ -674,7 +674,7 @@ void EntryDirectionRecovery(bool left, bool reacquire) {
   c.recovery_center_tolerance_px=50;
   c.recovery_observation_sec=1;c.recovery_max_observations=5;
   BallController ball(c,3);
-  const auto target=Target(c.far_u_des_px+(left?-120:120),100);
+  const auto target=Target(c.approach_top_center_u_px+(left?-120:120),100);
   const CameraFeedback forward{CameraMode::kForward,true};
   BallResult b;
   for(int i=0;i<6;++i)
@@ -719,7 +719,7 @@ void EntryDirectionTransport(bool left) {
   auto r=core.Step(f);const auto a=r.command.action_id;
   assert(r.command.action==MissionAction::kLineStraightUnit);
   for(int i=1;i<=6;++i) {
-    f.now_sec=.1*i;f.ball_target=Target(c.ball.far_u_des_px+(left?-120:120),100);
+    f.now_sec=.1*i;f.ball_target=Target(c.ball.approach_top_center_u_px+(left?-120:120),100);
     f.delivery_feedback={a,true,false,false};r=core.Step(f);
   }
   assert(r.active_mission==MissionType::kLine && r.candidate_mission==MissionType::kBall);
@@ -741,7 +741,7 @@ void EntryDirectionCentralFallback() {
   BallController ball(c,3);BallResult b;
   const CameraFeedback forward{CameraMode::kForward,true};
   for(int i=0;i<6;++i)
-    b=ball.Compute(Target(c.far_u_des_px,100),640,480,.1*i,forward,{false,true,false});
+    b=ball.Compute(Target(c.approach_top_center_u_px,100),640,480,.1*i,forward,{false,true,false});
   ball.UseVerifiedObservation({},std::deque<bool>(10,false),640,480);
   b=ball.Compute({},640,480,2,forward,{true,false,true});
   assert(b.mode==BallMode::kForwardRecoveryObserve);

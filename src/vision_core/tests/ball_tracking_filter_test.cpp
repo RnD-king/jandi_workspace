@@ -395,7 +395,8 @@ void BackboardIdentityAndCameraReset() {
   auto a=DetectionAt(180,3,80,40,.6),b=DetectionAt(540,3,80,40,.6);
   a.left_depth_m=a.right_depth_m=.6;b.left_depth_m=b.right_depth_m=.6;
   for(int i=0;i<30;++i)tick({a});
-  assert(out.mission.active_mission==MissionType::kGoal && out.perception.backboard_target_locked);
+  assert(out.mission.active_mission==MissionType::kGoal && !out.perception.backboard_target_locked &&
+         out.perception.backboard_target_id!=0);
   const auto id=out.perception.backboard_target_id;
   for(int i=0;i<10;++i) {
     tick({b,a});assert(out.perception.targets.backboard->center_px.u==180);

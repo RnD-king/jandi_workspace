@@ -27,7 +27,8 @@ public:
            action == MissionAction::kStepForwardRight;
   }
   void UpdateConfig(const LineP2pConfig& config) { config_ = config; }
-  ActionRequest Begin(MissionAction cruise, std::uint64_t owner = 0, bool probe = false);
+  ActionRequest Begin(MissionAction cruise, std::uint64_t owner = 0, bool probe = false,
+                      double end_weight = -1.0);
   ActionRequest Continue(std::uint64_t ready_id = 0) const;
   void Issued(const ControlCommand& command, std::uint64_t parent_id);
   void Feedback(const CommandDeliveryFeedback& feedback, double now, double hold);
@@ -40,7 +41,8 @@ public:
   // Keep the original LINE block owner while tracking a BALL admission in parallel.
   // The admission is already qualified; READY still determines its final center.
   void AttachBallEntry(std::uint64_t action_id, std::uint64_t epoch,
-                       std::optional<Point2> admission_mean, double now);
+                       std::optional<Point2> admission_mean, double now,
+                       double end_weight = 3.0);
   void ObserveBallEntry(double now, std::uint64_t epoch,
                         std::optional<Point2> center);
   bool BallEntryOwned(std::uint64_t action_id, std::uint64_t epoch) const;
@@ -103,9 +105,9 @@ private:
           const LineP2pConfig &config,int window,int required_hits)
         : id(key), cruise(old), unit(basic), count(repeat),
           observations(config.failure_min_valid_samples,config.observation_start_ratio,
-                       window,required_hits),
+                       window,required_hits,config.ready_observation_end_weight),
           ball_entry_centers(config.failure_min_valid_samples,config.observation_start_ratio,
-                             window,required_hits) {}
+                             window,required_hits,config.ready_observation_end_weight) {}
   };
   struct Unit {
     std::uint64_t block, parent;
@@ -113,6 +115,7 @@ private:
     bool done{false};
     bool acknowledged{false};
     std::optional<double> parent_start_estimate;
+    std::optional<double> start;
   };
   Block* Find(std::uint64_t id);
   const Block* Find(std::uint64_t id) const;

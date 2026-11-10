@@ -17,6 +17,7 @@ static GoalPoseObservation Pose(double x,double z,double yaw=0) {
 }
 static void NearDistanceUsesEightFrameRatio() {
   auto c=LoadDefaultAlgorithmConfig().goal;
+  c.stable_window=8;c.stable_min_hits=6;
   assert(c.stable_window==8 && c.stable_min_hits==6 && c.near_distance_min_hits==3);
   const std::deque<bool> detected{true,true,true,true,true,true,false,false};
   const std::deque<bool> two_near{true,true,false,false,false,false,false,false};
@@ -35,6 +36,7 @@ static void NearDistanceUsesEightFrameRatio() {
 }
 static void GoalNearTransitionUsesWindow() {
   auto c=LoadDefaultAlgorithmConfig().goal;
+  c.stable_window=8;c.stable_min_hits=6;
   const CameraFeedback camera{CameraMode::kGoal,true};
   GoalController goal(c,3);goal.StartTestNear();
   goal.Compute({},{},{},640,480,0,true,camera,{});

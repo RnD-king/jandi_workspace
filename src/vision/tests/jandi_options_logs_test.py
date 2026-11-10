@@ -78,7 +78,7 @@ class OptionsLogsTest(unittest.TestCase):
                     for key, value in (("show_debug_view",show),("terminal_node",terminal),("stream_debug_view",stream)):
                         self.assertIn(f"{key}:={str(value).lower()}",command)
                     self.assertNotIn("inference_hz", " ".join(command))
-                    self.assertEqual(plan.commands()["camera"], ["ros2","launch","realsense2_camera","rs_launch.py"])
+                    self.assertEqual(plan.commands()["camera"], ["ros2","launch","realsense2_camera","rs_launch.py", "config_file:="+plan.camera_config])
 
     def test_reconnect_without_mode_skips_selection_and_start(self):
         with tempfile.TemporaryDirectory() as directory, \

@@ -22,6 +22,7 @@ vision_algorithm:
 
   # 라인 보행 방향 판단과 유실 복구
   line_p2p:
+    ready_observation_end_weight: 3.0
     left_repetitions: 1 # Single-block timing fixture; production is covered separately.
     straight_repetitions: 1
     right_repetitions: 1
@@ -39,6 +40,7 @@ vision_algorithm:
     recovery_max_turns: 5
 
   ball:
+    ready_observation_end_weight: 3.0
     # 단독 시험 순서
     test_mission_index: 1
 
@@ -91,6 +93,7 @@ vision_algorithm:
     recovery_center_tolerance_px: 76.8
 
   hurdle:
+    ready_observation_end_weight: 3.0
     entry_recovery_max_steps: 3
     recovery_max_steps: 3
     down_search_max_steps: 10
@@ -131,6 +134,7 @@ vision_algorithm:
     recovery_center_tolerance_px: 76.8
 
   goal:
+    ready_observation_end_weight: 3.0
     entry_line_retry_max_attempts: 3
     # 화면 이탈 방지: 좌우 끝에서 이 픽셀 이내에 박스가 닿으면 연속 2회 회전
     edge_margin_px: 50.0 # rqt: goal_edge_margin_px, 양쪽에 동시에 닿으면 HOLD

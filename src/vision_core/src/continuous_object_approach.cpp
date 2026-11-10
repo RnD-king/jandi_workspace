@@ -82,7 +82,7 @@ void MissionController::EnterContinuousMission(const MissionFrameInput& input,bo
   } else if (!route.near && route.mission!=MissionType::kHurdle) {
     // No qualified READY mean: do not steer from a single last sighting.
     recovery_target.center_px.u=route.mission==MissionType::kBall
-        ? config_.ball.far_u_des_px : config_.goal.target_u_px;
+        ? config_.ball.ApproachCenter(recovery_target.center_px.v,input.image_height) : config_.goal.target_u_px;
   }
   // All IDs have physically completed. Consume that real feedback before the
   // mission controller starts; never give a LINE DONE to a pickup/shoot FSM.
@@ -305,12 +305,13 @@ bool MissionController::PrepareGoalDepthRecovery(const MissionFrameInput& input,
 void MissionController::ClearGoalEdgeObservation() {
   auto& e=goal_edge_guard_;
   if(e.phase!=GoalEdgeGuard::Phase::kIdle)return;
+  if(active_mission_==MissionType::kLine && foot_pose_==FootPose::kWalk)return;
   e.observing=false;e.ready=false;
   e.left_qualified=e.right_qualified=false;
   e.left_hits.clear();e.right_hits.clear();
 }
 
-// Shared 10/4 raw RGB edge evidence. Reuse the post-FINE DONE window
+// Shared configurable raw RGB edge evidence. Reuse the post-FINE DONE window
 // instead of starting a separate 1s timer after the same stationary frame.
 void MissionController::ObserveGoalEdgeSample(const MissionFrameInput& input) {
   auto& e=goal_edge_guard_;
@@ -319,6 +320,12 @@ void MissionController::ObserveGoalEdgeSample(const MissionFrameInput& input) {
     e.left_hits.clear();e.right_hits.clear();
     e.left_qualified=e.right_qualified=false;
   }
+  const double stamp=input.frame_capture_sec.value_or(input.now_sec);
+  if (!std::isfinite(stamp) || stamp<=e.last_sample_sec) return;
+  e.last_sample_sec=stamp;
+  e.seen_hits.push_back(input.raw_backboard_target.has_value());
+  while(e.seen_hits.size()>static_cast<std::size_t>(config_.goal.edge_stable_window))
+    e.seen_hits.pop_front();
   bool left=false,right=false;
   if(input.raw_backboard_target){
     const auto& box=input.raw_backboard_target->box_px;
@@ -331,7 +338,7 @@ void MissionController::ObserveGoalEdgeSample(const MissionFrameInput& input) {
   const auto window=static_cast<std::size_t>(config_.goal.edge_stable_window);
   while(e.left_hits.size()>window)e.left_hits.pop_front();
   while(e.right_hits.size()>window)e.right_hits.pop_front();
-  // Latch ANY consecutive 10-frame window in this stationary observation.
+  // Latch a qualifying full window within this observation.
   if(e.left_hits.size()==window){
     if(std::count(e.left_hits.begin(),e.left_hits.end(),true)>=config_.goal.edge_stable_min_hits)
       e.left_qualified=true;
@@ -367,7 +374,7 @@ bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
         e.phase=GoalEdgeGuard::Phase::kReobserve;
         e.observing=false;e.ready=false;
         e.left_qualified=e.right_qualified=false;
-        e.left_hits.clear();e.right_hits.clear();
+        e.left_hits.clear();e.right_hits.clear();e.seen_hits.clear();
       }
     }
     if(e.phase==GoalEdgeGuard::Phase::kTurning && e.action_id==0 && idle &&
@@ -376,20 +383,73 @@ bool MissionController::PrepareGoalEdgeGuard(const MissionFrameInput& input,
     }
     return true;
   }
-  if(e.ready)return false;
-  if(!idle)return false;
-  ObserveGoalEdgeSample(input);
-  if(input.now_sec+1e-9<e.observation_start_sec+config_.post_motion_observation_sec ||
-     e.left_hits.size()<static_cast<std::size_t>(config_.goal.edge_stable_window))return true;
-  e.observing=false;e.ready=true;
-  if(e.left_qualified!=e.right_qualified){
+  const bool far=active_mission_==MissionType::kLine && foot_pose_==FootPose::kWalk;
+  const auto begin_turns=[&]() {
     e.turn_left=e.left_qualified;
     e.turns_completed=0;e.action_id=0;
+    e.phase=GoalEdgeGuard::Phase::kPending;
+    if(far) line_plan_.Abort(); // Only unissued repeats; queued ACKs remain real.
+  };
+  if(e.phase==GoalEdgeGuard::Phase::kPending) {
+    if(!idle || line_plan_.Outstanding()) return true;
     e.phase=GoalEdgeGuard::Phase::kTurning;
     if(input.allow_new_commands && input.allow_new_body_actions)
       action={select_turn(),ActionCategory::kLocomotion,edge_turn_yaw_deg,false};
     return true;
   }
+  if(far && e.phase==GoalEdgeGuard::Phase::kIdle) {
+    // One physical unit's ACK/start..READY window. Queued storage ACK is not a start.
+    const auto id=command_coordinator_.PendingActionId();
+    const auto start=id ? line_plan_.StartEstimate(id) : std::optional<double>{};
+    if(id && (!start || input.now_sec+1e-9<*start)) return false;
+    if(e.sample_action_id!=id) {
+      e.sample_action_id=id;e.sample_ready_closed=false;
+      e.observing=false;e.ready=false;
+      e.left_hits.clear();e.right_hits.clear();e.seen_hits.clear();
+      e.left_qualified=e.right_qualified=false;
+    }
+    const bool done=id && input.delivery_feedback.action_id==id && input.delivery_feedback.done;
+    if(!e.sample_ready_closed && !done &&
+        (!start || input.frame_capture_sec.value_or(input.now_sec)+1e-9>=*start))
+      ObserveGoalEdgeSample(input);
+    const bool ready=id && input.delivery_feedback.action_id==id && input.delivery_feedback.ready;
+    if(ready || done) e.sample_ready_closed=true;
+    // Initial acquisition may qualify at rest. Moving evidence commits only at READY.
+    if((ready || idle) && e.left_qualified!=e.right_qualified) {
+      begin_turns();
+      if(idle && !line_plan_.Outstanding()) {
+        e.phase=GoalEdgeGuard::Phase::kTurning;
+        if(input.allow_new_commands && input.allow_new_body_actions)
+          action={select_turn(),ActionCategory::kLocomotion,edge_turn_yaw_deg,false};
+      }
+      return true;
+    }
+    return false; // Normal far approach never waits for an edge-only observation.
+  }
+  if(e.ready)return false;
+  if(!idle)return false;
+  ObserveGoalEdgeSample(input);
+  const bool full=e.left_hits.size()>=static_cast<std::size_t>(config_.goal.edge_stable_window);
+  const bool qualified=e.left_qualified!=e.right_qualified ||
+      std::count(e.seen_hits.begin(),e.seen_hits.end(),true)>=config_.goal.stable_min_hits;
+  const bool fast_ready=config_.race_round2_fast_enabled && full && qualified;
+  if(!full || (!fast_ready && input.now_sec+1e-9<
+      e.observation_start_sec+config_.post_motion_observation_sec)) return true;
+  e.observing=false;e.ready=true;
+  if(e.left_qualified!=e.right_qualified) {
+    begin_turns();
+    e.phase=GoalEdgeGuard::Phase::kTurning;
+    if(input.allow_new_commands && input.allow_new_body_actions)
+      action={select_turn(),ActionCategory::kLocomotion,edge_turn_yaw_deg,false};
+    return true;
+  }
+  if(far && std::count(e.seen_hits.begin(),e.seen_hits.end(),true)==0 &&
+      continuous_.mission==MissionType::kGoal) {
+    // A failed fresh recheck is RGB loss, never evidence of an unclipped board.
+    continuous_.loss_pending=true;
+    goal_rgb_missing_frames_=config_.goal.lost_frames;
+  }
+
   e.phase=GoalEdgeGuard::Phase::kIdle;
   return false;
 }
@@ -432,8 +492,8 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
          goal_head_search_.phase==GoalHeadSearch::Phase::kBodyTurn))
       goal_head_search_={};
   }
-  // A stationary 10/4 raw-bbox edge guard always precedes Depth recovery.
-  if(goal_view && input.raw_backboard_observation_available && has_ball_ &&
+  // The raw-bbox edge guard precedes Depth recovery; far evidence stays in motion.
+  if(goal_view && input.advance_line_fsm && input.raw_backboard_observation_available && has_ball_ &&
      !input.backboard_image_out_of_depth_range &&
      !(continuous_.mission==MissionType::kGoal && continuous_.near)) {
     ActionRequest edge_action;

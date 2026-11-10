@@ -201,7 +201,8 @@ public:
     declare_parameter<int>("test_stage",algorithm_defaults.test_stage);
     declare_parameter<int>("test_ball_mission_index",algorithm_defaults.test_ball_mission_index);
     declare_parameter<int>("test_goal_mission_index",algorithm_defaults.test_goal_mission_index);
-    declare_parameter<double>("ball_far_u_des_px", algorithm_defaults.ball.far_u_des_px);
+    declare_parameter<double>("ball_approach_top_center_u_px", algorithm_defaults.ball.approach_top_center_u_px);
+    declare_parameter<double>("ball_approach_bottom_center_u_px", algorithm_defaults.ball.approach_bottom_center_u_px);
     declare_parameter<double>("ball_approach_top_half_width_px", algorithm_defaults.ball.approach_top_half_width_px);
     declare_parameter<double>("ball_approach_bottom_half_width_px", algorithm_defaults.ball.approach_bottom_half_width_px);
     declare_parameter<double>("ball_approach_near_outer_margin_px", algorithm_defaults.ball.approach_near_outer_margin_px);
@@ -343,7 +344,8 @@ public:
         get_parameter("goal_position_tolerance_m").as_double();
     goal_cmd_cfg.shoot_yaw_limit_deg =
         get_parameter("goal_shoot_yaw_limit_deg").as_double();
-    ball_cmd_cfg.far_u_des_px = get_parameter("ball_far_u_des_px").as_double();
+    ball_cmd_cfg.approach_top_center_u_px = get_parameter("ball_approach_top_center_u_px").as_double();
+    ball_cmd_cfg.approach_bottom_center_u_px = get_parameter("ball_approach_bottom_center_u_px").as_double();
     ball_cmd_cfg.approach_top_half_width_px = get_parameter("ball_approach_top_half_width_px").as_double();
     ball_cmd_cfg.approach_bottom_half_width_px = get_parameter("ball_approach_bottom_half_width_px").as_double();
     ball_cmd_cfg.approach_near_outer_margin_px = get_parameter("ball_approach_near_outer_margin_px").as_double();
@@ -908,7 +910,8 @@ private:
       else if (name == "line_p2p_offset_gain") target = &candidate.line_p2p.offset_gain;
       else if (name == "line_p2p_heading_gain") target = &candidate.line_p2p.heading_gain;
       else if (name == "line_p2p_steering_deadband") target = &candidate.line_p2p.steering_deadband;
-      else if (name == "ball_far_u_des_px") target = &candidate.ball.far_u_des_px;
+      else if (name == "ball_approach_top_center_u_px") target = &candidate.ball.approach_top_center_u_px;
+      else if (name == "ball_approach_bottom_center_u_px") target = &candidate.ball.approach_bottom_center_u_px;
       else if (name == "ball_approach_top_half_width_px") target = &candidate.ball.approach_top_half_width_px;
       else if (name == "ball_approach_bottom_half_width_px") target = &candidate.ball.approach_bottom_half_width_px;
       else if (name == "ball_approach_near_outer_margin_px") target = &candidate.ball.approach_near_outer_margin_px;
@@ -1183,8 +1186,9 @@ private:
       const auto &obj = target_of(*sample);
       ++hits;
       class_id = obj->class_id;
-      const double weight=mission==vision_core::MissionType::kGoal ? 1.0 :
-          1.0+2.0*std::clamp((sample->now_sec-cutoff)/std::max(1e-9,ready_sec-cutoff),0.0,1.0);
+      const double weight=1.0+((mission==vision_core::MissionType::kBall ? tuning_config_.ball.ready_observation_end_weight :
+          mission==vision_core::MissionType::kGoal ? tuning_config_.goal.ready_observation_end_weight :
+          tuning_config_.hurdle.ready_observation_end_weight)-1.0)*std::clamp((sample->now_sec-cutoff)/std::max(1e-9,ready_sec-cutoff),0.0,1.0);
       object_weight+=weight;
       sx += weight*obj->box_px.x; sy += weight*obj->box_px.y;
       sw += weight*obj->box_px.width; sh += weight*obj->box_px.height;

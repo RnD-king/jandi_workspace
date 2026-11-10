@@ -125,7 +125,7 @@ void TestUnlockedGoalReplacementWaitsForStableNewId() {
     assert(observe({Candidate(0, 100, 170, 40, 40)}).target);
   const auto old_id=tracker.TargetId();
   assert(old_id && !tracker.Locked());
-  for (int frame=0;frame<6;++frame) {
+  for (int frame=0;frame<9;++frame) {
     const auto result=observe({Candidate(1, 390, 170, 40, 40)});
     assert(!result.target);
     assert(tracker.TargetId()==old_id);

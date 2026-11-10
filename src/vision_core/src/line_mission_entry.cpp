@@ -32,6 +32,9 @@ void MissionController::ObserveLineFeedback(const CommandDeliveryFeedback& feedb
     }
     if (feedback.action_id == line_auxiliary_id_ && !line_auxiliary_done_) {
       line_auxiliary_done_ = true;
+      if (finish_line_started_ && (line_auxiliary_action_==MissionAction::kTurnLeftInPlace ||
+          line_auxiliary_action_==MissionAction::kStepForwardRightOneHurdle))
+        ++line_guard_turns_completed_; // Count actual DONE even if floor evidence vanished.
       if (line_auxiliary_action_ == MissionAction::kWalkMode ||
           line_auxiliary_action_ == MissionAction::kDefaultPoseMode) {
         foot_pose_ = line_auxiliary_action_ == MissionAction::kWalkMode ? FootPose::kWalk : FootPose::kFine;
@@ -77,9 +80,10 @@ MissionFrameResult MissionController::StepPlannedLine(
   const bool automatic_approach = !input.manual_observation_control &&
                                   config_.test_mission == MissionType::kNone;
   const bool finish_course=FinishCourseEnabled(input);
-  if (finish_course && input.advance_line_fsm && input.camera_feedback.settled &&
-      input.camera_feedback.actual_mode==CameraMode::kForward) {
-    line_state_=LineState::kNormal;
+  if (finish_course && !finish_line_started_ && input.advance_line_fsm &&
+      input.camera_feedback.settled && input.camera_feedback.actual_mode==CameraMode::kForward) {
+    finish_line_started_=true;
+    if (line_state_!=LineState::kFinalHold) line_state_=LineState::kNormal;
     line_failure_pending_done_=false;
     line_observation_active_=false;
   }
@@ -215,6 +219,12 @@ MissionFrameResult MissionController::StepPlannedLine(
     // ComputeLineAction keeps the existing straight fallback for this case.
     raw={};
   }
+  // Sparse/invalid finish evidence bypasses visual recovery, without cancelling issued IDs.
+  if (finish_course && !finish_floor_usable) {
+    if (line_state_==LineState::kScoreRecovery) line_state_=LineState::kNormal;
+    line_auxiliary_observing_=false;
+    decision_observation_active_=false;
+  }
   LineGuide decision = input.line_decision_guide_override.value_or(raw);
   if (finish_course) decision=raw;
   output.line_decision_guide = decision;
@@ -349,7 +359,7 @@ MissionFrameResult MissionController::StepPlannedLine(
       const auto pending=command_coordinator_.PendingActionId();
       if (pending && !line_plan_.ObjectOwned(pending,continuous_.epoch))
         line_plan_.AttachBallEntry(pending,continuous_.epoch,
-                                   input.ball_entry_mean_center,input.now_sec);
+                                   input.ball_entry_mean_center,input.now_sec,config_.ball.ready_observation_end_weight);
     }
     line_plan_.Observe(input.now_sec,automatic_approach ? actual_line_guide : raw,
                        object_observation,continuous_.epoch,object_center,pixel_owner);
@@ -753,7 +763,7 @@ MissionFrameResult MissionController::StepPlannedLine(
             // inverse restoration, regardless of how long draining took.
             if (!candidate_.search_left && candidate_.direction_u) {
               const double center = candidate_.mission == MissionType::kBall ?
-                  config_.ball.far_u_des_px : config_.hurdle.target_u_px;
+                  config_.ball.ApproachCenter(decision_last_target_ ? decision_last_target_->center_px.v : 0.0,input.image_height) : config_.hurdle.target_u_px;
               const double tolerance = candidate_.mission == MissionType::kBall ?
                   config_.ball.recovery_center_tolerance_px : config_.hurdle.recovery_center_tolerance_px;
               const double offset = *candidate_.direction_u - center;
@@ -1020,7 +1030,7 @@ MissionFrameResult MissionController::StepPlannedLine(
         const bool pose = line_auxiliary_action_ == MissionAction::kWalkMode ||
                           line_auxiliary_action_ == MissionAction::kDefaultPoseMode;
         if ((line_state_ == LineState::kScoreRecovery || pose) && !line_auxiliary_observing_) {
-          if (!pose) ++line_guard_turns_completed_;
+          if (!pose && !finish_course) ++line_guard_turns_completed_;
           BeginDecisionObservation(input.now_sec, MissionType::kLine, false, {});
           line_auxiliary_observing_ = true;
         }
@@ -1120,7 +1130,11 @@ MissionFrameResult MissionController::StepPlannedLine(
   if (LinePlan::IsCruise(request.action)) {
     if (input.allow_new_line_plan) request = line_plan_.Begin(request.action,
         automatic_approach && !route.resume_line_at_ready ? continuous_.epoch : 0,
-        route.probe_start);
+        route.probe_start,
+        continuous_.mission==MissionType::kBall ? config_.ball.ready_observation_end_weight :
+        continuous_.mission==MissionType::kGoal ? config_.goal.ready_observation_end_weight :
+        continuous_.mission==MissionType::kHurdle ? config_.hurdle.ready_observation_end_weight :
+        config_.line_p2p.ready_observation_end_weight);
     else request = {};
   }
   if (!input.allow_new_commands) camera = CameraRequest::kNone;
@@ -1188,7 +1202,9 @@ MissionFrameResult MissionController::StepPlannedLine(
     output.approach_path_guide=route.display_guide.value_or(*route.guide);
     output.approach_path_reference_px={
          (continuous_.mission==MissionType::kGoal ?
-             config_.goal.auto_approach_center_u_px : config_.ball.far_u_des_px),
+             config_.goal.auto_approach_center_u_px : config_.ball.ApproachCenter(
+                 output.line_features.guide.valid ? output.line_features.guide_reference_v_px :
+                 config_.object_approach.reference_v_ratio*input.image_height,input.image_height)),
         output.line_features.guide.valid
             ? output.line_features.guide_reference_v_px
             : config_.object_approach.reference_v_ratio * input.image_height};

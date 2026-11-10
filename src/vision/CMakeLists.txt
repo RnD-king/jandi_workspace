@@ -270,8 +270,9 @@ install(DIRECTORY config/
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
 install(PROGRAMS scripts/jandi.py DESTINATION lib/${PROJECT_NAME} RENAME run_jandi)
 install(FILES scripts/jandi_runtime.py scripts/jandi_ros.py scripts/jandi_logs.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/jandi_deploy.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/install_jandi_command.sh DESTINATION lib/${PROJECT_NAME})
-install(FILES JANDI_RUNTIME.md DESTINATION share/${PROJECT_NAME})
+install(FILES JANDI_RUNTIME.md JANDI_DUAL_INSTALL.md DESTINATION share/${PROJECT_NAME})
 
 install(FILES ROSBAG_RECORDING.md SHOOT_TUNING.md TERMINAL_VIEW.md HTTP_DEBUG_STREAMING.md DESTINATION share/${PROJECT_NAME})
 
@@ -354,6 +355,8 @@ if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(NAME vision_jandi_runtime_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_runtime_test.py)
+  add_test(NAME vision_jandi_deploy_test
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_deploy_test.py)
   add_test(NAME vision_jandi_options_logs_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/jandi_options_logs_test.py)
   add_test(NAME vision_jandi_launch_test
