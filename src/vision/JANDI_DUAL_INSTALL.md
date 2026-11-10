@@ -6,25 +6,55 @@
 
 ## 알고리즘 설정
 
-`vision_core/config/vision_algorithm.yaml`은 배포 기본값이다. 실제 실행 튜닝은 PC/Jetson 모두
-아래 버전별 파일에서 한다. 최초 update/실행 시 해당 설치본의 기본값으로 생성한다.
+실제 실행은 선택 버전의 **소스 `vision_core/config/vision_algorithm.yaml`**을 직접 읽는다.
+이 파일은 GitHub push/update 대상이다. PC에서 바꾼 값을 push하고 Jetson에서 해당 버전을
+update하면 같은 값이 적용된다. 기존 홈 튜닝값을 병합하거나 유지하는 별도 복사본은 없다.
 
-```text
-MAIN: ~/.config/jandi/main/vision_algorithm.yaml
-FAST: ~/.config/jandi/fast/vision_algorithm.yaml
+| 장비 | MAIN | FAST |
+|---|---|---|
+| PC | `~/vision_core/config/vision_algorithm.yaml` | `~/vision_core_fast/config/vision_algorithm.yaml` |
+| Jetson | `~/jandi_main/src/vision_core/config/vision_algorithm.yaml` | `~/jandi_fast/src/vision_core/config/vision_algorithm.yaml` |
+
+로컬에서 이 파일을 저장한 뒤 JANDI를 전체 종료하고 `~/run_jandi.sh`로 다시 실행한다.
+파라미터 값만 바꿀 때 `cp`나 재빌드는 필요 없다. 다른 장비에 전달할 때는 push/update한다.
+update는 최신 소스 YAML을 가져온다. 로컬 미커밋 수정이 있으면 기존 Git 보호 규칙에 따라
+중단하므로 Jetson에서 튜닝했다면 공유할 변경을 먼저 push한다. 설치된 Release 내부 YAML은
+수정하지 않는다. 기존 `~/.config/jandi/main/vision_algorithm.yaml`과 fast 파일은
+그대로 보존하지만 읽거나 새로 생성하지 않는다. 기존 홈에서만 바꾼 튜닝값은 자동 이관하지
+않으므로 필요한 값이 있다면 확인 후 위 소스 YAML에 직접 반영한다.
+시작 전에는 선택 버전의 C++ config_check로 소스 YAML의 범위·형식을 검사한다.
+실패 시 카메라·모터 관리자를 시작하지 않으며 잘못된 YAML을 자동 덮어쓰지 않는다.
+직접 ROS 노드를 실행하는 경우에는 해당 소스 파일을 VISION_CORE_ALGORITHM_CONFIG로 지정한다.
+엔진 선택용 yolo26_runtime.yaml도 선택 버전의 소스 파일을 읽는다.
+
+### 이전 홈 튜닝 방식에서 한 번 전환하기
+
+홈 명령은 ~/.local/share/jandi-tools/jandi_deploy.py 복사본을 실행하므로
+소스만 업데이트하는 것으로는 기존 배포 도구가 바뀌지 않는다. 이번 전환 때 한 번 갱신한다.
+이 명령은 도구만 설치하고 빌드·노드를 실행하지 않는다.
+
+PC에서 수정한 소스의 도구를 설치한 뒤 두 버전을 push한다:
+
+```bash
+/usr/bin/python3 ~/my_cv/src/vision/scripts/jandi_deploy.py install --machine pc
+~/push_jandi_workspace.sh main
+~/push_jandi_workspace.sh fast
 ```
 
-파일을 저장한 뒤 JANDI를 전체 종료하고 `~/run_jandi.sh`로 다시 실행한다.
-파라미터만 바꿀 때 `cp`, 재빌드, GitHub push/update는 필요 없다.
-이 파일은 Git 저장소와 설치본 무결성 검사 대상 밖에 있으므로 튜닝이 update를 막지 않는다.
-업데이트는 기존 값·주석을 보존하며 새 기본 항목만 추가한다. 배포 기본값이 달라져도
-이미 있는 튜닝값은 덮어쓰지 않는다. 새 항목을 추가하기 전 파일은
-`~/.local/state/jandi/algorithm-originals/<version>/`에 보존한다.
-설정 검사에 실패하면 파일을 교체하거나 새 Release를 활성화하지 않는다.
-시작 전에는 선택 버전의 C++ config_check로 실제 로더의 범위·형식 검사도 수행하며,
-실패 시 카메라·모터 관리자를 시작하지 않는다. 현재 전체 관측창/투표 조합 등도 검사한다.
-직접 ROS 노드를 실행하는 경우에는 해당 파일을 VISION_CORE_ALGORITHM_CONFIG로 지정한다.
-엔진 선택용 yolo26_runtime.yaml은 기존처럼 선택 버전의 소스 파일을 읽으며 별도다.
+PC push 완료 후 Jetson에서, JANDI와 진행 중인 업데이트를 종료한 상태로:
+
+```bash
+mkdir -p ~/jandi-tools
+git -C ~/jandi fetch origin main
+git -C ~/jandi archive origin/main src/vision/scripts/jandi_deploy.py | tar -x -C ~/jandi-tools
+/usr/bin/python3 ~/jandi-tools/src/vision/scripts/jandi_deploy.py install --machine jetson
+~/jandi_update.sh main
+~/jandi_update.sh fast
+```
+
+이후 일반 알고리즘 값 변경은 기존 push/update 흐름만 사용한다. 배포 도구 코드 자체가
+변경되는 경우에는 위와 같이 도구 복사본도 갱신해야 한다. 배포 도구를 PC에 설치하면
+현재 정상 Release를 재빌드하지 않아도 시작 시 새 소스 YAML 선택 방식이 적용된다.
 
 기본 가중치:
 

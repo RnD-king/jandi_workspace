@@ -31,6 +31,15 @@ def fixture_release(root):
     return data
 
 
+def fixture_roots(root):
+    roots={p:root/p for p in d.PACKAGES}
+    for path in roots.values():path.mkdir(parents=True,exist_ok=True)
+    path=roots['vision_core']/'config/vision_algorithm.yaml'
+    path.parent.mkdir(parents=True,exist_ok=True)
+    path.write_text('vision_algorithm:\n  test_gain: 2 # shared source\n')
+    return roots
+
+
 class DeployTest(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
@@ -80,8 +89,7 @@ class DeployTest(unittest.TestCase):
 
     def test_failed_new_build_does_not_publish_over_previous_success(self):
         _,manifest=d.release_paths('main');old=fixture_release(self.root/'previous');d.atomic_json(manifest,old)
-        before=manifest.read_bytes();roots={p:self.root/p for p in d.PACKAGES}
-        for p in roots.values():p.mkdir()
+        before=manifest.read_bytes();roots=fixture_roots(self.root)
         with patch.object(d,'git',return_value='a'*40),patch.object(d,'ros_environment',return_value={}), \
              patch.object(d,'call',side_effect=subprocess.CalledProcessError(1,['colcon'])):
             with self.assertRaises(subprocess.CalledProcessError):
@@ -89,8 +97,7 @@ class DeployTest(unittest.TestCase):
         self.assertEqual(manifest.read_bytes(),before);self.assertTrue(d.valid_release(old))
 
     def test_new_build_only_publishes_after_all_steps(self):
-        _,manifest=d.release_paths('main');roots={p:self.root/p for p in d.PACKAGES}
-        for p in roots.values():p.mkdir()
+        _,manifest=d.release_paths('main');roots=fixture_roots(self.root)
         commands=[]
         def fake_call(command,**kwargs):
             self.assertFalse(manifest.exists());commands.append(command)
@@ -145,7 +152,7 @@ class DeployTest(unittest.TestCase):
         d.CONFIG_DIR.mkdir(parents=True)
         old=d.CONFIG_DIR/'old.yaml';old.write_text('old user settings')
         launch=d.CONFIG_DIR/'realsense.launch.py';launch.write_text('# user old launch')
-        d.atomic_json(d.CONFIG_DIR/'deployment.json',{'machine':'pc','selected':'main','camera_config':str(old),'camera_launch':str(launch),'engine':'/obsolete.engine'})
+        d.atomic_json(d.CONFIG_DIR/'deployment.json',{'machine':'pc','selected':'main','repositories':{v:str(self.root/('repo-'+v)) for v in d.BRANCHES},'camera_config':str(old),'camera_launch':str(launch),'engine':'/obsolete.engine'})
         target=self.root/'tools/jandi_deploy.py'
         original='#!/usr/bin/env bash\n# JANDI versioned entrypoint\nset -euo pipefail\nexec /usr/bin/python3 '+str(target)+' camera --machine pc "$@"\n'
         (self.root/'jandi_camera.sh').write_text(original)
@@ -185,7 +192,10 @@ class DeployTest(unittest.TestCase):
             for name in ['jandi_runtime.py','jandi_logs.py']:
                 shutil.copy2(Path(d.__file__).parent/name,lib/name)
             d.atomic_json(d.release_paths(version)[1],data)
-            bindings[version]=(runtime,engine)
+            roots=fixture_roots(Path(cfg['repositories'][version])/'src')
+            bindings[version]=(runtime,engine,roots['vision_core']/'config/vision_algorithm.yaml')
+            old=d.CONFIG_DIR/version/'vision_algorithm.yaml'
+            old.parent.mkdir(parents=True);old.write_text('vision_algorithm: [invalid old home config')
         real_call=d.call;calls=[]
         def fake_backend(command,**kwargs):
             calls.append((command,dict(kwargs.get('env',{}))))
@@ -199,8 +209,8 @@ class DeployTest(unittest.TestCase):
                 self.assertEqual(len(calls),3)
                 self.assertEqual(calls[-1][1]['YOLO26_RUNTIME_CONFIG'],str(bindings[version][0]))
                 self.assertNotIn('YOLO26_ENGINE_PATH',calls[-1][1])
-                self.assertEqual(calls[-1][1]['VISION_CORE_ALGORITHM_CONFIG'],str(d.CONFIG_DIR/version/'vision_algorithm.yaml'))
-            runtime,engine=bindings['main']
+                self.assertEqual(calls[-1][1]['VISION_CORE_ALGORITHM_CONFIG'],str(bindings[version][2]))
+            runtime,engine,algorithm=bindings['main']
             new_engine=self.root/'changed.engine';new_engine.write_bytes(b'new fake model')
             runtime.write_text(runtime.read_text().replace(str(engine),str(new_engine)))
             calls.clear();self.assertEqual(d.main(['run','main','--no-menu']),0)
@@ -208,106 +218,57 @@ class DeployTest(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):d.main(['run','main','--no-menu'])
             self.assertEqual(len(calls),2,'missing engine started the backend')
             new_engine.write_bytes(b'restored fake')
-            operator=d.CONFIG_DIR/'main/vision_algorithm.yaml'
-            operator.write_text('vision_algorithm:\n  test_gain: -1\n')
+            algorithm.write_text('vision_algorithm:\n  test_gain: 9 # next start reads latest source\n')
+            calls.clear();self.assertEqual(d.main(['run','main','--no-menu']),0)
+            self.assertEqual(calls[0][0][1],algorithm)
+            algorithm.write_text('vision_algorithm:\n  test_gain: -1\n')
             calls.clear()
             with self.assertRaisesRegex(RuntimeError,'test_gain'):d.main(['run','main','--no-menu'])
             self.assertEqual(len(calls),1,'invalid algorithm started engine probe or backend')
 
-    def test_operator_config_is_separate_from_release_and_preserves_tuning(self):
+    def test_pc_and_jetson_use_the_selected_shared_source(self):
         release=fixture_release(self.root/'release');core=Path(release['core'])
-        defaults=core/'share/shared_vision_core/config/vision_algorithm.yaml'
-        original=defaults.read_bytes()
-        path=d.ensure_algorithm_config('main',core,{})
-        self.assertEqual(path,d.CONFIG_DIR/'main/vision_algorithm.yaml')
-        self.assertEqual(path.read_bytes(),original)
-        path.write_text('# operator comment\nvision_algorithm:\n  test_gain: 7 # tuned\n')
-        before=path.read_bytes();mtime=path.stat().st_mtime_ns
-        d.ensure_algorithm_config('main',core,{})
-        self.assertEqual(path.read_bytes(),before);self.assertEqual(path.stat().st_mtime_ns,mtime)
-        self.assertEqual(defaults.read_bytes(),original)
-        fast=d.ensure_algorithm_config('fast',core,{})
-        self.assertEqual(fast.read_bytes(),original)
-        self.assertNotEqual(path,fast)
+        installed=(core/'share/shared_vision_core/config/vision_algorithm.yaml').read_bytes()
+        for machine in ('pc','jetson'):
+            for version in ('main','fast'):
+                repo=self.root/('jetson-'+version)
+                roots=d.source_roots({'machine':machine},version,repo)
+                path=roots['vision_core']/'config/vision_algorithm.yaml'
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text('vision_algorithm:\n  test_gain: 7 # shared\n')
+                previous=path.read_bytes();mtime=path.stat().st_mtime_ns
+                old=d.CONFIG_DIR/version/'vision_algorithm.yaml'
+                old.parent.mkdir(parents=True,exist_ok=True)
+                old.write_text('invalid ignored old config: [')
+                self.assertEqual(d.source_algorithm_config(roots,core,{}),path)
+                self.assertEqual(path.read_bytes(),previous)
+                self.assertEqual(path.stat().st_mtime_ns,mtime)
+                self.assertEqual(old.read_text(),'invalid ignored old config: [')
+                expected=(self.root/('vision_core' if version=='main' else 'vision_core_fast') if machine=='pc'
+                          else repo/'src/vision_core')/'config/vision_algorithm.yaml'
+                self.assertEqual(path,expected)
+        self.assertEqual((core/'share/shared_vision_core/config/vision_algorithm.yaml').read_bytes(),installed)
+        self.assertFalse((d.STATE_DIR/'algorithm-originals').exists())
 
-    def test_missing_nested_defaults_append_without_rewriting_values_or_comments(self):
-        default='''vision_algorithm:
-  line:
-    walk:
-      gain: 1
-      new_gain: 2
-    new_section:
-      enabled: true
-  hurdle:
-    vote: 3
-  new_mission:
-    value: 4
-'''
-        for user in [
-            '# heading\nvision_algorithm:\n  line:\n    walk:\n      gain: 7 # tuned',
-            'vision_algorithm: {line: {walk: {gain: 7}}}',
-            'vision_algorithm:\n  line:\n    walk:\n      gain: 7 # tuned\n  hurdle:\n    vote: 9 # other\n# tail\n',
-            'vision_algorithm: {}\n',
-        ]:
-            merged,added=d.fill_algorithm_defaults(default,user)
-            data=d.yaml.safe_load(merged)['vision_algorithm']
-            self.assertTrue(added);self.assertEqual(data['line']['walk']['new_gain'],2)
-            self.assertEqual(data['new_mission']['value'],4)
-            if 'gain: 7' in user:
-                self.assertEqual(data['line']['walk']['gain'],7)
-            for comment in ['# heading','# tuned','# other','# tail']:
-                if comment in user:self.assertIn(comment,merged)
-            self.assertEqual(d.fill_algorithm_defaults(default,merged),(merged,[]))
-
-    def test_schema_addition_backs_up_original_and_preserves_changed_defaults(self):
-        release=fixture_release(self.root/'release');core=Path(release['core'])
-        defaults=core/'share/shared_vision_core/config/vision_algorithm.yaml'
-        path=d.ensure_algorithm_config('main',core,{})
-        tuned='# user tuning\nvision_algorithm:\n  test_gain: 7 # keep\n'
-        path.write_text(tuned)
-        defaults.write_text('vision_algorithm:\n  test_gain: 2\n  new_controls:\n    votes: 3\n')
-        d.ensure_algorithm_config('main',core,{})
-        data=d.yaml.safe_load(path.read_text())['vision_algorithm']
-        self.assertEqual(data['test_gain'],7);self.assertEqual(data['new_controls']['votes'],3)
-        self.assertIn('# keep',path.read_text())
-        backups=list((d.STATE_DIR/'algorithm-originals/main').glob('*.yaml'))
-        self.assertEqual(len(backups),1);self.assertEqual(backups[0].read_text(),tuned)
-        d.ensure_algorithm_config('main',core,{})
-        self.assertEqual(len(list((d.STATE_DIR/'algorithm-originals/main').glob('*.yaml'))),1)
-
-    def test_invalid_operator_yaml_never_gets_replaced(self):
-        release=fixture_release(self.root/'release');core=Path(release['core'])
-        path=d.CONFIG_DIR/'main/vision_algorithm.yaml';path.parent.mkdir(parents=True)
+    def test_missing_or_invalid_source_never_falls_back_or_rewrites_it(self):
+        release=fixture_release(self.root/'release');roots=fixture_roots(self.root/'sources')
+        core=Path(release['core']);path=roots['vision_core']/'config/vision_algorithm.yaml'
+        path.unlink()
+        with self.assertRaisesRegex(RuntimeError,'소스 YAML 없음'):d.source_algorithm_config(roots,core,{})
         for bad in ['', 'vision_algorithm: [', 'vision_algorithm: null\n',
                     'vision_algorithm:\n  test_gain: 1\n  test_gain: 2\n',
                     'vision_algorithm:\n  test_gain: -1\n']:
             path.write_text(bad)
-            with self.assertRaises(RuntimeError):d.ensure_algorithm_config('main',core,{})
+            with self.assertRaises(RuntimeError):d.source_algorithm_config(roots,core,{})
             self.assertEqual(path.read_text(),bad)
-            self.assertFalse(list(path.parent.glob('.algorithm-*')))
-        path.write_text('vision_algorithm:\n  test_gain: 7\n')
-        defaults=core/'share/shared_vision_core/config/vision_algorithm.yaml'
-        defaults.write_text('vision_algorithm:\n  test_gain:\n    nested: 2\n')
-        with self.assertRaisesRegex(RuntimeError,'매핑'):d.ensure_algorithm_config('main',core,{})
-        self.assertEqual(path.read_text(),'vision_algorithm:\n  test_gain: 7\n')
+        self.assertFalse(d.CONFIG_DIR.exists())
 
-    def test_editor_save_during_schema_upgrade_is_not_overwritten(self):
-        release=fixture_release(self.root/'release');core=Path(release['core'])
-        path=d.ensure_algorithm_config('main',core,{})
-        defaults=core/'share/shared_vision_core/config/vision_algorithm.yaml'
-        defaults.write_text(defaults.read_text()+'  new_value: 1\n')
-        saved='vision_algorithm:\n  test_gain: 8 # concurrent save\n'
-        with patch.object(d,'validate_algorithm',side_effect=lambda *args:path.write_text(saved)):
-            with self.assertRaisesRegex(RuntimeError,'편집 중'):d.ensure_algorithm_config('main',core,{})
-        self.assertEqual(path.read_text(),saved)
-
-    def test_failed_algorithm_validation_preserves_previous_release_and_operator_file(self):
+    def test_failed_source_validation_preserves_previous_success_and_yaml(self):
         old=fixture_release(self.root/'previous');_,manifest=d.release_paths('main');d.atomic_json(manifest,old)
-        before=manifest.read_bytes();path=d.CONFIG_DIR/'main/vision_algorithm.yaml'
-        path.parent.mkdir(parents=True);path.write_text('vision_algorithm:\n  test_gain: -1 # invalid tuning\n')
-        tuned=path.read_bytes();roots={p:self.root/p for p in d.PACKAGES}
-        for p in roots.values():p.mkdir()
-        real=d.call
+        before=manifest.read_bytes();roots=fixture_roots(self.root/'sources')
+        path=roots['vision_core']/'config/vision_algorithm.yaml'
+        path.write_text('vision_algorithm:\n  test_gain: -1 # invalid shared config\n')
+        tuned=path.read_bytes();real=d.call
         def fake_build(command,**kwargs):
             if Path(command[0]).name=='config_check':return real(command,**kwargs)
             if command[0]=='colcon':fixture_release(Path(command[command.index('--install-base')+1]).parent)
@@ -317,37 +278,39 @@ class DeployTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'test_gain'):
                 d.build_release({'machine':'pc'},'main',self.root,roots)
         self.assertEqual(manifest.read_bytes(),before);self.assertEqual(path.read_bytes(),tuned)
-        self.assertTrue(d.valid_release(old))
+        self.assertTrue(d.valid_release(old));self.assertFalse(d.CONFIG_DIR.exists())
 
-    def test_merge_preserves_sequences_unknown_fields_and_parent_comments(self):
-        defaults='vision_algorithm:\n  line:\n    walk:\n      gain: 1\n      new: 2\n    extra: true\n  goal:\n    points: [[1,2],[3,4]]\n'
-        user='vision_algorithm:\n  line:\n    walk:\n      gain: 8 # keep\n\n  # GOAL section\n  goal:\n    points: [[9,8]] # vertices\n    custom: preserve\n'
-        merged,_=d.fill_algorithm_defaults(defaults,user)
-        self.assertLess(merged.index('new: 2'),merged.index('# GOAL section'))
-        data=d.yaml.safe_load(merged)['vision_algorithm']
-        self.assertEqual(data['goal']['points'],[[9,8]]);self.assertEqual(data['goal']['custom'],'preserve')
-        self.assertIn('# vertices',merged);self.assertEqual(data['line']['walk']['gain'],8)
-
-    def test_operator_edit_does_not_trigger_build_or_install_hash_failure(self):
-        roots={p:self.root/p for p in d.PACKAGES}
-        for p in roots.values():p.mkdir()
-        stamp=d.fingerprint('a'*40,{'machine':'pc'},roots)
-        release=fixture_release(self.root/'release');release['fingerprint']=stamp
-        d.atomic_json(d.release_paths('main')[1],release)
-        core=Path(release['core']);path=d.ensure_algorithm_config('main',core,{})
+    def test_source_tuning_is_revalidated_without_modifying_the_install(self):
+        roots=fixture_roots(self.root/'sources')
+        release=fixture_release(self.root/'release');core=Path(release['core'])
+        installed=core/'share/shared_vision_core/config/vision_algorithm.yaml'
+        release['artifacts']={str(installed):hashlib.sha256(installed.read_bytes()).hexdigest()}
+        path=d.source_algorithm_config(roots,core,{})
         path.write_text('vision_algorithm:\n  test_gain: 9\n')
-        self.assertEqual(stamp,d.fingerprint('a'*40,{'machine':'pc'},roots))
+        self.assertEqual(d.source_algorithm_config(roots,core,{}),path)
         self.assertTrue(d.valid_release(release))
-        real=d.call;commands=[]
-        def check_only(command,**kwargs):
-            commands.append(command)
-            self.assertEqual(Path(command[0]).name,'config_check')
-            return real(command,**kwargs)
-        with patch.object(d,'git',return_value='a'*40),patch.object(d,'ros_environment',return_value={}), \
-             patch.object(d,'call',side_effect=check_only):
-            self.assertEqual(d.build_release({'machine':'pc'},'main',self.root,roots),release)
-        self.assertEqual(len(commands),1)
         self.assertIn('test_gain: 9',path.read_text())
+
+    def test_generated_install_link_does_not_block_update_but_source_edits_do(self):
+        repo=self.root/'repo';repo.mkdir()
+        subprocess.run(['git','init','-q',str(repo)],check=True)
+        subprocess.run(['git','-C',str(repo),'remote','add','origin',d.ORIGIN],check=True)
+        subprocess.run(['git','-C',str(repo),'checkout','--orphan','main'],check=True,capture_output=True)
+        subprocess.run(['git','-C',str(repo),'-c','user.name=Test','-c','user.email=test@example.invalid',
+                        'commit','-q','--allow-empty','-m','fixture'],check=True)
+        source=repo/'src/vision_core/config/vision_algorithm.yaml'
+        source.parent.mkdir(parents=True);source.write_text('shared fixture')
+        subprocess.run(['git','-C',str(repo),'add','src'],check=True)
+        subprocess.run(['git','-C',str(repo),'-c','user.name=Test','-c','user.email=test@example.invalid',
+                        'commit','-q','-m','source fixture'],check=True)
+        target=repo/'releases/release/ros';target.mkdir(parents=True)
+        (repo/'install').symlink_to(target,target_is_directory=True)
+        cfg={'repositories':{'main':str(repo)}}
+        self.assertEqual(d.ensure_repo(cfg,'main'),repo)
+        self.assertEqual(d.git(repo,'status','--porcelain'),'')
+        source.write_text('local tuning must not be discarded')
+        with self.assertRaisesRegex(RuntimeError,'미커밋'):d.ensure_repo(cfg,'main')
+        self.assertEqual(source.read_text(),'local tuning must not be discarded')
 
     def test_backup_branch_is_not_an_accepted_version(self):
         with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
@@ -371,8 +334,7 @@ class DeployTest(unittest.TestCase):
         self.assertEqual(d.files(self.root),{'source.cpp':b'source'})
 
     def test_algorithm_edit_invalidates_source_fingerprint(self):
-        roots={p:self.root/p for p in d.PACKAGES}
-        for p in roots.values():p.mkdir()
+        roots=fixture_roots(self.root)
         a=d.fingerprint('a',{},roots);(roots['vision_core']/'algorithm.yaml').write_text('weight: 1')
         self.assertNotEqual(a,d.fingerprint('a',{},roots))
 
