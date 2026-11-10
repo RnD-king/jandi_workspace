@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+import platform
 from unittest.mock import Mock, patch
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -240,8 +241,8 @@ class RuntimeTest(unittest.TestCase):
     def test_plan_uses_explicit_options_and_standard_camera_launch(self):
         with patch.dict(os.environ, {}, clear=True):
             plan = runtime.Plan.load(SCRIPTS.parent)
-            self.assertEqual(plan.workspace, "/home/rnd/jandi")
-            self.assertEqual(plan.engine, "/home/rnd/jandi/src/dataset/best_1029.engine")
+            self.assertEqual(plan.workspace, str(Path.home() / ("jandi" if platform.machine().lower() in ("aarch64","arm64") else "my_cv")))
+            self.assertEqual(plan.engine, "/home/rnd/jandi/src/dataset/best_1029.engine" if platform.machine().lower() in ("aarch64","arm64") else "/home/noh/dataset/runs/yolo26n_goal_1029/weights/best.engine")
             self.assertEqual(plan.environment()["ROS_DOMAIN_ID"], "22")
         with patch.dict(os.environ,{'JANDI_CAMERA_LAUNCH':'/obsolete.launch.py','JANDI_CAMERA_CONFIG':'/obsolete.yaml'}):
             legacy=runtime.Plan.load(SCRIPTS.parent)
@@ -257,6 +258,27 @@ class RuntimeTest(unittest.TestCase):
         self.assertNotIn("mode",plan.__dict__)
         for service,path in runtime.SERVICES.items():
             self.assertIn(f"{service}:={path}",a["vision"])
+
+    def test_runtime_selects_platform_and_live_yaml_without_engine_environment(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'runtime.yaml'
+            values={'pc_engine_path':'/models/pc.engine','jetson_engine_path':'/models/jetson.engine'}
+            path.write_text(json.dumps({'yolo26_runtime':{'ros__parameters':values}}))
+            with patch.dict(os.environ,{'YOLO26_RUNTIME_CONFIG':str(path),'YOLO26_ENGINE_PATH':'/obsolete.engine'},clear=True):
+                for machine,key in [('x86_64','pc_engine_path'),('aarch64','jetson_engine_path'),('arm64','jetson_engine_path')]:
+                    with patch.object(runtime.platform,'machine',return_value=machine):
+                        plan=runtime.Plan.load(SCRIPTS.parent,workspace=temp)
+                    self.assertEqual(plan.engine,values[key])
+                    self.assertIn('engine_path:='+values[key],plan.commands()['vision'])
+                    self.assertNotIn('YOLO26_ENGINE_PATH',plan.environment())
+                values['pc_engine_path']='new/model.engine'
+                path.write_text(json.dumps({'yolo26_runtime':{'ros__parameters':values}}))
+                with patch.object(runtime.platform,'machine',return_value='x86_64'):
+                    self.assertEqual(runtime.Plan.load(SCRIPTS.parent,workspace=temp).engine,str(Path(temp)/'new/model.engine'))
+                    for bad in ['',None,15]:
+                        values['pc_engine_path']=bad
+                        path.write_text(json.dumps({'yolo26_runtime':{'ros__parameters':values}}))
+                        with self.assertRaisesRegex(ValueError,'pc_engine_path'):runtime.Plan.load(SCRIPTS.parent)
 
     def test_survivor_pid_reuse_and_private_directory(self):
         path = Path(self.temp.name) / "state.json"
@@ -276,8 +298,9 @@ class RuntimeTest(unittest.TestCase):
                                     "VISION_CORE_ROOT": "/opt/custom-core",
                                     "VISION_CORE_ALGORITHM_CONFIG": "/config/operator.yaml"}):
             plan = runtime.Plan.load(SCRIPTS.parent)
-        self.assertEqual(plan.engine, "/models/custom.engine")
-        self.assertEqual(plan.workspace, "/home/rnd/jandi")
+        self.assertNotEqual(plan.engine, "/models/custom.engine")
+        self.assertNotIn("YOLO26_ENGINE_PATH", plan.environment())
+        self.assertEqual(plan.workspace, str(Path.home() / ("jandi" if platform.machine().lower() in ("aarch64","arm64") else "my_cv")))
         self.assertEqual(plan.core_prefix, "/opt/custom-core")
         self.assertEqual(plan.algorithm, "/config/operator.yaml")
 

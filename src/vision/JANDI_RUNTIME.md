@@ -18,6 +18,11 @@
 0 → 1은 전체 정상 종료, K → 1은 기존 긴급종료다. 0/Esc로 확인을 취소할 수 있다.
 실행 중인 버전의 업데이트와 MAIN/FAST 동시 실행은 거부한다.
 
+엔진 경로는 선택 버전의 소스 `vision/config/yolo26_runtime.yaml`에서만 관리한다.
+PC는 pc_engine_path, Jetson은 jetson_engine_path다. deployment.json의 engine 값은 제거됐다.
+경로 변경 후 전체 종료하고 다시 실행하면 반영되며 엔진 경로만 바꿀 때 재빌드는 필요 없다.
+정확한 MAIN/FAST 소스 경로는 JANDI_DUAL_INSTALL.md를 참조한다.
+
 노출의 시작값은 기존 `realsense2_camera/launch/rs_launch.py`의 마지막 parameters 딕셔너리에서
 직접 수정한다. 추가 카메라 launch/YAML override는 없다.
 확인된 PC/Jetson은 소스 링크 설치로 재빌드 없이 카메라 재시작 때 적용된다.

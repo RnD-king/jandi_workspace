@@ -79,7 +79,6 @@ python3 ~/jandi-tools/src/vision/scripts/jandi_deploy.py install --machine jetso
   예: `~/my_cv/install/dynamixel_sdk`, `~/realsense_ws/install/realsense2_camera`.
   `vision`·`forward_walk`가 함께 들어 있는 전체 기존 install을 지정하지 않는다.
   `/opt/ros/humble`에 설치된 의존성은 별도 항목이 필요 없다.
-- `engine`: 기존 엔진의 절대 경로. 기본은 `~/jandi/src/dataset/best_1029.engine`.
 - `jobs`: 기본 2. 8GB Jetson에서 병렬도를 임의로 크게 늘리지 않는다.
 - `library_paths`: 공통 CUDA 등의 추가 경로. 다른 MAIN/FAST 경로를 넣지 않는다.
 
@@ -160,6 +159,24 @@ python3 ~/my_cv/src/vision/scripts/jandi_deploy.py install --machine pc
 
 PC도 Release 실행본은 `~/jandi_main`, `~/jandi_fast`의 독립 release를 사용한다.
 기존 `~/my_cv/install`, `~/vision_core/install`은 삭제·교체하지 않는다.
+
+## 엔진 경로: yolo26_runtime.yaml 한 곳에서 관리
+
+`deployment.json`에는 engine을 지정하지 않는다. 설치 시 예전 engine 키를 제거하고
+실행 시에도 그 값이나 물려받은 YOLO26_ENGINE_PATH를 사용하지 않는다.
+JANDI는 선택 버전의 아래 **소스 runtime 파일**을 직접 읽는다.
+
+| 장치 | MAIN | FAST |
+|---|---|---|
+| PC | `~/my_cv/src/vision/config/yolo26_runtime.yaml` | `~/my_cv/variants/fast/src/vision/config/yolo26_runtime.yaml` |
+| Jetson | `~/jandi_main/src/vision/config/yolo26_runtime.yaml` | `~/jandi_fast/src/vision/config/yolo26_runtime.yaml` |
+
+PC는 `pc_engine_path`, Jetson(aarch64/arm64)은 `jetson_engine_path`를 읽는다.
+엔진 파일을 준비하고 해당 YAML 경로를 수정한 뒤 기존 JANDI를 **전체 종료 후 다시 실행**한다.
+엔진 경로만 바꾸면 재빌드는 필요 없다. 실행 전 같은 runtime loader로 파일 존재를 확인하며
+없거나 설정이 잘못되면 카메라/모터 관리자를 시작하지 않는다.
+소스 파일을 수정하는 것이므로 GitHub 업데이트의 로컬 변경 보호 정책은 그대로 적용된다.
+설치된 release 내부 YAML을 직접 수정하지 않는다.
 
 ## RealSense 설정: 기존 rs_launch.py를 직접 수정
 

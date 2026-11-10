@@ -14,7 +14,7 @@ def generate_launch_description():
         DeclareLaunchArgument("terminal_node", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("stream_debug_view", default_value="true", choices=["true", "false"]),
         DeclareLaunchArgument("workspace", default_value="",
-                              description="Empty: derive Jetson workspace from yolo26_runtime.yaml"),
+                              description="Empty: use the platform workspace under HOME"),
         DeclareLaunchArgument("core_prefix", default_value="",
                               description="Empty: VISION_CORE_ROOT or ~/vision_core/install"),
         ExecuteProcess(cmd=[executable, "--background",

@@ -5,6 +5,7 @@ from collections import deque
 from dataclasses import dataclass
 import json
 import os
+import platform
 from pathlib import Path
 import re
 import signal
@@ -44,12 +45,21 @@ class Plan:
              show_debug_view=False, terminal_node=False, stream_debug_view=True):
         import yaml
         share = Path(share).resolve()
-        runtime = yaml.safe_load((share / "config/yolo26_runtime.yaml").read_text())
-        configured_engine = Path(runtime["yolo26_runtime"]["ros__parameters"]["jetson_engine_path"])
-        engine = Path(os.environ.get("YOLO26_ENGINE_PATH") or configured_engine).expanduser()
-        # The existing engine setting is /home/rnd/jandi/src/dataset/*.engine.
-        default_workspace = configured_engine.parent.parent.parent
+        runtime_path = Path(os.environ.get("YOLO26_RUNTIME_CONFIG") or share / "config/yolo26_runtime.yaml").expanduser()
+        runtime = yaml.safe_load(runtime_path.read_text())
+        key = "jetson_engine_path" if platform.machine().lower() in ("aarch64", "arm64") else "pc_engine_path"
+        try:
+            value = runtime["yolo26_runtime"]["ros__parameters"][key]
+        except (KeyError, TypeError) as error:
+            raise ValueError(f"Missing {key} in {runtime_path}") from error
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be a nonempty path in {runtime_path}")
+        version = os.environ.get("JANDI_VERSION", "")
+        default_workspace = Path.home() / ("jandi_" + version if version in ("main", "fast") else
+                                            "jandi" if key == "jetson_engine_path" else "my_cv")
         workspace = Path(workspace or default_workspace).expanduser().resolve()
+        engine = Path(value).expanduser()
+        if not engine.is_absolute():engine = (workspace / engine).resolve()
         core = Path(core_prefix or os.environ.get("VISION_CORE_ROOT", "~/vision_core/install"))
         core = core.expanduser().resolve()
         algorithm = Path(os.environ.get("VISION_CORE_ALGORITHM_CONFIG") or
@@ -81,6 +91,7 @@ class Plan:
 
     def environment(self):
         env = dict(os.environ)
+        env.pop("YOLO26_ENGINE_PATH",None)
         env["ROS_DOMAIN_ID"] = "22"
         env["JANDI_VERSION"]=self.version
         env["JANDI_RELEASE"]=self.release

@@ -242,7 +242,7 @@ def clean_environment():
     env=dict(os.environ)
     for key in ('AMENT_PREFIX_PATH','CMAKE_PREFIX_PATH','COLCON_PREFIX_PATH','LD_LIBRARY_PATH','LD_PRELOAD',
                 'PYTHONPATH','ROS_PACKAGE_PATH','VISION_CORE_ROOT','SHARED_VISION_CORE_ROOT',
-                'VISION_CORE_ALGORITHM_CONFIG','JANDI_RELEASE','JANDI_VERSION','JANDI_CAMERA_CONFIG','JANDI_CAMERA_LAUNCH','COLCON_CURRENT_PREFIX','AMENT_CURRENT_PREFIX'):
+                'VISION_CORE_ALGORITHM_CONFIG','YOLO26_ENGINE_PATH','YOLO26_RUNTIME_CONFIG','JANDI_RELEASE','JANDI_VERSION','JANDI_CAMERA_CONFIG','JANDI_CAMERA_LAUNCH','COLCON_CURRENT_PREFIX','AMENT_CURRENT_PREFIX'):
         env.pop(key,None)
     env['PATH']=':'.join(p for p in env.get('PATH',os.defpath).split(':')
                          if p and not any(x in p for x in ('/jandi_main/','/jandi_fast/','/my_cv/install','/variants/fast/')))
@@ -397,14 +397,26 @@ def start(cfg,args):
     if not current.exists():raise RuntimeError(f'{version.upper()} 설치본이 없습니다. jandi_update.sh {version}')
     data=json.loads(current.read_text())
     if not valid_release(data) or data.get('version')!=version:raise RuntimeError('설치본 버전이 다르거나 불완전합니다. 업데이트 또는 --force 재빌드가 필요합니다.')
-    if not Path(cfg['engine']).is_file():raise RuntimeError('YOLO 엔진 파일 없음: '+cfg['engine'])
     env=ros_environment(cfg,data['ros'],data['core'])
-    env.update(JANDI_VERSION=version,JANDI_RELEASE=data['release'],YOLO26_ENGINE_PATH=cfg['engine'])
+    env.update(JANDI_VERSION=version,JANDI_RELEASE=data['release'])
+    repo=Path(cfg['repositories'][version]).expanduser()
+    runtime=source_roots(cfg,version,repo)['vision']/'config/yolo26_runtime.yaml'
+    if not runtime.is_file():raise RuntimeError('YOLO runtime 파일 없음: '+str(runtime))
+    env['YOLO26_RUNTIME_CONFIG']=str(runtime.resolve())
     script=Path(data['ros'])/'vision/lib/vision/run_jandi'
     command=['/usr/bin/python3',str(script),'--no-menu','--workspace',str(HOME_DIR/('jandi_'+version)),
              '--core-prefix',data['core'],'--show-debug-view',str(show).lower(),
              '--terminal-node',str(terminal).lower(),'--stream-debug-view',str(stream).lower()]
     if args.background:command.append('--background')
+    # Resolve through the installed runtime loader before camera/motor startup.
+    # Only the existing YAML path is passed; deployment owns no engine setting.
+    probe=("import sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); "
+           "from jandi_runtime import Plan; p=Plan.load(sys.argv[2],sys.argv[3],sys.argv[4]); "
+           "engine=Path(p.engine); "
+           "engine.is_file() or sys.exit('YOLO 엔진 파일 없음: '+str(engine)); "
+           "print('YOLO engine: '+str(engine),flush=True)")
+    call(['/usr/bin/python3','-s','-c',probe,str(script.parent),
+          str(Path(data['ros'])/'vision/share/vision'),str(HOME_DIR/('jandi_'+version)),data['core']],env=env)
     # Starts only the existing backend; lifetime version lock is owned by that backend.
     return call(command,env=env).returncode
 
@@ -426,11 +438,10 @@ def install(machine):
             v:str(HOME_DIR/('jandi_'+v)) for v in BRANCHES}
         cfg={'machine':machine,'repository':str(repo),'repositories':repos,'selected':'main','jobs':2,
              'dependency_prefixes':prefixes,
-             'engine':str(HOME_DIR/('dataset/runs/yolo26n_goal_1029/weights/best.engine' if machine=='pc' else 'jandi/src/dataset/best_1029.engine')),
              'cmake_args':[],'library_paths':[str(p) for p in [Path('/usr/local/cuda/lib64')] if p.is_dir()]}
         atomic_json(config,cfg)
     cfg=json.loads(config.read_text())
-    cfg.pop('camera_config',None);cfg.pop('camera_launch',None)
+    cfg.pop('camera_config',None);cfg.pop('camera_launch',None);cfg.pop('engine',None)
     atomic_json(config,cfg)
     wrappers={'push_jandi_workspace.sh':('push','pc'),'sync_jandi_to_my_cv.sh':('update','pc'),
               'jetson_push_to_github.sh':('push','jetson'),'jetson_pull_from_github.sh':('update','jetson'),
