@@ -19,6 +19,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import yaml
 
 BRANCHES={'main':'main','fast':'race-round2-fast-20261109'}
 PACKAGES=('vision','forward_walk','camera_overlay','vision_core')
@@ -44,6 +45,139 @@ def atomic_json(path,data):
         json.dump(data,stream,ensure_ascii=False,indent=2);stream.write('\n')
         stream.flush();os.fsync(stream.fileno());temporary=Path(stream.name)
     temporary.replace(path)
+
+
+class AlgorithmLoader(yaml.SafeLoader):
+    """Do not silently select one of two differently tuned duplicate keys."""
+    def construct_mapping(self,node,deep=False):
+        mapping={}
+        for key_node,value_node in node.value:
+            key=self.construct_object(key_node,deep=deep)
+            if not isinstance(key,str) or key in mapping:
+                raise ValueError('알고리즘 YAML 중복 또는 비문자열 키: '+str(key))
+            mapping[key]=self.construct_object(value_node,deep=deep)
+        return mapping
+
+
+def algorithm_document(text):
+    try:
+        data=yaml.load(text,Loader=AlgorithmLoader)
+        if not isinstance(data,dict) or not isinstance(data.get('vision_algorithm'),dict):
+            raise ValueError('vision_algorithm 매핑이 필요합니다.')
+        return data,yaml.compose(text,Loader=AlgorithmLoader)
+    except (yaml.YAMLError,ValueError) as error:
+        raise RuntimeError('알고리즘 YAML 형식 오류: '+str(error)) from error
+
+
+def fill_algorithm_defaults(default_text,user_text):
+    """Append missing mapping keys without rewriting any existing tuning/comment."""
+    defaults,_=algorithm_document(default_text)
+    user,node=algorithm_document(user_text)
+    lines=user_text.splitlines(keepends=True)
+    offsets=[0]
+    for line in lines:offsets.append(offsets[-1]+len(line))
+    edits=[];added=[]
+    def content_end(current):
+        if isinstance(current,yaml.MappingNode) and not current.flow_style and current.value:
+            return content_end(current.value[-1][1])
+        if isinstance(current,yaml.SequenceNode) and not current.flow_style and current.value:
+            return content_end(current.value[-1])
+        return current.end_mark
+    def visit(expected,actual,current,path,depth):
+        if not isinstance(expected,dict):return
+        if not isinstance(actual,dict) or not isinstance(current,yaml.MappingNode):
+            raise RuntimeError('알고리즘 YAML 매핑 형식이 다릅니다: '+'.'.join(path))
+        children={key.value:value for key,value in current.value}
+        missing={}
+        for key,value in expected.items():
+            if key not in actual:
+                missing[key]=value;added.append('.'.join((*path,key)))
+            elif isinstance(value,dict):
+                visit(value,actual[key],children[key],(*path,key),depth+1)
+        if not missing:return
+        if current.flow_style:
+            # JSON and inline YAML maps keep their existing spelling/quotes.
+            chunk=yaml.safe_dump(missing,allow_unicode=True,sort_keys=False,
+                                 default_flow_style=True,width=10**9).strip()
+            chunk=chunk[1:-1].strip()
+            edits.append((current.end_mark.index-1,depth,(', ' if current.value else '')+chunk))
+        else:
+            end=content_end(current)
+            line_start=offsets[min(end.line,len(lines))]
+            # A block map ends at the next dedented key, or after its last scalar.
+            at=line_start if not user_text[line_start:end.index].strip() else offsets[min(end.line+1,len(lines))]
+            indent=' '*current.start_mark.column
+            chunk=yaml.safe_dump(missing,allow_unicode=True,sort_keys=False)
+            chunk=''.join(indent+line if line.strip() else line for line in chunk.splitlines(keepends=True))
+            prefix='\n' if at and user_text[at-1]!='\n' else ''
+            edits.append((at,depth,prefix+chunk))
+    visit(defaults,user,node,(),0)
+    result=user_text
+    # At a common EOF, insert a parent first so its child's keys finish above it.
+    for at,depth,chunk in sorted(edits,key=lambda e:(e[0],-e[1]),reverse=True):
+        result=result[:at]+chunk+result[at:]
+    merged,_=algorithm_document(result)
+    def check(expected,actual):
+        if isinstance(expected,dict):
+            return isinstance(actual,dict) and all(k in actual and check(v,actual[k]) for k,v in expected.items())
+        return True
+    def retained(old,new):
+        if isinstance(old,dict):
+            return isinstance(new,dict) and all(k in new and retained(v,new[k]) for k,v in old.items())
+        if isinstance(old,list):
+            return isinstance(new,list) and len(old)==len(new) and all(retained(a,b) for a,b in zip(old,new))
+        return type(old) is type(new) and (old==new or isinstance(old,float) and old!=old and new!=new)
+    if not check(defaults,merged) or not retained(user,merged):
+        raise RuntimeError('알고리즘 YAML 새 항목 병합에 실패했습니다.')
+    return result,added
+
+
+def validate_algorithm(core,path,env):
+    checker=Path(core)/'libexec/shared_vision_core/config_check'
+    if not checker.is_file():
+        raise RuntimeError('알고리즘 검사기가 없는 이전 설치본입니다. jandi_update.sh로 해당 버전을 업데이트하세요.')
+    try:
+        call([checker,path],env=env,capture_output=True,text=True)
+    except subprocess.CalledProcessError as error:
+        detail=(error.stderr or error.stdout or str(error)).strip()
+        raise RuntimeError('알고리즘 YAML 검사 실패 ('+str(path)+'): '+detail) from error
+
+
+def ensure_algorithm_config(version,core,env):
+    """Validate against this release, then atomically create/extend operator tuning."""
+    if version not in BRANCHES:raise ValueError('잘못된 알고리즘 버전: '+version)
+    defaults=Path(core)/'share/shared_vision_core/config/vision_algorithm.yaml'
+    path=CONFIG_DIR/version/'vision_algorithm.yaml'
+    if path.is_symlink():raise RuntimeError('알고리즘 편집 파일의 심볼릭 링크는 자동 교체하지 않습니다: '+str(path))
+    baseline=defaults.read_text()
+    previous=path.read_text() if path.exists() else None
+    if previous is None:
+        algorithm_document(baseline)
+        candidate=baseline;added=[]
+    else:candidate,added=fill_algorithm_defaults(baseline,previous)
+    if candidate==previous:
+        validate_algorithm(core,path,env)
+        return path
+    path.parent.mkdir(parents=True,exist_ok=True)
+    temporary=None
+    try:
+        with tempfile.NamedTemporaryFile('w',dir=path.parent,prefix='.algorithm-',suffix='.yaml',delete=False) as stream:
+            stream.write(candidate);stream.flush();os.fsync(stream.fileno());temporary=Path(stream.name)
+        validate_algorithm(core,temporary,env)
+        if (path.read_text() if path.exists() else None)!=previous:
+            raise RuntimeError('알고리즘 파일 편집 중입니다. 저장을 마친 뒤 다시 실행하세요: '+str(path))
+        if previous is not None:
+            saved=STATE_DIR/'algorithm-originals'/version/(str(time.time_ns())+'.yaml')
+            saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,saved)
+            temporary.chmod(path.stat().st_mode & 0o777)
+        temporary.replace(path)
+    except RuntimeError as error:
+        raise RuntimeError('알고리즘 편집 파일 '+str(path)+': '+str(error)) from error
+    finally:
+        if temporary is not None:temporary.unlink(missing_ok=True)
+    print(('알고리즘 편집 파일 생성: ' if previous is None else
+           '알고리즘 새 항목 추가 ('+str(len(added))+'): ')+str(path))
+    return path
 
 
 def load_config():
@@ -290,6 +424,7 @@ def valid_release(data):
     if Path(data['core']).parent!=Path(data['ros']).parent:return False
     if not isinstance(data.get('artifacts',{}),dict):return False
     paths=[Path(data['core'])/'lib/libshared_vision_core.so',
+           Path(data['core'])/'libexec/shared_vision_core/config_check',
            Path(data['core'])/'share/shared_vision_core/config/vision_algorithm.yaml',
            Path(data['ros'])/'local_setup.bash',Path(data['ros'])/'vision/lib/vision/line_perception_node',
            Path(data['ros'])/'vision/lib/vision/run_jandi',Path(data['ros'])/'forward_walk/lib/forward_walk/main_node']
@@ -313,6 +448,7 @@ def build_release(cfg,version,repo,roots,force=False):
     root,current=release_paths(version)
     previous=json.loads(current.read_text()) if current.exists() else None
     if not force and valid_release(previous) and previous.get('version')==version and previous.get('fingerprint')==stamp:
+        ensure_algorithm_config(version,previous['core'],ros_environment(cfg,previous['ros'],previous['core']))
         print(f'[{version.upper()}] 같은 소스의 정상 설치본이 있습니다. 빌드 생략.');return previous
     # Build into its final immutable prefix. Never move an installed tree with embedded RPATHs.
     release=root/'releases'/f'{commit[:12]}-{time.time_ns()}'
@@ -340,6 +476,7 @@ def build_release(cfg,version,repo,roots,force=False):
         data={'version':version,'branch':BRANCHES[version],'commit':commit,'fingerprint':stamp,
               'core':str(core),'ros':str(ros),'release':str(release),'completed_at':datetime.now().isoformat()}
         if not valid_release(data):raise RuntimeError('필수 설치 파일이 누락됐습니다.')
+        ensure_algorithm_config(version,core,env)
         data['artifacts']={str(p):hashlib.sha256(p.read_bytes()).hexdigest()
             for prefix in (core,ros) for p in prefix.rglob('*')
             if p.is_file() and '__pycache__' not in p.parts and p.suffix!='.pyc'}
@@ -399,6 +536,8 @@ def start(cfg,args):
     if not valid_release(data) or data.get('version')!=version:raise RuntimeError('설치본 버전이 다르거나 불완전합니다. 업데이트 또는 --force 재빌드가 필요합니다.')
     env=ros_environment(cfg,data['ros'],data['core'])
     env.update(JANDI_VERSION=version,JANDI_RELEASE=data['release'])
+    algorithm=ensure_algorithm_config(version,data['core'],env)
+    env['VISION_CORE_ALGORITHM_CONFIG']=str(algorithm.resolve())
     repo=Path(cfg['repositories'][version]).expanduser()
     runtime=source_roots(cfg,version,repo)['vision']/'config/yolo26_runtime.yaml'
     if not runtime.is_file():raise RuntimeError('YOLO runtime 파일 없음: '+str(runtime))
@@ -470,6 +609,7 @@ def install(machine):
     print('명령 설치 완료. 기존 파일 보존: '+str(saved))
     print('설정: '+str(config)+'\n카메라: ros2 launch realsense2_camera rs_launch.py')
     print('브랜치 선택은 기본 버전만 바꿉니다. 설치: ~/jandi_update.sh main 또는 fast')
+    print('튜닝 YAML (update 후 생성): '+str(CONFIG_DIR/'main/vision_algorithm.yaml')+' / '+str(CONFIG_DIR/'fast/vision_algorithm.yaml'))
 
 
 def main(argv=None):

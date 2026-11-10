@@ -6,7 +6,27 @@
 
 ## 알고리즘 설정
 
-`vision_core/config/vision_algorithm.yaml`에서 설정한다.
+`vision_core/config/vision_algorithm.yaml`은 배포 기본값이다. 실제 실행 튜닝은 PC/Jetson 모두
+아래 버전별 파일에서 한다. 최초 update/실행 시 해당 설치본의 기본값으로 생성한다.
+
+```text
+MAIN: ~/.config/jandi/main/vision_algorithm.yaml
+FAST: ~/.config/jandi/fast/vision_algorithm.yaml
+```
+
+파일을 저장한 뒤 JANDI를 전체 종료하고 `~/run_jandi.sh`로 다시 실행한다.
+파라미터만 바꿀 때 `cp`, 재빌드, GitHub push/update는 필요 없다.
+이 파일은 Git 저장소와 설치본 무결성 검사 대상 밖에 있으므로 튜닝이 update를 막지 않는다.
+업데이트는 기존 값·주석을 보존하며 새 기본 항목만 추가한다. 배포 기본값이 달라져도
+이미 있는 튜닝값은 덮어쓰지 않는다. 새 항목을 추가하기 전 파일은
+`~/.local/state/jandi/algorithm-originals/<version>/`에 보존한다.
+설정 검사에 실패하면 파일을 교체하거나 새 Release를 활성화하지 않는다.
+시작 전에는 선택 버전의 C++ config_check로 실제 로더의 범위·형식 검사도 수행하며,
+실패 시 카메라·모터 관리자를 시작하지 않는다. 현재 전체 관측창/투표 조합 등도 검사한다.
+직접 ROS 노드를 실행하는 경우에는 해당 파일을 VISION_CORE_ALGORITHM_CONFIG로 지정한다.
+엔진 선택용 yolo26_runtime.yaml은 기존처럼 선택 버전의 소스 파일을 읽으며 별도다.
+
+기본 가중치:
 
 - `line.walk.ready_observation_end_weight: 1.0`
 - `ball.control.ready_observation_end_weight: 1.0`
@@ -44,7 +64,7 @@ GOAL 가장자리는 원거리 보행 시작~READY까지만 관측한다. READY�
 MAIN은 1초와 전체 창, FAST는 최소 8프레임 및 조건 충족 시 조기 완료하며
 실패 판정은 기존 1초까지 기다린다. RGB 유실과 Depth 실패는 각각 기존 복구로 넘긴다.
 보정 묶음의 추가 상한은 두지 않는다. 근거리 가장자리 판정도 8중5를 적용한다.
-기존 Depth median/ROI 확대, ID 교체, 근거리 진입, 투척 계산, HURDLE 로직은 유지한다.
+기존 Depth median/ROI 확대, ID 교체, 골대 근거리 진입, 투척 계산은 유지한다. 허들 v 투표 변경은 아래 항목을 따른다.
 
 K는 확인 화면만 연다. 확인 화면의 1만 기존 긴급종료를 호출한다.
 0/Esc는 원래 메뉴로 복귀하며 노드·미션 상태를 바꾸지 않는다. 반복 K는 종료하지 않는다.

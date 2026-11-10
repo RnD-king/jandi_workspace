@@ -54,6 +54,14 @@ install(TARGETS shared_vision_core
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
+# Read-only startup validation uses the same loader as robot nodes, without ROS/hardware.
+add_executable(shared_vision_core_config_check src/config_check.cpp)
+target_link_libraries(shared_vision_core_config_check PRIVATE shared_vision_core)
+set_target_properties(shared_vision_core_config_check PROPERTIES
+  OUTPUT_NAME config_check INSTALL_RPATH "$ORIGIN/../../${CMAKE_INSTALL_LIBDIR}")
+install(TARGETS shared_vision_core_config_check
+  RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
+
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY config/ DESTINATION
   ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/config)
@@ -81,6 +89,15 @@ install(FILES
 )
 
 if(BUILD_TESTING)
+  add_test(NAME shared_vision_core_config_check_valid
+    COMMAND shared_vision_core_config_check ${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml)
+  file(READ ${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml invalid_algorithm)
+  string(REGEX REPLACE "ready_observation_end_weight:[^\n]*" "ready_observation_end_weight: -1.0"
+    invalid_algorithm "${invalid_algorithm}")
+  file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/invalid_algorithm.yaml "${invalid_algorithm}")
+  add_test(NAME shared_vision_core_config_check_invalid
+    COMMAND shared_vision_core_config_check ${CMAKE_CURRENT_BINARY_DIR}/invalid_algorithm.yaml)
+  set_tests_properties(shared_vision_core_config_check_invalid PROPERTIES WILL_FAIL TRUE)
   add_executable(shared_vision_core_hurdle_voting_test tests/hurdle_voting_test.cpp)
   target_link_libraries(shared_vision_core_hurdle_voting_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_hurdle_voting_test COMMAND shared_vision_core_hurdle_voting_test)
