@@ -509,6 +509,7 @@ ActionRequest GoalController::FineAction(const GoalPoseObservation& pose) const 
 }
 
 void GoalController::BeginDepthRecovery(bool fine) {
+  shoot_verification_active_=false;
   depth_recovery_={};depth_recovery_.active=true;depth_recovery_.fine=fine;
 }
 
@@ -564,6 +565,11 @@ GoalResult GoalController::Compute(
                                 mode_ == GoalMode::kReturnCameraToLine;
   if (camera.actual_mode == CameraMode::kGoal && camera.settled)
     ObserveEntryBackboard(board_visible);
+  // A camera/body movement invalidates the entire pre-shot observation.
+  if (shoot_verification_active_ &&
+      (camera.actual_mode != CameraMode::kGoal || !camera.settled ||
+       feedback.action_active || feedback.action_done))
+    ClearTracking();
   const bool verified = verified_observation_pending_;
   verified_observation_pending_ = false;
   if (!verified && mode_ == GoalMode::kFineAdjust && feedback.action_done)
@@ -592,11 +598,17 @@ GoalResult GoalController::Compute(
   result.entry_line_retries = entry_line_retries_;
   result.tracked = tracked_;
   result.pose = tracked_pose_;
+  result.shoot_verifying = shoot_verification_active_;
   result.shoot_yaw_rad =
       tracked_pose_.visible
           ? ComputeShootYawRad(tracked_pose_.x_m, tracked_pose_.z_m,
                                tracked_pose_.yaw_rad)
           : shoot_yaw_rad_;
+  // Successful FAST windows must not shorten this extra stationary second.
+  // Trackers keep only the latest window, excluding the original shot candidate.
+  if (shoot_verification_active_ &&
+      now_sec + 1e-9 < shoot_verification_start_sec_ + config_.shoot_verification_sec)
+    return result;
   // Near commitment precedes coordinate-loss recovery, including image-visible
   // boards whose depth is near but full pose estimation is temporarily invalid.
   const bool far_recovery = mode_ == GoalMode::kRecoverySearch ||
@@ -643,6 +655,7 @@ GoalResult GoalController::Compute(
     }
     result.depth_recovery_active=depth_recovery_.active;
     result.depth_recovery_steps=depth_recovery_.steps;
+    result.shoot_verifying=shoot_verification_active_;
     result.mode=mode_;return result;
   }
   // A failed first GOAL-view window must not erase the direction seen
@@ -688,9 +701,10 @@ GoalResult GoalController::Compute(
       backboard->box_px.width > 0 && backboard->box_px.height > 0 && tracked_.stable &&
       !(feedback.action_active && !feedback.action_done)) {
     const auto& box = backboard->box_px;
-    const bool left = box.x <= config_.edge_margin_px;
-    const bool right = box.x + box.width >= image_width - config_.edge_margin_px;
-    if (left && right) return result; // No directional evidence for an oversized box.
+    const double center_u = box.x + 0.5 * box.width;
+    const bool left = center_u <= config_.edge_margin_px;
+    const bool right = center_u >= image_width - config_.edge_margin_px;
+    if (left && right) return result; // Overlapping boundary margins are ambiguous.
     if (left || right) {
       turn_resume_mode_ = mode_;
       turn_left_ = left;
@@ -869,6 +883,7 @@ GoalResult GoalController::Compute(
         stationary_recovery_.Begin(now_sec);
       }
       result.mode = mode_;
+      result.shoot_verifying = shoot_verification_active_;
       return result;
     }
     const auto mean_pose = FinePoseMean();
@@ -878,7 +893,10 @@ GoalResult GoalController::Compute(
     result.fine_decision_pose = *mean_pose;
     result.fine_decision_pose_used = true;
     result.action = FineAction(*mean_pose);
-    if(allow_new_body_actions && result.action.category==ActionCategory::kLocomotion) {
+    if (allow_new_body_actions && result.action.category==ActionCategory::kLocomotion) {
+      // A correction consumes this verification; the next shot needs a new one.
+      shoot_verification_active_=false;
+      result.shoot_verifying=false;
       const auto plan=PlanFineMotion(*mean_pose);
       const int execute=plan.action==MissionAction::kStepForwardHalf
           ? plan.repetitions : std::max(1,plan.repetitions-1);
@@ -897,6 +915,17 @@ GoalResult GoalController::Compute(
       result.action = {};
     if (allow_new_body_actions &&
         result.action.action == MissionAction::kShoot) {
+      if (!shoot_verification_active_) {
+        // Keep the robot stationary and discard all candidate/preaveraged poses.
+        ClearTracking();
+        shoot_verification_active_=true;
+        shoot_verification_start_sec_=now_sec;
+        result.shoot_verifying=true;
+        result.action={};
+        return result;
+      }
+      shoot_verification_active_=false;
+      result.shoot_verifying=false;
       // Latch the selected, permitted integer command, not the unconstrained
       // ideal angle. Subsequent SHOOT cycles must repeat this exact angle.
       shoot_yaw_rad_ = result.action.target_yaw_deg * kPi / 180.0;
@@ -1166,6 +1195,8 @@ void GoalController::ClearObservationHistory() {
 }
 
 void GoalController::ClearTracking() {
+  shoot_verification_active_ = false;
+  shoot_verification_start_sec_ = 0.0;
   verified_observation_pending_ = false;
   hit_history_.clear();
   pose_hit_history_.clear();

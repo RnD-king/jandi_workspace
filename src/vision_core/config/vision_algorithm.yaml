@@ -377,6 +377,7 @@ vision_algorithm:
         right_delta_z_m: 0.0
       position_tolerance_m: 0.04 # 목표 거리의 허용 오차
       shoot_yaw_limit_deg: 20.0 # ±이 값: FINE 투척 허리각 및 좌우 미세 이동 판단 기준
+      shoot_verification_sec: 1.0 # 슛 후보 판단 후 새 정지 관측; 최신 관측창으로 슛/보정 이동 재판단
 
       # 투척 후 복귀
       post_shoot_back_steps: 0 # 0: 투척 후 후진 없이 카메라 FORWARD 및 라인 복귀

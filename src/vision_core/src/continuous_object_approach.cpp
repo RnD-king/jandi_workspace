@@ -329,10 +329,11 @@ void MissionController::ObserveGoalEdgeSample(const MissionFrameInput& input) {
   bool left=false,right=false;
   if(input.raw_backboard_target){
     const auto& box=input.raw_backboard_target->box_px;
-    left=box.width>0&&box.height>0&&box.x<=config_.goal.edge_margin_px;
-    right=box.width>0&&box.height>0&&box.x+box.width>=
+    const double center_u=box.x+0.5*box.width;
+    left=box.width>0&&box.height>0&&center_u<=config_.goal.edge_margin_px;
+    right=box.width>0&&box.height>0&&center_u>=
           static_cast<double>(input.image_width)-config_.goal.edge_margin_px;
-    if(left&&right)left=right=false; // Ambiguous clipped/oversized box.
+    if(left&&right)left=right=false; // Overlapping boundary margins are ambiguous.
   }
   e.left_hits.push_back(left);e.right_hits.push_back(right);
   const auto window=static_cast<std::size_t>(config_.goal.edge_stable_window);
