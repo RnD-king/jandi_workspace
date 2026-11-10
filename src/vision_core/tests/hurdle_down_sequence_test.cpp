@@ -226,7 +226,7 @@ void DownIgnoresOutOfRangeDepthButForwardDoesNot() {
 
 int main() {
   InitialDownMotionUsesLastReadyAction();
-  FirstTwoMovingVotes(100,MissionAction::kLineStraightUnit);
+  FirstTwoMovingVotes(100,MissionAction::kStepForwardOne); // Only 3 far votes: insufficient for 2 steps.
   FirstTwoMovingVotes(120,MissionAction::kStepForwardOne);
   FirstTwoMovingVotes(240,MissionAction::kDefaultPoseMode);
   DistanceStepsOnlyReobserveAfterDone();

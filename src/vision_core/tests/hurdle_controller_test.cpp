@@ -14,13 +14,14 @@ static ObjectTarget H(double v) {
 static void ContactWalkHold() {
   auto c=LoadDefaultAlgorithmConfig().hurdle;
   c.contact_steps=3;c.contact_inter_action_hold_sec=.5;c.pre_cross_hold_sec=0;
-  c.stable_window=c.stable_min_hits=c.down_search_min_hits=1;
+  c.stable_window=c.stable_min_hits=c.down_search_min_hits=1; c.down_v_min_hits=c.down_two_step_min_hits=c.contact_v_min_hits=1;
   const CameraFeedback down{CameraMode::kDown,true};
   const auto target=H(.9);
   c.contact_v_px=260;
   HurdleController controller(c,3);
   const auto enter=[&](double now) {
     controller.StartTestExecute();
+    controller.ObserveOnly(target,640,480);
     controller.UseVerifiedObservation(target,{true},640,480);
     const auto r=controller.Compute({},640,480,now,down,{},{});
     assert(r.mode==HurdleMode::kContactWalk && r.action.action==MissionAction::kStepForwardHalf);
@@ -93,11 +94,12 @@ static void PreCrossHold() {
   c.contact_steps=3;
   c.contact_inter_action_hold_sec=.3;
   c.pre_cross_hold_sec=.5;
-  c.stable_window=c.stable_min_hits=c.down_search_min_hits=1;
+  c.stable_window=c.stable_min_hits=c.down_search_min_hits=1; c.down_v_min_hits=c.down_two_step_min_hits=c.contact_v_min_hits=1;
   c.contact_v_px=260;
   HurdleController controller(c,3);
   const CameraFeedback down{CameraMode::kDown,true};
   controller.StartTestExecute();
+  controller.ObserveOnly(H(.9),640,480);
   controller.UseVerifiedObservation(H(.9),{true},640,480);
   ActionExecutionFeedback done;done.action_done=true;
   auto r=controller.Compute({},640,480,1.0,down,{},{});
@@ -127,6 +129,7 @@ static void PreCrossHold() {
 
   // PAUSE shifts the final hold deadline without inventing a DONE.
   controller.StartTestExecute();
+  controller.ObserveOnly(H(.9),640,480);
   controller.UseVerifiedObservation(H(.9),{true},640,480);
   r=controller.Compute({},640,480,10.0,down,{},{});
   r=controller.Compute({},640,480,10.1,down,done,{});
@@ -146,7 +149,7 @@ static void PreCrossHold() {
 int main() {
   ContactWalkHold();
   PreCrossHold();
-  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle;  c.contact_steps=1; c.pre_cross_hold_sec=0; c.down_search_min_hits=1; c.stable_window = c.stable_min_hits = 1;
+  HurdleConfig c=LoadDefaultAlgorithmConfig().hurdle;  c.contact_steps=1; c.pre_cross_hold_sec=0; c.down_search_min_hits=1; c.stable_window = c.stable_min_hits = 1; c.down_v_min_hits=c.down_two_step_min_hits=c.contact_v_min_hits=1;
   c.lost_frames = 2;  c.upper_acquire_v_px=480;
   c.approach_two_step_v_px = 360.0;
   c.approach_short_v_px = 312.0;

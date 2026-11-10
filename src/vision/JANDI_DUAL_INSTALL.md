@@ -11,7 +11,7 @@
 - `line.walk.ready_observation_end_weight: 1.0`
 - `ball.control.ready_observation_end_weight: 1.0`
 - `goal.control.ready_observation_end_weight: 1.0`
-- `hurdle.control.ready_observation_end_weight: 3.0`
+- `hurdle.control.ready_observation_end_weight: 1.0`
 
 유효한 양수만 허용한다. `1`은 균등 평균, `3`은 기존 시작 1→끝 3 가중치다.
 정규화된 가중치 합으로 나누며, O/H 게인·점수식·READY 타이밍은 변경하지 않는다.
@@ -241,3 +241,21 @@ Jetson HTTP는 `http://192.168.0.133:8081`, PC 로컬 실행은 `http://localhos
 ROS 합성 peer와 fake Dynamixel 실행기 검사, 런처 입력·배포 실패 검사를 구분한다.
 Release 설치 성공 기록은 실기 성공이나 전체 테스트 통과 기록을 의미하지 않는다.
 Jetson ARM64 빌드와 실제 카메라·모터·주행 성능은 별도 확인 대상이다.
+
+## 허들 DOWN 이후 v 판정
+
+평균 v 대신 원본 프레임의 임계값 충족 횟수로 판단한다. MAIN 관측창은 10프레임,
+FAST는 8프레임이다. `hurdle.control`의 `down_v_min_hits: 3`은
+`v >= fine_mode_v_px`(현재 220) 전환 기준, `contact_v_min_hits: 3`은
+`v >= contact_v_px`(현재 220) 접촉 확정 기준이다.
+`down_two_step_min_hits`는 MAIN 7 / FAST 6이며, `v < down_one_step_v_px`(현재 40)가
+그 횟수를 충족할 때만 2걸음, 나머지는 1걸음 후 기존 새 정지 관측을 수행한다.
+가까움 투표가 3회 충족되면 FINE 전환을 우선한다. 미검출·비유한 v는 표로 세지 않지만
+전체 프레임 수에는 포함한다. 완전한 관측창이 필요하며 평균 좌표로 가상 투표를 만들지 않는다.
+
+접촉은 FINE 자세 진입 후 투표가 확정되면 이후 낮은 v/유실로 취소하지 않는다.
+실제 진행 중 동작의 DONE과 라인 정렬/명령 허용 조건을 기다린 뒤 접촉 보행을 시작한다.
+전체 Reset, 대상 무효화, v 임계값/투표 설정 변경은 이전 증거를 초기화한다.
+FAST 최초 DOWN 탐색의 6중3 검출과 이후 8중3 검출은 유지하며,
+거리 결정은 기존 정책대로 새 정지 관측의 8프레임 투표로 수행한다.
+허들 READY 가중치는 1이며, 원거리 바닥 라인 O/H와 DOWN 직전 추가 보행에도 적용한다.

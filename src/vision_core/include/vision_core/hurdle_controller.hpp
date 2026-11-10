@@ -32,7 +32,7 @@ enum class HurdleMode {
 };
 
 struct HurdleConfig {
-  double ready_observation_end_weight{3.0};
+  double ready_observation_end_weight{1.0};
   double approach_short_v_px{};
   int pre_down_extra_forward_steps{2}; // Additional physical steps after the existing near 2-step.
   int down_search_max_steps{10};
@@ -53,6 +53,9 @@ struct HurdleConfig {
   int stable_min_hits{};
   int near_v_min_hits{3}; // v threshold votes in stable FORWARD window.
   int down_search_min_hits{}; // DOWN search only, within stable_window.
+  int down_v_min_hits{3}; // Raw v >= fine_mode_v_px votes.
+  int down_two_step_min_hits{7}; // Raw v < down_one_step_v_px votes.
+  int contact_v_min_hits{3}; // Raw v >= contact_v_px votes; latched until reset.
   int lost_frames{};
   double upper_acquire_v_px{};
   double approach_two_step_v_px{};
@@ -133,11 +136,12 @@ public:
       MissionAction first_down_unit=MissionAction::kLineStraightUnit);
   const std::deque<bool>& ObservationHits() const { return hit_history_; }
   // Discard all observations made before the most recent motion DONE.
-  // The mission phase and last known recovery direction are retained.
+  // The mission phase, recovery direction and confirmed contact decision are retained.
   void ClearObservationHistory();
   // A changed bbox filter invalidates the latched search detection as well.
   void InvalidateTargetIdentity() {
     ClearObservationHistory();
+    contact_v_ready_ = fine_line_close_ = false;
   }
   void InvalidateDetectionEvidence() {
     InvalidateTargetIdentity();
@@ -147,7 +151,8 @@ public:
   void ObserveFineLine(const LineGuide &guide, int image_width, double now_sec);
   void OnActualMotionDone(MissionAction action, double now_sec);
   void UseVerifiedObservation(const std::optional<ObjectTarget>& mean,
-      const std::deque<bool>& hits, int width, int height);
+      const std::deque<bool>& hits, int width, int height,
+      const std::deque<std::optional<double>>* raw_v_samples = nullptr);
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
   void UpdateTuning(const HurdleConfig &config) {
     if (contact_next_step_sec_>0.0)
@@ -156,7 +161,15 @@ public:
           : config.contact_inter_action_hold_sec-config_.contact_inter_action_hold_sec;
     if (mode_==HurdleMode::kDownSearch && config_.down_search_min_hits!=config.down_search_min_hits)
       down_search_.InvalidateDetection();
+    const bool changed = config_.stable_window != config.stable_window ||
+        config_.down_v_min_hits != config.down_v_min_hits ||
+        config_.down_two_step_min_hits != config.down_two_step_min_hits ||
+        config_.contact_v_min_hits != config.contact_v_min_hits ||
+        config_.down_one_step_v_px != config.down_one_step_v_px ||
+        config_.fine_mode_v_px != config.fine_mode_v_px ||
+        config_.contact_v_px != config.contact_v_px;
     config_ = config;
+    if (changed) InvalidateDetectionEvidence();
   }
   void ShiftTimers(double duration) {
     state_enter_sec_+=duration;
@@ -171,6 +184,7 @@ public:
     mode_=HurdleMode::kWaitCameraDown; test_camera_pending_=true; }
   void StartTestExecute() { Reset(); fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; }
   void Reset();
+  bool ContactObservationReady() const { return contact_v_ready_; }
   bool ExecutionObservationReady() const {
     return tracked_.visible && tracked_.stable &&
         hit_history_.size()>=static_cast<std::size_t>(config_.stable_window);
@@ -198,7 +212,8 @@ public:
 private:
   static double Clamp(double value, double low, double high);
   void UpdateTracker(const std::optional<ObjectTarget> &target,
-                     int image_width, int image_height);
+                     int image_width, int image_height, bool collect_v = true);
+  void UpdateVQualifications();
   ActionRequest RecoveryAction() const;
   void BeginStepRecovery(double now_sec, bool entry_loss);
   void ExhaustStepRecovery(double now_sec, HurdleResult &result);
@@ -238,7 +253,9 @@ private:
   bool down_final_one_pending_{false}, down_near_qualified_{false};
   std::deque<bool> down_near_hits_; // Legacy diagnostic history.
   std::deque<std::optional<double>> down_v_samples_;
-  std::optional<double> down_observed_v_px_;
+  bool down_fine_qualified_{false}, down_two_step_qualified_{false};
+  std::deque<std::optional<double>> v_samples_;
+  bool fine_v_ready_{false}, contact_v_ready_{false};
   bool down_distance_pending_{false}, down_stationary_observing_{false};
   bool down_search_step_pending_{false};
   double down_stationary_start_sec_{0.0}, down_search_hold_until_sec_{0.0};

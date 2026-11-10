@@ -139,7 +139,7 @@ void TestCameraLatchSurvivesLoss() {
   assert(b.mode==BallMode::kApproachTwoBeforeDown && b.camera_request==CameraRequest::kNone);
   b=ball.Compute({},640,480,.2,{},busy); assert(b.mode==BallMode::kApproachTwoBeforeDown);
   b=ball.Compute({},640,480,.3,{},done); assert(b.camera_request==CameraRequest::kBallView);
-  c.hurdle.down_search_min_hits=1; c.hurdle.stable_window=c.hurdle.stable_min_hits=1; c.hurdle.lost_frames=1;
+  c.hurdle.down_search_min_hits=1; c.hurdle.stable_window=c.hurdle.stable_min_hits=1; c.hurdle.down_v_min_hits=c.hurdle.down_two_step_min_hits=c.hurdle.contact_v_min_hits=1; c.hurdle.lost_frames=1;
   c.hurdle.upper_acquire_v_px=480;
   HurdleController hurdle(c.hurdle,3);
   hurdle.Compute(Target(.5,.85),640,480,0,{},{},StraightLine());
@@ -319,7 +319,7 @@ void TestHurdleSearchAndContact() {
   t.Commit(); assert(t.out.command.action==MissionAction::kStepForwardOne);
   for(int i=0;i<7;++i) {t.in.hurdle_target=Target(.5,.9); t.Tick(i%2==1);}
   t.Tick(true); assert(t.out.hurdle.mode==HurdleMode::kCoarseAdjust && t.permit==0);
-  for(int i=0;i<7;++i)t.Tick();
+  for(int i=0;i<10;++i)t.Tick(); // A complete raw v voting window is required.
   t.Commit(); assert(t.out.command.action==MissionAction::kDefaultPoseMode);
   t.Tick(true); assert(t.out.hurdle.mode==HurdleMode::kFineLineAlign);
   for(int i=0;i<11;++i)t.Tick();

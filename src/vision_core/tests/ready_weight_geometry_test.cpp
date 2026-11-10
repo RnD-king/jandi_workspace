@@ -25,7 +25,9 @@ int main() {
   assert(production.line_p2p.ready_observation_end_weight==1 &&
          production.ball.ready_observation_end_weight==1 &&
          production.goal.ready_observation_end_weight==1 &&
-         production.hurdle.ready_observation_end_weight==3);
+         production.hurdle.ready_observation_end_weight==1);
+  assert(production.hurdle.down_v_min_hits==3 && production.hurdle.contact_v_min_hits==3);
+  assert(production.hurdle.down_two_step_min_hits==7);
   auto c=LoadDefaultAlgorithmConfig();
   auto lp=c.line_p2p;lp.failure_min_valid_samples=1;lp.ready_observation_end_weight=1;lp.straight_repetitions=2;
   LinePlan plan(lp,2,1);plan.Begin(MissionAction::kStepForwardFour,7,false,3);

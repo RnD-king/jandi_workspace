@@ -25,7 +25,9 @@ void VerifiedFineWindows() {
   b=single.Compute(Target(345,100),640,480,1,{CameraMode::kBallView,true},done);
   assert(b.action.action==MissionAction::kNone && !single.ExecutionObservationReady());
   HurdleController hurdle(c.hurdle,3);hurdle.StartTestExecute();
-  hurdle.UseVerifiedObservation(Target(320,270),hits,640,480);
+  std::deque<std::optional<double>> raw_v;
+  for (bool hit:hits) raw_v.push_back(hit ? std::optional<double>(270) : std::nullopt);
+  hurdle.UseVerifiedObservation(Target(320,270),hits,640,480,&raw_v);
   auto h=hurdle.Compute({},640,480,1,{CameraMode::kDown,true},done,{});
   assert(h.mode==HurdleMode::kContactWalk && h.action.action==MissionAction::kStepForwardHalf);
   GoalController goal(c.goal,3);goal.StartTestExecute();
