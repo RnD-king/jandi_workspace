@@ -22,6 +22,12 @@ def fixture_release(root):
                  root/'ros/local_setup.bash',root/'ros/vision/lib/vision/line_perception_node',
                  root/'ros/vision/lib/vision/run_jandi',root/'ros/forward_walk/lib/forward_walk/main_node']:
         path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'installed fixture')
+    defaults=root/'core/share/shared_vision_core/config/vision_algorithm.yaml'
+    defaults.write_text('vision_algorithm:\n  test_gain: 1 # fixture default\n')
+    checker=root/'core/libexec/shared_vision_core/config_check'
+    checker.parent.mkdir(parents=True,exist_ok=True)
+    checker.write_text("#!/usr/bin/python3\nimport sys,yaml\na=yaml.safe_load(open(sys.argv[1]))['vision_algorithm']\nif a.get('test_gain',0)<=0:\n sys.stderr.write('test_gain must be positive\\n');sys.exit(1)\n")
+    checker.chmod(0o755)
     return data
 
 
@@ -95,11 +101,12 @@ class DeployTest(unittest.TestCase):
             return subprocess.CompletedProcess(command,0)
         with patch.object(d,'git',return_value='b'*40),patch.object(d,'ros_environment',return_value={}),patch.object(d,'call',side_effect=fake_call):
             installed=d.build_release({'machine':'pc'},'main',self.root,roots)
-        self.assertEqual(len(commands),4);self.assertEqual(json.loads(manifest.read_text()),installed)
+        self.assertEqual(len(commands),5);self.assertEqual(json.loads(manifest.read_text()),installed)
         self.assertTrue(d.valid_release(installed))
-        with patch.object(d,'git',return_value='b'*40),patch.object(d,'call') as call:
+        with patch.object(d,'git',return_value='b'*40),patch.object(d,'ros_environment',return_value={}),patch.object(d,'call') as call:
             self.assertEqual(d.build_release({'machine':'pc'},'main',self.root,roots),installed)
-            call.assert_not_called()
+            self.assertEqual(call.call_count,1)
+            self.assertEqual(Path(call.call_args[0][0][0]).name,'config_check')
 
     def test_mixed_core_and_ros_releases_are_rejected(self):
         a=fixture_release(self.root/'a');b=fixture_release(self.root/'b')
@@ -182,23 +189,165 @@ class DeployTest(unittest.TestCase):
         real_call=d.call;calls=[]
         def fake_backend(command,**kwargs):
             calls.append((command,dict(kwargs.get('env',{}))))
-            if '-c' in command:return real_call(command,**kwargs) # real read-only resolver, no ROS init
+            if '-c' in command or Path(command[0]).name=='config_check':return real_call(command,**kwargs) # real read-only resolver, no ROS init
             self.assertEqual(Path(command[1]).name,'run_jandi')
             return subprocess.CompletedProcess(command,0)
         with patch.object(d,'load_config',return_value=cfg),patch.object(d,'active_plan',return_value=None), \
              patch.object(d,'ros_environment',side_effect=lambda *args:d.clean_environment()),patch.object(d,'call',side_effect=fake_backend):
             for version in ['main','fast']:
                 calls.clear();self.assertEqual(d.main(['run',version,'--no-menu']),0)
-                self.assertEqual(len(calls),2)
+                self.assertEqual(len(calls),3)
                 self.assertEqual(calls[-1][1]['YOLO26_RUNTIME_CONFIG'],str(bindings[version][0]))
                 self.assertNotIn('YOLO26_ENGINE_PATH',calls[-1][1])
+                self.assertEqual(calls[-1][1]['VISION_CORE_ALGORITHM_CONFIG'],str(d.CONFIG_DIR/version/'vision_algorithm.yaml'))
             runtime,engine=bindings['main']
             new_engine=self.root/'changed.engine';new_engine.write_bytes(b'new fake model')
             runtime.write_text(runtime.read_text().replace(str(engine),str(new_engine)))
             calls.clear();self.assertEqual(d.main(['run','main','--no-menu']),0)
             new_engine.unlink();calls.clear()
             with self.assertRaises(subprocess.CalledProcessError):d.main(['run','main','--no-menu'])
-            self.assertEqual(len(calls),1,'missing engine started the backend')
+            self.assertEqual(len(calls),2,'missing engine started the backend')
+            new_engine.write_bytes(b'restored fake')
+            operator=d.CONFIG_DIR/'main/vision_algorithm.yaml'
+            operator.write_text('vision_algorithm:\n  test_gain: -1\n')
+            calls.clear()
+            with self.assertRaisesRegex(RuntimeError,'test_gain'):d.main(['run','main','--no-menu'])
+            self.assertEqual(len(calls),1,'invalid algorithm started engine probe or backend')
+
+    def test_operator_config_is_separate_from_release_and_preserves_tuning(self):
+        release=fixture_release(self.root/'release');core=Path(release['core'])
+        defaults=core/'share/shared_vision_core/config/vision_algorithm.yaml'
+        original=defaults.read_bytes()
+        path=d.ensure_algorithm_config('main',core,{})
+        self.assertEqual(path,d.CONFIG_DIR/'main/vision_algorithm.yaml')
+        self.assertEqual(path.read_bytes(),original)
+        path.write_text('# operator comment\nvision_algorithm:\n  test_gain: 7 # tuned\n')
+        before=path.read_bytes();mtime=path.stat().st_mtime_ns
+        d.ensure_algorithm_config('main',core,{})
+        self.assertEqual(path.read_bytes(),before);self.assertEqual(path.stat().st_mtime_ns,mtime)
+        self.assertEqual(defaults.read_bytes(),original)
+        fast=d.ensure_algorithm_config('fast',core,{})
+        self.assertEqual(fast.read_bytes(),original)
+        self.assertNotEqual(path,fast)
+
+    def test_missing_nested_defaults_append_without_rewriting_values_or_comments(self):
+        default='''vision_algorithm:
+  line:
+    walk:
+      gain: 1
+      new_gain: 2
+    new_section:
+      enabled: true
+  hurdle:
+    vote: 3
+  new_mission:
+    value: 4
+'''
+        for user in [
+            '# heading\nvision_algorithm:\n  line:\n    walk:\n      gain: 7 # tuned',
+            'vision_algorithm: {line: {walk: {gain: 7}}}',
+            'vision_algorithm:\n  line:\n    walk:\n      gain: 7 # tuned\n  hurdle:\n    vote: 9 # other\n# tail\n',
+            'vision_algorithm: {}\n',
+        ]:
+            merged,added=d.fill_algorithm_defaults(default,user)
+            data=d.yaml.safe_load(merged)['vision_algorithm']
+            self.assertTrue(added);self.assertEqual(data['line']['walk']['new_gain'],2)
+            self.assertEqual(data['new_mission']['value'],4)
+            if 'gain: 7' in user:
+                self.assertEqual(data['line']['walk']['gain'],7)
+            for comment in ['# heading','# tuned','# other','# tail']:
+                if comment in user:self.assertIn(comment,merged)
+            self.assertEqual(d.fill_algorithm_defaults(default,merged),(merged,[]))
+
+    def test_schema_addition_backs_up_original_and_preserves_changed_defaults(self):
+        release=fixture_release(self.root/'release');core=Path(release['core'])
+        defaults=core/'share/shared_vision_core/config/vision_algorithm.yaml'
+        path=d.ensure_algorithm_config('main',core,{})
+        tuned='# user tuning\nvision_algorithm:\n  test_gain: 7 # keep\n'
+        path.write_text(tuned)
+        defaults.write_text('vision_algorithm:\n  test_gain: 2\n  new_controls:\n    votes: 3\n')
+        d.ensure_algorithm_config('main',core,{})
+        data=d.yaml.safe_load(path.read_text())['vision_algorithm']
+        self.assertEqual(data['test_gain'],7);self.assertEqual(data['new_controls']['votes'],3)
+        self.assertIn('# keep',path.read_text())
+        backups=list((d.STATE_DIR/'algorithm-originals/main').glob('*.yaml'))
+        self.assertEqual(len(backups),1);self.assertEqual(backups[0].read_text(),tuned)
+        d.ensure_algorithm_config('main',core,{})
+        self.assertEqual(len(list((d.STATE_DIR/'algorithm-originals/main').glob('*.yaml'))),1)
+
+    def test_invalid_operator_yaml_never_gets_replaced(self):
+        release=fixture_release(self.root/'release');core=Path(release['core'])
+        path=d.CONFIG_DIR/'main/vision_algorithm.yaml';path.parent.mkdir(parents=True)
+        for bad in ['', 'vision_algorithm: [', 'vision_algorithm: null\n',
+                    'vision_algorithm:\n  test_gain: 1\n  test_gain: 2\n',
+                    'vision_algorithm:\n  test_gain: -1\n']:
+            path.write_text(bad)
+            with self.assertRaises(RuntimeError):d.ensure_algorithm_config('main',core,{})
+            self.assertEqual(path.read_text(),bad)
+            self.assertFalse(list(path.parent.glob('.algorithm-*')))
+        path.write_text('vision_algorithm:\n  test_gain: 7\n')
+        defaults=core/'share/shared_vision_core/config/vision_algorithm.yaml'
+        defaults.write_text('vision_algorithm:\n  test_gain:\n    nested: 2\n')
+        with self.assertRaisesRegex(RuntimeError,'매핑'):d.ensure_algorithm_config('main',core,{})
+        self.assertEqual(path.read_text(),'vision_algorithm:\n  test_gain: 7\n')
+
+    def test_editor_save_during_schema_upgrade_is_not_overwritten(self):
+        release=fixture_release(self.root/'release');core=Path(release['core'])
+        path=d.ensure_algorithm_config('main',core,{})
+        defaults=core/'share/shared_vision_core/config/vision_algorithm.yaml'
+        defaults.write_text(defaults.read_text()+'  new_value: 1\n')
+        saved='vision_algorithm:\n  test_gain: 8 # concurrent save\n'
+        with patch.object(d,'validate_algorithm',side_effect=lambda *args:path.write_text(saved)):
+            with self.assertRaisesRegex(RuntimeError,'편집 중'):d.ensure_algorithm_config('main',core,{})
+        self.assertEqual(path.read_text(),saved)
+
+    def test_failed_algorithm_validation_preserves_previous_release_and_operator_file(self):
+        old=fixture_release(self.root/'previous');_,manifest=d.release_paths('main');d.atomic_json(manifest,old)
+        before=manifest.read_bytes();path=d.CONFIG_DIR/'main/vision_algorithm.yaml'
+        path.parent.mkdir(parents=True);path.write_text('vision_algorithm:\n  test_gain: -1 # invalid tuning\n')
+        tuned=path.read_bytes();roots={p:self.root/p for p in d.PACKAGES}
+        for p in roots.values():p.mkdir()
+        real=d.call
+        def fake_build(command,**kwargs):
+            if Path(command[0]).name=='config_check':return real(command,**kwargs)
+            if command[0]=='colcon':fixture_release(Path(command[command.index('--install-base')+1]).parent)
+            return subprocess.CompletedProcess(command,0)
+        with patch.object(d,'git',return_value='b'*40),patch.object(d,'ros_environment',return_value={}), \
+             patch.object(d,'call',side_effect=fake_build):
+            with self.assertRaisesRegex(RuntimeError,'test_gain'):
+                d.build_release({'machine':'pc'},'main',self.root,roots)
+        self.assertEqual(manifest.read_bytes(),before);self.assertEqual(path.read_bytes(),tuned)
+        self.assertTrue(d.valid_release(old))
+
+    def test_merge_preserves_sequences_unknown_fields_and_parent_comments(self):
+        defaults='vision_algorithm:\n  line:\n    walk:\n      gain: 1\n      new: 2\n    extra: true\n  goal:\n    points: [[1,2],[3,4]]\n'
+        user='vision_algorithm:\n  line:\n    walk:\n      gain: 8 # keep\n\n  # GOAL section\n  goal:\n    points: [[9,8]] # vertices\n    custom: preserve\n'
+        merged,_=d.fill_algorithm_defaults(defaults,user)
+        self.assertLess(merged.index('new: 2'),merged.index('# GOAL section'))
+        data=d.yaml.safe_load(merged)['vision_algorithm']
+        self.assertEqual(data['goal']['points'],[[9,8]]);self.assertEqual(data['goal']['custom'],'preserve')
+        self.assertIn('# vertices',merged);self.assertEqual(data['line']['walk']['gain'],8)
+
+    def test_operator_edit_does_not_trigger_build_or_install_hash_failure(self):
+        roots={p:self.root/p for p in d.PACKAGES}
+        for p in roots.values():p.mkdir()
+        stamp=d.fingerprint('a'*40,{'machine':'pc'},roots)
+        release=fixture_release(self.root/'release');release['fingerprint']=stamp
+        d.atomic_json(d.release_paths('main')[1],release)
+        core=Path(release['core']);path=d.ensure_algorithm_config('main',core,{})
+        path.write_text('vision_algorithm:\n  test_gain: 9\n')
+        self.assertEqual(stamp,d.fingerprint('a'*40,{'machine':'pc'},roots))
+        self.assertTrue(d.valid_release(release))
+        real=d.call;commands=[]
+        def check_only(command,**kwargs):
+            commands.append(command)
+            self.assertEqual(Path(command[0]).name,'config_check')
+            return real(command,**kwargs)
+        with patch.object(d,'git',return_value='a'*40),patch.object(d,'ros_environment',return_value={}), \
+             patch.object(d,'call',side_effect=check_only):
+            self.assertEqual(d.build_release({'machine':'pc'},'main',self.root,roots),release)
+        self.assertEqual(len(commands),1)
+        self.assertIn('test_gain: 9',path.read_text())
 
     def test_backup_branch_is_not_an_accepted_version(self):
         with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):

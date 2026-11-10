@@ -18,6 +18,13 @@
 0 → 1은 전체 정상 종료, K → 1은 기존 긴급종료다. 0/Esc로 확인을 취소할 수 있다.
 실행 중인 버전의 업데이트와 MAIN/FAST 동시 실행은 거부한다.
 
+알고리즘 파라미터는 PC·Jetson 모두 `~/.config/jandi/main/vision_algorithm.yaml` 또는
+`~/.config/jandi/fast/vision_algorithm.yaml`에서 편집한다. 최초 update/실행 시 생성한다.
+저장 후 JANDI 전체 종료·재실행으로 반영하며 `cp`/재빌드는 필요 없다.
+update는 튜닝값과 주석을 보존하고 없는 새 항목만 보충한다.
+원본 소스의 YAML은 배포 기본값이며, 설치된 Release 내부 YAML은 수정하지 않는다.
+잘못된 설정은 실제 C++ 로더로 시작 전에 검사하여 카메라·모터 시작을 막는다.
+
 엔진 경로는 선택 버전의 소스 `vision/config/yolo26_runtime.yaml`에서만 관리한다.
 PC는 pc_engine_path, Jetson은 jetson_engine_path다. deployment.json의 engine 값은 제거됐다.
 경로 변경 후 전체 종료하고 다시 실행하면 반영되며 엔진 경로만 바꿀 때 재빌드는 필요 없다.
