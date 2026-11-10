@@ -10,7 +10,6 @@ from launch.substitutions import LaunchConfiguration
 def generate_launch_description():
     executable = str(Path(get_package_prefix("vision")) / "lib/vision/run_jandi")
     return LaunchDescription([
-        DeclareLaunchArgument("mode", default_value="custom", choices=["custom", "practice", "IRC"]),
         DeclareLaunchArgument("show_debug_view", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("terminal_node", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("stream_debug_view", default_value="true", choices=["true", "false"]),
@@ -18,7 +17,7 @@ def generate_launch_description():
                               description="Empty: derive Jetson workspace from yolo26_runtime.yaml"),
         DeclareLaunchArgument("core_prefix", default_value="",
                               description="Empty: VISION_CORE_ROOT or ~/vision_core/install"),
-        ExecuteProcess(cmd=[executable, "--background", LaunchConfiguration("mode"),
+        ExecuteProcess(cmd=[executable, "--background",
                             "--show-debug-view", LaunchConfiguration("show_debug_view"),
                             "--terminal-node", LaunchConfiguration("terminal_node"),
                             "--stream-debug-view", LaunchConfiguration("stream_debug_view"),

@@ -1,3 +1,7 @@
+# Depth 컬러·실시간 노출 뷰어
+
+새 도구 실행과 HTTP 조작: [DEPTH_COLOR_VIEWER.md](DEPTH_COLOR_VIEWER.md).
+
 # Camera overlay and click depth measurement
 
 기존 `sensor_msgs/msg/Image` 토픽을 구독하는 독립 C++ ROS 2 노드.

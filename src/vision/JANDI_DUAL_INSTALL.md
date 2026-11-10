@@ -65,7 +65,7 @@ GitHub에서 도구 파일만 가져오는 경우(기존 체크아웃을 전환�
 ```bash
 mkdir -p ~/jandi-tools
  git -C ~/jandi fetch origin main
- git -C ~/jandi archive origin/main src/vision/scripts/jandi_deploy.py src/vision/config/realsense_depth.yaml | tar -x -C ~/jandi-tools
+ git -C ~/jandi archive origin/main src/vision/scripts/jandi_deploy.py src/vision/launch/realsense.launch.py | tar -x -C ~/jandi-tools
 python3 ~/jandi-tools/src/vision/scripts/jandi_deploy.py install --machine jetson
 ```
 
@@ -136,7 +136,7 @@ SSH 재연결 후 `run_jandi.sh`는 실행 중인 기존 콘솔에 연결하고 
 | `~/jetson_pull_from_github.sh [main\|fast]` | 해당 Jetson 버전 업데이트·독립 설치 |
 | `bash ~/jandi_branch_switch.sh main` | 기본 대상 MAIN 선택; 소스/설치본을 덮어쓰지 않음 |
 | `bash ~/jandi_branch_switch.sh fast` | 기본 대상 FAST 선택; 소스/설치본을 덮어쓰지 않음 |
-| `~/run_jandi.sh` 또는 `run_jandi` | 버전·PRACTICE/IRC·세 가지 화면 옵션 선택 |
+| `~/run_jandi.sh` 또는 `run_jandi` | 버전·OpenCV/터미널/HTTP 옵션 선택 |
 
 버전을 생략한 업로드/업데이트는 선택된 기본 버전을 사용한다. 명시하는 편이 분명하다.
 예전 `JANDI_BRANCH=main` 또는 `JANDI_BRANCH=race-round2-fast-20261109`도 지원한다.
@@ -161,31 +161,68 @@ python3 ~/my_cv/src/vision/scripts/jandi_deploy.py install --machine pc
 PC도 Release 실행본은 `~/jandi_main`, `~/jandi_fast`의 독립 release를 사용한다.
 기존 `~/my_cv/install`, `~/vision_core/install`은 삭제·교체하지 않는다.
 
-## 공통 RealSense 설정
+## 공통 RealSense 런치와 실시간 노출 실험
 
-MAIN/FAST 모두 `~/.config/jandi/realsense_depth.yaml` 하나를 사용한다.
-ROS 알고리즘 YAML과 분리하며, 드라이버 `rs_launch.py`의 `config_file`용 평면 map이다.
-노드 이름으로 감싼 `ros__parameters` YAML을 이 파일에 그대로 넣지 않는다.
+MAIN/FAST 모두 `~/.config/jandi/realsense.launch.py` 하나를 사용한다.
+이 파일 상단의 세 항목을 직접 수정한다. YAML은 사용하지 않는다.
 
-```yaml
-depth_module.enable_auto_exposure: false
-depth_module.exposure: 5000
-depth_module.gain: 16
+```python
+DEPTH_AUTO_EXPOSURE = False
+DEPTH_EXPOSURE = 5000
+DEPTH_GAIN = 16
 ```
 
-이 값은 실험용 초기값이며 반사 아크릴 검출 개선을 보장하는 값은 아니다.
-RGB 노출·기존 640×480@15fps·alignment·IMU 설정·토픽 이름에는 새 override를 추가하지 않는다.
-노출 변경은 카메라 재시작에 반영된다. source만 다시 실행해도 바뀌는 구조가 아니다.
-PC 소스의 RealSense 런치는 세 파라미터와 `config_file` 입력을 지원한다.
-Jetson에 설치된 드라이버 버전·장치 허용 범위와 실제 적용값은 실기 확인 대상이다.
-카메라를 사용자가 켠 상태에서 다음으로 확인할 수 있다.
+이 파일은 드라이버의 기존 `rs_launch.py`를 포함하면서 위 세 값을 런치 인자로 전달한다.
+기존 RGB·해상도/FPS·alignment·IMU·토픽 설정은 원래 드라이버 런치를 따른다.
+공유 파일은 빌드 설치물 바깥에 있어 재빌드 없이 카메라 재시작에 반영된다.
+설치기를 다시 실행해도 사용자가 수정한 이 파일은 덮어쓰지 않는다.
+이전 `realsense_depth.yaml`은 파일만 보존하고 읽거나 적용하지 않는다.
+
+일반 실행:
 
 ```bash
+~/run_jandi.sh
+```
+
+첫 메뉴의 1은 버전, 3/4/5는 OpenCV/터미널/HTTP다. 번호 입력 후 Enter로 변경하며
+빈 입력 Enter로 시작한다. PRACTICE/IRC 구분과 mode 파라미터는 제거했다.
+CLI에서 메뉴를 생략할 때는 `~/run_jandi.sh main --no-menu --terminal --opencv`처럼
+버전과 옵션을 직접 지정한다. 기본은 OpenCV OFF / 터미널 OFF / HTTP ON이다.
+
+카메라 노출만 실험하려면 전체 JANDI 대신 다음을 사용한다.
+
+```bash
+# 터미널 1: 카메라만 실행. 모터와 비전은 실행하지 않음.
+~/jandi_camera.sh
+
+# 터미널 2: 이미 발행 중인 Depth를 구독하고 HTTP 뷰어 실행.
+~/jandi_depth.sh main
+# FAST 설치의 뷰어를 쓸 때는 ~/jandi_depth.sh fast
+```
+
+PC 브라우저에서 `http://192.168.0.133:8081`에 접속한다(Jetson에서 실행한 경우).
+고정 거리 색상, 클릭 Z, 21×21 ROI median/유효 비율, AE ON/OFF와 수동 exposure/gain을 제공한다.
+AE를 끈 뒤 수동값을 적용한다. 카메라가 보고한 범위와 step을 검증하며 성공/거부 및
+현재 ROS 파라미터를 다시 표시한다. 뷰어 시작만으로 카메라 값을 변경하지 않는다.
+브라우저 변경은 실행 중 카메라에만 적용된다. 다음 시작에도 유지하려면 위 런치파일을 수정한다.
+
+일반 JANDI가 이미 카메라를 실행 중이면 카메라를 하나 더 실행하지 않고 뷰어만 실행한다.
+`jandi_camera.sh`는 JANDI 관리자가 실행 중일 때 거부한다.
+뷰어는 Ctrl+C로 종료한다. 뷰어 종료는 카메라를 종료하거나 기존 노출을 되돌리지 않는다.
+HTTP 뷰어의 일반 포트는 8081로 기존 비전 8080과 분리한다.
+직접 ROS 실행/거리 범위/토픽 선택은 `camera_overlay/DEPTH_COLOR_VIEWER.md`를 참조한다.
+
+카메라를 사용자가 실행한 뒤 적용값을 확인할 수 있다.
+
+```bash
+export ROS_DOMAIN_ID=22
 ros2 param get /camera/camera depth_module.enable_auto_exposure
 ros2 param get /camera/camera depth_module.exposure
 ros2 param get /camera/camera depth_module.gain
-ros2 param describe /camera/camera depth_module.exposure
 ```
+
+업데이트 명령은 Release 빌드와 설치를 수행하며 자동 테스트는 실행하지 않는다.
+테스트는 수정 과정에서 별도로 수행한다. fake 카메라/모터 검사는 실제 장치 동작 검증을 대신하지 않는다.
 
 ## 검증과 미검증
 

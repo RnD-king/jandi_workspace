@@ -16,7 +16,6 @@ from jandi_logs import LogJournal, LogClassifier
 
 
 NAMES = ("camera", "motor", "vision")
-MODES = ("practice", "IRC", "custom")
 INTERVAL = 5.0
 SERVICES = {name: f"/line_perception_node/{name}"
             for name in ("start", "pause", "resume", "reset")}
@@ -29,7 +28,6 @@ def clean_text(text):
 
 @dataclass(frozen=True)
 class Plan:
-    mode: str
     workspace: str
     core_prefix: str
     share: str
@@ -40,14 +38,12 @@ class Plan:
     stream_debug_view: bool = True
     version: str = ""
     release: str = ""
-    camera_config: str = ""
+    camera_launch: str = ""
 
     @classmethod
-    def load(cls, mode, share, workspace=None, core_prefix=None, *,
-             show_debug_view=False, terminal_node=None, stream_debug_view=True):
+    def load(cls, share, workspace=None, core_prefix=None, *,
+             show_debug_view=False, terminal_node=False, stream_debug_view=True):
         import yaml
-        if mode not in MODES:
-            raise ValueError("unknown JANDI mode")
         share = Path(share).resolve()
         runtime = yaml.safe_load((share / "config/yolo26_runtime.yaml").read_text())
         configured_engine = Path(runtime["yolo26_runtime"]["ros__parameters"]["jetson_engine_path"])
@@ -59,21 +55,13 @@ class Plan:
         core = core.expanduser().resolve()
         algorithm = Path(os.environ.get("VISION_CORE_ALGORITHM_CONFIG") or
                          core / "share/shared_vision_core/config/vision_algorithm.yaml")
-        camera=Path(os.environ.get("JANDI_CAMERA_CONFIG") or "~/.config/jandi/realsense_depth.yaml").expanduser()
-        if not camera.is_file() and not os.environ.get("JANDI_CAMERA_CONFIG"):
-            camera=share/"config/realsense_depth.yaml"
-        settings=yaml.safe_load(camera.read_text())
-        allowed={"depth_module.enable_auto_exposure","depth_module.exposure","depth_module.gain"}
-        if not isinstance(settings,dict) or set(settings)!=allowed:
-            raise ValueError("카메라 YAML에는 Depth 수동 노출 세 항목만 허용합니다")
-        if settings["depth_module.enable_auto_exposure"] is not False:
-            raise ValueError("Depth 자동 노출은 false여야 합니다")
-        for name in ("depth_module.exposure","depth_module.gain"):
-            if type(settings[name]) is not int or settings[name]<=0:
-                raise ValueError(name+" must be a positive integer")
-        return cls(mode, str(workspace), str(core), str(share), str(engine),
+        camera=Path(os.environ.get("JANDI_CAMERA_LAUNCH") or "~/.config/jandi/realsense.launch.py").expanduser()
+        if not camera.is_file() and not os.environ.get("JANDI_CAMERA_LAUNCH"):
+            camera=share/"launch/realsense.launch.py"
+        if not camera.is_file():raise ValueError("RealSense launch file missing: "+str(camera))
+        return cls(str(workspace), str(core), str(share), str(engine),
                    str(algorithm.expanduser().resolve()), bool(show_debug_view),
-                   mode == "practice" if terminal_node is None else bool(terminal_node),
+                   bool(terminal_node),
                    bool(stream_debug_view), os.environ.get("JANDI_VERSION","legacy"),
                    os.environ.get("JANDI_RELEASE",""),str(camera.resolve()))
 
@@ -91,8 +79,7 @@ class Plan:
         for name, destination in SERVICES.items():
             vision += ["-r", f"{name}:={destination}"]
         return {
-            "camera": ["ros2", "launch", "realsense2_camera", "rs_launch.py"] +
-                (["config_file:="+self.camera_config] if self.camera_config else []),
+            "camera": ["ros2", "launch", self.camera_launch],
             "motor": ["ros2", "run", "forward_walk", "main_node"],
             "vision": vision,
         }
@@ -102,7 +89,8 @@ class Plan:
         env["ROS_DOMAIN_ID"] = "22"
         env["JANDI_VERSION"]=self.version
         env["JANDI_RELEASE"]=self.release
-        env["JANDI_CAMERA_CONFIG"]=self.camera_config
+        env.pop("JANDI_CAMERA_CONFIG",None)
+        env["JANDI_CAMERA_LAUNCH"]=self.camera_launch
         env["VISION_CORE_ROOT"] = self.core_prefix
         env["VISION_CORE_ALGORITHM_CONFIG"] = self.algorithm
         env["LD_LIBRARY_PATH"] = str(Path(self.core_prefix) / "lib") + (

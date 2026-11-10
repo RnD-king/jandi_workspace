@@ -369,6 +369,12 @@ if(BUILD_TESTING)
   set_tests_properties(camera_overlay_http_debug_view_test PROPERTIES
     ENVIRONMENT "ROS_DOMAIN_ID=89;ROS_LOCALHOST_ONLY=1" TIMEOUT 30)
 
+  add_test(NAME camera_overlay_depth_color_test
+    COMMAND /usr/bin/python3 -s ${CMAKE_CURRENT_SOURCE_DIR}/tests/depth_color_test.py
+      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/depth_color_viewer.py)
+  set_tests_properties(camera_overlay_depth_color_test PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=90;ROS_LOCALHOST_ONLY=1" TIMEOUT 40)
+
   # ----------------------------------------------------------
   # Depth Measurement Test
   # ----------------------------------------------------------
@@ -460,8 +466,10 @@ install(
 )
 
 install(
-  FILES README.md HTTP_DEBUG_STREAMING.md
+  FILES README.md HTTP_DEBUG_STREAMING.md DEPTH_COLOR_VIEWER.md
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(PROGRAMS scripts/depth_color_viewer.py
+  DESTINATION lib/${PROJECT_NAME} RENAME depth_color_viewer)
 ament_package()

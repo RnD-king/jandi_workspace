@@ -212,7 +212,7 @@ def synchronize(cfg,version,pushing=False):
     remote_ref=git(repo,'rev-parse','origin/'+branch)
     if pushing:
         changed=git(repo,'diff','--name-only','--no-renames','origin/'+branch+'...HEAD','-z').split('\0')
-        allowed_scripts={'scripts/'+name for name in ('jandi_update.sh','run_jandi.sh','push_jandi_workspace.sh',
+        allowed_scripts={'scripts/'+name for name in ('jandi_update.sh','jandi_depth.sh','jandi_camera.sh','run_jandi.sh','push_jandi_workspace.sh',
             'sync_jandi_to_my_cv.sh','jetson_push_to_github.sh','jetson_pull_from_github.sh','jandi_branch_switch.sh')}
         for name in filter(None,changed):
             if name not in allowed_scripts and not any(name.startswith('src/'+p+'/') for p in PACKAGES):
@@ -242,7 +242,7 @@ def clean_environment():
     env=dict(os.environ)
     for key in ('AMENT_PREFIX_PATH','CMAKE_PREFIX_PATH','COLCON_PREFIX_PATH','LD_LIBRARY_PATH','LD_PRELOAD',
                 'PYTHONPATH','ROS_PACKAGE_PATH','VISION_CORE_ROOT','SHARED_VISION_CORE_ROOT',
-                'VISION_CORE_ALGORITHM_CONFIG','JANDI_RELEASE','JANDI_VERSION','JANDI_CAMERA_CONFIG','COLCON_CURRENT_PREFIX','AMENT_CURRENT_PREFIX'):
+                'VISION_CORE_ALGORITHM_CONFIG','JANDI_RELEASE','JANDI_VERSION','JANDI_CAMERA_CONFIG','JANDI_CAMERA_LAUNCH','COLCON_CURRENT_PREFIX','AMENT_CURRENT_PREFIX'):
         env.pop(key,None)
     env['PATH']=':'.join(p for p in env.get('PATH',os.defpath).split(':')
                          if p and not any(x in p for x in ('/jandi_main/','/jandi_fast/','/my_cv/install','/variants/fast/')))
@@ -363,16 +363,15 @@ def build_release(cfg,version,repo,roots,force=False):
 
 
 def choose_start(default):
-    if not sys.stdin.isatty():raise RuntimeError('실행 선택에는 터미널이 필요합니다. --version/--mode를 지정하세요.')
-    version=default;mode='practice';show=False;terminal=False;stream=True
+    if not sys.stdin.isatty():raise RuntimeError('실행 선택에는 터미널이 필요합니다. --version과 --no-menu를 지정하세요.')
+    version=default;show=False;terminal=False;stream=True
     while True:
         print('\n========== JANDI START ==========')
-        print(f'1. 실행 버전: {version.upper()}\n2. 실행 모드: {mode.upper()}\n3. OpenCV 디버그 화면: {"ON" if show else "OFF"}\n4. 터미널: {"ON" if terminal else "OFF"}\n5. HTTP MJPEG: {"ON" if stream else "OFF"}\nEnter: 실행 / 0: 취소')
+        print(f'1. 실행 버전: {version.upper()}\n3. OpenCV 디버그 화면: {"ON" if show else "OFF"}\n4. 터미널: {"ON" if terminal else "OFF"}\n5. HTTP MJPEG: {"ON" if stream else "OFF"}\nEnter: 실행 / 0: 취소')
         key=input('선택: ').strip()
-        if not key:return version,mode,show,terminal,stream
+        if not key:return version,show,terminal,stream
         if key=='0':return None
         if key=='1':version='fast' if version=='main' else 'main'
-        elif key=='2':mode='IRC' if mode=='practice' else 'practice'
         elif key=='3':show=not show
         elif key=='4':terminal=not terminal
         elif key=='5':stream=not stream
@@ -390,10 +389,10 @@ def start(cfg,args):
         print('기존 콘솔에 다시 연결합니다. 새 노드를 시작하지 않습니다.')
         return call(['/usr/bin/python3',script,'attach']).returncode
     if args.attach:raise RuntimeError('연결할 실행 중 JANDI가 없습니다.')
-    selected=choose_start(args.version or cfg.get('selected','main')) if not args.mode else (
-        args.version or cfg.get('selected','main'),args.mode,args.opencv,args.terminal,args.http)
+    selected=choose_start(args.version or cfg.get('selected','main')) if not args.no_menu else (
+        args.version or cfg.get('selected','main'),args.opencv,args.terminal,args.http)
     if selected is None:return 0
-    version,mode,show,terminal,stream=selected
+    version,show,terminal,stream=selected
     _,current=release_paths(version)
     if not current.exists():raise RuntimeError(f'{version.upper()} 설치본이 없습니다. jandi_update.sh {version}')
     data=json.loads(current.read_text())
@@ -401,9 +400,9 @@ def start(cfg,args):
     if not Path(cfg['engine']).is_file():raise RuntimeError('YOLO 엔진 파일 없음: '+cfg['engine'])
     env=ros_environment(cfg,data['ros'],data['core'])
     env.update(JANDI_VERSION=version,JANDI_RELEASE=data['release'],YOLO26_ENGINE_PATH=cfg['engine'],
-               JANDI_CAMERA_CONFIG=cfg['camera_config'])
+               JANDI_CAMERA_LAUNCH=cfg['camera_launch'])
     script=Path(data['ros'])/'vision/lib/vision/run_jandi'
-    command=['/usr/bin/python3',str(script),mode,'--workspace',str(HOME_DIR/('jandi_'+version)),
+    command=['/usr/bin/python3',str(script),'--no-menu','--workspace',str(HOME_DIR/('jandi_'+version)),
              '--core-prefix',data['core'],'--show-debug-view',str(show).lower(),
              '--terminal-node',str(terminal).lower(),'--stream-debug-view',str(stream).lower()]
     if args.background:command.append('--background')
@@ -411,15 +410,27 @@ def start(cfg,args):
     return call(command,env=env).returncode
 
 
+def start_depth(cfg,args,version):
+    _,current=release_paths(version)
+    if not current.is_file():raise RuntimeError('먼저 jandi_update.sh '+version)
+    data=json.loads(current.read_text())
+    if not valid_release(data) or data['version']!=version:raise RuntimeError('설치본이 불완전합니다.')
+    script=Path(data['ros'])/'camera_overlay/lib/camera_overlay/depth_color_viewer'
+    if not script.is_file():raise RuntimeError('Depth 뷰어가 없는 이전 설치본입니다. 업데이트하세요.')
+    command=['/usr/bin/python3','-s',str(script),'--ros-args','-p','stream_debug_view:=true',
+             '-p','stream_debug_port:=8081','-p','show_debug_view:='+str(args.opencv).lower()]
+    return call(command,env=ros_environment(cfg,data['ros'],data['core'])).returncode
+
+
 def install(machine):
     CONFIG_DIR.mkdir(parents=True,exist_ok=True);TOOLS_DIR.mkdir(parents=True,exist_ok=True)
     target=TOOLS_DIR/'jandi_deploy.py'
     if Path(__file__).resolve()!=target.resolve():shutil.copy2(__file__,target)
-    depth=Path(__file__).resolve().parent.parent/'config/realsense_depth.yaml'
-    camera=CONFIG_DIR/'realsense_depth.yaml'
+    template=Path(__file__).resolve().parent.parent/'launch/realsense.launch.py'
+    camera=CONFIG_DIR/'realsense.launch.py'
     if not camera.exists():
-        if not depth.is_file():raise RuntimeError('배포 파일과 함께 config/realsense_depth.yaml을 제공해야 합니다.')
-        shutil.copy2(depth,camera)
+        if not template.is_file():raise RuntimeError('launch/realsense.launch.py 배포 파일이 필요합니다.')
+        shutil.copy2(template,camera)
     config=CONFIG_DIR/'deployment.json'
     if not config.exists():
         bases=[HOME_DIR/'my_cv/install',HOME_DIR/'jandi/install']
@@ -432,11 +443,14 @@ def install(machine):
         repos={'main':str(repo),'fast':str(HOME_DIR/'jandi_workspace_fast')} if machine=='pc' else {
             v:str(HOME_DIR/('jandi_'+v)) for v in BRANCHES}
         cfg={'machine':machine,'repository':str(repo),'repositories':repos,'selected':'main','jobs':2,
-             'dependency_prefixes':prefixes,'camera_config':str(camera),
+             'dependency_prefixes':prefixes,'camera_launch':str(camera),
              'engine':str(HOME_DIR/('dataset/runs/yolo26n_goal_1029/weights/best.engine' if machine=='pc' else 'jandi/src/dataset/best_1029.engine')),
              'cmake_args':[],'library_paths':[str(p) for p in [Path('/usr/local/cuda/lib64')] if p.is_dir()]}
         atomic_json(config,cfg)
-    wrappers={'push_jandi_workspace.sh':('push','pc'),'sync_jandi_to_my_cv.sh':('update','pc'),
+    cfg=json.loads(config.read_text())
+    cfg.pop('camera_config',None);cfg['camera_launch']=str(camera)
+    atomic_json(config,cfg)
+    wrappers={'jandi_camera.sh':('camera',machine),'jandi_depth.sh':('depth',machine),'push_jandi_workspace.sh':('push','pc'),'sync_jandi_to_my_cv.sh':('update','pc'),
               'jetson_push_to_github.sh':('push','jetson'),'jetson_pull_from_github.sh':('update','jetson'),
               'jandi_update.sh':('update',machine),'jandi_branch_switch.sh':('select',machine),'run_jandi.sh':('run',machine)}
     saved=STATE_DIR/'script-originals'/str(time.time_ns())
@@ -455,25 +469,21 @@ def install(machine):
     entry.write_text('#!/usr/bin/env bash\n# JANDI versioned entrypoint\nexec bash '+shlex.quote(str(HOME_DIR/'run_jandi.sh'))+' "$@"\n')
     entry.chmod(0o755)
     print('명령 설치 완료. 기존 파일 보존: '+str(saved))
-    print('설정: '+str(config)+'\n공유 Depth 설정: '+str(camera))
+    print('설정: '+str(config)+'\n공유 RealSense launch: '+str(camera))
     print('브랜치 선택은 기본 버전만 바꿉니다. 설치: ~/jandi_update.sh main 또는 fast')
 
 
 def main(argv=None):
     argv=list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0]=='run':
-        for token in ('attach','practice','IRC','custom'):
-            if token in argv[1:]:
-                argv.remove(token)
-                argv+=['--attach'] if token=='attach' else ['--mode',token]
-                break
+    if argv and argv[0]=='run' and 'attach' in argv[1:]:
+        argv.remove('attach');argv+=['--attach']
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=('install','update','push','select','run','status'))
+    parser.add_argument('command',choices=('install','update','push','select','run','depth','camera','status'))
     parser.add_argument('version',nargs='?',choices=tuple(BRANCHES))
     parser.add_argument('--version',dest='explicit_version',choices=tuple(BRANCHES))
     parser.add_argument('--machine',choices=('pc','jetson'))
     parser.add_argument('--force',action='store_true');parser.add_argument('--message',default='Update JANDI canonical sources')
-    parser.add_argument('--mode',choices=('practice','IRC','custom'));parser.add_argument('--background',action='store_true')
+    parser.add_argument('--no-menu',action='store_true');parser.add_argument('--background',action='store_true')
     parser.add_argument('--attach',action='store_true')
     parser.add_argument('--opencv',action='store_true');parser.add_argument('--terminal',action='store_true')
     parser.add_argument('--no-http',dest='http',action='store_false',default=True)
@@ -488,6 +498,10 @@ def main(argv=None):
     if args.command=='status':
         print(json.dumps({'active':active_plan(),'selected':cfg.get('selected'),'installs':{
             v:json.loads(release_paths(v)[1].read_text()) if release_paths(v)[1].exists() else None for v in BRANCHES}},indent=2));return 0
+    if args.command=='depth':return start_depth(cfg,args,version)
+    if args.command=='camera':
+        require_stopped()
+        return call(['ros2','launch',cfg['camera_launch']],env=ros_environment(cfg)).returncode
     with operation_lock():
         if args.command=='select':
             require_stopped();cfg['selected']=version;atomic_json(CONFIG_DIR/'deployment.json',cfg)
