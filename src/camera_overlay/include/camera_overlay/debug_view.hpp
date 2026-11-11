@@ -25,12 +25,12 @@ public:
     descriptor.read_only = true;
     const auto display = std::getenv("DISPLAY"), wayland = std::getenv("WAYLAND_DISPLAY");
     const bool has_display = (display && *display) || (wayland && *wayland);
-    local_ = node.declare_parameter<bool>("show_debug_view", has_display, descriptor);
+    local_ = node.declare_parameter<bool>("show_debug_view", false, descriptor);
     if (local_ && !has_display) {
       local_ = false;
       RCLCPP_WARN(node.get_logger(), "No desktop display: OpenCV windows disabled");
     }
-    const bool stream = node.declare_parameter<bool>("stream_debug_view", false, descriptor);
+    const bool stream = node.declare_parameter<bool>("stream_debug_view", true, descriptor);
     const int port = node.declare_parameter<int>("stream_debug_port", 8080, descriptor);
     if (port < 1 || port > 65535) throw std::invalid_argument("invalid stream_debug_port");
     if (stream) {

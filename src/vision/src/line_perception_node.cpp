@@ -176,7 +176,7 @@ public:
     rcl_interfaces::msg::ParameterDescriptor stream_descriptor;
     stream_descriptor.read_only = true;
     stream_descriptor.description = "Serve final debug image over HTTP MJPEG on port 8080 (startup only)";
-    if (declare_parameter<bool>("stream_debug_view", false, stream_descriptor)) {
+    if (declare_parameter<bool>("stream_debug_view", true, stream_descriptor)) {
       try {
         debug_stream_ = std::make_unique<vision::DebugMjpegServer>();
         RCLCPP_INFO(get_logger(), "[STREAM] http://<JETSON_IP>:8080 (JPEG quality 40, max 15 fps)");

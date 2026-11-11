@@ -67,27 +67,22 @@ ros2 run forward_walk main_node
 구간 3은 물체가 이미 실행 가능한 위치에 있어야 한다.
 
 ```bash
-ros2 run vision ball_tuning_node --ros-args -p test_stage:=0 \
-  -p show_debug_view:=false -p show_yolo_debug_view:=false \
-  -p stream_debug_view:=true
+ros2 run vision ball_tuning_node --ros-args -p test_stage:=0
 
-ros2 run vision hurdle_tuning_node --ros-args -p test_stage:=0 \
-  -p show_debug_view:=false -p show_yolo_debug_view:=false \
-  -p stream_debug_view:=true
+ros2 run vision hurdle_tuning_node --ros-args -p test_stage:=0
 
-ros2 run vision goal_tuning_node --ros-args -p test_stage:=1 \
-  -p show_debug_view:=false -p show_yolo_debug_view:=false \
-  -p stream_debug_view:=true
+ros2 run vision goal_tuning_node --ros-args -p test_stage:=1
 
-ros2 run vision goal_shot_preview_node --ros-args \
-  -p show_debug_view:=false -p stream_debug_view:=true
+ros2 run vision goal_shot_preview_node
 ```
 
 Jetson 브라우저 주소는 `http://192.168.0.133:8080`, PC에서 자기 영상을 볼 때는
 `http://localhost:8080`이다. 튜닝 노드의 포트는 시작 시
 `-p stream_debug_port:=8082`처럼 지정할 수 있다. HTTP는 카메라 디버그 영상만
 송신한다. Qt 버튼이나 클릭 좌표 입력은 HTTP로 제공하지 않는다.
-영상 송신은 기본 OFF이며 JPEG 인코딩·네트워크 처리는 기존 별도 작업 스레드를
+PC·Jetson 모두 HTTP 영상 송신은 기본 ON, 로컬 창은 기본 OFF다.
+HTTP를 끄려면 `-p stream_debug_view:=false`, 로컬 창을 켜려면
+`-p show_debug_view:=true`를 지정한다. JPEG 인코딩·네트워크 처리는 기존 별도 작업 스레드를
 사용한다. 브라우저가 없으면 HTTP용 렌더링과 인코딩을 요청하지 않는다.
 
 `goal_shot_preview_node`는 DISPLAY/Wayland가 없는 SSH에서 Qt offscreen을 자동
@@ -144,9 +139,7 @@ COMMIT은 저장한 각도로 한 번 투척이다. pause/reset 서비스는 없
 수동으로 직접 실행하고 별도 namespace/remap을 지정하지 않은 경우다.
 
 ```bash
-ros2 run vision line_perception_node --ros-args \
-  -p show_debug_view:=false -p show_yolo_debug_view:=false \
-  -p stream_debug_view:=true
+ros2 run vision line_perception_node
 
 # 별도 서비스 터미널에서 필요한 명령을 하나씩 호출한다.
 ros2 service call /start std_srvs/srv/Trigger "{}"

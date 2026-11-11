@@ -4,8 +4,7 @@ OpenCV 창 없이 브라우저에서 기존 카메라 디버그 화면을 보고
 최대 15FPS, JPEG 품질 40, 기본 포트 8080이다. RealSense는 별도로 실행한다.
 
 ```bash
-ros2 run camera_overlay motion_calibration_node --ros-args \
-  -p show_debug_view:=false -p stream_debug_view:=true
+ros2 run camera_overlay motion_calibration_node
 ```
 
 노트북 Windows/Ubuntu 브라우저에서 `http://JETSON_IP:8080`에 접속한다.
@@ -16,15 +15,17 @@ ros2 run camera_overlay motion_calibration_node --ros-args \
 아래 세 실행파일도 같은 두 파라미터를 지원한다.
 
 ```bash
-ros2 run camera_overlay camera_overlay_node --ros-args -p show_debug_view:=false -p stream_debug_view:=true
-ros2 run camera_overlay click_depth_node --ros-args -p show_debug_view:=false -p stream_debug_view:=true
-ros2 run camera_overlay ball_pixel_pin_node --ros-args -p show_debug_view:=false -p stream_debug_view:=true
+ros2 run camera_overlay camera_overlay_node
+ros2 run camera_overlay click_depth_node
+ros2 run camera_overlay ball_pixel_pin_node
 ```
 
 여러 도구를 동시에 보려면 `-p stream_debug_port:=8081` 등으로 포트를 분리한다.
-기본 `stream_debug_view=false`이며, 화면 환경이 있는 PC에서는 기존 OpenCV 조작을 유지한다.
+PC·Jetson 모두 기본 `stream_debug_view=true`, `show_debug_view=false`다.
+로컬 창이 필요하면 `-p show_debug_view:=true`, HTTP를 끄려면
+`-p stream_debug_view:=false`를 지정한다.
 DISPLAY/Wayland가 없는 SSH 환경에서는 로컬 창을 만들지 않는다.
-기존 launch XML은 이 두 인자를 노출하지 않으므로 HTTP 실행은 위 `ros2 run`을 사용한다.
+기존 launch XML도 노드의 HTTP 기본 ON 설정을 따른다. 개별 옵션 지정은 위 `ros2 run`에 파라미터를 추가한다.
 
 ## 송신 화면
 

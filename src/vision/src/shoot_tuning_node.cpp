@@ -153,14 +153,14 @@ public:
 #endif
       ),
       config_(vision_core::LoadDefaultAlgorithmConfig()) {
-    show_debug_view_=ReadOnly<bool>("show_debug_view",true);
+    show_debug_view_=ReadOnly<bool>("show_debug_view",false);
     rcl_interfaces::msg::ParameterDescriptor stream_descriptor;
     stream_descriptor.read_only=true;
     stream_descriptor.description="HTTP debug stream (startup only)";
     const int stream_port=declare_parameter<int>("stream_debug_port",8080,stream_descriptor);
     if (stream_port<1 || stream_port>65535)
       throw std::invalid_argument("stream_debug_port must be in [1,65535]");
-    if (declare_parameter<bool>("stream_debug_view",false,stream_descriptor)) {
+    if (declare_parameter<bool>("stream_debug_view",true,stream_descriptor)) {
       try {
         debug_stream_=std::make_unique<vision::DebugMjpegServer>(
             static_cast<std::uint16_t>(stream_port));
@@ -972,7 +972,7 @@ private:
   std::unique_ptr<vision_core::MissionController> observer_;
   std::unique_ptr<vision_core::ControlCommandCoordinator> transport_;
   std::unique_ptr<YoloTrtEngine> yolo_;
-  bool show_debug_view_{true};
+  bool show_debug_view_{false};
   std::unique_ptr<vision::DebugMjpegServer> debug_stream_;
   std::unique_ptr<QWidget> window_;
   ImageWidget *live_view_{},*frozen_view_{},*state_view_{};

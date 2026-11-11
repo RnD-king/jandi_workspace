@@ -178,14 +178,14 @@ public:
     declare_parameter<bool>("assume_zero_imu", false);           // roll/pitch를 0으로 가정
     declare_parameter<double>("imu_abs_limit_deg", 45.0);        // IMU roll/pitch clamp 각도
     // core가 확정한 객체만 표시하는 기본 디버그 화면/상태 패널이다.
-    declare_parameter<bool>("show_debug_view", true);
+    declare_parameter<bool>("show_debug_view", false);
     rcl_interfaces::msg::ParameterDescriptor stream_descriptor;
     stream_descriptor.read_only=true;
     stream_descriptor.description="HTTP debug stream (startup only)";
     const int stream_port=declare_parameter<int>("stream_debug_port",8080,stream_descriptor);
     if (stream_port<1 || stream_port>65535)
       throw std::invalid_argument("stream_debug_port must be in [1,65535]");
-    if (declare_parameter<bool>("stream_debug_view",false,stream_descriptor)) {
+    if (declare_parameter<bool>("stream_debug_view",true,stream_descriptor)) {
       try {
         debug_stream_=std::make_unique<vision::DebugMjpegServer>(
             static_cast<std::uint16_t>(stream_port));
