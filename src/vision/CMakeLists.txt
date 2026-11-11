@@ -339,6 +339,8 @@ if(BUILD_TESTING)
   set_tests_properties(vision_debug_bag_publisher_test PROPERTIES LABELS "recording"
     ENVIRONMENT "ROS_DOMAIN_ID=88;ROS_LOCALHOST_ONLY=1")
   add_executable(vision_mission_parameters_test tests/mission_parameters_test.cpp)
+  target_compile_definitions(vision_mission_parameters_test PRIVATE
+    VISION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   target_include_directories(vision_mission_parameters_test PRIVATE include)
   target_link_libraries(vision_mission_parameters_test shared_vision_core::shared_vision_core)
   ament_target_dependencies(vision_mission_parameters_test rclcpp)
