@@ -15,6 +15,8 @@
 #include "vision/object_depth.hpp"
 #include "vision/shoot_tuning.hpp"
 #include "vision/debug_mjpeg_server.hpp"
+#include "vision/qt_web_view.hpp"
+#include "vision/qt_web_page.hpp"
 #include "vision_core/config_loader.hpp"
 #include "vision_core/control_command.hpp"
 
@@ -54,6 +56,9 @@ public:
     setMinimumSize(320,240);
   }
   std::function<void(int,int)> clicked;
+  QRect ImageAreaIn(QWidget* root) const {
+    return ImageRect().translated(mapTo(root,QPoint(0,0)));
+  }
   void SetImage(const cv::Mat& bgr) {
     if (bgr.empty()) { image_=QImage(); update(); return; }
     cv::Mat rgb;
@@ -139,7 +144,12 @@ struct Frame {
   vision_core::PerceptionMissionFrameResult result;
   vision_core::MissionControllerConfig config;
   Clock::time_point received;
+  std::uint64_t parameter_revision{};
   bool valid{false},camera_info_valid{false};
+};
+struct WebFrame {
+  Frame live,frozen;
+  QRect live_area,frozen_area;
 };
 } // namespace
 
@@ -163,7 +173,7 @@ public:
     if (declare_parameter<bool>("stream_debug_view",true,stream_descriptor)) {
       try {
         debug_stream_=std::make_unique<vision::DebugMjpegServer>(
-            static_cast<std::uint16_t>(stream_port));
+            static_cast<std::uint16_t>(stream_port),"0.0.0.0",true,kQtWebPage);
         RCLCPP_INFO(get_logger(),"[STREAM] http://<HOST_IP>:%d",stream_port);
       } catch (const std::exception& error) {
         RCLCPP_WARN(get_logger(),"[STREAM] disabled: %s",error.what());
@@ -284,24 +294,31 @@ public:
         yolo_->SetConfidenceThreshold(static_cast<float>(config_.line_detection.confidence));
         observer_=std::move(observer);
         ++parameter_revision_;
+        ++web_revision_;
         result.successful=true;
       } catch (const std::exception& error) { result.reason=error.what(); }
       return result;
     });
     BuildUi();
+    if (debug_stream_) web_view_=std::make_unique<QtWebView>(*window_,*debug_stream_);
 #if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
     SetupServiceControls();
 #endif
     frame_timer_=create_wall_timer(std::chrono::duration<double>(1.0/hz),
         [this]() { ProcessLatestImage(); });
     transport_timer_=create_wall_timer(std::chrono::milliseconds(100),[this]() {
+      HandleWebInput();
       PollStartupPose();
       if (transport_->HasPendingAction() && !ReleaseUnavailableRequest()) AdvanceTransport({});
       UpdateUi();
+      PublishWebView();
     });
     startup_pose_wait_started_=Clock::now();
     status_text_->setText("시작 기본자세 준비 — 모션 수신 노드 연결 대기");
-    if (show_debug_view_) window_->show();
+    // Keep widget layout/focus active for browser input without mapping a
+    // desktop window. The SSH Qt platform itself remains offscreen.
+    if (!show_debug_view_ && web_view_) window_->setAttribute(Qt::WA_DontShowOnScreen);
+    if (show_debug_view_ || web_view_) window_->show();
     RCLCPP_INFO(get_logger(),"Shoot bench ready; requesting the fixed shooting pose once after executor discovery");
   }
 
@@ -496,6 +513,9 @@ private:
       form->addRow(QString::fromUtf8(label),spin);
       parameter_widgets_[name]=spin;
       QObject::connect(spin,&QDoubleSpinBox::editingFinished,[this,spin,name]() {
+        // Browser focus changes may finish the same edit twice. A no-op must
+        // not invalidate a freshly computed PREVIEW or rebuild its observer.
+        if (get_parameter(name).as_double()==spin->value()) return;
         const auto result=set_parameters_atomically({rclcpp::Parameter(name,spin->value())});
         if (!result.successful) status_text_->setText(QString::fromStdString(result.reason));
         SyncParameters(true);
@@ -542,6 +562,58 @@ private:
     RefreshStoredResult();
   }
 
+  void UpdateLiveViews() {
+    const auto views=Render(live_);
+    live_view_->SetImage(views.image);
+    state_view_->SetImage(views.panel);
+    displayed_live_=live_;
+  }
+  void HandleWebInput() {
+    if (!web_view_) return;
+    try {
+      web_view_->ProcessInputs([this]() { return web_revision_; },
+          [this](const std::any& context,QWidget* widget,int x,int y) {
+            if (widget!=live_view_ && widget!=frozen_view_ && widget!=calculate_button_) return false;
+            const auto& snapshot=std::any_cast<const WebFrame&>(context);
+            if (widget==calculate_button_) {
+              Calculate(&snapshot.live);
+              return true;
+            }
+            const auto& frame=widget==live_view_ ? snapshot.live : snapshot.frozen;
+            const auto& area=widget==live_view_ ? snapshot.live_area : snapshot.frozen_area;
+            if (frame.valid && area.width()>0 && area.height()>0 && area.contains(x,y)) {
+              const int u=(x-area.x())*frame.bgr.cols/area.width();
+              const int v=(y-area.y())*frame.bgr.rows/area.height();
+              ClickPixel(frame,u,v);
+            }
+            return true;
+          },
+          [this](const char* reason) { status_text_->setText(QString::fromUtf8(reason)); });
+    } catch (const std::exception& error) {
+      RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),2000,"Web input error: %s",error.what());
+    }
+  }
+  void PublishWebView() {
+    if (!web_view_) return;
+    try {
+      web_view_->Present([this]() { return web_revision_; },[this]() {
+        // Refresh only when the displayed RGB-D context changes. The full Qt
+        // layout is still sent when buttons/status change without a camera.
+        if (live_.valid && (!displayed_live_.valid ||
+            StampSeconds(displayed_live_.header)!=StampSeconds(live_.header) ||
+            displayed_live_.parameter_revision!=live_.parameter_revision))
+          UpdateLiveViews();
+      },[this]() -> std::any {
+        auto visible=displayed_live_;
+        if (!live_.valid || visible.parameter_revision!=parameter_revision_) visible.valid=false;
+        return WebFrame{visible,frozen_,live_view_->ImageAreaIn(window_.get()),
+                        frozen_view_->ImageAreaIn(window_.get())};
+      });
+    } catch (const std::exception& error) {
+      RCLCPP_WARN_THROTTLE(get_logger(),*get_clock(),2000,"Web view error: %s",error.what());
+    }
+  }
+
   void ProcessLatestImage() {
     if (!latest_image_ || latest_image_==processed_image_) return;
     const auto image=latest_image_;
@@ -549,6 +621,7 @@ private:
     try {
       Frame frame;
       frame.received=latest_received_; frame.header=image->header; frame.config=config_;
+      frame.parameter_revision=parameter_revision_;
       frame.bgr=cv_bridge::toCvShare(image,"bgr8")->image.clone();
       if (frame.bgr.empty()) return;
       if (!yolo_->Infer(frame.bgr,frame.detections)) {
@@ -634,14 +707,7 @@ private:
       frame.valid=true;
       live_=std::move(frame);
       live_revision_=parameter_revision_;
-      const bool stream_frame=debug_stream_ && debug_stream_->RequestFrame();
-      if (show_debug_view_ || stream_frame) {
-        const auto views=Render(live_,show_debug_view_);
-        if (show_debug_view_) {
-          live_view_->SetImage(views.image); state_view_->SetImage(views.panel);
-        }
-        if (stream_frame) debug_stream_->Submit(views.image);
-      }
+      if (show_debug_view_) UpdateLiveViews();
     } catch (const std::exception& error) {
       live_.valid=false;
       status_text_->setText(QString("프레임 처리 실패: %1").arg(error.what()));
@@ -668,24 +734,25 @@ private:
         frame.input.intrinsics,context,render_panel);
   }
 
-  QString MeasurementError() {
-    if (!live_.valid) return "계산 가능한 카메라 프레임이 없습니다.";
-    const double capture=StampSeconds(live_.header);
+  QString MeasurementError(const Frame& frame) {
+    if (!frame.valid) return "계산 가능한 카메라 프레임이 없습니다.";
+    const double capture=StampSeconds(frame.header);
     const double age=get_clock()->now().seconds()-capture;
-    if (std::chrono::duration<double>(Clock::now()-live_.received).count()>max_frame_age_ ||
+    if (std::chrono::duration<double>(Clock::now()-frame.received).count()>max_frame_age_ ||
         capture<=0 || age>max_frame_age_ || age < -max_depth_age_)
       return "프레임이 오래되었거나 타임스탬프가 유효하지 않습니다.";
-    if (live_revision_!=parameter_revision_) return "변경된 파라미터가 적용된 새 프레임을 기다려 주세요.";
+    if (frame.parameter_revision!=parameter_revision_) return "변경된 파라미터가 적용된 새 프레임을 기다려 주세요.";
     if (capture<=last_done_sec_) return "동작 DONE 이후 촬영된 새 프레임을 기다려 주세요.";
-    if (!live_.camera_info_valid) return "영상 크기와 일치하는 CameraInfo가 필요합니다.";
-    if (use_imu_ && !live_.input.imu_valid) return "IMU 입력을 기다리고 있습니다.";
-    if (live_.depth.empty()) return "RGB와 시간·크기가 일치하는 유효 깊이 영상이 없습니다.";
-    if (!live_.result.perception.targets.backboard) return "깊이·confidence·크기 조건을 통과한 백보드가 없습니다.";
-    if (!live_.result.perception.goal_pose.valid) return "백보드 좌·중앙·우 깊이로 자세를 계산할 수 없습니다.";
+    if (!frame.camera_info_valid) return "영상 크기와 일치하는 CameraInfo가 필요합니다.";
+    if (use_imu_ && !frame.input.imu_valid) return "IMU 입력을 기다리고 있습니다.";
+    if (frame.depth.empty()) return "RGB와 시간·크기가 일치하는 유효 깊이 영상이 없습니다.";
+    if (!frame.result.perception.targets.backboard) return "깊이·confidence·크기 조건을 통과한 백보드가 없습니다.";
+    if (!frame.result.perception.goal_pose.valid) return "백보드 좌·중앙·우 깊이로 자세를 계산할 수 없습니다.";
     return {};
   }
-  void Calculate() {
-    const auto error=MeasurementError();
+  void Calculate(const Frame* displayed=nullptr) {
+    const Frame& frame=displayed ? *displayed : live_;
+    const auto error=MeasurementError(frame);
     if (!error.isEmpty()) {
       calculated_target_.reset();
 #if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
@@ -695,7 +762,7 @@ private:
       action_text_->setText("다음 동작: 저장된 계산 결과 없음");
       UpdateUi(); return;
     }
-    const auto landing=ComputeGoalLandingDebug(live_.config.goal,live_.result.mission);
+    const auto landing=ComputeGoalLandingDebug(frame.config.goal,frame.result.mission);
     const auto target=GoalCenterFromLanding(landing);
     if (!target) {
       calculated_target_.reset();
@@ -707,13 +774,14 @@ private:
       UpdateUi(); return;
     }
     const auto details=QString("백보드 yaw = %1°\n프레임 %2.%3")
-        .arg(live_.result.perception.goal_pose.yaw_rad*180/kDebugPi,0,'f',2)
-        .arg(live_.header.stamp.sec).arg(live_.header.stamp.nanosec,9,10,QChar('0'));
-    StoreCalculatedTarget(*target,"자동 인식",details,&live_);
+        .arg(frame.result.perception.goal_pose.yaw_rad*180/kDebugPi,0,'f',2)
+        .arg(frame.header.stamp.sec).arg(frame.header.stamp.nanosec,9,10,QChar('0'));
+    StoreCalculatedTarget(*target,"자동 인식",details,&frame);
   }
   void StoreCalculatedTarget(const GoalCenterTarget& target,const QString& source,
                              const QString& details,const Frame* frame=nullptr) {
     if (!target.Valid()) return;
+    ++web_revision_;
     calculated_target_=target;
 #if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
     preview_.reset(); // New target requires a new explicit PREVIEW.
@@ -762,6 +830,7 @@ private:
 #if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
   void PreviewStoredShot() {
     if (MotionBusy()) return;
+    ++web_revision_;
     preview_.reset();
     if (!calculated_target_) {
       status_text_->setText("먼저 계산하기 또는 직접 입력 좌표 적용으로 골대 중심을 저장하세요.");
@@ -813,6 +882,7 @@ private:
   }
   void ClickPixel(const Frame& frame,int u,int v) {
     if (!frame.valid) return;
+    ++web_revision_;
     const auto sample=SampleClickedBackboard(frame.depth,u,v,frame.input.intrinsics,
                                             frame.config.goal,click_yaw_deg_);
     clicked_target_.reset();
@@ -853,6 +923,7 @@ private:
     // An explicit motion button supersedes any still-pending startup request.
     startup_pose_pending_=false;
     if (MotionBusy()) return;
+    ++web_revision_;
     const bool preparing=request.action==MissionAction::kDefaultPoseMode;
     if ((preparing ? pose_pub_->get_subscription_count() : action_pub_->get_subscription_count())==0) {
       status_text_->setText("알림: 모션 수신 노드가 없어 동작 요청을 건너뛰었습니다. 계산·좌표 표시는 계속 사용할 수 있습니다.");
@@ -886,6 +957,7 @@ private:
     feedback.ready=status.status==msg::CommandStatus::READY;
     AdvanceTransport(feedback);
     if (feedback.done && !transport_->HasPendingAction()) {
+      ++web_revision_;
       last_done_id_=status.command_id;
       last_done_sec_=get_clock()->now().seconds();
 #if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
@@ -942,6 +1014,7 @@ private:
         ? pose_pub_->get_subscription_count()>0 : action_pub_->get_subscription_count()>0;
     const auto reason=ReleaseUnavailableShootRequest(*transport_,connected);
     if (reason==ShootRequestUnavailable::kNone) return false;
+    ++web_revision_;
     const auto notice=reason==ShootRequestUnavailable::kDisconnected
         ? "모션 수신 노드 연결이 없어 동작 요청 대기를 해제했습니다."
         : "모션 ACK 응답이 없어 동작 요청 대기를 해제했습니다.";
@@ -975,6 +1048,8 @@ private:
   bool show_debug_view_{false};
   std::unique_ptr<vision::DebugMjpegServer> debug_stream_;
   std::unique_ptr<QWidget> window_;
+  std::unique_ptr<QtWebView> web_view_;
+  std::uint64_t web_revision_{1};
   ImageWidget *live_view_{},*frozen_view_{},*state_view_{};
   QLabel *calculation_text_{},*action_text_{},*status_text_{},*click_text_{};
   QPushButton *calculate_button_{},*stored_shoot_button_{},*adopt_click_button_{};
@@ -987,7 +1062,7 @@ private:
   std::vector<QWidget*> target_edit_widgets_;
   std::vector<QPushButton*> motion_buttons_;
   std::map<std::string,QDoubleSpinBox*> parameter_widgets_;
-  Frame live_,frozen_,clicked_frame_;
+  Frame live_,frozen_,clicked_frame_,displayed_live_;
   std::optional<GoalCenterTarget> calculated_target_,clicked_target_;
   QString calculated_source_,calculated_details_,clicked_details_;
   vision_core::Intrinsics intrinsics_;

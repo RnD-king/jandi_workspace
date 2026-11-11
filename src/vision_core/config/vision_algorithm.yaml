@@ -156,6 +156,7 @@ vision_algorithm:
 
       # DOWN 1걸음 탐색
       down_search_min_hits: 3 # DOWN 이동 탐색: 최근 8프레임 중 3회 검출
+      pickup_verification_sec: 1.0 # PICK 후보 이후 새 안정 관측으로 재검증
       fine_pose_pre_hold_sec: 0.5 # 공 발견 후 2번 미세보행 자세 전환 직전 정지 대기
       down_search_max_steps: 10 # DOWN 탐색 최대 전진 동작 횟수
       down_search_inter_action_hold_sec: 0.3 # BALL DOWN 미검출 시 다음 10번 보행 전 대기; 발견 시 생략
@@ -393,6 +394,10 @@ vision_algorithm:
 
   # COMMON: Depth 표본 → 객체 연결 → 명령 → 미션 공통 동작
   common:
+    scan_correction:
+      measured_turn_deg: 12.0 # 계산용 실측값. 실행 요청 15도는 유지.
+      near_angle_deg: 30.0 # 6도 이내 0회, 30도 이하 2회, 초과 3회.
+      max_attempts: 3 # 발견 후 재관측 실패도 같은 탐색 횟수에 포함.
     camera:
       ball_view_pitch_tick: 1850 # ID22, yaw always follows DOWN  // 허들 2013 // 공 1850
     depth_roi_size_px: 5 # 공·허들 BBox 중심 Depth 표본의 한 변 길이 (px)

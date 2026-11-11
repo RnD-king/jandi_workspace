@@ -26,7 +26,7 @@ ros2 run camera_overlay depth_color_viewer
 
 PC도 같은 노드 명령을 사용한다. 사용하던 ROS 환경에 `~/jandi_main/install/local_setup.bash`
 또는 이 패키지를 빌드한 워크스페이스를 source한다.
-Jetson HTTP: `http://192.168.0.133:8081`, PC: `http://localhost:8081`.
+Jetson HTTP: `http://192.168.0.133:8080`, PC: `http://localhost:8080`.
 카메라가 이미 실행 중이면 뷰어만 실행한다. 기본은 headless HTTP다.
 로컬 화면 추가: `ros2 run camera_overlay depth_color_viewer --ros-args -p show_debug_view:=true`.
 

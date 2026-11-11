@@ -47,6 +47,7 @@ struct BallConfig {
   bool race_round2_fast_enabled{false};
   double approach_short_v_px{};
   int down_search_max_steps{};
+  double pickup_verification_sec{1.0};
   double fine_pose_pre_hold_sec{}; // Stationary delay before requesting FINE feet.
   double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
   double recovery_observation_sec{};
@@ -159,6 +160,7 @@ struct BallResult {
   bool active{false};
   bool has_ball{false};
   bool pickup_failed{false};
+  bool pickup_verifying{false};
   int pickup_attempt_count{0};
   int pickup_shrink_count{0}; // Applied failed-PICK insets.
   int entry_frames{0};
@@ -204,6 +206,7 @@ public:
   void EnterContinuousNear(double now);
   const std::deque<bool>& ObservationHits() const { return hit_history_; }
   bool HasBall() const { return has_ball_; }
+  bool PickupVerificationActive() const { return pickup_verification_active_; }
   void SetHasBall(bool has_ball) { has_ball_ = has_ball; }
   void CompleteLineRecovery();
   void ClearEntryEvidence();
@@ -232,6 +235,7 @@ public:
   }
   void ShiftTimers(double duration) {
     state_enter_sec_+=duration;
+    if(pickup_verification_active_) pickup_verification_start_sec_+=duration;
     down_search_.ShiftTimers(duration);
   }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
@@ -310,6 +314,8 @@ private:
   int recovery_visible_count_{0};
   bool has_smoothed_{false};
   bool verified_observation_pending_{false};
+  bool pickup_verification_active_{false};
+  double pickup_verification_start_sec_{0.0};
   ObjectObservationWindow observation_window_;
   DownSearchWalk down_search_;
   StationaryObjectRecovery stationary_recovery_;

@@ -147,6 +147,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.ball.down_search_max_steps, "ball.down_search_max_steps");
   Nonnegative(c.ball.down_search_inter_action_hold_sec, "ball.down_search_inter_action_hold_sec");
   Nonnegative(c.ball.fine_pose_pre_hold_sec, "ball.fine_pose_pre_hold_sec");
+  Positive(c.ball.pickup_verification_sec,"ball.pickup_verification_sec");
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
   NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
@@ -267,6 +268,13 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     NonnegativeInt(c.curve_search.failure_lock_line_blocks,"curve_search.failure_lock_line_blocks");
     NonnegativeInt(c.curve_search.post_goal_rearm_line_blocks,"curve_search.post_goal_rearm_line_blocks");
   }
+  Positive(c.scan_correction.measured_turn_deg,"scan_correction.measured_turn_deg");
+  Positive(c.scan_correction.near_angle_deg,"scan_correction.near_angle_deg");
+  if(c.scan_correction.near_angle_deg<=c.scan_correction.measured_turn_deg*.5 ||
+     c.scan_correction.near_angle_deg>180)
+    throw std::runtime_error("scan correction near angle must exceed its zero-turn range and be <=180");
+  if(c.scan_correction.max_attempts<1 || c.scan_correction.max_attempts>3)
+    throw std::runtime_error("scan correction attempts must be [1,3]");
   Positive(c.line_recovery.observation_sec, "line_recovery.observation_sec");
   if(c.line_recovery.min_points!=3 || c.line_recovery.ransac_enabled)
     throw std::runtime_error("LINE sparse recovery requires min_points=3 and RANSAC disabled");
@@ -659,6 +667,11 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   if (!raw || !raw.IsMap())
     throw std::runtime_error("vision algorithm config must contain a vision_algorithm map: " + path);
   const YAML::Node a = AlgorithmSections(raw);
+  if (const auto scan=raw["common"]["scan_correction"]) {
+    Assign(scan,"measured_turn_deg",c.scan_correction.measured_turn_deg);
+    Assign(scan,"near_angle_deg",c.scan_correction.near_angle_deg);
+    Assign(scan,"max_attempts",c.scan_correction.max_attempts);
+  }
 
   const auto f = a["line_features"];
   Assign(f, "max_centers", c.line_features.max_centers);
@@ -758,6 +771,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "down_search_max_steps", c.ball.down_search_max_steps);
   Assign(b, "down_search_inter_action_hold_sec", c.ball.down_search_inter_action_hold_sec);
   Assign(b, "fine_pose_pre_hold_sec", c.ball.fine_pose_pre_hold_sec);
+  if(b["pickup_verification_sec"]) Assign(b,"pickup_verification_sec",c.ball.pickup_verification_sec);
   Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
   Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
   Assign(b, "recovery_walk_turn_max", c.ball.recovery_walk_turn_max);

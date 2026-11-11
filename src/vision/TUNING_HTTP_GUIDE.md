@@ -77,9 +77,12 @@ ros2 run vision goal_shot_preview_node
 ```
 
 Jetson 브라우저 주소는 `http://192.168.0.133:8080`, PC에서 자기 영상을 볼 때는
-`http://localhost:8080`이다. 튜닝 노드의 포트는 시작 시
-`-p stream_debug_port:=8082`처럼 지정할 수 있다. HTTP는 카메라 디버그 영상만
-송신한다. Qt 버튼이나 클릭 좌표 입력은 HTTP로 제공하지 않는다.
+`http://localhost:8080`이다. 모든 도구의 기본 포트는 8080이며 같은 장비에서는
+하나씩 실행한다. 공·허들·골대 미션 튜닝은 카메라
+디버그 영상을 송신한다. `shoot_tuning_node`와 `goal_shot_preview_node`는
+기존 Qt GUI 전체를 HTTP로 표시하여 영상 클릭, 직접 좌표 입력, 계산·기본자세·
+투척 버튼, 파라미터 편집 및 스크롤을 사용할 수 있다. 자세한 조작은
+[SHOOT_TUNING.md](SHOOT_TUNING.md)를 따른다.
 PC·Jetson 모두 HTTP 영상 송신은 기본 ON, 로컬 창은 기본 OFF다.
 HTTP를 끄려면 `-p stream_debug_view:=false`, 로컬 창을 켜려면
 `-p show_debug_view:=true`를 지정한다. JPEG 인코딩·네트워크 처리는 기존 별도 작업 스레드를
@@ -192,7 +195,7 @@ cmake --build "$jandi_test_release/build/core-tests" -j2
 ctest --test-dir "$jandi_test_release/build/core-tests" \
   -R 'ball_fine_pose_hold|config_loader' --output-on-failure
 ctest --test-dir "$jandi_test_release/build/ros/vision" \
-  -R 'vision_(debug_mjpeg|mission_parameters)_test' --output-on-failure
+  -R 'vision_(debug_mjpeg|qt_web_view|mission_parameters)_test' --output-on-failure
 ```
 
 로컬 확인을 마치면 기존 push 명령으로 해당 버전을 GitHub에 올린다.

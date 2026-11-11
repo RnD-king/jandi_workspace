@@ -23,6 +23,7 @@
 #include "vision_core/object_association_tracker.hpp"
 #include "vision_core/object_target_tracker.hpp"
 #include "vision_core/stationary_scan_observation.hpp"
+#include "vision_core/scan_body_correction.hpp"
 
 namespace vision_core {
 
@@ -54,6 +55,7 @@ struct MissionControllerConfig {
   LineTrackingConfig line;
   LineP2pConfig line_p2p;
   LineLossRecoveryConfig line_recovery;
+  ScanBodyCorrectionConfig scan_correction;
   CurveSearchConfig curve_search;
   BallConfig ball;
   HurdleConfig hurdle;
@@ -484,7 +486,9 @@ private:
                        kReturnFound, kBodyTurn, kReobserve };
     Phase phase{Phase::kIdle};
     bool used{false}, started{false}, turn_left{false};
-    int turns_remaining{0};
+    int turns_remaining{0}, attempts{0};
+    bool first_left{true};
+    std::optional<bool> last_found_left;
     std::uint64_t body_action_id{0};
     double reobserve_started_sec{0.0};
     bool resume_right{false}, exhausted{false};
@@ -648,7 +652,8 @@ private:
     StationaryScanObservation observation; // CURVE: one 45-degree stationary stop.
     int direction{0}, confirmations{0}, delay_remaining{0};
     int head_attempts{0}, body_attempts{0}, unlock_blocks{0};
-    int observed_frames{0};
+    int observed_frames{0}, turns_remaining{0};
+    bool turn_left{false};
     bool skip_pending{false}, started{false};
     std::optional<double> found_yaw;
     std::optional<LineGuide> saved_line;
@@ -719,7 +724,8 @@ private:
     bool release_requested{false}, release_align_body{false}, release_seen_transition{false};
     int completed_pairs{0};
     int align_remaining{0};
-    bool resume_right{false};
+    bool resume_right{false}, first_left{true};
+    std::optional<bool> last_found_left;
     StationaryScanObservation observation;
     std::uint64_t align_action_id{0};
     std::deque<bool> pause_hits, verify_hits;
@@ -727,6 +733,12 @@ private:
   int line_forward_recovery_issued_{0};
   bool line_forward_recovery_pending_{false};
   std::optional<double> last_line_score_;
+  struct LineRecoveryMemory {
+    std::optional<LineGuide> normal, frozen;
+    std::optional<bool> last_left, frozen_left;
+    int budget{-1}; // A loss episode may reduce this budget, never increase it.
+  } line_recovery_memory_;
+  std::optional<double> last_ball_scan_u_, last_goal_scan_u_;
   std::deque<bool> actual_line_stability_history_;
   bool line_recovery_uses_visible_centers_{false};
   bool line_recovery_left_{false};

@@ -1578,7 +1578,8 @@ private:
     const double capture_sec=StampSeconds(msg->header);
     const bool stationary_observation=stationary_scan ||
         last_debug_result_.mission.stationary_scan_observing ||
-        last_debug_result_.mission.goal.shoot_verifying;
+        last_debug_result_.mission.goal.shoot_verifying ||
+        last_debug_result_.mission.ball.pickup_verifying;
     if(stationary_observation) {
       if(!std::isfinite(capture_sec) || capture_sec<=last_stationary_capture_sec_) return;
       last_stationary_capture_sec_=capture_sec;
@@ -1715,6 +1716,9 @@ private:
     if (!applied_action_feedback_queue_.empty()) perception_input.allow_new_commands=false;
     perception_input.camera_feedback = camera_feedback_;
     perception_input.camera_scan = camera_scan_feedback_;
+    if(stationary_scan && scan_stationary_since_sec_>0)
+      perception_input.camera_scan.stationary_since_sec=scan_stationary_since_sec_-
+          (frame_now_sec-perception_input.now_sec);
     perception_input.camera_scan.frame_is_fresh=fresh_scan_frame;
     perception_input.command_transport_enabled =
         enable_command_transport_ || simulate_decision_;
