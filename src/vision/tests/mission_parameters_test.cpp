@@ -1,10 +1,45 @@
 #include "vision/mission_parameters.hpp"
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <regex>
+#include <set>
+#include <sstream>
 #include <stdexcept>
 
 static void Check(bool value,const char* message) {
   if(!value)throw std::runtime_error(message);
 }
+
+// Check every adapter using the shared declaration helper without starting
+// TensorRT, cameras, or command transport. Shared names include table entries.
+static void CheckAdapterDeclarations(const rclcpp::Node& shared_node) {
+  const auto shared_names=shared_node.list_parameters({},0).names;
+  const std::regex helper(R"(\bDeclareMissionParameters\s*\()");
+  const std::regex declaration(
+      R"param(\bdeclare_parameter\s*<[^>]+>\s*\(\s*"([^"]+)")param");
+  std::size_t adapters=0;
+  for(const auto& entry:std::filesystem::directory_iterator(
+          std::filesystem::path(VISION_SOURCE_DIR)/"src")) {
+    if(entry.path().extension()!=".cpp")continue;
+    std::ifstream input(entry.path());
+    if(!input)throw std::runtime_error("Cannot read adapter: "+entry.path().string());
+    std::ostringstream buffer;
+    buffer<<input.rdbuf();
+    const auto source=buffer.str();
+    if(!std::regex_search(source,helper))continue;
+    ++adapters;
+    std::set<std::string> names(shared_names.begin(),shared_names.end());
+    for(std::sregex_iterator it(source.begin(),source.end(),declaration),end;it!=end;++it) {
+      const auto name=(*it)[1].str();
+      if(!names.insert(name).second)
+        throw std::runtime_error(entry.path().filename().string()+
+            ": duplicate parameter declaration: "+name);
+    }
+  }
+  Check(adapters>=2,"Expected production and tuning adapters using shared parameters");
+}
+
 int main(int argc,char** argv) {
   rclcpp::init(argc,argv);
   try {
@@ -42,6 +77,7 @@ int main(int argc,char** argv) {
         rclcpp::Parameter("ball_fine_right_delta_v_px",3.0)});
     auto node=std::make_shared<rclcpp::Node>("mission_parameter_test",options);
     vision::DeclareMissionParameters(*node,base);
+    CheckAdapterDeclarations(*node);
     auto applied=base;
     // Mirror the adapter's final construction order: subconfigs first, then
     // ROS overrides. Source wiring coverage checks both constructors too.

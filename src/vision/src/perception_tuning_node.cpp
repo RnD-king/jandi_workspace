@@ -217,11 +217,6 @@ public:
     declare_parameter<int>("test_stage",algorithm_defaults.test_stage);
     declare_parameter<int>("test_ball_mission_index",algorithm_defaults.test_ball_mission_index);
     declare_parameter<int>("test_goal_mission_index",algorithm_defaults.test_goal_mission_index);
-    declare_parameter<double>("ball_approach_top_center_u_px", algorithm_defaults.ball.approach_top_center_u_px);
-    declare_parameter<double>("ball_approach_bottom_center_u_px", algorithm_defaults.ball.approach_bottom_center_u_px);
-    declare_parameter<double>("ball_approach_top_half_width_px", algorithm_defaults.ball.approach_top_half_width_px);
-    declare_parameter<double>("ball_approach_bottom_half_width_px", algorithm_defaults.ball.approach_bottom_half_width_px);
-    declare_parameter<double>("ball_approach_near_outer_margin_px", algorithm_defaults.ball.approach_near_outer_margin_px);
     declare_parameter<double>("ball_upper_acquire_v_px", algorithm_defaults.ball.upper_acquire_v_px);
     declare_parameter<double>("ball_approach_two_step_v_px", algorithm_defaults.ball.approach_two_step_v_px);
     declare_parameter<double>("goal_target_u_px", algorithm_defaults.goal.target_u_px);
