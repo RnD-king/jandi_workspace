@@ -263,6 +263,7 @@ int main(int argc, char **argv) {
   assert(c.hurdle.contact_steps == 3);
   assert(c.hurdle.contact_inter_action_hold_sec == 0.5);
   assert(c.ball.down_search_inter_action_hold_sec == 0.0);
+  assert(c.ball.fine_pose_pre_hold_sec == 0.0);
   assert(c.hurdle.down_search_inter_action_hold_sec == 0.0);
   assert(c.hurdle.down_one_step_v_px == 100);
   assert(c.hurdle.fine_mode_v_px == 180);
@@ -276,6 +277,9 @@ int main(int argc, char **argv) {
   assert(c.line_features.ransac_min_sample_v_gap_px==20);
   assert(c.line_features.ransac_max_outliers==2);
   std::ifstream in(argv[1]); std::ostringstream text; text << in.rdbuf();
+  for (const auto* value : {"-0.1", ".nan", ".inf", "not_a_number"})
+    Reject(text.str(),"fine_pose_pre_hold_sec: 0.0",std::string("fine_pose_pre_hold_sec: ")+value);
+  Reject(text.str(),"fine_pose_pre_hold_sec: 0.0","");
   CheckGroupedConfiguration(text.str());
   CheckDirectionalHurdleCalibration(text.str());
   // Old F/T configuration must fail explicitly, never silently restore or

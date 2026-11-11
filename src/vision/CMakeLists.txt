@@ -192,6 +192,7 @@ target_link_libraries(line_p2p_tuning_node
   "${vision_typesupport_target}"
 )
 target_link_libraries(perception_tuning_node
+  vision_debug_mjpeg
   vision_core
   "${vision_typesupport_target}"
 )
@@ -222,21 +223,21 @@ ament_target_dependencies(perception_tuning_node
 )
 
 foreach(mission_test_target ball_tuning_node hurdle_tuning_node)
-  target_link_libraries(${mission_test_target} vision_core "${vision_typesupport_target}")
+  target_link_libraries(${mission_test_target} vision_core vision_debug_mjpeg "${vision_typesupport_target}")
   set_target_properties(${mission_test_target} PROPERTIES
     BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
     INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
   ament_target_dependencies(${mission_test_target}
     rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge)
 endforeach()
-target_link_libraries(goal_tuning_node vision_core "${vision_typesupport_target}")
+target_link_libraries(goal_tuning_node vision_core vision_debug_mjpeg "${vision_typesupport_target}")
 set_target_properties(goal_tuning_node PROPERTIES
   BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
   INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
 ament_target_dependencies(goal_tuning_node
   rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge)
 foreach(shoot_bench_target shoot_tuning_node goal_shot_preview_node)
-  target_link_libraries(${shoot_bench_target} vision_core "${vision_typesupport_target}" Qt5::Widgets)
+  target_link_libraries(${shoot_bench_target} vision_core vision_debug_mjpeg "${vision_typesupport_target}" Qt5::Widgets)
   set_target_properties(${shoot_bench_target} PROPERTIES
     BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
     INSTALL_RPATH "$ORIGIN;${SHARED_VISION_CORE_ROOT}/lib")
@@ -274,7 +275,7 @@ install(PROGRAMS scripts/jandi_deploy.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS scripts/install_jandi_command.sh DESTINATION lib/${PROJECT_NAME})
 install(FILES JANDI_RUNTIME.md JANDI_DUAL_INSTALL.md DESTINATION share/${PROJECT_NAME})
 
-install(FILES ROSBAG_RECORDING.md SHOOT_TUNING.md TERMINAL_VIEW.md HTTP_DEBUG_STREAMING.md DESTINATION share/${PROJECT_NAME})
+install(FILES ROSBAG_RECORDING.md SHOOT_TUNING.md TERMINAL_VIEW.md HTTP_DEBUG_STREAMING.md TUNING_HTTP_GUIDE.md DESTINATION share/${PROJECT_NAME})
 
 install(PROGRAMS scripts/vision_terminal_node.py
   DESTINATION lib/${PROJECT_NAME} RENAME vision_terminal_node)

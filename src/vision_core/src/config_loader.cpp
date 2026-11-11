@@ -146,6 +146,7 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   Nonnegative(c.ball.approach_short_v_px, "ball.approach_short_v_px");
   PositiveInt(c.ball.down_search_max_steps, "ball.down_search_max_steps");
   Nonnegative(c.ball.down_search_inter_action_hold_sec, "ball.down_search_inter_action_hold_sec");
+  Nonnegative(c.ball.fine_pose_pre_hold_sec, "ball.fine_pose_pre_hold_sec");
   Positive(c.ball.recovery_observation_sec, "ball.recovery_observation_sec");
   PositiveInt(c.ball.recovery_max_observations, "ball.recovery_max_observations");
   NonnegativeInt(c.ball.recovery_walk_turn_max, "ball.recovery_walk_turn_max");
@@ -756,6 +757,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(b, "approach_short_v_px", c.ball.approach_short_v_px);
   Assign(b, "down_search_max_steps", c.ball.down_search_max_steps);
   Assign(b, "down_search_inter_action_hold_sec", c.ball.down_search_inter_action_hold_sec);
+  Assign(b, "fine_pose_pre_hold_sec", c.ball.fine_pose_pre_hold_sec);
   Assign(b, "recovery_observation_sec", c.ball.recovery_observation_sec);
   Assign(b, "recovery_max_observations", c.ball.recovery_max_observations);
   Assign(b, "recovery_walk_turn_max", c.ball.recovery_walk_turn_max);

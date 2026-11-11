@@ -30,6 +30,7 @@ int main(int argc,char** argv) {
         rclcpp::Parameter("ball_approach_direct_down_v_px",370.0),
         rclcpp::Parameter("hurdle_contact_inter_action_hold_sec",.7),
         rclcpp::Parameter("ball_down_search_inter_action_hold_sec",.6),
+        rclcpp::Parameter("ball_fine_pose_pre_hold_sec",.5),
         rclcpp::Parameter("hurdle_down_search_inter_action_hold_sec",1.2),
         rclcpp::Parameter("ball_approach_top_center_u_px",400.0),
         rclcpp::Parameter("ball_approach_top_half_width_px",70.0),
@@ -236,17 +237,20 @@ int main(int argc,char** argv) {
     node->set_parameter(rclcpp::Parameter("ball_approach_top_half_width_px",70.0));
     vision::ReadMissionParameters(*node,applied);
     Check(applied.hurdle.contact_inter_action_hold_sec==.7,"HURDLE contact hold startup override was lost");
+    Check(applied.ball.fine_pose_pre_hold_sec==.5,"BALL FINE pre-hold startup override was lost");
     Check(applied.ball.down_search_inter_action_hold_sec==.6 &&
           applied.hurdle.down_search_inter_action_hold_sec==1.2,
           "independent DOWN search hold startup overrides were lost");
     for (const auto* name : {"ball_down_search_inter_action_hold_sec",
+                             "ball_fine_pose_pre_hold_sec",
                              "hurdle_down_search_inter_action_hold_sec"}) {
       for (double valid : {0.0, .8}) {
         Check(vision::ApplyLivePerceptionParameter(rclcpp::Parameter(name,valid),applied),
               "DOWN search hold live setting was not recognized");
         const double value=std::string(name)=="ball_down_search_inter_action_hold_sec"
             ? applied.ball.down_search_inter_action_hold_sec
-            : applied.hurdle.down_search_inter_action_hold_sec;
+            : std::string(name)=="ball_fine_pose_pre_hold_sec"
+                ? applied.ball.fine_pose_pre_hold_sec : applied.hurdle.down_search_inter_action_hold_sec;
         Check(value==valid,"DOWN search hold live value was lost");
       }
       for (double bad : {-1.0, std::numeric_limits<double>::quiet_NaN(),

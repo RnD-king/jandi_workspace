@@ -14,6 +14,7 @@
 #include "vision/yolo_trt_engine.hpp"
 #include "vision/object_depth.hpp"
 #include "vision/shoot_tuning.hpp"
+#include "vision/debug_mjpeg_server.hpp"
 #include "vision_core/config_loader.hpp"
 #include "vision_core/control_command.hpp"
 
@@ -152,6 +153,22 @@ public:
 #endif
       ),
       config_(vision_core::LoadDefaultAlgorithmConfig()) {
+    show_debug_view_=ReadOnly<bool>("show_debug_view",true);
+    rcl_interfaces::msg::ParameterDescriptor stream_descriptor;
+    stream_descriptor.read_only=true;
+    stream_descriptor.description="HTTP debug stream (startup only)";
+    const int stream_port=declare_parameter<int>("stream_debug_port",8080,stream_descriptor);
+    if (stream_port<1 || stream_port>65535)
+      throw std::invalid_argument("stream_debug_port must be in [1,65535]");
+    if (declare_parameter<bool>("stream_debug_view",false,stream_descriptor)) {
+      try {
+        debug_stream_=std::make_unique<vision::DebugMjpegServer>(
+            static_cast<std::uint16_t>(stream_port));
+        RCLCPP_INFO(get_logger(),"[STREAM] http://<HOST_IP>:%d",stream_port);
+      } catch (const std::exception& error) {
+        RCLCPP_WARN(get_logger(),"[STREAM] disabled: %s",error.what());
+      }
+    }
     // Bench mode observes a single frame; it never enters the mission FSM.
     // PreviewPerception works on a disposable copy with command transport off.
     config_.enable_ball=config_.enable_hurdle=config_.enable_goal=false;
@@ -284,7 +301,7 @@ public:
     });
     startup_pose_wait_started_=Clock::now();
     status_text_->setText("시작 기본자세 준비 — 모션 수신 노드 연결 대기");
-    window_->show();
+    if (show_debug_view_) window_->show();
     RCLCPP_INFO(get_logger(),"Shoot bench ready; requesting the fixed shooting pose once after executor discovery");
   }
 
@@ -617,8 +634,14 @@ private:
       frame.valid=true;
       live_=std::move(frame);
       live_revision_=parameter_revision_;
-      const auto views=Render(live_);
-      live_view_->SetImage(views.image); state_view_->SetImage(views.panel);
+      const bool stream_frame=debug_stream_ && debug_stream_->RequestFrame();
+      if (show_debug_view_ || stream_frame) {
+        const auto views=Render(live_,show_debug_view_);
+        if (show_debug_view_) {
+          live_view_->SetImage(views.image); state_view_->SetImage(views.panel);
+        }
+        if (stream_frame) debug_stream_->Submit(views.image);
+      }
     } catch (const std::exception& error) {
       live_.valid=false;
       status_text_->setText(QString("프레임 처리 실패: %1").arg(error.what()));
@@ -626,7 +649,7 @@ private:
     }
   }
 
-  MissionDebugImages Render(const Frame& frame) const {
+  MissionDebugImages Render(const Frame& frame, bool render_panel=true) const {
     MissionDebugContext context;
     context.control_state=MotionBusy() ? "EXECUTING / WAIT DONE" : "SHOOT BENCH / HOLD";
 #if defined(VISION_GOAL_SHOT_PREVIEW_NODE)
@@ -642,7 +665,7 @@ private:
     context.performance="SINGLE FRAME / MANUAL";
     return RenderMissionDebug(frame.bgr,frame.detections,frame.depth,frame.config,
         frame.result.perception,frame.result.mission,frame.input.camera_feedback,
-        frame.input.intrinsics,context);
+        frame.input.intrinsics,context,render_panel);
   }
 
   QString MeasurementError() {
@@ -949,6 +972,8 @@ private:
   std::unique_ptr<vision_core::MissionController> observer_;
   std::unique_ptr<vision_core::ControlCommandCoordinator> transport_;
   std::unique_ptr<YoloTrtEngine> yolo_;
+  bool show_debug_view_{true};
+  std::unique_ptr<vision::DebugMjpegServer> debug_stream_;
   std::unique_ptr<QWidget> window_;
   ImageWidget *live_view_{},*frozen_view_{},*state_view_{};
   QLabel *calculation_text_{},*action_text_{},*status_text_{},*click_text_{};
@@ -993,6 +1018,13 @@ private:
 
 int main(int argc,char** argv) {
   rclcpp::init(argc,argv);
+  // The existing Qt controls also support offscreen service-only sessions.
+  const auto has_display=[](const char* name) {
+    const char* value=std::getenv(name); return value && *value;
+  };
+  if (!has_display("DISPLAY") && !has_display("WAYLAND_DISPLAY") &&
+      !has_display("QT_QPA_PLATFORM"))
+    ::setenv("QT_QPA_PLATFORM","offscreen",1);
   // ROS arguments belong to rclcpp, not Qt's command-line parser.
   int qt_argc=1;
   QApplication application(qt_argc,argv);

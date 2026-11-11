@@ -85,6 +85,7 @@ inline void DeclareMissionParameters(rclcpp::Node& node,
   }
   node.declare_parameter<int>("ball_down_search_max_steps",c.ball.down_search_max_steps);
   node.declare_parameter<double>("ball_down_search_inter_action_hold_sec",c.ball.down_search_inter_action_hold_sec);
+  node.declare_parameter<double>("ball_fine_pose_pre_hold_sec",c.ball.fine_pose_pre_hold_sec);
   node.declare_parameter<double>("ball_approach_direct_down_v_px",c.ball.approach_direct_down_v_px);
   node.declare_parameter<double>("ball_approach_top_center_u_px",c.ball.approach_top_center_u_px);
   node.declare_parameter<double>("ball_approach_bottom_center_u_px",c.ball.approach_bottom_center_u_px);
@@ -197,6 +198,7 @@ inline void ReadMissionParameters(const rclcpp::Node& node,
     return value;
   };
   c.ball.down_search_inter_action_hold_sec=search_hold("ball_down_search_inter_action_hold_sec");
+  c.ball.fine_pose_pre_hold_sec=search_hold("ball_fine_pose_pre_hold_sec");
   c.hurdle.down_search_inter_action_hold_sec=search_hold("hurdle_down_search_inter_action_hold_sec");
   const double contact_hold=node.get_parameter("hurdle_contact_inter_action_hold_sec").as_double();
   if (!std::isfinite(contact_hold) || contact_hold<0.0)
@@ -347,12 +349,14 @@ inline bool ApplyLivePerceptionParameter(const rclcpp::Parameter& p,
   }
 
   if (name=="ball_down_search_inter_action_hold_sec" ||
+      name=="ball_fine_pose_pre_hold_sec" ||
       name=="hurdle_down_search_inter_action_hold_sec") {
     if (p.get_type()!=rclcpp::ParameterType::PARAMETER_DOUBLE ||
         !std::isfinite(p.as_double()) || p.as_double()<0.0)
       throw std::invalid_argument(name+" must be a finite nonnegative double");
     if (name=="ball_down_search_inter_action_hold_sec")
       c.ball.down_search_inter_action_hold_sec=p.as_double();
+    else if (name=="ball_fine_pose_pre_hold_sec") c.ball.fine_pose_pre_hold_sec=p.as_double();
     else c.hurdle.down_search_inter_action_hold_sec=p.as_double();
     return true;
   }
