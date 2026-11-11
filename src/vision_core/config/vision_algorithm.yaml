@@ -170,7 +170,7 @@ vision_algorithm:
         forward_delta_v_px: 42 # Action 3 1회 후 공의 Δy (아래쪽 +)
         backward_delta_u_px: -35 # Action 4
         backward_delta_v_px: -18
-        left_delta_u_px: 40 # Action 5
+        left_delta_u_px: 55 # Action 5
         left_delta_v_px: 15
         right_delta_u_px: -60 # Action 6
         right_delta_v_px: 1 # 방향별 (0,0)은 미측정. 모두 미측정이면 기존 단발/옆걸음 2회 유지.
