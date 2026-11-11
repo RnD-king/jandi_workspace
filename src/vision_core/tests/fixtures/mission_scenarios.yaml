@@ -28,6 +28,8 @@ vision_algorithm:
     right_repetitions: 1
     offset_gain: 0.3
     heading_gain: 0.3
+    finish_offset_gain: 0.3
+    finish_heading_gain: 0.3
     steering_deadband: 0.10
     in_place_turn_score: 10.0 # |라인 점수|가 이 값보다 크면 WALK 제자리 회전 1회 후 재관측
     ready_lead_sec: 0.25

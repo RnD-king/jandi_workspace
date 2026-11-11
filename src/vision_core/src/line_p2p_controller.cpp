@@ -16,11 +16,12 @@ double Clamp(double value, double low, double high) {
 LineP2pController::LineP2pController(const LineP2pConfig &config)
     : config_(config) {}
 
-CruiseDecision LineP2pController::Compute(const LineGuide &guide) const {
+CruiseDecision LineP2pController::Compute(const LineGuide &guide, bool finish_course) const {
   const bool valid = guide.valid && std::isfinite(guide.offset) &&
                      std::isfinite(guide.heading_rad);
-  const double score = config_.offset_gain * guide.offset +
-                       config_.heading_gain * guide.heading_rad;
+  const double offset_gain = finish_course ? config_.finish_offset_gain : config_.offset_gain;
+  const double heading_gain = finish_course ? config_.finish_heading_gain : config_.heading_gain;
+  const double score = offset_gain * guide.offset + heading_gain * guide.heading_rad;
   return SelectCruiseDecision(true, valid, score,
                               config_.steering_deadband);
 }

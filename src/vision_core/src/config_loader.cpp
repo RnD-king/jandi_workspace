@@ -356,6 +356,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
 
   Nonnegative(c.line_p2p.offset_gain, "line_p2p.offset_gain");
   Nonnegative(c.line_p2p.heading_gain, "line_p2p.heading_gain");
+  Nonnegative(c.line_p2p.finish_offset_gain, "line_p2p.finish_offset_gain");
+  Nonnegative(c.line_p2p.finish_heading_gain, "line_p2p.finish_heading_gain");
   Nonnegative(c.line_p2p.steering_deadband, "line_p2p.steering_deadband");
   Positive(c.line_p2p.in_place_turn_score,"line_p2p.in_place_turn_score");
   if (c.line_p2p.in_place_turn_score <= c.line_p2p.steering_deadband)
@@ -754,6 +756,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     Assign(lp,"right_unit_action",c.line_p2p.right_unit_action);
   Assign(lp, "offset_gain", c.line_p2p.offset_gain);
   Assign(lp, "heading_gain", c.line_p2p.heading_gain);
+  Assign(lp, "finish_offset_gain", c.line_p2p.finish_offset_gain);
+  Assign(lp, "finish_heading_gain", c.line_p2p.finish_heading_gain);
   Assign(lp, "steering_deadband", c.line_p2p.steering_deadband);
   Assign(lp,"in_place_turn_score",c.line_p2p.in_place_turn_score);
   Assign(lp, "ready_lead_sec", c.line_p2p.ready_lead_sec);

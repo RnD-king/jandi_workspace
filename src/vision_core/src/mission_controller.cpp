@@ -102,8 +102,8 @@ Features MissionController::ComputeLineFeaturesForFrame(
 }
 
 ActionRequest MissionController::CruiseAction(const LineGuide &guide,
-                                              bool queue_eligible) {
-  const CruiseDecision decision = SteeringDecision(guide);
+                                              bool queue_eligible, bool finish_course) {
+  const CruiseDecision decision = SteeringDecision(guide, finish_course);
   // Remember the signed decision, including straight/deadband and exact zero.
   // Never replace it with an invalid frame or the sparse-center recovery hint.
   // Virtual object paths must not replace the last actual LINE direction:
@@ -111,8 +111,8 @@ ActionRequest MissionController::CruiseAction(const LineGuide &guide,
   if (decision.direction != CruiseDirection::kNone && continuous_.mission==MissionType::kNone)
     last_line_score_ = decision.error;
   MissionAction action = MissionAction::kNone;
-  const bool virtual_approach = continuous_.mission == MissionType::kBall ||
-      continuous_.mission == MissionType::kGoal;
+  const bool virtual_approach = !finish_course &&
+      (continuous_.mission == MissionType::kBall || continuous_.mission == MissionType::kGoal);
   const double turn_threshold = virtual_approach
       ? config_.object_approach.in_place_turn_deg : config_.line_p2p.in_place_turn_score;
   if (decision.direction != CruiseDirection::kNone &&
@@ -143,10 +143,10 @@ ActionRequest MissionController::CruiseAction(const LineGuide &guide,
                              : ActionRequest{};
 }
 
-CruiseDecision MissionController::SteeringDecision(const LineGuide &guide) const {
-  if (continuous_.mission != MissionType::kBall &&
-      continuous_.mission != MissionType::kGoal)
-    return line_p2p_controller_.Compute(guide);
+CruiseDecision MissionController::SteeringDecision(const LineGuide &guide, bool finish_course) const {
+  if (finish_course || (continuous_.mission != MissionType::kBall &&
+      continuous_.mission != MissionType::kGoal))
+    return line_p2p_controller_.Compute(guide, finish_course);
   const bool valid = guide.valid && std::isfinite(guide.offset) &&
       std::isfinite(guide.heading_rad);
   return SelectCruiseDecision(true, valid,
@@ -217,8 +217,8 @@ ActionRequest MissionController::ComputeLineAction(
       line_state_=LineState::kNormal;
       return LineLocomotion(MissionAction::kStepForwardFour,true);
     }
-    // Reuse ordinary score steering, its WALK turn assets and turn budget.
-    auto request=CruiseAction(guide,true);
+    // Finish gains share the ordinary WALK turn assets, thresholds and turn budget.
+    auto request=CruiseAction(guide,true,true);
     if (line_state_==LineState::kFinalHold) {
       finish_line_straight_only_=true;
       line_state_=LineState::kNormal;

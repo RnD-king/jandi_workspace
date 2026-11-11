@@ -574,8 +574,9 @@ private:
                                   bool action_done,
                                   bool *reference_valid,
                                   bool append_stability = true);
-  ActionRequest CruiseAction(const LineGuide &guide, bool queue_eligible);
-  CruiseDecision SteeringDecision(const LineGuide &guide) const;
+  ActionRequest CruiseAction(const LineGuide &guide, bool queue_eligible,
+                             bool finish_course = false);
+  CruiseDecision SteeringDecision(const LineGuide &guide, bool finish_course = false) const;
   void BeginObservation(LineState state, double now_sec);
   void AddObservation(const LineGuide &guide);
   std::optional<LineGuide> FinishObservation() const;

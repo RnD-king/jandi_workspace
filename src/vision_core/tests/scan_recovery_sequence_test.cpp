@@ -30,6 +30,7 @@
 
 
 using namespace vision_core;
+using LineState = MissionController::LineState;
 namespace {
 void Check(bool ok,const char* message) { if(!ok) throw std::runtime_error(message); }
 MissionControllerConfig Config() {
