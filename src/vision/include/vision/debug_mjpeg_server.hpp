@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <opencv2/core.hpp>
 
 namespace vision {
@@ -26,7 +27,8 @@ public:
   // Port 0 is for isolated loopback tests; default runtime port is 8080.
   explicit DebugMjpegServer(std::uint16_t port = 8080,
                             const char *bind_address = "0.0.0.0",
-                            bool interactive = false);
+                            bool interactive = false,
+                            const char *interactive_page = nullptr);
   ~DebugMjpegServer();
   DebugMjpegServer(const DebugMjpegServer &) = delete;
   DebugMjpegServer &operator=(const DebugMjpegServer &) = delete;

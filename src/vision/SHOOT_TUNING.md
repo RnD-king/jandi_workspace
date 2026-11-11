@@ -2,6 +2,68 @@
 
 # shoot_tuning_node
 
+## Jetson / PC의 브라우저 GUI
+
+두 노드 모두 기본 HTTP ON / 로컬 창 OFF다. 기존 Qt GUI 전체를 브라우저에서
+조작한다. 같은 장비에서는 두 노드 중 하나만 실행한다.
+
+```bash
+# 원하는 버전 환경을 선택한 뒤 하나만 실행한다.
+jandi_main
+# 또는 jandi_fast
+ros2 run vision shoot_tuning_node
+# 또는 ros2 run vision goal_shot_preview_node
+```
+
+Jetson: `http://192.168.0.133:8080`, PC: `http://localhost:8080`.
+노드 실행 전에 RealSense와 실제 동작용 `forward_walk main_node`를 별도로 준비한다.
+기존처럼 실행기 연결 후 슈팅 기본자세를 한 번 자동 요청하며 실제 DONE을 기다린다.
+
+- **영상 클릭**: 실시간/계산 프레임 탭에서 클릭한 브라우저 화면의 RGB-D를 사용한다.
+  최신 프레임으로 바꿔 측정하지 않는다. 결과를 쓰려면 **클릭 결과를 계산 결과로 사용**을 누른다.
+- **좌표 직접 입력**: X/Y 숫자 칸을 클릭하고 Ctrl+A → 숫자 입력 → Enter.
+  또는 숫자를 붙여넣는다(24자 이내). 입력 후 **입력 좌표를 계산 결과로 사용**을 누른다.
+  입력 대상은 카메라 기준 골대 림 중심이며 단위 m, X는 오른쪽, Y는 전방이다.
+- **계산하기**: 브라우저에 표시된 실시간 RGB-D로 계산하여 저장한다. 오래된 영상이나
+  파라미터 변경 전 영상은 실패로 표시하며 다른 최신 영상으로 몰래 대체하지 않는다.
+- **파라미터**: 오른쪽 숫자 칸을 편집하고 Enter로 반영한다. GUI 안의 스크롤 휠과
+  스크롤바를 사용할 수 있다. 실제 동작 중 파라미터 편집은 기존처럼 잠긴다.
+- `shoot_tuning_node`: **슛**은 허리 0° 단발 투척. **계산된 값에서 슛**은 저장 좌표로
+  생산 코어가 판단한 투척 또는 미세 보행 한 동작을 실행한다.
+- `goal_shot_preview_node`: 저장 좌표로 **PREVIEW — 회전각 계산** 후
+  **COMMIT — 실제 투척**을 누른다. PREVIEW는 모터 명령을 보내지 않는다.
+- 투척 후 실제 DONE을 받은 뒤 **기본자세/슈팅 기본자세 준비**로 다음 시험을 준비한다.
+
+수동 입력/클릭으로 저장한 좌표를 쓰는 경우 브라우저의 PREVIEW 버튼을 사용한다.
+기존 `/goal_shot_preview_node/preview` 서비스는 새 카메라 관측을 자동 계산하므로
+수동 저장 좌표를 새 인식 결과로 교체한다. 서비스 동작은 변경하지 않았다.
+
+브라우저 입력은 노드의 Qt/ROS 스레드에서 기존 위젯에 전달한다. 오래된 화면,
+이미 사용한 버튼 화면, 좌표/파라미터/동작 상태가 달라진 화면의 입력은 버린다.
+연결이 끊겨도 버튼 요청을 자동 재전송하지 않는다. ACK/READY/DONE과 슛 승인
+조건은 기존 코드를 그대로 사용한다. 정지 영상과 입력 결과만 보고 접수된 모션이
+취소되었다고 판단하지 않는다.
+
+PC의 별도 로컬 GUI를 사용하려면:
+
+```bash
+ros2 run vision shoot_tuning_node --ros-args \
+  -p show_debug_view:=true -p stream_debug_view:=false
+```
+
+Qt offscreen 플러그인이 있는 SSH 환경에서는 DISPLAY 없이도 브라우저 GUI가
+작동한다. 영상이 없어도 GUI와 직접 좌표 입력은 표시되며 자동 인식 계산에는
+기존 RGB/Depth/CameraInfo가 필요하다. 엔진 로딩 조건은 기존과 같다.
+
+카메라/모터 없이 사용자가 실행할 GUI·HTTP 회귀 검사:
+
+```bash
+ctest --test-dir "$jandi_test_release/build/ros/vision" \
+  -R 'vision_(qt_web_view|debug_mjpeg)_test' --output-on-failure
+```
+
+이번 작업에서는 빌드·설치·테스트 실행·Jetson 접속·GitHub 업로드를 수행하지 않았다.
+
 ## 전용 PREVIEW / COMMIT: goal_shot_preview_node
 
 기존 `shoot_tuning_node`와 별도로 빌드되는 시험 실행 파일이다.

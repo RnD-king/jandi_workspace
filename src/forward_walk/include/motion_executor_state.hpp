@@ -292,7 +292,7 @@ public:
         point_scan_=observation_timeout_sec>0;
         single_point_scan_=point_scan_ && single_point_scan;
         observation_timeout_sec_=observation_timeout_sec;
-        point_index_=left ? 0 : 1;
+        point_index_=0;scan_first_sign_=left ? 1 : -1;
         scan_amplitude_=std::abs(proposed-scan_origin_.yaw);
         if(point_scan_ && (scan_origin_.yaw-scan_amplitude_<0 ||
                           !std::isfinite(observation_timeout_sec) || observation_timeout_sec<hold_sec))
@@ -321,7 +321,7 @@ public:
             if(scan_phase_!=ScanPhase::Dwell && scan_phase_!=ScanPhase::Paused) return false;
             if(single_point_scan_) return ReturnScan(now); // CURVE: one verified stop.
             if(++point_index_>2) { scan_phase_=ScanPhase::Verify; return true; }
-            const CameraPose next{point_index_==1 ? scan_origin_.yaw-scan_amplitude_ :
+            const CameraPose next{point_index_==1 ? scan_origin_.yaw-scan_first_sign_*scan_amplitude_ :
                                                      scan_origin_.yaw,scan_origin_.pitch};
             const double distance=std::abs(double(next.yaw-current_.yaw));
             scan_phase_=ScanPhase::Outbound;
@@ -462,7 +462,7 @@ private:
     }
     ScanPhase scan_phase_{ScanPhase::None};
     bool point_scan_{false}, single_point_scan_{false};
-    int point_index_{0},scan_amplitude_{0};
+    int point_index_{0},scan_amplitude_{0},scan_first_sign_{1};
     uint32_t scan_stop_id_{0};
     double observation_timeout_sec_{0};
     Clock::time_point observation_until_{};

@@ -1932,6 +1932,12 @@ private:
     RCLCPP_DEBUG(get_logger(), "[IMU] snapshot roll=%.5f pitch=%.5f | imu_ready=%d", roll, pitch,
                  imu_ready_snapshot ? 1 : 0);
 
+    // An automatic pre-PICK verification must never vote the same RGB frame twice.
+    const double capture_sec=StampSeconds(msg->header);
+    if(last_debug_result_.mission.ball.pickup_verifying) {
+      if(!std::isfinite(capture_sec) || capture_sec<=last_pickup_verification_capture_sec_) return;
+      last_pickup_verification_capture_sec_=capture_sec;
+    }
     // 3) YOLO 추론
     std::vector<Detection> dets;
 
@@ -2580,6 +2586,7 @@ private:
   size_t imu_count_{0};
   size_t action_pub_count_{0};
   double last_img_stamp_sec_{0.0};
+  double last_pickup_verification_capture_sec_{0.0};
 
   // ---- PERF 오버레이(1초 갱신) ----
   rclcpp::Time last_report_time_{0, 0, RCL_ROS_TIME};

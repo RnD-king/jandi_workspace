@@ -342,18 +342,8 @@ ActionRequest MissionController::ComputeLineAction(
   if (line_state_ == LineState::kRecoveryHeadScan)
     return {}; // Head scan and its body realignment are owned by StepPlannedLine.
 
-  if (line_state_ == LineState::kRecoveryForward) {
-    if (action_active) return {};
-    if (guide.valid && std::isfinite(guide.offset) && std::isfinite(guide.heading_rad)) {
-      line_state_ = LineState::kNormal;
-      line_forward_recovery_issued_ = line_visible_recovery_turns_ =
-          line_last_score_recovery_turns_ = 0;
-      line_forward_recovery_pending_ = false;
-      line_head_search_ = {};
-      return CruiseAction(guide, true);
-    }
-    return {}; // No movement on a failed READY; wait for physical DONE + 1s.
-  }
+  if (line_state_ == LineState::kRecoveryForward)
+    return {}; // Every recovery walk drains DONE before its fresh one-second observation.
 
   if (line_state_ == LineState::kRecoveryTurn) {
     if (action_done) {
@@ -397,6 +387,7 @@ ActionRequest MissionController::ComputeLineAction(
       line_forward_recovery_pending_ = false;
       line_head_search_ = {};
       line_no_evidence_observations_ = 0;
+      line_recovery_memory_.budget=-1;line_recovery_memory_.frozen.reset();line_recovery_memory_.frozen_left.reset();
       return CruiseAction(*observed, true);
     }
     // Sparse hints are NOT admitted to the normal LINE 10/5 accumulator.
@@ -413,46 +404,45 @@ ActionRequest MissionController::ComputeLineAction(
     });
     centers.resize(std::min(centers.size(),static_cast<std::size_t>(
         std::min(8,std::max(1,config_.line_features.max_centers)))));
-    double mean_u=0.0;
-    for (const auto &p:centers) mean_u+=p.u;
-    if (!centers.empty()) mean_u/=centers.size();
-
-    const auto sparse_score=[&]() {
-      FeatureConfig sparse=config_.line_features;
-      sparse.ransac_enabled=false;
-      sparse.guide_min_points=3;
-      const auto hint=ComputeLineFeatures(centers,input.image_width,
-                                          input.image_height,sparse,3).guide;
-      return hint.valid
-          ? config_.line_recovery.offset_gain*hint.offset +
-            config_.line_recovery.heading_gain*hint.heading_rad
-          : 0.0; // Degenerate three-point fit: fixed RIGHT fallback.
+    auto &memory=line_recovery_memory_;
+    const int observed_budget=centers.size()>=3 ? config_.line_recovery.forward_max_turns :
+        centers.size()==2 ? 1 : 0;
+    if(memory.budget<0) {
+      memory.budget=observed_budget;
+      memory.frozen=memory.normal;memory.frozen_left=memory.last_left;
+    } else memory.budget=std::min(memory.budget,observed_budget);
+    const auto direction=[&](const LineGuide& hint)->std::optional<bool> {
+      if(!hint.valid || !std::isfinite(hint.offset) || !std::isfinite(hint.heading_rad))
+        return std::nullopt;
+      const double score=config_.line_recovery.offset_gain*hint.offset+
+          config_.line_recovery.heading_gain*hint.heading_rad;
+      if(std::abs(score)>1e-9) return score<0;
+      return memory.frozen_left;
     };
-    if (centers.size() >= 3 &&
-        line_forward_recovery_issued_ < config_.line_recovery.forward_max_turns) {
-      const double score=sparse_score();
+    std::optional<bool> left;
+    if(centers.size()>=3) {
+      FeatureConfig sparse=config_.line_features;
+      sparse.ransac_enabled=false;sparse.guide_min_points=3;
+      left=direction(ComputeLineFeatures(centers,input.image_width,
+          input.image_height,sparse,3).guide);
+    }
+    if(!left && memory.frozen) left=direction(*memory.frozen);
+    if(centers.size()>=2 && left && line_forward_recovery_issued_<memory.budget) {
       line_state_=LineState::kRecoveryForward;
       line_forward_recovery_pending_=true;
-      // No straight deadband and no in-place threshold for sparse recovery.
-      return {score<0 ? MissionAction::kStepForwardLeft :
-                         MissionAction::kStepForwardRight,
+      return {*left ? MissionAction::kStepForwardLeft : MissionAction::kStepForwardRight,
               ActionCategory::kLocomotion,0,true};
     }
-    if (centers.size()>=2 &&
-        line_visible_recovery_turns_<config_.line_recovery.body_max_turns) {
-      line_recovery_left_=centers.size()>=3 ? sparse_score()<0 :
-          mean_u<last_line_image_center_u_;
-      line_state_=LineState::kRecoveryTurn;
-      recovery_turn_issued_=false;
-      return ComputeLineAction(guide,input,false,false,reference_valid,false);
-    }
-    // 0-1 points, or body-turn budget exhausted. Never drive blindly.
-    if (line_head_search_.tried) {
-      line_state_=LineState::kFinalHold;
-      return {};
-    }
+    // 0-1 points, exhausted total budget, or no valid directional memory.
+    if(line_head_search_.tried) { line_state_=LineState::kFinalHold;return {}; }
     line_state_=LineState::kRecoveryHeadScan;
-    line_head_search_.phase=LineHeadSearch::Phase::kPendingLeft;
+    std::optional<double> last_u;
+    if(memory.frozen) last_u=last_line_image_center_u_+
+        memory.frozen->offset*input.image_width*.5;
+    line_head_search_.first_left=ScanFirstLeft(last_u,last_line_image_center_u_,
+        config_.line_recovery.scan_center_half_width_px,memory.frozen_left.value_or(true));
+    line_head_search_.phase=line_head_search_.first_left ?
+        LineHeadSearch::Phase::kPendingLeft : LineHeadSearch::Phase::kPendingRight;
     line_head_search_.tried=true;
     return {};
   }
@@ -477,7 +467,7 @@ void MissionController::BeginLineReacquisition() {
   mission_recovery_verifying_ = false;
   mission_recovery_qualified_ = false;
   mission_recovery_hits_.clear();
-  last_line_score_.reset();
+  last_line_score_.reset();line_recovery_memory_={};
   actual_line_stability_history_.clear();
   line_recovery_uses_visible_centers_ = line_recovery_left_ = false;
   line_visible_recovery_turns_ = line_last_score_recovery_turns_ = 0;
@@ -536,7 +526,7 @@ void MissionController::FinishMission() {
     mission_finish_pending_ = true;
     return;
   }
-  last_line_score_.reset();recovering_approach_.reset();
+  last_line_score_.reset();line_recovery_memory_={};recovering_approach_.reset();
   actual_line_stability_history_.clear();
   if (active_mission_ == MissionType::kBall && has_ball_ &&
       config_.enable_goal) {
@@ -2032,7 +2022,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       (active_mission_==MissionType::kGoal &&
        (goal_result_.mode==GoalMode::kCoarseAdjust || goal_result_.mode==GoalMode::kWaitFinePose ||
         goal_result_.mode==GoalMode::kFineAdjust)))
-    last_line_score_.reset();
+    last_line_score_.reset();line_recovery_memory_={};
     actual_line_stability_history_.clear();
   ActionRequest request;
   CameraRequest camera_request = CameraRequest::kNone;
@@ -2262,6 +2252,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 
 void MissionController::PopulateDiagnostics(MissionFrameResult &output,
                                             double now) const {
+  output.ball.pickup_verifying=ball_controller_.PickupVerificationActive();
   output.goal.shoot_verifying=goal_controller_.ShootVerificationActive();
   if (output.goal.shoot_verifying) {
     output.post_motion_observing=true;
@@ -2272,7 +2263,8 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
   }
   output.stationary_scan_observing=
       goal_head_search_.phase==GoalHeadSearch::Phase::kReobserve ||
-      line_head_search_.phase==LineHeadSearch::Phase::kReobserve;
+      line_head_search_.phase==LineHeadSearch::Phase::kReobserve ||
+      curve_.phase==CurveSearchState::Phase::kBodyObserve;
   output.course_curve_index=course_curve_index_;
   output.curve_search_phase=static_cast<int>(curve_.phase);
   output.curve_confirmations=curve_.confirmations;
@@ -3058,7 +3050,8 @@ bool MissionController::NeedsStationaryObservation() const {
   return (active_mission_ == MissionType::kBall &&
           (ball_result_.mode == BallMode::kBallRecoveryDown ||
            ball_result_.mode == BallMode::kBallRecoveryForward ||
-           ball_result_.mode == BallMode::kForwardRecoveryObserve)) ||
+           ball_result_.mode == BallMode::kForwardRecoveryObserve ||
+           ball_controller_.PickupVerificationActive())) ||
          (active_mission_ == MissionType::kHurdle &&
           (hurdle_result_.mode == HurdleMode::kRecoveryDown ||
            hurdle_result_.mode == HurdleMode::kRecoveryForward ||
@@ -3459,7 +3452,8 @@ void MissionController::Reset(bool preserve_action_ids) {
   active_mission_ = MissionType::kLine;
   has_ball_ = config_.initial_has_ball;
   line_state_ = LineState::kNormal;
-  last_line_score_.reset();
+  last_ball_scan_u_.reset();last_goal_scan_u_.reset();
+  last_line_score_.reset();line_recovery_memory_={};
   actual_line_stability_history_.clear();
   line_recovery_uses_visible_centers_ = line_recovery_left_ = false;
   line_observation_active_ = false;

@@ -60,6 +60,7 @@ struct DebugMjpegServer::Impl {
   cv::Mat pending;
   std::uint64_t pending_id{};
   bool interactive{};
+  std::string interactive_page;
   std::mutex input_mutex;
   std::deque<Input> inputs;
   std::shared_ptr<const Packet> latest;
@@ -77,8 +78,9 @@ struct DebugMjpegServer::Impl {
     Clock::time_point accepted{Clock::now()}, send_started{};
   };
 
-  Impl(std::uint16_t requested_port, const char *address, bool accept_input)
-      : interactive(accept_input) {
+  Impl(std::uint16_t requested_port, const char *address, bool accept_input,
+       const char *page)
+      : interactive(accept_input), interactive_page(page ? page : kInteractiveDebugPage) {
     try {
       listener = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
       if (listener < 0) Fail("socket");
@@ -291,7 +293,7 @@ struct DebugMjpegServer::Impl {
     } else {
       client.close_after_send = true;
       if (line == "GET / HTTP/1.1" || line == "GET / HTTP/1.0") {
-        if (interactive) Queue(client, Response("text/html; charset=utf-8", kInteractiveDebugPage));
+        if (interactive) Queue(client, Response("text/html; charset=utf-8", interactive_page));
         else Queue(client, Response("text/html; charset=utf-8",
             "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
             "<title>Vision debug</title><style>body{margin:0;background:#111}"
@@ -401,8 +403,9 @@ struct DebugMjpegServer::Impl {
   }
 };
 
-DebugMjpegServer::DebugMjpegServer(std::uint16_t port, const char *address, bool interactive)
-    : impl_(std::make_unique<Impl>(port, address, interactive)) {}
+DebugMjpegServer::DebugMjpegServer(std::uint16_t port, const char *address, bool interactive,
+                                 const char *interactive_page)
+    : impl_(std::make_unique<Impl>(port, address, interactive, interactive_page)) {}
 DebugMjpegServer::~DebugMjpegServer() = default;
 bool DebugMjpegServer::RequestFrame() {
   if (!impl_->running || impl_->subscribers == 0) return false;

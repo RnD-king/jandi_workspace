@@ -189,7 +189,7 @@ class DepthViewer(Node):
         colorize(np.zeros((1, 1), np.float32), self.minimum, self.maximum)
         self.local = self.declare_parameter('show_debug_view', False).value
         streaming = self.declare_parameter('stream_debug_view', True).value
-        port = self.declare_parameter('stream_debug_port', 8081).value
+        port = self.declare_parameter('stream_debug_port', 8080).value
         if not self.topic or not self.camera_node.startswith('/') or not 1 <= port <= 65535:
             raise ValueError('invalid topic, absolute camera node, or port')
         if self.local and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):

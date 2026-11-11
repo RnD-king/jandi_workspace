@@ -156,6 +156,7 @@ vision_algorithm:
 
       # DOWN 1걸음 탐색
       down_search_min_hits: 3 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
+      pickup_verification_sec: 1.0 # PICK 후보 이후 새 안정 관측으로 재검증
       fine_pose_pre_hold_sec: 0.5 # 공 발견 후 2번 미세보행 자세 전환 직전 정지 대기
       down_search_max_steps: 10 # DOWN 탐색 최대 전진 동작 횟수
       down_search_inter_action_hold_sec: 0.3 # BALL DOWN 미검출 시 다음 10번 보행 전 대기; 발견 시 생략
@@ -262,7 +263,7 @@ vision_algorithm:
       fine_line_turn_yaw_deg: 15 # 7/8번 회전 1회 요청각 (도)
       fine_line_measured_turn_deg: 0.0 # 방향별 값이 0일 때 쓰는 공통 호환값. 세 값 모두 0이면 단발 관측
       fine_line_measured_left_turn_deg: 11.0 # Action 7: 1회 H 변화량의 크기. 0이면 공통 실측값 사용
-      fine_line_measured_right_turn_deg: 8.0 # Action 8: 1회 H 변화량의 크기. 실행 요청각 15도와 별개
+      fine_line_measured_right_turn_deg: 11.0 # Action 8: 1회 H 변화량의 크기. 실행 요청각 15도와 별개
       fine_line_measured_side_px: 60 # 1회 실제 옆걸음에 따른 O 변화량(px). 0: 기존 단발 관측 유지
       fine_line_batch_max_repetitions: 3 # 하나의 O/H 관측에서 회전과 횡이동 각각 최대 연속 3회
       fine_line_post_turn_hold_sec: 0.3 # 연속 회전의 마지막 DONE 이후 횡이동 전 대기 (재관측은 마지막에만)
@@ -393,6 +394,10 @@ vision_algorithm:
 
   # COMMON: Depth 표본 → 객체 연결 → 명령 → 미션 공통 동작
   common:
+    scan_correction:
+      measured_turn_deg: 12.0 # 계산용 실측값. 실행 요청 15도는 유지.
+      near_angle_deg: 30.0 # 6도 이내 0회, 30도 이하 2회, 초과 3회.
+      max_attempts: 3 # 발견 후 재관측 실패도 같은 탐색 횟수에 포함.
     camera:
       ball_view_pitch_tick: 1850 # ID22, yaw always follows DOWN  // 허들 2013 // 공 1850
     depth_roi_size_px: 5 # 공·허들 BBox 중심 Depth 표본의 한 변 길이 (px)
