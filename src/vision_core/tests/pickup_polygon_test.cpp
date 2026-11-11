@@ -45,8 +45,13 @@ MissionAction FineAt(const BallConfig& config,Point2 point) {
   controller.StartTestExecute();
   controller.UseVerifiedObservation(Target(point.u,point.v),
                                      std::deque<bool>(10,true),640,480);
-  const auto result=controller.Compute({},640,480,0,
+  auto result=controller.Compute({},640,480,0,
       {CameraMode::kBallView,true},{},false);
+  if(result.pickup_verifying) {
+    for(int i=1;i<=10;++i)
+      result=controller.Compute(Target(point.u,point.v),640,480,.1*i,
+          {CameraMode::kBallView,true},{},false);
+  }
   assert(result.mode==BallMode::kFineAdjustForPickup);
   assert(controller.FineMotionRepetitions()==0);
   return result.action.action;

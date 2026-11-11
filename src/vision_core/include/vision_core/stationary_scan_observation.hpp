@@ -10,10 +10,12 @@ class StationaryScanObservation {
 public:
   enum class Result { kWaiting, kEmpty, kRejected, kConfirmed };
   void Reset() { *this = {}; }
+  void Begin(std::uint64_t stop,double now) { Reset();stop_=stop;started_=now; }
   Result Observe(std::uint64_t stop, bool fresh, double now, bool candidate,
                  double dwell, double timeout, int window, int required,
                  std::optional<double> u = std::nullopt,
-                 std::optional<double> stationary_since = std::nullopt) {
+                 std::optional<double> stationary_since = std::nullopt,
+                 std::optional<double> capture = std::nullopt) {
     if (!stop || !std::isfinite(now)) return Result::kWaiting;
     if (stop_ != stop) {
       Reset(); stop_=stop;
@@ -24,7 +26,9 @@ public:
     // A late frame must not retroactively succeed after the deadline.
     if (now-started_>timeout+1e-9)
       return result_=hits_==0 ? Result::kEmpty : Result::kRejected;
-    if (fresh && now>last_sample_ && frames_<window) {
+    if (fresh && now>last_sample_ && frames_<window &&
+        (!capture || (std::isfinite(*capture) && *capture>last_capture_))) {
+      if(capture) last_capture_=*capture;
       last_sample_=now; ++frames_;
       if (candidate) {
         ++hits_;
@@ -44,7 +48,7 @@ public:
   }
 private:
   std::uint64_t stop_{0};
-  double started_{0}, last_sample_{-1}, sum_u_{0};
+  double started_{0}, last_sample_{-1}, last_capture_{-1}, sum_u_{0};
   int frames_{0},hits_{0},coordinate_samples_{0};
   Result result_{Result::kWaiting};
 };

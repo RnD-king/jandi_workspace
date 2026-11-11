@@ -342,8 +342,12 @@ ActionRequest MissionController::ComputeLineAction(
   if (line_state_ == LineState::kRecoveryHeadScan)
     return {}; // Head scan and its body realignment are owned by StepPlannedLine.
 
-  if (line_state_ == LineState::kRecoveryForward)
-    return {}; // Every recovery walk drains DONE before its fresh one-second observation.
+  if (line_state_ == LineState::kRecoveryForward) {
+    if(line_forward_recovery_pending_ && !action_active)
+      return {line_recovery_left_ ? MissionAction::kStepForwardLeft : MissionAction::kStepForwardRight,
+              ActionCategory::kLocomotion,0,true};
+    return {}; // Every issued recovery walk drains DONE before its fresh observation.
+  }
 
   if (line_state_ == LineState::kRecoveryTurn) {
     if (action_done) {
@@ -388,6 +392,12 @@ ActionRequest MissionController::ComputeLineAction(
       line_head_search_ = {};
       line_no_evidence_observations_ = 0;
       line_recovery_memory_.budget=-1;line_recovery_memory_.frozen.reset();line_recovery_memory_.frozen_left.reset();
+      if(continuous_.mission==MissionType::kNone) {
+        line_recovery_memory_.normal=*observed;
+        const auto dir=line_p2p_controller_.Compute(*observed).direction;
+        if(dir==CruiseDirection::kLeft) line_recovery_memory_.last_left=true;
+        else if(dir==CruiseDirection::kRight) line_recovery_memory_.last_left=false;
+      }
       return CruiseAction(*observed, true);
     }
     // Sparse hints are NOT admitted to the normal LINE 10/5 accumulator.
@@ -416,6 +426,7 @@ ActionRequest MissionController::ComputeLineAction(
         return std::nullopt;
       const double score=config_.line_recovery.offset_gain*hint.offset+
           config_.line_recovery.heading_gain*hint.heading_rad;
+      if(!std::isfinite(score)) return std::nullopt;
       if(std::abs(score)>1e-9) return score<0;
       return memory.frozen_left;
     };
@@ -429,6 +440,7 @@ ActionRequest MissionController::ComputeLineAction(
     if(!left && memory.frozen) left=direction(*memory.frozen);
     if(centers.size()>=2 && left && line_forward_recovery_issued_<memory.budget) {
       line_state_=LineState::kRecoveryForward;
+      line_recovery_left_=*left;
       line_forward_recovery_pending_=true;
       return {*left ? MissionAction::kStepForwardLeft : MissionAction::kStepForwardRight,
               ActionCategory::kLocomotion,0,true};
@@ -522,6 +534,8 @@ void MissionController::EnterMission(MissionType mission) {
 }
 
 void MissionController::FinishMission() {
+  if(active_mission_==MissionType::kBall && has_ball_) last_ball_scan_u_.reset();
+  if(active_mission_==MissionType::kGoal && goal_shot_done_) last_goal_scan_u_.reset();
   if (foot_pose_ != FootPose::kWalk) {
     mission_finish_pending_ = true;
     return;
@@ -2021,9 +2035,10 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         hurdle_result_.mode==HurdleMode::kFineAdjust)) ||
       (active_mission_==MissionType::kGoal &&
        (goal_result_.mode==GoalMode::kCoarseAdjust || goal_result_.mode==GoalMode::kWaitFinePose ||
-        goal_result_.mode==GoalMode::kFineAdjust)))
+        goal_result_.mode==GoalMode::kFineAdjust))) {
     last_line_score_.reset();line_recovery_memory_={};
-    actual_line_stability_history_.clear();
+  }
+  actual_line_stability_history_.clear();
   ActionRequest request;
   CameraRequest camera_request = CameraRequest::kNone;
   int phase = 0;
@@ -2148,6 +2163,15 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   output.command = command_coordinator_.Compute(
       command_mission, phase, request, camera_request, input.delivery_feedback,
       input.now_sec);
+  if(output.command.command_type==CommandType::kAction &&
+     output.command.mission==MissionType::kBall && output.command.action==MissionAction::kPickBall)
+    ball_controller_.NotifyPickupIssued(output.command.action_id);
+  else if(ball_controller_.PickupRequestPending()) {
+    // A pose/permission/transport gate did not actually emit this candidate.
+    ball_controller_.CancelUnissuedPickup();ball_result_.mode=BallMode::kFineAdjustForPickup;
+    ball_result_.action={};
+  }
+  ball_result_.pickup_attempt_count=ball_controller_.PickupAttemptCount();
   // A recovery turn is pending only after the coordinator actually issues it.
   // A stance transition, observation hold, or command gate must not consume
   // a turn before the executor's matching DONE arrives.
@@ -2253,6 +2277,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 void MissionController::PopulateDiagnostics(MissionFrameResult &output,
                                             double now) const {
   output.ball.pickup_verifying=ball_controller_.PickupVerificationActive();
+  output.ball.pickup_attempt_count=ball_controller_.PickupAttemptCount();
   output.goal.shoot_verifying=goal_controller_.ShootVerificationActive();
   if (output.goal.shoot_verifying) {
     output.post_motion_observing=true;
@@ -3199,6 +3224,7 @@ void MissionController::SetLivePerceptionTuning(
   updated.ball.pickup_v1_px = candidate.ball.pickup_v1_px;
   updated.ball.pickup_v2_px = candidate.ball.pickup_v2_px;
   updated.ball.pickup_polygon = candidate.ball.pickup_polygon;
+  updated.ball.pickup_verification_sec=candidate.ball.pickup_verification_sec;
   updated.ball.pickup_shrink_enabled = candidate.ball.pickup_shrink_enabled;
   updated.ball.pickup_shrink_percent = candidate.ball.pickup_shrink_percent;
   updated.ball.pickup_shrink_max_failures = candidate.ball.pickup_shrink_max_failures;
@@ -3264,6 +3290,7 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   MissionControllerConfig updated = config_;
   updated.line_features.image_center_u = candidate.line_features.image_center_u;
   updated.line_p2p = candidate.line_p2p;
+  updated.scan_correction=candidate.scan_correction;
   updated.transition_settle_sec = candidate.transition_settle_sec;
   updated.walk_inter_action_hold_sec = candidate.walk_inter_action_hold_sec;
   updated.fine_motion_settle_sec = candidate.fine_motion_settle_sec;
@@ -3311,6 +3338,8 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
       decision_line_offset_sum_ += delta * decision_line_valid_count_;
       if (last_ready_line_guide_ && last_ready_line_guide_->valid)
         last_ready_line_guide_->offset += delta;
+      if(line_recovery_memory_.normal) line_recovery_memory_.normal->offset+=delta;
+      if(line_recovery_memory_.frozen) line_recovery_memory_.frozen->offset+=delta;
     }
   }
   config_ = updated;
@@ -3371,6 +3400,8 @@ void MissionController::ClearObservationEvidence() {
   curve_.frame_directions.clear();
   curve_.block_curve_direction=0;
   curve_.observation.Reset();
+  line_head_search_.observation.Reset();line_head_search_.observed_line.reset();
+  goal_head_search_.observation.Reset();goal_head_search_.observed_target.reset();
   approach_evidence_={};
   continuous_.hits.clear();continuous_.pose_hits.clear();continuous_.near_hits.clear();
   continuous_.missing=0;
@@ -3673,6 +3704,7 @@ ControlCommand MissionController::AcceptDeliveryFeedback(
       foot_pose_ = FootPose::kWalk;
   }
   ObserveLineFeedback(feedback, now_sec);
+  AdvanceScanDeadlines(now_sec);
   return command_coordinator_.Compute(active_mission_, 0, {},
                                       CameraRequest::kNone, feedback, now_sec);
 }

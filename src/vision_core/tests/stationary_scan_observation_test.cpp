@@ -1,31 +1,39 @@
 #include "vision_core/stationary_scan_observation.hpp"
+#include <cmath>
 #include <stdexcept>
 using Window=vision_core::StationaryScanObservation;
 using Result=Window::Result;
 void Check(bool value) { if(!value)throw std::runtime_error("stationary scan window contract failed"); }
 int main() {
-  Window w;
-  auto sample=[&](unsigned stop,double now,bool candidate,bool fresh=true) {
-    return w.Observe(stop,fresh,now,candidate,.5,2,10,5);
-  };
-  Check(sample(1,0,false)==Result::kWaiting);
-  Check(sample(1,.49,false)==Result::kWaiting);
-  Check(sample(1,.5,false)==Result::kEmpty);
-  w.Reset();
-  Check(sample(1,0,false)==Result::kWaiting);
-  Check(sample(1,.49,true)==Result::kWaiting);
-  // Movement/old frames and repeated frame times cannot create votes.
-  for(int i=0;i<20;++i)Check(sample(1,.49,true)==Result::kWaiting);
-  Check(sample(1,.50,true,false)==Result::kWaiting);
-  for(int i=1;i<9;++i)
-    Check(sample(1,.49+.067*i,i<5)==Result::kWaiting);
-  Check(sample(1,1.10,false)==Result::kConfirmed); // 5/10, final frame missing.
-  Check(sample(1,1.2,false)==Result::kConfirmed);
-  Check(sample(2,1.3,false)==Result::kWaiting); // New pose starts a fresh window.
-  w.Reset();
-  for(int i=0;i<9;++i)Check(sample(1,.067*i,i<4)==Result::kWaiting);
-  Check(sample(1,.603,false)==Result::kRejected);
-  w.Reset();
-  Check(sample(1,0,true)==Result::kWaiting);
-  Check(sample(1,2.01,false)==Result::kRejected); // Low FPS is bounded.
+  for(int size:{10,8}) {
+    Window w;const int required=size/2;
+    auto sample=[&](unsigned stop,double now,bool candidate,bool fresh=true,
+                    std::optional<double> capture=std::nullopt) {
+      return w.Observe(stop,fresh,now,candidate,.5,2,size,required,
+                       candidate ? std::optional<double>(100+now) : std::nullopt,
+                       std::nullopt,capture);
+    };
+    // Misses count from arrival; an empty partial window cannot end at .5s.
+    Check(sample(1,0,false)==Result::kWaiting);
+    Check(sample(1,.5,false)==Result::kWaiting);
+    Check(sample(1,2,false,false)==Result::kEmpty); // No fresh frames still times out.
+    w.Reset();
+    for(int i=0;i<size;++i)
+      Check(sample(1,.02*i,i<required)==Result::kWaiting);
+    Check(sample(1,.49,true,false)==Result::kWaiting);
+    Check(sample(1,.5,true,false)==Result::kConfirmed);
+    Check(w.MeanU() && std::abs(*w.MeanU()-(100+.01*(required-1)))<1e-8);
+    Check(sample(2,.6,false)==Result::kWaiting); // A new stop cannot inherit success.
+    w.Reset();
+    Check(sample(1,0,true,true,100)==Result::kWaiting);
+    for(int i=1;i<20;++i)Check(sample(1,.05*i,true,true,100)==Result::kWaiting);
+    Check(sample(1,2.01,false,false)==Result::kRejected); // Duplicate captures never fill the window.
+    w.Reset();
+    for(int i=0;i<size;++i) {
+      const auto result=sample(1,.08*i,i<required-1);
+      Check(i==size-1 ? result==Result::kRejected : result==Result::kWaiting);
+    }
+    w.Reset();w.Begin(1,10);
+    Check(sample(1,12.01,true)==Result::kEmpty); // Late captures cannot rescue an expired stop.
+  }
 }

@@ -186,6 +186,7 @@ Trial PickAndReturn() {
   t.Commit(); t.Tick(true);
   assert(t.out.ball.mode==BallMode::kFineAdjustForPickup);
   for(int i=0;i<10;++i)t.Tick();
+  for(int i=0;i<10;++i) { t.Tick();assert(t.out.ball.pickup_attempt_count==0); }
   t.Tick(false,old_id); // Old DONE cannot advance a new phase.
   const auto before=t.out.ball.pickup_attempt_count;
   assert(t.Preview().command.action==MissionAction::kPickBall);

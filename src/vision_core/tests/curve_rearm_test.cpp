@@ -65,10 +65,9 @@ int main() {
   for(int attempt=1;attempt<=3;++attempt) {
     d.FailedHeadScan(attempt);
     if(attempt<3) {
-      if(d.out.curve_search_phase!=8)d.Fail("missed head scan should schedule probe walk");
-      d.Tick(); // Book the next LINE probe using saved guide.
-      d.Walk();
-      if(d.out.curve_search_phase!=4)d.Fail("probe DONE should schedule next head scan");
+      if(d.out.curve_search_phase!=3)d.Fail("missed head scan should schedule the next scan without a probe walk");
+      d.Tick();
+      if(d.out.curve_search_phase!=4)d.Fail("retry did not start the next head scan");
     }
   }
   if(d.out.curve_search_phase!=12 || d.out.curve_unlock_blocks!=20 ||

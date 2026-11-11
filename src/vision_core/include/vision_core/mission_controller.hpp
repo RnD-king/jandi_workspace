@@ -592,6 +592,10 @@ private:
 
   MissionFrameResult StepPlannedLine(const MissionFrameInput& input,
                                     std::optional<double> image_center);
+  void RetryLineHeadSearch();
+  void RetryGoalHeadSearch();
+  void RetryCurveHeadSearch();
+  void AdvanceScanDeadlines(double now);
   void ObserveLineFeedback(const CommandDeliveryFeedback& feedback, double now);
   void BeginCandidateObservation(double now);
   void ReleaseCandidate();
@@ -722,6 +726,7 @@ private:
     std::optional<bool> last_found_left;
     StationaryScanObservation observation;
     std::uint64_t align_action_id{0};
+    std::optional<LineGuide> observed_line;
     std::deque<bool> pause_hits, verify_hits;
   } line_head_search_;
   int line_forward_recovery_issued_{0};

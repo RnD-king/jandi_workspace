@@ -486,15 +486,12 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     continuous_.missing=0;continuous_.loss_pending=false;
     goal_rgb_missing_frames_=goal_tracking_unusable_frames_=0;
     approach_evidence_[1]={};
-    // An already-issued camera/body motion is not interrupted. At a settled
-    // post-turn observation, a fresh stable ID releases the obsolete search.
-    if (idle && input.camera_scan.phase==0 &&
-        (goal_head_search_.phase==GoalHeadSearch::Phase::kReobserve ||
-         goal_head_search_.phase==GoalHeadSearch::Phase::kBodyTurn))
-      goal_head_search_={};
+    // Adopt the identity immediately, but never cancel an issued scan/body
+    // correction or bypass its fresh post-turn verification window.
   }
   // The raw-bbox edge guard precedes Depth recovery; far evidence stays in motion.
-  if(goal_view && input.advance_line_fsm && input.raw_backboard_observation_available && has_ball_ &&
+  if(goal_head_search_.phase==GoalHeadSearch::Phase::kIdle &&
+     goal_view && input.advance_line_fsm && input.raw_backboard_observation_available && has_ball_ &&
      !input.backboard_image_out_of_depth_range &&
      !(continuous_.mission==MissionType::kGoal && continuous_.near)) {
     ActionRequest edge_action;
@@ -521,13 +518,6 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     using Phase=GoalHeadSearch::Phase;
     auto &scan=goal_head_search_;
     const auto &sf=input.camera_scan;
-    const auto retry=[&]() {
-      scan.observation.Reset();scan.observed_target.reset();scan.started=false;
-      if(scan.attempts<config_.scan_correction.max_attempts) {
-        scan.first_left=scan.last_found_left.value_or(scan.first_left);
-        scan.phase=scan.first_left ? Phase::kPendingLeft : Phase::kPendingRight;
-      } else { scan.phase=Phase::kIdle;scan.exhausted=true;approach_goal_empty_frames_=0; }
-    };
     if(scan.phase==Phase::kPendingLeft || scan.phase==Phase::kPendingRight) {
       if(idle && input.allow_new_commands && input.allow_new_body_actions &&
          camera.settled && camera.actual_mode==CameraMode::kGoal) {
@@ -546,7 +536,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
             input.now_sec,candidate,config_.goal.head_scan_hold_sec,
             config_.goal.head_scan_observation_timeout_sec,
             config_.goal.head_scan_verify_window,config_.goal.head_scan_verify_hits,
-            input.scan_backboard_u,sf.stationary_since_sec);
+            input.scan_backboard_u,sf.stationary_since_sec,input.frame_capture_sec);
         using Verdict=StationaryScanObservation::Result;
         if(verdict==Verdict::kConfirmed) {
           const auto correction=ObjectScanCorrection(sf.yaw_deg,scan.observation.MeanU(),
@@ -561,7 +551,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       }
       if(sf.finished && scan.started &&
          (scan.phase==Phase::kScanningLeft || scan.phase==Phase::kScanningRight ||
-          scan.phase==Phase::kHoldingLeft || scan.phase==Phase::kHoldingRight)) retry();
+          scan.phase==Phase::kHoldingLeft || scan.phase==Phase::kHoldingRight)) RetryGoalHeadSearch();
     } else if(scan.phase==Phase::kReturnFound) {
       if(sf.finished && camera.settled && camera.actual_mode==CameraMode::kGoal)
         scan.phase=Phase::kBodyTurn;
@@ -572,7 +562,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       }
       if(scan.turns_remaining==0 && !scan.body_action_id && idle) {
         scan.phase=Phase::kReobserve;scan.reobserve_started_sec=input.now_sec;
-        scan.observation.Reset();scan.observed_target.reset();
+        scan.observation.Begin(1,input.now_sec);scan.observed_target.reset();
       } else if(!scan.body_action_id && idle && input.allow_new_commands && input.allow_new_body_actions) {
         result.action={scan.turn_left ? MissionAction::kTurnLeftInPlace :
                                        MissionAction::kStepForwardRightOneHurdle,
@@ -587,7 +577,8 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       if(valid) { scan.observed_target=input.backboard_target;scan.observed_id=input.backboard_track_id; }
       const auto verdict=scan.observation.Observe(1,true,input.now_sec,valid,
           config_.goal.head_scan_hold_sec,config_.goal.head_scan_observation_timeout_sec,
-          config_.goal.stable_window,config_.goal.stable_min_hits);
+          config_.goal.stable_window,config_.goal.stable_min_hits,
+          std::nullopt,std::nullopt,input.frame_capture_sec);
       using Verdict=StationaryScanObservation::Result;
       if(verdict==Verdict::kWaiting)return result;
       if(verdict==Verdict::kConfirmed) {
@@ -602,7 +593,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         scan={};approach_goal_empty_frames_=0;approach_evidence_={};
         return result;
       }
-      retry();return result;
+      RetryGoalHeadSearch();return result;
     }
     if(scan.phase!=Phase::kIdle || !input.backboard_target) return result;
   }
@@ -706,7 +697,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       acquired=true;
       if (i==1) {
         approach_goal_empty_retries_=0;
-        goal_head_search_.used=false; // Re-arm search for a later acquired GOAL loss.
+        goal_head_search_={}; // Re-arm a new episode only after real GOAL acquisition.
       }
       break;
     }
@@ -719,7 +710,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
       if (input.backboard_target) approach_goal_empty_frames_=0;
       else if (++approach_goal_empty_frames_>=config_.goal.lost_frames) {
         if (config_.goal.head_scan_enabled && !goal_head_search_.used) {
-          goal_head_search_.used=true;
+          goal_head_search_={};goal_head_search_.used=true;
           goal_head_search_.phase=GoalHeadSearch::Phase::kPendingLeft;
           return result;
         }
@@ -863,7 +854,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     line_plan_.Abort();
     result.hold=true;
     if (idle && !line_plan_.Outstanding()) {
-      goal_head_search_.used=true;
+      goal_head_search_={};goal_head_search_.used=true;
       goal_head_search_.phase=GoalHeadSearch::Phase::kPendingLeft;
     }
     return result;

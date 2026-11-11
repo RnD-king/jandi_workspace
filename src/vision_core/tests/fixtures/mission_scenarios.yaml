@@ -44,6 +44,7 @@ vision_algorithm:
     # 단독 시험 순서
     test_mission_index: 1
 
+    pickup_verification_sec: 1.0
     fine_pose_pre_hold_sec: 0.0 # Existing timing scenarios; separate hold test exercises 0.5 seconds.
     down_search_max_steps: 10
     down_search_inter_action_hold_sec: 0.0

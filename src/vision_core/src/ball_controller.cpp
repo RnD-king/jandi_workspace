@@ -324,7 +324,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     return result;
   }
   // Ignore all intermediate DOWN/FORWARD camera frames.
-  if(pickup_verification_active_ &&
+  if((pickup_verification_active_ || pickup_verification_complete_) &&
      (feedback.action_active || feedback.action_done || !camera.settled ||
       (camera.actual_mode!=CameraMode::kBallView && camera.actual_mode!=CameraMode::kDown)))
     ClearTracking();
@@ -640,17 +640,17 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       return result;
     if (feedback.action_done && !verified)
       return result;
-    if (lost_count_ >= std::max(1, config_.lost_frames)) {
-      BeginDownRecovery(now_sec);
-      result.mode = mode_;
-      return result;
-    }
     if(pickup_verification_active_ &&
        now_sec+1e-9<pickup_verification_start_sec_+config_.pickup_verification_sec)
       return result;
+    if (lost_count_ >= std::max(1, config_.lost_frames)) {
+      BeginDownRecovery(now_sec);
+      result.mode = mode_;result.pickup_verifying=false;
+      return result;
+    }
     if (!ExecutionObservationReady()) return result;
     result.action = FineAction();
-    if(result.action.action==MissionAction::kPickBall && !pickup_verification_active_) {
+    if(result.action.action==MissionAction::kPickBall && !pickup_verification_active_ && !pickup_verification_complete_) {
       // Start on the real observation path as well as speculative PREVIEW.
       // No PICK command exists until a second, fresh stable window passes.
       ClearTracking();
@@ -658,8 +658,14 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
       result.pickup_verifying=true;result.tracked={};result.action={};
       return result;
     }
+    if(result.action.action==MissionAction::kPickBall && pickup_verification_active_) {
+      // End automatic observation even when manual body admission is false.
+      // PREVIEW can now show a PICK; COMMIT alone consumes the attempt.
+      pickup_verification_active_=false;pickup_verification_complete_=true;
+      result.pickup_verifying=false;
+    }
     if(result.action.action!=MissionAction::kPickBall) {
-      pickup_verification_active_=false;result.pickup_verifying=false;
+      pickup_verification_active_=pickup_verification_complete_=false;result.pickup_verifying=false;
     }
     const auto pickup=EffectivePickupConfig();
     if (result.action.category==ActionCategory::kLocomotion && config_.fine_motion.HasCalibration()) {
@@ -693,9 +699,8 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     } // Uncalibrated lateral corrections execute once before reobservation.
     if (allow_new_body_actions && allow_pickup &&
         result.action.action == MissionAction::kPickBall) {
-      pickup_verification_active_=false;result.pickup_verifying=false;
-      ++pickup_attempt_count_;
-      result.pickup_attempt_count = pickup_attempt_count_;
+      pickup_verification_active_=pickup_verification_complete_=false;result.pickup_verifying=false;
+      pickup_request_issued_=false;
       mode_ = BallMode::kPickupBall;
       result.mode = mode_;
     }
@@ -724,7 +729,7 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
     return result;
   case BallMode::kPickupBall:
     result.action = Mission(MissionAction::kPickBall);
-    if (feedback.action_done) {
+    if (feedback.action_done && pickup_request_issued_) {
       mode_ = BallMode::kVerifyPickupObservation;
       ClearTracking();
       result.mode = mode_;
@@ -1054,10 +1059,11 @@ void BallController::EnterContinuousNear(double now) {
 void BallController::UseVerifiedObservation(
     const std::optional<ObjectTarget>& mean, const std::deque<bool>& hits,
     int width, int height) {
-  const bool verifying=pickup_verification_active_;
+  const bool verifying=pickup_verification_active_, complete=pickup_verification_complete_;
   const double verification_start=pickup_verification_start_sec_;
   ClearTracking();
-  pickup_verification_active_=verifying;pickup_verification_start_sec_=verification_start;
+  pickup_verification_active_=verifying;pickup_verification_complete_=complete;
+  pickup_verification_start_sec_=verification_start;
   UpdateTracker(mean, width, height);
   hit_history_ = hits;
   while (hit_history_.size() > static_cast<std::size_t>(config_.stable_window))
@@ -1071,12 +1077,15 @@ void BallController::UseVerifiedObservation(
 }
 
 void BallController::ClearObservationHistory() {
-  ClearTracking();
+  // Manual PREVIEW replaces coordinates with its fresh observation window.
+  // Retain a completed extra second until movement/identity/geometry revokes it.
+  const bool complete=pickup_verification_complete_;
+  ClearTracking();pickup_verification_complete_=complete;
   stationary_recovery_.DiscardDetections();
 }
 
 void BallController::ClearTracking() {
-  pickup_verification_active_=false;
+  pickup_verification_active_=pickup_verification_complete_=false;
   verified_observation_pending_ = false;
   observation_window_.Clear();
   hit_history_.clear();
@@ -1091,6 +1100,7 @@ void BallController::ClearTracking() {
 
 void BallController::ResetToLine() {
   mode_ = BallMode::kLineFollow;
+  pickup_request_issued_=false;
   entry_recovery_u_.reset();
   entry_recovery_pending_ = false;
   entry_recovery_allowed_ = true;

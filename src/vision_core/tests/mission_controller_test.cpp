@@ -66,7 +66,7 @@ static void TestLineScanReleaseAfterBothDirections() {
   // or separate return-to-center transaction may occur between these stops.
   for(unsigned stop=1;stop<=3;++stop) {
     bool advanced=false;
-    for(int i=0;i<8;++i) {
+    for(int i=0;i<12;++i) {
       auto input=frame();input.camera_feedback={CameraMode::kTransition,false};
       input.camera_scan={1,2,stop==1 ? 45.0 : stop==2 ? -45.0 : 0.0,false,stop,true};
       result=controller.Step(input);
@@ -109,7 +109,7 @@ static void TestLineScanReleaseAfterBothDirections() {
   }
 }
 
-static void TestStationaryLineCenterGate() {
+static void TestStationaryLineVisibleGuide() {
   for(double u : {220.0,420.0,421.0}) {
     auto c=LoadDefaultAlgorithmConfig();
     c.enable_ball=c.enable_goal=c.enable_hurdle=false;c.curve_search.enabled=false;
@@ -131,7 +131,7 @@ static void TestStationaryLineCenterGate() {
     assert(started);
     for(int i=0;i<15;++i)
       assert(tick(1,0,true).command.camera_request!=CameraRequest::kScanReturn);
-    for(int i=0;i<15;++i)
+    for(int i=0;i<3;++i)
       assert(tick(2,1,false).command.camera_request!=CameraRequest::kScanReturn);
     bool found=false,advanced=false;
     for(int i=0;i<15;++i) {
@@ -139,7 +139,7 @@ static void TestStationaryLineCenterGate() {
       found |= result.command.camera_request==CameraRequest::kScanReturn;
       advanced |= result.command.camera_request==CameraRequest::kScanResume;
     }
-    assert(u<=420 ? found && !advanced : !found && advanced);
+    assert(found && !advanced); // A valid off-center guide is also a scan success.
   }
 }
 
@@ -251,7 +251,7 @@ static void TestLiveBallPickupTrapezoidTuning() {
 }
 
 int main() {
-  TestStationaryLineCenterGate();
+  TestStationaryLineVisibleGuide();
   TestLineScanReleaseAfterBothDirections();
   TestLiveBallPickupTrapezoidTuning();
   TestNearBallTurnThenDown();
@@ -354,13 +354,13 @@ int main() {
   }
   assert(line_scan_issued);
 
-  // Three sparse dots: unfiltered O/H score with zero choosing RIGHT, not
-  // the normal 4-point RANSAC guide or straight deadband.
+  // Three sparse dots with valid nonzero O/H use directional recovery;
+  // zero/degenerate fits without memory are covered by scan_recovery_sequence_test.
   controller.Reset();
-  in=Frame(0);in.line_centers.resize(3);r=controller.Step(in);
+  in=Frame(0);in.line_centers.resize(3);ShiftLine(in,500);r=controller.Step(in);
   bool sparse_forward_issued=false;
   for(int i=1;i<=12;++i) {
-    in=Frame(.1*i);in.line_centers.resize(3);
+    in=Frame(.1*i);in.line_centers.resize(3);ShiftLine(in,500);
     r=controller.Step(in);
     // Unit action is 34 or 36 according to this fixture's right_unit_action;
     // the production YAML independently selects 36.
@@ -729,6 +729,10 @@ int main() {
   assert(mr.ball.pickup_attempt_count==0);
   assert(mr.command.action_id==0);
   mi.manual_observation_control=true; mi.allow_new_body_actions=true;
+  // The real controller owns the extra stationary second, not its copy PREVIEW.
+  mi.allow_new_body_actions=false;
+  for(int i=0;i<11;++i) { mi.now_sec+=.1;mr=manual.Step(mi);assert(mr.ball.pickup_attempt_count==0); }
+  mi.allow_new_body_actions=true;
   MissionController speculative_manual(manual);
   const auto preview=speculative_manual.Step(mi);
   assert(preview.command.action==MissionAction::kPickBall);
