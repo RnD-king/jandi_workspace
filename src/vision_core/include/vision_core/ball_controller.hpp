@@ -46,6 +46,7 @@ struct BallConfig {
   double ready_observation_end_weight{3.0};
   double approach_short_v_px{};
   int down_search_max_steps{};
+  double fine_pose_pre_hold_sec{}; // Stationary delay before requesting FINE feet.
   double down_search_inter_action_hold_sec{}; // Real DONE to next DOWN search step.
   double recovery_observation_sec{};
   int recovery_max_observations{};
@@ -264,6 +265,7 @@ private:
   void UpdateTracker(const std::optional<ObjectTarget> &target,
                      int image_width, int image_height);
   ActionRequest FarAction(int image_height) const;
+  ActionRequest FinePoseRequest(double now_sec, bool allow_new_body_actions);
   ActionRequest FineAction() const;
   ActionRequest FineActionAt(Point2 center) const;
   ActionRequest RecoveryAction() const;
@@ -296,6 +298,7 @@ private:
   MissionAction mid_recovery_turn_{MissionAction::kNone};
   bool mid_recovery_turn_pending_{false};
   bool fine_pose_entered_{false};
+  bool fine_pose_requested_{false};
   bool approach_walk_issued_{false};
   MissionAction approach_before_down_action_{MissionAction::kStepForwardTwo};
   MissionAction near_turn_action_{MissionAction::kNone};

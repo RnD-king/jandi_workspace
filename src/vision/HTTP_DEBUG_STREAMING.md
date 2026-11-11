@@ -1,3 +1,5 @@
+> MAIN/FAST 튜닝 HTTP·SSH 실행, 단계 선택 및 서비스 명령은 [TUNING_HTTP_GUIDE.md](TUNING_HTTP_GUIDE.md)를 참고한다.
+
 # HTTP MJPEG debug view
 
 SSH can start the node without HDMI or a graphical session. After building and

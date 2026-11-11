@@ -44,6 +44,7 @@ vision_algorithm:
     # 단독 시험 순서
     test_mission_index: 1
 
+    fine_pose_pre_hold_sec: 0.0 # Existing timing scenarios; separate hold test exercises 0.5 seconds.
     down_search_max_steps: 10
     down_search_inter_action_hold_sec: 0.0
     recovery_observation_sec: 1.0
@@ -179,6 +180,7 @@ vision_algorithm:
     throw_landing_z_m: 0.40
     position_tolerance_m: 0.08
     shoot_yaw_limit_deg: 30.0
+    shoot_verification_sec: 1.0
 
     post_shoot_back_steps: 0
 

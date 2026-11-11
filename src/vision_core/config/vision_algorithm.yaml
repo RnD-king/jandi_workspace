@@ -7,8 +7,8 @@ vision_algorithm:
     detection:
       class_id: 0 # 검출 모델의 클래스 번호
       confidence: 0.60 # LINE 기준값; 실전 노드 YOLO 전체 1차 신뢰도 기본값으로도 사용
-      min_box_width: 1.0 # 사용할 바운딩 박스 최소 가로 크기 (px)
-      min_box_height: 1.0 # 사용할 바운딩 박스 최소 세로 크기 (px)
+      min_box_width: 15.0 # 사용할 바운딩 박스 최소 가로 크기 (px)
+      min_box_height: 15.0 # 사용할 바운딩 박스 최소 세로 크기 (px)
 
     features:
       # 라인 중심점과 기준선
@@ -156,6 +156,7 @@ vision_algorithm:
 
       # DOWN 1걸음 탐색
       down_search_min_hits: 3 # DOWN 1걸음 탐색 종료 검출 횟수 (최근 stable_window 프레임, FINE과 별도)
+      fine_pose_pre_hold_sec: 0.5 # 공 발견 후 2번 미세보행 자세 전환 직전 정지 대기
       down_search_max_steps: 10 # DOWN 탐색 최대 전진 동작 횟수
       down_search_inter_action_hold_sec: 0.3 # BALL DOWN 미검출 시 다음 10번 보행 전 대기; 발견 시 생략
 
@@ -253,7 +254,7 @@ vision_algorithm:
 
       # DOWN 완료부터 LINE O/H 기억; 2번 자세 DONE 후 FINE 정렬에만 사용
       fine_line_reference_u_px: 380.0 # 허들 DOWN 화면의 로봇 기준선
-      fine_line_offset_tolerance_px: 120.0 # |O| 허용 범위 (px)
+      fine_line_offset_tolerance_px: 200.0 # |O| 허용 범위 (px)
       fine_line_heading_tolerance_deg: 10.0 # |H| 허용 범위 (도)
       fine_line_observation_sec: 1.0 # 최초 정렬 판단 및 회전+횡이동 묶음의 최종 DONE 이후 정지 관측 (초)
       fine_line_stable_window: 10
@@ -353,7 +354,7 @@ vision_algorithm:
       auto_approach_center_u_px: 320.0 # GOAL 전용 수직 3구역 중심
       auto_approach_half_width_px: 100.0 # 180~380px 직진, 밖은 좌/우회전전진
       approach_u_deadband_px: 160 # 중앙 세로 구역의 반폭
-      edge_margin_px: 50.0 # GOAL 이미지 경계 보호 구간(px)
+      edge_margin_px: 70.0 # GOAL 이미지 경계 보호 구간(px)
       edge_stable_window: 8 # 원거리 이동 READY / 근거리 정지 관측
       edge_stable_min_hits: 5 # 최근 8프레임 중 같은 쪽 접촉 5회
       approach_short_z_m: 0.87 # GOAL 근거리 진입·FINE 자세 전환 기준 (87cm); FORWARD 뷰에서는 짧은 보행 선택 기준

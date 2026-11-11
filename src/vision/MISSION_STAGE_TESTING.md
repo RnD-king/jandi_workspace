@@ -1,3 +1,5 @@
+> MAIN/FAST 튜닝 HTTP·SSH 실행, 단계 선택 및 서비스 명령은 [TUNING_HTTP_GUIDE.md](TUNING_HTTP_GUIDE.md)를 참고한다.
+
 # 미션별 구간 시험
 
 이 문서는 수동 승인/단계별 시험의 단발 실행 계약을 설명한다. 실전 AUTO는 T/F 선택 없이

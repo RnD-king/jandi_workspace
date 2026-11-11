@@ -1,3 +1,5 @@
+> MAIN/FAST 튜닝 HTTP·SSH 실행, 단계 선택 및 서비스 명령은 [TUNING_HTTP_GUIDE.md](TUNING_HTTP_GUIDE.md)를 참고한다.
+
 # shoot_tuning_node
 
 ## 전용 PREVIEW / COMMIT: goal_shot_preview_node

@@ -183,6 +183,13 @@ ActionRequest BallController::FarAction(int image_height) const {
   return Locomotion(MissionAction::kStepForwardThree);
 }
 
+ActionRequest BallController::FinePoseRequest(double now_sec, bool allow_new_body_actions) {
+  if (now_sec + kEpsilon < state_enter_sec_ + config_.fine_pose_pre_hold_sec)
+    return {};
+  if (allow_new_body_actions) fine_pose_requested_ = true;
+  return Locomotion(MissionAction::kDefaultPoseMode);
+}
+
 ActionRequest BallController::FineAction() const {
   if (!tracked_.visible)
     return {};
@@ -580,8 +587,10 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
         decision==DownSearchWalk::Decision::kWaiting) return result;
     if (decision==DownSearchWalk::Decision::kFound) {
       mode_=BallMode::kWaitFinePose;
+      state_enter_sec_=now_sec;
+      fine_pose_requested_=false;
       result.mode=mode_;
-      result.action=Locomotion(MissionAction::kDefaultPoseMode);
+      result.action=FinePoseRequest(now_sec,allow_new_body_actions);
       return result;
     }
     if (decision==DownSearchWalk::Decision::kExhausted) {
@@ -596,9 +605,21 @@ BallResult BallController::Compute(const std::optional<ObjectTarget> &target,
   case BallMode::kCoarseAdjust: // Reserved phase ID; no DOWN WALK approach remains.
     if (feedback.action_active && !feedback.action_done) return result;
     mode_=BallMode::kWaitFinePose;result.mode=mode_;
-    result.action=Locomotion(MissionAction::kDefaultPoseMode);
+    state_enter_sec_=now_sec;fine_pose_requested_=false;
+    result.action=FinePoseRequest(now_sec,allow_new_body_actions);
     return result;
   case BallMode::kWaitFinePose:
+    if (!fine_pose_requested_) {
+      // Prior walking DONE is not FINE-pose DONE. Keep callbacks running
+      // while the logical mission clock measures the stationary hold.
+      if ((feedback.action_active && !feedback.action_done) ||
+          camera.actual_mode!=CameraMode::kBallView || !camera.settled) {
+        state_enter_sec_=now_sec;
+        return result;
+      }
+      result.action=FinePoseRequest(now_sec,allow_new_body_actions);
+      return result;
+    }
     if (feedback.action_done) {
       mode_ = BallMode::kFineAdjustForPickup;
       fine_pose_entered_ = true;
@@ -1071,6 +1092,7 @@ void BallController::ResetToLine() {
   state_enter_sec_ = 0.0;
   test_camera_pending_ = false;
   fine_pose_entered_ = false;
+  fine_pose_requested_ = false;
   approach_walk_issued_ = false;
   approach_before_down_action_ = MissionAction::kStepForwardTwo;
   near_turn_action_ = MissionAction::kNone;
