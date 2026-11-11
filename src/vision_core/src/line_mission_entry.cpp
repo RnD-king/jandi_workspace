@@ -150,7 +150,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   // retain their stationary, one-command-at-a-time execution contract. The
   // candidate direction search below is unnecessary in ordinary AUTO.
   const bool automatic_approach = !input.manual_observation_control &&
-                                  config_.test_mission == MissionType::kNone;
+                                  UsesAutomaticMissionPolicy();
   const bool finish_course=FinishCourseEnabled(input);
   if (finish_course && !finish_line_started_ && input.advance_line_fsm &&
       input.camera_feedback.settled && input.camera_feedback.actual_mode==CameraMode::kForward) {
@@ -490,7 +490,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   // becomes the current executing unit: completed counts are now accurate.
   // The floor LINE must still be valid before raising the camera.
   if (config_.race_round2_fast_enabled && !goal_early_camera_armed_ &&
-      config_.test_mission==MissionType::kNone &&
+      UsesAutomaticMissionPolicy() &&
       active_mission_==MissionType::kLine && has_ball_ &&
       config_.enable_goal && post_pickup_goal_line_gate_active_ &&
       line_valid && line_state_==LineState::kNormal &&
@@ -1233,7 +1233,7 @@ MissionFrameResult MissionController::StepPlannedLine(
     // Latch the pre-camera LINE validity when the FINAL required 32/33/36
     // is physically issued. The normal configuration has one unit/block;
     // LastUnit also safely handles changed repetition counts.
-    if (config_.race_round2_fast_enabled && config_.test_mission==MissionType::kNone &&
+    if (config_.race_round2_fast_enabled && UsesAutomaticMissionPolicy() &&
         active_mission_==MissionType::kLine &&
         command.command_type==CommandType::kAction &&
         command.action_id && !goal_early_camera_armed_ &&

@@ -183,7 +183,8 @@ public:
   void StartTestNear(bool use_continuous_down_sequence=false) { Reset();
     down_approach_fixed_sequence_=use_continuous_down_sequence;
     mode_=HurdleMode::kWaitCameraDown; test_camera_pending_=true; }
-  void StartTestExecute() { Reset(); fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; }
+  void StartContinuousExecute() { Reset(); fine_pose_entered_=true; mode_=HurdleMode::kFineAdjust; }
+  void StartTestExecute() { StartContinuousExecute(); }
   void Reset();
   bool ContactObservationReady() const { return contact_v_ready_; }
   bool ExecutionObservationReady() const {

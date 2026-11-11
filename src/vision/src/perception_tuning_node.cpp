@@ -671,8 +671,8 @@ public:
             std::lock_guard<std::mutex> lock(image_mutex_);
             latest_image_.reset();
           }
-          // RESET is an explicit disarm. Camera goes FORWARD automatically,
-          // but observing/previewing requires a NEW, separate START request.
+          // RESET disarms perception decisions while the configured starting
+          // pose/view are restored. A separate START is always required.
           run_state_ = RunState::kResettingCamera;
           DrivePhysicalReset();
           response->success = true;
@@ -831,12 +831,14 @@ private:
       if (parameters.size()!=1 || !dedicated_test_ ||
           stage_parameter->get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER ||
           stage_parameter->as_int()<0 || stage_parameter->as_int()>3 ||
-          run_state_!=RunState::kWaitStart || !outstanding_actions_.empty() || pending_camera_id_!=0 ||
+          run_state_!=RunState::kWaitStart || !outstanding_actions_.empty() ||
+          !outstanding_cameras_.empty() || pending_camera_id_!=0 ||
           !mission_controller_->SetTestStage(tuning_config_.test_mission,static_cast<int>(stage_parameter->as_int()))) {
         response.successful=false; response.reason="test_stage: dedicated node, WAIT_START, integer 0..3; change separately"; return response;
       }
       tuning_config_.test_stage=static_cast<int>(stage_parameter->as_int());
-      stage_setup_action_id_=0; trial_finished_=false; return response;
+      stage_setup_action_id_=0; trial_finished_=false;
+      return response;
     }
     const bool edits_index=std::any_of(parameters.begin(),parameters.end(),[](const auto& p) {
       return p.get_name()=="test_ball_mission_index" || p.get_name()=="test_goal_mission_index";
@@ -1631,7 +1633,10 @@ private:
     if (last_transport_command_.command_type==vision_core::CommandType::kAction &&
         outstanding_actions_.count(last_transport_command_.action_id)!=0)
       PublishActionCommand(last_transport_command_);
-    if (pending_camera_id_!=0) PublishCameraCommand(pending_camera_request_);
+    if (pending_camera_id_!=0) {
+      if (run_state_==RunState::kPausing) ResendPendingCameraDuringPause();
+      else PublishCameraCommand(pending_camera_request_);
+    }
     // Physical PAUSE completion depends on received DONE, not availability of RGB.
     // Keep the ordered sensory edges for RESUME, or discard them on explicit RESET.
     CompletePauseAfterFeedback();
@@ -1657,8 +1662,8 @@ private:
     if (result.physical_reset_complete && outstanding_actions_.empty() && outstanding_cameras_.empty()) {
       run_state_=RunState::kWaitStart;
       manual_action_active_=false; manual_action_id_=0;
-      RCLCPP_INFO(get_logger(),"[RESET] WALK feet and %s camera DONE -> WAIT_START",
-          camera_feedback_.actual_mode==vision_core::CameraMode::kGoal ? "GOAL" : "FORWARD");
+      RCLCPP_INFO(get_logger(),"[RESET] start pose and camera mode=%u DONE -> WAIT_START",
+          static_cast<unsigned>(camera_feedback_.actual_mode));
     }
   }
 
@@ -1721,7 +1726,7 @@ private:
 
   void PublishCameraCommand(vision_core::CameraRequest request) {
     if (request == vision_core::CameraRequest::kNone) return;
-    // The node may only originate new camera requests in RUNNING.
+    // New camera requests require RUNNING or explicit starting-state preparation.
     if (run_state_ != RunState::kRunning &&
         !(run_state_ == RunState::kResettingCamera &&
           (request == vision_core::CameraRequest::kForward || request == vision_core::CameraRequest::kGoal))) return;
@@ -1981,8 +1986,8 @@ private:
     if (run_state_ == RunState::kWaitStart ||
         run_state_ == RunState::kPaused ||
         run_state_ == RunState::kResettingCamera) {
-      // Disarmed/paused/reset-camera: freeze MissionController. RESET may
-      // retransmit only its already assigned FORWARD CameraCommand ID.
+      // Freeze perception decisions here; the transport timer handles
+      // dispatched commands and explicit starting-state preparation.
       DisplayDebugFrame(msg->header, bgr, dets, aligned_depth, last_debug_result_,
                         imu_ready_snapshot, roll, pitch);
       UpdatePerfOverlayOncePerSecond(

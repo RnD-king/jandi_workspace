@@ -198,7 +198,8 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
     throw std::runtime_error("approach/fine transition thresholds must be ordered");
   const int tm=static_cast<int>(c.test_mission);
   if ((tm!=0 && tm!=2 && tm!=3 && tm!=4) || c.test_stage<0 || c.test_stage>3 ||
-      (tm==0 && c.test_stage!=0)) throw std::runtime_error("invalid test mission/stage");
+      (tm==0 && (c.test_stage!=0 || c.continuous_test)))
+    throw std::runtime_error("invalid test mission/stage");
   Positive(c.backboard_depth_strip_width_ratio,"goal.backboard_depth_strip_width_ratio");
   PositiveInt(c.backboard_depth_center_size_px,"goal.backboard_depth_center_size_px");
   if(c.backboard_depth_center_size_px%2!=1)throw std::runtime_error("goal.backboard_depth_center_size_px must be odd");

@@ -85,7 +85,7 @@ Features MissionController::ComputeLineFeaturesForFrame(
   // Carrying GOAL-return LINE and the verified finish straight both steer
   // from three floor points. Ordinary LINE, HURDLE, and isolated/manual
   // trials keep their four-point gate. RANSAC for >=4 is unchanged.
-  const bool goal_line_view = config_.test_mission == MissionType::kNone &&
+  const bool goal_line_view = UsesAutomaticMissionPolicy() &&
       !input.manual_observation_control && active_mission_ == MissionType::kLine &&
       !FinishCourseEnabled(input) &&
       has_ball_ && config_.enable_goal && post_pickup_goal_line_gate_active_ &&
@@ -979,7 +979,7 @@ void MissionController::AddDecisionObservation(const MissionFrameInput &input) {
     // center against the boundary lines. Reuse that observation window.
     if (decision_observation_mission_==MissionType::kGoal &&
         active_mission_==MissionType::kGoal &&
-        config_.test_mission==MissionType::kNone &&
+        UsesAutomaticMissionPolicy() &&
         !input.manual_observation_control &&
         input.raw_backboard_observation_available &&
         input.camera_feedback.settled &&
@@ -1150,7 +1150,8 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     goal_start_camera_pending_=false; // The shared router now owns GOAL discovery.
   }
   if (active_mission_ == MissionType::kLine &&
-      (config_.test_mission == MissionType::kNone || goal_controller_.EntryLineRetryPending()) &&
+      (UsesAutomaticMissionPolicy() || goal_controller_.EntryLineRetryPending()) &&
+      !test_setup_pending_ &&
       !goal_trial_complete_ && !physical_reset_pending_)
     return StepPlannedLine(input, line_image_center_u);
   TrackMovingObjectReadyWindow(input);
@@ -1373,13 +1374,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     return output;
   }
   if (test_setup_pending_) {
-    const CameraMode wanted =
-        config_.test_stage == 0 || (config_.test_stage == 1 &&
-                                    config_.test_mission != MissionType::kGoal)
-            ? CameraMode::kForward
-            : (config_.test_mission == MissionType::kGoal ? CameraMode::kGoal
-                : config_.test_mission == MissionType::kBall ? CameraMode::kBallView
-                                                          : CameraMode::kDown);
+    const CameraMode wanted = TestStartCamera();
     const bool camera_ready = input.camera_feedback.settled &&
                               input.camera_feedback.actual_mode == wanted;
     const MissionAction initial_pose = config_.test_stage == 3
@@ -1408,9 +1403,11 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     if (camera_ready && test_setup_pose_done_) {
       test_setup_pending_ = false;
       ClearObservationEvidence();
-      test_entry_pending_ =
+      test_entry_pending_ = !config_.continuous_test &&
           config_.test_stage <= 1 && config_.test_mission != MissionType::kGoal;
-      if (config_.test_stage <= 1) {
+      if (config_.continuous_test) {
+        InitializeContinuousTestStage(input);
+      } else if (config_.test_stage <= 1) {
         if (config_.test_mission == MissionType::kGoal) {
           if (config_.test_stage == 0) {
             goal_controller_.StartForwardTrial();
@@ -1912,9 +1909,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         input.ball_target, input.image_width, input.image_height, input.now_sec,
         input.camera_feedback, action_feedback, controller_allow, true,
         std::nullopt, std::nullopt,
-        !(config_.test_mission != MissionType::kNone &&
+        !(config_.test_mission != MissionType::kNone && !config_.continuous_test &&
           config_.test_stage == 2),
-        !(config_.test_mission != MissionType::kNone &&
+        !(config_.test_mission != MissionType::kNone && !config_.continuous_test &&
           config_.test_stage == 3 && !test_execution_started_));
     if ((before == BallMode::kFineSidePair || before == BallMode::kFineMotionRepeat) &&
         ball_result_.mode != before &&
@@ -1933,7 +1930,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       BeginLineReacquisition();
     if (ball_result_.mode == BallMode::kPostPickupLineRecovery &&
         line_reference_valid) {
-      if(config_.test_mission==MissionType::kNone && has_ball_ &&
+      if(UsesAutomaticMissionPolicy() && has_ball_ &&
          (course_curve_index_==1 || course_curve_index_==3)) {
         ++course_curve_index_;
         curve_.phase=CurveSearchState::Phase::kLocked;
@@ -1946,7 +1943,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       FinishMission();
     } else if (ball_result_.mode == BallMode::kLineFollow &&
                !ball_result_.active && !test_entry_pending_) {
-      if(config_.test_mission==MissionType::kNone && !has_ball_ &&
+      if(UsesAutomaticMissionPolicy() && !has_ball_ &&
          curve_.phase==CurveSearchState::Phase::kLocked) {
         curve_.unlock_blocks=config_.curve_search.failure_lock_line_blocks;
         curve_.skip_pending=true;
@@ -1983,7 +1980,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     const GoalMode before = goal_result_.mode;
     const bool controller_allow =
         input.allow_new_body_actions && input.allow_new_commands &&
-        !(config_.test_mission != MissionType::kNone &&
+        !(config_.test_mission != MissionType::kNone && !config_.continuous_test &&
           config_.test_stage == 2 && before == GoalMode::kFineAdjust);
     if (before == GoalMode::kHeadingRecovery)
       line_action = ComputeMissionLineRecovery(input, action_feedback,
@@ -1998,7 +1995,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         input.delivery_feedback.done &&
         input.delivery_feedback.action_id==goal_edge_guard_.action_id;
     const bool goal_owned_done=action_feedback.action_done && !edge_owned_done;
-    const bool guard= config_.test_mission==MissionType::kNone &&
+    const bool guard= UsesAutomaticMissionPolicy() &&
         !input.manual_observation_control &&
         input.raw_backboard_observation_available && !goal_owned_done &&
         before!=GoalMode::kWaitFinePose &&
@@ -2051,7 +2048,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
         post_pickup_five_step_completed_ = false;
         post_pickup_line_actions_.clear();
       } else {
-        if(config_.test_mission==MissionType::kNone && goal_shot_done_ &&
+        if(UsesAutomaticMissionPolicy() && goal_shot_done_ &&
            (course_curve_index_==2 || course_curve_index_==4)) {
           ++course_curve_index_;
           curve_={};
@@ -2122,13 +2119,13 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
   }
   // Stage 2's HURDLE test allows all three contact half-steps, but never
   // dispatches the actual HURDLE primitive. BALL/GOAL boundaries are unchanged.
-  if (config_.test_mission != MissionType::kNone && config_.test_stage == 2 &&
-      (request.action == MissionAction::kPickBall ||
+  if (config_.test_mission != MissionType::kNone && !config_.continuous_test &&
+      config_.test_stage == 2 && (request.action == MissionAction::kPickBall ||
        request.action == MissionAction::kShoot ||
        request.action == MissionAction::kHurdle))
     request = {};
-  if (config_.test_mission != MissionType::kNone && config_.test_stage == 3 &&
-      !test_execution_started_ && !TestExecutionReady())
+  if (config_.test_mission != MissionType::kNone && !config_.continuous_test &&
+      config_.test_stage == 3 && !test_execution_started_ && !TestExecutionReady())
     request = {};
   if (mission_finish_pending_) {
     request = {MissionAction::kWalkMode, ActionCategory::kLocomotion, 0, false};
@@ -2410,7 +2407,7 @@ void MissionController::PopulateDiagnostics(MissionFrameResult &output,
   output.goal.entry_line_retries = goal_controller_.EntryLineRetries();
   output.goal.depth_recovery_active=goal_controller_.DepthRecoveryActive();
   output.goal.depth_recovery_steps=goal_controller_.DepthRecoverySteps();
-  if (active_mission_==MissionType::kLine && config_.test_mission==MissionType::kNone)
+  if (active_mission_==MissionType::kLine && UsesAutomaticMissionPolicy())
     output.goal.entry_line_retries=approach_goal_empty_retries_;
   output.goal.recovery_observation_elapsed_sec =
       goal_controller_.RecoveryObservationElapsed(now);
@@ -2997,7 +2994,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   // Line robot-reference is independent from the camera optical cx.
   std::optional<double> center = input.camera_feedback.actual_mode==CameraMode::kBallView
       ? config_.ball_view_line_image_center_u : config_.line_features.image_center_u;
-  goal_controller_.SetExternalEdgeGuard(config_.test_mission==MissionType::kNone &&
+  goal_controller_.SetExternalEdgeGuard(UsesAutomaticMissionPolicy() &&
       !input.manual_observation_control);
   output.mission = StepWithLineImageCenter(prepared, center);
   UpdateWalkDiagnostics(prepared,output.mission);
@@ -3232,7 +3229,7 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
     return {};
   const int index = active_mission_ == MissionType::kBall ? ball_mission_index_
                                                           : goal_mission_index_;
-  return RecoveryTurn(config_.test_mission==MissionType::kNone ?
+  return RecoveryTurn(UsesAutomaticMissionPolicy() ?
       course_curve_index_>=3 : index%2==0,
       config_.mission_recovery_turn_yaw_deg);
 }
@@ -3624,6 +3621,21 @@ void MissionController::Reset(bool preserve_action_ids) {
   }
   InitializeTest();
 }
+CameraMode MissionController::TestStartCamera() const {
+  if (config_.test_stage == 0 ||
+      (config_.test_stage == 1 && config_.test_mission != MissionType::kGoal))
+    return CameraMode::kForward;
+  return config_.test_mission == MissionType::kGoal ? CameraMode::kGoal
+       : config_.test_mission == MissionType::kBall ? CameraMode::kBallView
+                                                   : CameraMode::kDown;
+}
+
+bool MissionController::TestStartReady(const CameraFeedback& camera) const {
+  const auto wanted_pose = config_.test_stage == 3 ? FootPose::kFine : FootPose::kWalk;
+  return !physical_reset_pending_ && !pose_change_pending_ &&
+      foot_pose_ == wanted_pose && camera.settled && camera.actual_mode == TestStartCamera();
+}
+
 void MissionController::BeginPhysicalReset() {
   Reset(true);
   physical_reset_pending_ = true;
@@ -3639,26 +3651,30 @@ MissionController::StepPhysicalReset(const CommandDeliveryFeedback &feedback,
     result.physical_reset_complete = true;
     return result;
   }
+  const auto initial_pose = config_.continuous_test && config_.test_stage == 3
+      ? MissionAction::kDefaultPoseMode : MissionAction::kWalkMode;
   if (feedback.done && last_command_.action_id != 0 &&
       feedback.action_id == last_command_.action_id &&
-      last_command_.action == MissionAction::kWalkMode) {
+      last_command_.action == initial_pose) {
     reset_walk_done_ = true;
-    foot_pose_ = FootPose::kWalk;
+    foot_pose_ = initial_pose == MissionAction::kWalkMode ? FootPose::kWalk : FootPose::kFine;
   }
-  // Direct GOAL trials reset to their starting view. Dedicated staged tests
-  // keep their existing FORWARD reset and prepare their own camera on START.
+  // Continuous tests prepare their selected entry view before START. Manual
+  // staged tests retain FORWARD reset; direct GOAL trials retain GOAL reset.
   const bool start_goal = config_.goal_trial_start_goal &&
                           config_.test_mission == MissionType::kNone;
-  const auto wanted = start_goal ? CameraMode::kGoal : CameraMode::kForward;
-  const auto request =
-      start_goal ? CameraRequest::kGoal : CameraRequest::kForward;
+  const auto wanted = config_.continuous_test ? TestStartCamera()
+      : start_goal ? CameraMode::kGoal : CameraMode::kForward;
+  const auto request = wanted == CameraMode::kGoal ? CameraRequest::kGoal
+      : wanted == CameraMode::kBallView ? CameraRequest::kBallView
+      : wanted == CameraMode::kDown ? CameraRequest::kDown : CameraRequest::kForward;
   // Always force a NEW camera command, even when cached feedback matches.
   const bool camera_ready = reset_camera_command_sent_ && camera.settled &&
                             camera.actual_mode == wanted;
   result.command = command_coordinator_.Compute(
       MissionType::kLine, 902,
       reset_walk_done_ ? ActionRequest{}
-                       : ActionRequest{MissionAction::kWalkMode,
+                       : ActionRequest{initial_pose,
                                        ActionCategory::kLocomotion, 0, false},
       camera_ready ? CameraRequest::kNone : request, feedback, now_sec);
   if (result.command.camera_request == request)
@@ -3667,6 +3683,7 @@ MissionController::StepPhysicalReset(const CommandDeliveryFeedback &feedback,
   if (reset_walk_done_ && camera_ready && last_command_.action_id == 0) {
     physical_reset_pending_ = false;
     Reset(true);
+    if (config_.continuous_test) test_setup_pose_done_ = true;
     result.physical_reset_complete = true;
   }
   PopulateDiagnostics(result, now_sec);
@@ -3679,7 +3696,7 @@ void MissionController::InitializeTest() {
   if (config_.test_mission == MissionType::kNone)
     return;
   post_pickup_goal_line_gate_active_ = false;
-  active_mission_ = config_.test_mission;
+  active_mission_ = config_.continuous_test ? MissionType::kLine : config_.test_mission;
   ball_result_ = {};
   hurdle_result_ = {};
   goal_result_ = {};
@@ -3689,7 +3706,12 @@ void MissionController::InitializeTest() {
   test_setup_pending_ = true;
   test_entry_pending_ =
       !test_setup_pending_ && active_mission_ != MissionType::kGoal;
-  has_ball_ = active_mission_ == MissionType::kGoal;
+  has_ball_ = config_.test_mission == MissionType::kGoal;
+  if (config_.continuous_test) {
+    ball_mission_index_=config_.test_ball_mission_index-1;
+    goal_mission_index_=config_.test_goal_mission_index-1;
+    return;
+  }
   if (active_mission_ == MissionType::kBall)
     ball_mission_index_ = config_.test_ball_mission_index;
   if (active_mission_ == MissionType::kGoal) {
@@ -3700,6 +3722,35 @@ void MissionController::InitializeTest() {
     }
   }
 }
+void MissionController::InitializeContinuousTestStage(const MissionFrameInput& input) {
+  if (config_.test_stage <= 1) {
+    // Start in the same LINE planner/router as AUTO. GOAL stage 1 skips
+    // only the preceding carrying-LINE gate; acquisition remains unchanged.
+    active_mission_=MissionType::kLine;
+    post_pickup_goal_line_gate_active_=has_ball_ && config_.test_stage==0;
+    approach_goal_probe_=has_ball_ && config_.test_stage==1;
+    return;
+  }
+  EnterMission(config_.test_mission);
+  const bool execute=config_.test_stage==3;
+  if (active_mission_==MissionType::kBall) {
+    if (execute) ball_controller_.StartContinuousExecute();
+    else ball_controller_.EnterContinuousNear(input.now_sec);
+    ball_result_.mode=execute ? BallMode::kFineAdjustForPickup : BallMode::kWaitCameraDown;
+    ball_result_.active=true;
+  } else if (active_mission_==MissionType::kHurdle) {
+    if (execute) hurdle_controller_.StartContinuousExecute();
+    else hurdle_controller_.EnterContinuousNear(input.now_sec);
+    hurdle_result_.mode=execute ? HurdleMode::kFineAdjust : HurdleMode::kWaitCameraDown;
+    hurdle_result_.active=true;
+  } else {
+    if (execute) goal_controller_.StartContinuousExecute();
+    else goal_controller_.StartContinuousNear();
+    goal_result_.mode=execute ? GoalMode::kFineAdjust : GoalMode::kWaitFinePose;
+    goal_result_.active=true;
+  }
+}
+
 bool MissionController::SetTestStage(MissionType mission, int stage) {
   if (last_command_.action_id != 0 || pose_change_pending_ ||
       physical_reset_pending_ ||
@@ -3727,6 +3778,7 @@ bool MissionController::TestExecutionReady() const {
 }
 bool MissionController::TestBoundaryReached(
     const CameraFeedback &camera) const {
+  if (config_.continuous_test) return false;
   if (config_.test_mission == MissionType::kHurdle) {
     if (config_.test_stage == 1)
       // Intercept the very first DOWN request, including one produced on a

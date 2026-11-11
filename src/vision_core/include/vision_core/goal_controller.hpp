@@ -199,6 +199,8 @@ public:
   const std::deque<bool>& NearObservationHits() const { return fine_enter_history_; }
   void StartForwardTrial();
   void StartGoalTrial() { Reset(); StartAfterPickup(0); mode_=GoalMode::kWaitCameraGoal; }
+  void StartContinuousNear() { StartGoalTrial(); mode_=GoalMode::kWaitFinePose; fine_trigger_latched_=true; }
+  void StartContinuousExecute() { Reset(); SetHasBall(true); mode_=GoalMode::kFineAdjust; fine_trigger_latched_=true; }
   void StartTestNear() { StartGoalTrial(); }
   void StartTestExecute() { Reset(); test_execute_requires_stable_=true; SetHasBall(true); mode_=GoalMode::kFineAdjust; }
   void SetHasBall(bool has_ball);

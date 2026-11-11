@@ -250,7 +250,51 @@ static void TestLiveBallPickupTrapezoidTuning() {
   }
 }
 
+// Every continuous entry requires confirmed starting pose and camera completion.
+static void TestContinuousStagePreparation() {
+  for (const auto mission : {MissionType::kBall, MissionType::kHurdle, MissionType::kGoal}) {
+    for (int stage=0;stage<=3;++stage) {
+      auto config=LoadDefaultAlgorithmConfig();
+      config.test_mission=mission;
+      config.test_stage=stage;
+      config.continuous_test=true;
+      const auto wanted=stage==0 || (stage==1 && mission!=MissionType::kGoal)
+          ? CameraMode::kForward : mission==MissionType::kGoal ? CameraMode::kGoal
+          : mission==MissionType::kBall ? CameraMode::kBallView : CameraMode::kDown;
+      const auto pose=stage==3 ? MissionAction::kDefaultPoseMode : MissionAction::kWalkMode;
+      MissionController controller(config);
+      controller.BeginPhysicalReset();
+      assert(controller.TestStartCamera()==wanted);
+      assert(!controller.TestStartReady({wanted,true}));
+      assert(!controller.SetTestStage(mission,stage)); // reset still in flight
+      auto result=controller.StepPhysicalReset({}, {CameraMode::kForward,true},0);
+      assert(result.command.action==pose && result.command.action_id!=0);
+      const auto id=result.command.action_id;
+      assert(!result.physical_reset_complete);
+      result=controller.StepPhysicalReset({id,true,true,false},{CameraMode::kTransition,false},.1);
+      assert(!result.physical_reset_complete);
+      for (int i=2;i<=5 && !result.physical_reset_complete;++i)
+        result=controller.StepPhysicalReset({}, {wanted,true},i*.1);
+      assert(result.physical_reset_complete);
+      assert(controller.TestStartReady({wanted,true}));
+      assert(!controller.TestStartReady({CameraMode::kTransition,false}));
+      auto input=Frame(1);
+      input.camera_feedback={wanted,true};
+      input.allow_new_commands=true;
+      input.allow_new_body_actions=false;
+      result=controller.Step(input);
+      // Preparation before START must not issue the stance a second time.
+      assert(!controller.TestSetupPending() && result.command.action_id==0);
+      assert(!result.trial_complete);
+      controller.BeginPhysicalReset();
+      result=controller.StepPhysicalReset({}, {wanted,true},5);
+      assert(result.command.action==pose && result.command.action_id>id);
+    }
+  }
+}
+
 int main() {
+  TestContinuousStagePreparation();
   TestStationaryLineVisibleGuide();
   TestLineScanReleaseAfterBothDirections();
   TestLiveBallPickupTrapezoidTuning();

@@ -250,7 +250,8 @@ public:
   }
   // Isolated test startup selects an existing FSM phase; no completion is fabricated.
   void StartTestNear() { Reset(); mode_=BallMode::kWaitCameraDown; test_camera_pending_=true; }
-  void StartTestExecute() { Reset(); fine_pose_entered_=true; mode_=BallMode::kFineAdjustForPickup; }
+  void StartContinuousExecute() { Reset(); fine_pose_entered_=true; mode_=BallMode::kFineAdjustForPickup; }
+  void StartTestExecute() { StartContinuousExecute(); }
   void Reset();
   bool ExecutionObservationReady() const {
     return tracked_.visible && tracked_.stable &&
