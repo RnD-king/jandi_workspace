@@ -135,14 +135,40 @@ vision_core::MissionControllerConfig LoadSharedAlgorithmDefaults() {
   return config;
 }
 
+#if defined(VISION_CONTINUOUS_TEST_NODE)
+constexpr bool kContinuousTest=true;
+#if defined(VISION_BALL_TUNING_NODE)
+constexpr auto kContinuousMission=vision_core::MissionType::kBall;
+constexpr const char* kNodeName="ball_continuous_test_node";
+constexpr const char* kAlgorithmMode="ball";
+#elif defined(VISION_HURDLE_TUNING_NODE)
+constexpr auto kContinuousMission=vision_core::MissionType::kHurdle;
+constexpr const char* kNodeName="hurdle_continuous_test_node";
+constexpr const char* kAlgorithmMode="hurdle";
+#else
+constexpr auto kContinuousMission=vision_core::MissionType::kGoal;
+constexpr const char* kNodeName="goal_continuous_test_node";
+constexpr const char* kAlgorithmMode="goal";
+#endif
+#else
+constexpr bool kContinuousTest=false;
+constexpr auto kContinuousMission=vision_core::MissionType::kNone;
+constexpr const char* kNodeName="line_perception_node";
+constexpr const char* kAlgorithmMode="all";
+#endif
 } // namespace
 
 class LinePerceptionNode final : public rclcpp::Node {
 public:
-  LinePerceptionNode() : rclcpp::Node("line_perception_node") {
+  LinePerceptionNode() : rclcpp::Node(kNodeName) {
     const vision_core::MissionControllerConfig algorithm_defaults =
         LoadSharedAlgorithmDefaults();
     vision::DeclareMissionParameters(*this,algorithm_defaults);
+    if (kContinuousTest) {
+      declare_parameter<int>("test_stage",algorithm_defaults.test_stage);
+      declare_parameter<int>("test_ball_mission_index",algorithm_defaults.test_ball_mission_index);
+      declare_parameter<int>("test_goal_mission_index",algorithm_defaults.test_goal_mission_index);
+    }
     declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw"); // 입력 이미지 토픽
     declare_parameter<std::string>("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw");
     declare_parameter<std::string>("camera_info_topic", "/camera/camera/color/camera_info");
@@ -193,7 +219,7 @@ public:
     declare_parameter<bool>("enable_hurdle_controller", algorithm_defaults.enable_hurdle);
     declare_parameter<bool>("enable_goal_controller", algorithm_defaults.enable_goal);
     // all은 위 enable_* 값을 따르고, 나머지는 지정한 알고리즘 하나만 실행한다.
-    declare_parameter<std::string>("algorithm_mode", "all");
+    declare_parameter<std::string>("algorithm_mode", kAlgorithmMode);
     // rqt may select GOAL's starting phase, but only while disarmed.
     declare_parameter<bool>("goal_trial_start_goal", algorithm_defaults.goal_trial_start_goal);
     // 실제 카메라 대신 endpoint 도달 feedback을 모사하는 시험 옵션이다.
@@ -342,6 +368,18 @@ public:
     mission_config.initial_has_ball = algorithm_mode_ == "goal";
     goal_trial_start_goal_pending_ = algorithm_mode_ == "goal" &&
         get_parameter("goal_trial_start_goal").as_bool();
+    if (kContinuousTest) {
+      if (algorithm_mode_!=kAlgorithmMode)
+        throw std::invalid_argument("Continuous test requires its matching algorithm_mode");
+      if (!enable_command_transport_ && !simulate_decision_)
+        throw std::invalid_argument("Continuous test requires executor transport or explicit simulation");
+      goal_trial_start_goal_pending_=false;
+      mission_config.continuous_test=true;
+      mission_config.test_mission=kContinuousMission;
+      mission_config.test_stage=static_cast<int>(get_parameter("test_stage").as_int());
+      mission_config.test_ball_mission_index=static_cast<int>(get_parameter("test_ball_mission_index").as_int());
+      mission_config.test_goal_mission_index=static_cast<int>(get_parameter("test_goal_mission_index").as_int());
+    }
     mission_config.goal_trial_start_goal = goal_trial_start_goal_pending_;
     // ROS override가 shared YAML validation을 우회하지 못하게 하고, 무거운
     // TensorRT engine을 만들기 전에 fail-fast한다.
@@ -358,6 +396,44 @@ public:
         [this](const std::vector<rclcpp::Parameter>& parameters) {
           rcl_interfaces::msg::SetParametersResult response;
           response.successful=true;
+          const bool changes_stage=std::any_of(parameters.begin(),parameters.end(),[](const auto& p) {
+            return p.get_name()=="test_stage";
+          });
+          const bool changes_index=std::any_of(parameters.begin(),parameters.end(),[](const auto& p) {
+            return p.get_name()=="test_ball_mission_index" || p.get_name()=="test_goal_mission_index";
+          });
+          if (kContinuousTest && (changes_stage || changes_index)) {
+            if (run_state_!=RunState::kWaitStart || !outstanding_actions_.empty() ||
+                !outstanding_cameras_.empty() || pending_camera_id_!=0 ||
+                (changes_stage && parameters.size()!=1)) {
+              response.successful=false;
+              response.reason="Change stage/indices separately in WAIT_START after RESET/preparation DONE";
+              return response;
+            }
+            int stage=debug_config_.test_stage;
+            int ball=debug_config_.test_ball_mission_index,goal=debug_config_.test_goal_mission_index;
+            for (const auto& p:parameters) {
+              if (p.get_type()!=rclcpp::ParameterType::PARAMETER_INTEGER ||
+                  (p.get_name()!="test_stage" && p.get_name()!="test_ball_mission_index" &&
+                   p.get_name()!="test_goal_mission_index") ||
+                  p.as_int()<(p.get_name()=="test_stage" ? 0 : 1) ||
+                  p.as_int()>(p.get_name()=="test_stage" ? 3 : 1000000)) {
+                response.successful=false; response.reason="Invalid stage/index update"; return response;
+              }
+              if (p.get_name()=="test_stage") stage=static_cast<int>(p.as_int());
+              else if (p.get_name()=="test_ball_mission_index") ball=static_cast<int>(p.as_int());
+              else goal=static_cast<int>(p.as_int());
+            }
+            const bool accepted=changes_stage ? mission_controller_->SetTestStage(kContinuousMission,stage)
+                : mission_controller_->SetTestMissionIndices(ball,goal);
+            if (!accepted) {
+              response.successful=false; response.reason="Core still has an active command"; return response;
+            }
+            debug_config_.test_stage=stage;
+            debug_config_.test_ball_mission_index=ball;debug_config_.test_goal_mission_index=goal;
+            PrepareContinuousStart();
+            return response;
+          }
           std::optional<bool> proposed;
           std::optional<double> edge_margin;
           std::optional<double> ball_side_margin;
@@ -415,7 +491,15 @@ public:
               response.reason="Mission settings are applied at node startup; restart with the new value";
               return response;
             }
+            if (kContinuousTest && parameter.get_name()=="algorithm_mode" &&
+                (parameter.get_type()!=rclcpp::ParameterType::PARAMETER_STRING ||
+                 parameter.as_string()!=kAlgorithmMode)) {
+              response.successful=false; response.reason="Continuous test object is fixed"; return response;
+            }
             if (parameter.get_name() != "goal_trial_start_goal") continue;
+            if (kContinuousTest) {
+              response.successful=false; response.reason="Use test_stage for continuous test entry"; return response;
+            }
             if (parameter.get_type() != rclcpp::ParameterType::PARAMETER_BOOL) {
               response.successful=false;
               response.reason="goal_trial_start_goal must be a bool";
@@ -493,7 +577,7 @@ public:
         });
 
     start_service_ = create_service<std_srvs::srv::Trigger>(
-        "start", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+        ServiceName("start"), [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
           if (run_state_ != RunState::kWaitStart || !mission_controller_->FeetReadyToStart()) {
             response->success = false;
@@ -503,6 +587,22 @@ public:
           if (!camera_info_latch_.Ready()) {
             response->success = false;
             response->message = "START waiting for the first valid CameraInfo matching the RGB image size";
+            return;
+          }
+          if (kContinuousTest) {
+            DrainExecutionFeedback();
+            if (trial_finished_ || mission_controller_->IsTerminalHold() ||
+                !mission_controller_->TestStartReady(camera_feedback_) ||
+                !outstanding_actions_.empty() || !outstanding_cameras_.empty() ||
+                pending_camera_id_!=0 || !applied_action_feedback_queue_.empty()) {
+              response->success=false;
+              response->message="START requires completed stage preparation; RESET after completion/failure";
+              return;
+            }
+            mission_controller_->ClearObservationEvidence();
+            { std::lock_guard<std::mutex> lock(image_mutex_); latest_image_.reset(); }
+            run_state_=RunState::kRunning;
+            response->success=true; response->message="START accepted; production mission policy from selected stage";
             return;
           }
           mission_controller_->SetGoalTrialStartGoal(goal_trial_start_goal_pending_);
@@ -523,7 +623,7 @@ public:
           RCLCPP_INFO(get_logger(), "[CONTROL] %s", response->message.c_str());
         });
     pause_service_ = create_service<std_srvs::srv::Trigger>(
-        "pause", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+        ServiceName("pause"), [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
           if (run_state_ != RunState::kRunning && run_state_ != RunState::kObserving) {
             response->success = false;
@@ -546,7 +646,7 @@ public:
                       outstanding_actions_.size(), outstanding_cameras_.size());
         });
     resume_service_ = create_service<std_srvs::srv::Trigger>(
-        "resume", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+        ServiceName("resume"), [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                           std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
           if (run_state_ != RunState::kPaused) {
             response->success = false;
@@ -564,7 +664,7 @@ public:
           RCLCPP_INFO(get_logger(), "[CONTROL] RESUME -> OBSERVING");
         });
     reset_service_ = create_service<std_srvs::srv::Trigger>(
-        "reset", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+        ServiceName("reset"), [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
           DrainExecutionFeedback();
           bool feedback_empty;
@@ -572,7 +672,8 @@ public:
             std::lock_guard<std::mutex> lock(action_feedback_mutex_);
             feedback_empty = action_feedback_queue_.empty();
           }
-          if (run_state_ != RunState::kPaused || !outstanding_actions_.empty() ||
+          if ((run_state_ != RunState::kPaused && !(kContinuousTest && run_state_==RunState::kWaitStart)) ||
+              !outstanding_actions_.empty() ||
               !outstanding_cameras_.empty() || pending_camera_id_ != 0 ||
               !feedback_empty || (simulate_decision_ &&
                   (simulated_current_action_.id != 0 ||
@@ -587,6 +688,7 @@ public:
           applied_action_feedback_queue_.clear(); action_delivery_feedback_={};
           mission_controller_->BeginPhysicalReset(); // Do not reuse IDs in executor history.
           observation_accumulator_.Reset();
+          if (kContinuousTest) { trial_finished_=false; paused_accumulated_sec_=0; }
           run_state_ = RunState::kResetting;
           DrivePhysicalReset();
           // Preserve unique IDs and completion timestamps. The physical
@@ -601,7 +703,8 @@ public:
         });
 
     RCLCPP_INFO(get_logger(),
-        "vision node DISARMED. Services: /line_perception_node/{start,pause,resume,reset}");
+        "vision node DISARMED. Services: %s{start,pause,resume,reset}",
+        kContinuousTest ? "~/" : "/");
     RCLCPP_INFO(get_logger(), "  image_topic    : %s", image_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  depth_topic    : %s", depth_topic_.c_str());
     RCLCPP_INFO(get_logger(), "  camera_info    : %s", camera_info_topic_.c_str());
@@ -723,6 +826,7 @@ public:
     perf_infer_time_sec_ = 0.0;
     perf_loop_time_sec_ = 0.0;
     perf_text_ = "INFER: -- ms | LOOP: -- ms | FPS: --";
+    if (kContinuousTest) PrepareContinuousStart();
   }
 
   ~LinePerceptionNode() override {
@@ -1143,6 +1247,19 @@ private:
     CompletePauseAfterFeedback();
   }
 
+  std::string ServiceName(const char* name) const {
+    return kContinuousTest ? std::string("~/")+name : std::string(name);
+  }
+
+  void PrepareContinuousStart() {
+    applied_action_feedback_queue_.clear();action_delivery_feedback_={};
+    observation_accumulator_.Reset();
+    paused_accumulated_sec_=0;trial_finished_=false;
+    camera_scan_feedback_={};
+    mission_controller_->BeginPhysicalReset();
+    run_state_=RunState::kResetting;
+  }
+
   void DrivePhysicalReset() {
     if (run_state_!=RunState::kResetting) return;
     const double now=get_clock()->now().seconds();
@@ -1161,8 +1278,8 @@ private:
     PublishActionCommand(result.command); PublishCameraCommand(result.command.camera_request);
     if (result.physical_reset_complete && outstanding_actions_.empty() && outstanding_cameras_.empty()) {
       run_state_=RunState::kWaitStart;
-      RCLCPP_INFO(get_logger(),"[RESET] WALK feet + %s camera DONE -> WAIT_START",
-          camera_feedback_.actual_mode == vision_core::CameraMode::kGoal ? "GOAL" : "FORWARD");
+      RCLCPP_INFO(get_logger(),"[RESET] configured pose + camera mode=%u DONE -> WAIT_START",
+          static_cast<unsigned>(camera_feedback_.actual_mode));
     }
   }
 
@@ -1257,7 +1374,8 @@ private:
     // The node may only originate new camera requests in RUNNING.
     if (run_state_ != RunState::kRunning &&
         !(run_state_==RunState::kResetting &&
-          (request==vision_core::CameraRequest::kForward || request==vision_core::CameraRequest::kGoal))) return;
+          (kContinuousTest || request==vision_core::CameraRequest::kForward ||
+           request==vision_core::CameraRequest::kGoal))) return;
     if (simulate_camera_feedback_) {
       switch (request) {
       case vision_core::CameraRequest::kDown:
@@ -1762,6 +1880,12 @@ private:
                           : "LINE_P2P"));
     PublishActionCommand(control_command);
     PublishCameraCommand(control_command.camera_request);
+    if (kContinuousTest && mission_result.trial_complete && outstanding_actions_.empty() &&
+        outstanding_cameras_.empty() && pending_camera_id_==0 && applied_action_feedback_queue_.empty()) {
+      trial_finished_=true;
+      run_state_=RunState::kWaitStart;
+      RCLCPP_INFO(get_logger(),"[CONTINUOUS TEST] complete; RESET or select a new stage before START");
+    }
     ResendPendingCameraDuringPause();
     action_delivery_feedback_ = {};
     // PAUSED is entered only after every sent command has a matching DONE
@@ -1909,6 +2033,7 @@ private:
   std::deque<sensor_msgs::msg::Image::SharedPtr> scan_depth_frames_;
   std::string algorithm_mode_{"all"};
   bool goal_trial_start_goal_pending_{false};
+  bool trial_finished_{false};
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
       goal_trial_parameter_handle_;
 

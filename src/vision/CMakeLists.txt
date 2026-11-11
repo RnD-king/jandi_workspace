@@ -173,6 +173,13 @@ add_executable(hurdle_tuning_node src/perception_tuning_node.cpp)
 target_compile_definitions(hurdle_tuning_node PRIVATE VISION_HURDLE_TUNING_NODE=1)
 add_executable(goal_tuning_node src/perception_tuning_node.cpp)
 target_compile_definitions(goal_tuning_node PRIVATE VISION_GOAL_TUNING_NODE=1)
+foreach(object BALL HURDLE GOAL)
+  string(TOLOWER "${object}" object_lower)
+  set(continuous_target "${object_lower}_continuous_test_node")
+  add_executable(${continuous_target} src/line_perception_node.cpp)
+  target_compile_definitions(${continuous_target} PRIVATE
+    VISION_${object}_TUNING_NODE=1 VISION_CONTINUOUS_TEST_NODE=1)
+endforeach()
 add_executable(shoot_tuning_node src/shoot_tuning_node.cpp)
 target_compile_definitions(shoot_tuning_node PRIVATE QT_NO_KEYWORDS)
 # Reuses the bench's camera, transport and fixed-pose implementation, but
@@ -222,7 +229,8 @@ ament_target_dependencies(perception_tuning_node
   rclcpp ament_index_cpp sensor_msgs geometry_msgs std_srvs cv_bridge
 )
 
-foreach(mission_test_target ball_tuning_node hurdle_tuning_node)
+foreach(mission_test_target ball_tuning_node hurdle_tuning_node
+    ball_continuous_test_node hurdle_continuous_test_node goal_continuous_test_node)
   target_link_libraries(${mission_test_target} vision_core vision_debug_mjpeg "${vision_typesupport_target}")
   set_target_properties(${mission_test_target} PROPERTIES
     BUILD_RPATH "${SHARED_VISION_CORE_ROOT}/lib"
@@ -253,6 +261,9 @@ install(TARGETS
   line_p2p_tuning_node
   perception_tuning_node
   goal_tuning_node
+  ball_continuous_test_node
+  hurdle_continuous_test_node
+  goal_continuous_test_node
   shoot_tuning_node
   goal_shot_preview_node
   ball_tuning_node

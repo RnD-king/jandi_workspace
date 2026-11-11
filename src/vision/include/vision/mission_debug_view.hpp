@@ -599,6 +599,10 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
         mission_result.candidate_search_turns, mission_result.candidate_restore_turns);
     add_row(header_rows,buf,text_color);
   }
+  if (config.continuous_test)
+    add_row(header_rows,"START STAGE: "+std::to_string(config.test_stage)+
+        (mission_result.trial_complete ? " COMPLETE / RESET TO RESTART" : " CONTINUOUS"),text_color);
+  else
   add_row(header_rows,"TEST STAGE: "+std::to_string(config.test_stage)+
       (mission_result.trial_complete ? " COMPLETE / SELECT STAGE OR RESET" : mission_result.test_executing ? " EXECUTING / RECOVERY" : mission_result.test_ready ? " READY" : config.test_stage==3 ? " ALIGN IN STAGE 2 FIRST" : ""),text_color);
   const auto hurdle_test_boundary=HurdleTestBoundaryNotice(config,mission_result);

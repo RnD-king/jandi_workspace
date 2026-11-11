@@ -100,6 +100,8 @@ struct MissionControllerConfig {
   int mission_recovery_turn_yaw_deg{};
   MissionType test_mission{MissionType::kNone};
   int test_stage{}; // 0 full, 1 far approach, 2 near alignment, 3 mission execution/recovery
+  // Runtime-only dedicated test policy; stage selects entry, not an end boundary.
+  bool continuous_test{false};
   double backboard_depth_strip_width_ratio{};
   int backboard_depth_center_size_px{21};
   double backboard_depth_strip_step_ratio{0.05};
@@ -416,6 +418,8 @@ public:
         (config_.test_mission!=MissionType::kNone && config_.test_stage>=2);
     return known_stance && !pose_change_pending_ && !physical_reset_pending_;
   }
+  CameraMode TestStartCamera() const;
+  bool TestStartReady(const CameraFeedback& camera) const;
   void BeginPhysicalReset();
   MissionFrameResult StepPhysicalReset(const CommandDeliveryFeedback &feedback,
                                       const CameraFeedback &camera, double now_sec);
@@ -432,6 +436,12 @@ public:
   void Reset(bool preserve_action_ids);
 
 private:
+  // Continuous tests change entry and completion only; all running mission
+  // policy, including LINE plans, edge guards and recovery, remains AUTO.
+  bool UsesAutomaticMissionPolicy() const {
+    return config_.test_mission == MissionType::kNone || config_.continuous_test;
+  }
+  void InitializeContinuousTestStage(const MissionFrameInput& input);
   struct ApproachEvidence {
     std::uint64_t id{};
     std::optional<ObjectTarget> last;

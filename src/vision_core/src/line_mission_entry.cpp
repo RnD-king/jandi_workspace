@@ -150,7 +150,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   // retain their stationary, one-command-at-a-time execution contract. The
   // candidate direction search below is unnecessary in ordinary AUTO.
   const bool automatic_approach = !input.manual_observation_control &&
-                                  config_.test_mission == MissionType::kNone;
+                                  UsesAutomaticMissionPolicy();
   const bool finish_course=FinishCourseEnabled(input);
   if (finish_course && !finish_line_started_ && input.advance_line_fsm &&
       input.camera_feedback.settled && input.camera_feedback.actual_mode==CameraMode::kForward) {

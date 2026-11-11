@@ -1705,7 +1705,90 @@ void GoalAutoReferenceIsIsolated() {
 
 }
 }
+void ContinuousStageOneMatchesProduction() {
+  for (const auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {
+    for (const bool fast:{false,true}) {
+      auto production_config=Config();
+      production_config.race_round2_fast_enabled=fast;
+      production_config.test_stage=0;
+      production_config.enable_ball=mission==MissionType::kBall;
+      production_config.enable_hurdle=mission==MissionType::kHurdle;
+      production_config.enable_goal=mission==MissionType::kGoal;
+      production_config.initial_has_ball=production_config.goal_trial_start_goal=mission==MissionType::kGoal;
+      production_config.curve_search.enabled=false;
+      auto staged_config=production_config;
+      staged_config.goal_trial_start_goal=false;
+      staged_config.continuous_test=true;
+      staged_config.test_mission=mission;staged_config.test_stage=1;
+      MissionController production(production_config),staged(staged_config);
+      production.Reset(true);
+      const auto camera=mission==MissionType::kGoal ? CameraMode::kGoal : CameraMode::kForward;
+      staged.BeginPhysicalReset();
+      auto prepared=staged.StepPhysicalReset({}, {CameraMode::kForward,true},0);
+      const auto setup_id=prepared.command.action_id;
+      prepared=staged.StepPhysicalReset({setup_id,true,true,false},{CameraMode::kTransition,false},.1);
+      for (int i=2;i<8 && !prepared.physical_reset_complete;++i)
+        prepared=staged.StepPhysicalReset({}, {camera,true},i*.1);
+      Check(prepared.physical_reset_complete,"continuous stage preparation did not complete");
+      MissionFrameInput input;
+      input.image_width=640;input.image_height=480;input.intrinsics={600,600,320,240};
+      input.camera_feedback={camera,true};input.command_transport_enabled=true;
+      input.now_sec=1;input.allow_new_commands=false;input.allow_new_body_actions=false;
+      staged.Step(input); // Select the start boundary; no body admission.
+      Check(!staged.TestSetupPending(),"continuous stage remained in setup");
+      input.allow_new_commands=input.allow_new_body_actions=true;
+      input.line_centers={{320,450},{320,400},{320,350},{320,300},{320,250}};
+      input.ball_target=Target(150,80);input.ball_track_id=41;
+      input.hurdle_target=Target(320,80,4);input.hurdle_track_id=42;
+      input.backboard_target=Target(150,80,3);input.backboard_track_id=43;
+      input.backboard_center_depth_m=1.5;
+      struct Execution {
+        std::uint64_t current{},queued{},ack{};
+        int frames{};
+        CommandDeliveryFeedback Next() {
+          if (ack) { const auto id=ack;ack=0;return {id,true,false,false}; }
+          if (!current) return {};
+          if (++frames==8) return {current,true,false,true};
+          if (frames>=10) {
+            const auto id=current;current=queued;queued=0;frames=0;
+            return {id,true,true,false};
+          }
+          return {};
+        }
+        void Observe(const ControlCommand& command) {
+          if (!command.action_id || command.action_id==current || command.action_id==queued) return;
+          if (!current) {current=command.action_id;frames=0;}
+          else {Check(!queued,"third outstanding test command");queued=command.action_id;}
+          ack=command.action_id;
+        }
+      } actual,expected;
+      bool saw_object_walk=false;
+      for (int i=0;i<120;++i) {
+        input.now_sec=2+i*.1;
+        input.delivery_feedback=expected.Next();
+        const auto want=production.Step(input);
+        input.delivery_feedback=actual.Next();
+        const auto got=staged.Step(input);
+        Check(got.command.command_type==want.command.command_type &&
+              got.command.action==want.command.action &&
+              got.command.target_yaw_deg==want.command.target_yaw_deg &&
+              got.command.camera_request==want.command.camera_request &&
+              got.command.control_phase==want.command.control_phase &&
+              got.active_mission==want.active_mission,
+              "continuous stage 1 diverged from the production AUTO path");
+        Check((got.command.action_id!=0)==(want.command.action_id!=0),
+              "continuous test lost a production command transaction");
+        saw_object_walk=saw_object_walk ||
+            (got.approach_mission==mission && LinePlan::IsUnit(got.command.action));
+        expected.Observe(want.command);actual.Observe(got.command);
+      }
+      Check(saw_object_walk,"continuous stage 1 never used the production object-owned LINE plan");
+    }
+  }
+}
+
 int main() {
+  ContinuousStageOneMatchesProduction();
   GoalStationaryRecheck(false);GoalStationaryRecheck(true);
   GoalLineReturnThreePointSteering();
   GoalLineReturnSparseRecoveryUnchanged();
