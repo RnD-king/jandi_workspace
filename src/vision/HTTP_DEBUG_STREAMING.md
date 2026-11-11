@@ -8,13 +8,12 @@ sourcing the workspace, run on the Jetson:
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/my_cv/install/setup.bash
-ros2 run vision line_perception_node --ros-args \
-  -p terminal_node:=true \
-  -p stream_debug_view:=true
+ros2 run vision line_perception_node --ros-args -p terminal_node:=true
 ```
 
 The existing RealSense, executor, and mission start procedures are unchanged.
-`stream_debug_view` is a startup-only boolean, default `false`. Add
+`stream_debug_view` is a startup-only boolean, default `true`. Local windows default OFF.
+Use `-p stream_debug_view:=false` to disable HTTP. Add
 `-p show_debug_view:=true` only when local OpenCV windows are also wanted.
 
 On Windows or Ubuntu, open `http://<JETSON_IP>:8080` in a browser. Use the Jetson's
