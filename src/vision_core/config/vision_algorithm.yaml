@@ -261,7 +261,7 @@ vision_algorithm:
       fine_line_turn_yaw_deg: 15 # 7/8번 회전 1회 요청각 (도)
       fine_line_measured_turn_deg: 0.0 # 방향별 값이 0일 때 쓰는 공통 호환값. 세 값 모두 0이면 단발 관측
       fine_line_measured_left_turn_deg: 11.0 # Action 7: 1회 H 변화량의 크기. 0이면 공통 실측값 사용
-      fine_line_measured_right_turn_deg: 8.0 # Action 8: 1회 H 변화량의 크기. 실행 요청각 15도와 별개
+      fine_line_measured_right_turn_deg: 11.0 # Action 8: 1회 H 변화량의 크기. 실행 요청각 15도와 별개
       fine_line_measured_side_px: 60 # 1회 실제 옆걸음에 따른 O 변화량(px). 0: 기존 단발 관측 유지
       fine_line_batch_max_repetitions: 3 # 하나의 O/H 관측에서 회전과 횡이동 각각 최대 연속 3회
       fine_line_post_turn_hold_sec: 0.3 # 연속 회전의 마지막 DONE 이후 횡이동 전 대기 (재관측은 마지막에만)
