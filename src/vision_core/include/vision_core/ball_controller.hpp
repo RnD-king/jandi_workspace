@@ -207,6 +207,15 @@ public:
   const std::deque<bool>& ObservationHits() const { return hit_history_; }
   bool HasBall() const { return has_ball_; }
   bool PickupVerificationActive() const { return pickup_verification_active_; }
+  bool PickupVerificationReady() const { return pickup_verification_complete_; }
+  int PickupAttemptCount() const { return pickup_attempt_count_; }
+  bool PickupRequestPending() const { return mode_==BallMode::kPickupBall && !pickup_request_issued_; }
+  void NotifyPickupIssued(std::uint64_t action_id) {
+    if(action_id && PickupRequestPending()) { pickup_request_issued_=true;++pickup_attempt_count_; }
+  }
+  void CancelUnissuedPickup() {
+    if(PickupRequestPending()) { mode_=BallMode::kFineAdjustForPickup;pickup_verification_complete_=true; }
+  }
   void SetHasBall(bool has_ball) { has_ball_ = has_ball; }
   void CompleteLineRecovery();
   void ClearEntryEvidence();
@@ -214,6 +223,7 @@ public:
   // The mission phase and last known recovery direction are retained.
   void ClearObservationHistory();
   void InvalidateTargetIdentity() {
+    pickup_verification_complete_=false;
     // A completed detection vote still stops DOWN search after the real DONE.
     // A new identity must rebuild its own observations, not revoke that stop.
     ClearObservationHistory();
@@ -314,7 +324,7 @@ private:
   int recovery_visible_count_{0};
   bool has_smoothed_{false};
   bool verified_observation_pending_{false};
-  bool pickup_verification_active_{false};
+  bool pickup_verification_active_{false}, pickup_verification_complete_{false};
   double pickup_verification_start_sec_{0.0};
   ObjectObservationWindow observation_window_;
   DownSearchWalk down_search_;
@@ -346,6 +356,7 @@ private:
   bool has_ball_{false};
   bool pickup_failed_{false};
   int pickup_attempt_count_{0};
+  bool pickup_request_issued_{false};
   int pickup_shrink_count_{0};
   BallConfig EffectivePickupConfig() const {
     return config_.PickupRegionAfterFailures(pickup_shrink_count_);

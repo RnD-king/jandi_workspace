@@ -39,6 +39,11 @@ struct Trial {
   }
   MissionFrameResult Preview() const {auto trial=core;auto input=in;input.allow_new_body_actions=true;input.delivery_feedback={};return trial.Step(input);}
   void Commit(MissionAction action) {
+    if(action==MissionAction::kPickBall) {
+      for(int i=0;i<30 && Preview().command.action!=action;++i) {
+        Tick();assert(out.ball.pickup_attempt_count==0 && out.command.action_id==0);
+      }
+    }
     const auto candidate=Preview();
     if(candidate.command.action!=action)
       throw std::runtime_error("stage COMMIT expected="+std::to_string(static_cast<int>(action))+
@@ -233,7 +238,12 @@ void ExecuteStageNeedsRealPoseAndStableReadiness(MissionType mission) {
   const auto id=t.PrepareStage(mission,3);
   assert(t.out.foot_pose==FootPose::kFine && id!=0);
   for(int i=0;i<9;++i){t.Tick();assert(!t.out.test_ready && t.out.command.action_id==0);}
-  t.Tick();assert(t.out.test_ready && !t.out.trial_complete);
+  t.Tick();
+  if(mission==MissionType::kBall) {
+    assert(t.out.ball.pickup_verifying && !t.out.test_ready);
+    for(int i=0;i<10;++i)t.Tick();
+  }
+  assert(t.out.test_ready && !t.out.trial_complete);
   auto outside=t.core;auto input=t.in;input.allow_new_body_actions=false;
   if(mission==MissionType::kBall)input.ball_target=Target(100,336);
   else if(mission==MissionType::kHurdle)input.hurdle_target=Target(320,350);
@@ -305,6 +315,10 @@ void FineAdjustmentUsesFreshEqualMeans() {
     g=goal.Compute({},Target(),{true,0,recent ? .6 : .4,0,1},
                    640,480,now,false,goal_camera,{},false);
   }
+  assert(b.pickup_verifying && b.action.action==MissionAction::kNone);
+  // Repeat the same coordinate pattern in the independent pre-PICK window.
+  for(int i=0;i<10;++i)
+    b=ball.Compute(Target(i>=7 ? 380 : 280,336),640,480,1.2+.12*(i+1),down,{},false);
   assert(std::abs(b.tracked.center_px.u-310)<1e-9);
   assert(std::abs(h.tracked.center_px.v-408)<1e-9);
   assert(g.fine_decision_pose_used && std::abs(g.fine_decision_pose.z_m-.46)<1e-9);
@@ -326,11 +340,11 @@ void FineAdjustmentUsesFreshEqualMeans() {
          std::abs(g.fine_decision_pose.z_m-.5)<1e-9);
 
   ActionExecutionFeedback done; done.action_done=true;
-  ball.Compute(Target(600,336),640,480,1.3,down,done,false);
+  ball.Compute(Target(600,336),640,480,2.5,down,done,false);
   hurdle.Compute(Target(320,470),640,480,1.3,down,done,StraightLine(),false);
   goal.Compute({},Target(),{true,0,1.0,0,1},640,480,1.3,false,
                goal_camera,done,false);
-  b=ball.Compute(Target(300,336),640,480,1.4,down,{},false);
+  b=ball.Compute(Target(300,336),640,480,2.6,down,{},false);
   h=hurdle.Compute(Target(320,420),640,480,1.4,down,{},StraightLine(),false);
   g=goal.Compute({},Target(),{true,0,.5,0,1},640,480,1.4,false,
                  goal_camera,{},false);

@@ -31,6 +31,7 @@ int main(int argc,char** argv) {
         rclcpp::Parameter("hurdle_contact_inter_action_hold_sec",.7),
         rclcpp::Parameter("ball_down_search_inter_action_hold_sec",.6),
         rclcpp::Parameter("ball_fine_pose_pre_hold_sec",.5),
+        rclcpp::Parameter("ball_pickup_verification_sec",1.25),
         rclcpp::Parameter("hurdle_down_search_inter_action_hold_sec",1.2),
         rclcpp::Parameter("ball_approach_top_center_u_px",400.0),
         rclcpp::Parameter("ball_approach_top_half_width_px",70.0),
@@ -238,6 +239,14 @@ int main(int argc,char** argv) {
     vision::ReadMissionParameters(*node,applied);
     Check(applied.hurdle.contact_inter_action_hold_sec==.7,"HURDLE contact hold startup override was lost");
     Check(applied.ball.fine_pose_pre_hold_sec==.5,"BALL FINE pre-hold startup override was lost");
+    Check(applied.ball.pickup_verification_sec==1.25,"BALL pre-PICK verification startup override was lost");
+    for(double bad:{0.0,-1.0,std::numeric_limits<double>::infinity()}) {
+      bool rejected=false;
+      try {vision::ApplyLivePerceptionParameter(rclcpp::Parameter("ball_pickup_verification_sec",bad),applied);}
+      catch(const std::invalid_argument&) {rejected=true;}
+      Check(rejected && applied.ball.pickup_verification_sec==1.25,"invalid pre-PICK delay was accepted");
+    }
+
     Check(applied.ball.down_search_inter_action_hold_sec==.6 &&
           applied.hurdle.down_search_inter_action_hold_sec==1.2,
           "independent DOWN search hold startup overrides were lost");

@@ -667,7 +667,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   if (!raw || !raw.IsMap())
     throw std::runtime_error("vision algorithm config must contain a vision_algorithm map: " + path);
   const YAML::Node a = AlgorithmSections(raw);
-  if (const auto scan=raw["common"]["scan_correction"]) {
+  if (const auto common=raw["common"]; common && common["scan_correction"]) {
+    const auto scan=common["scan_correction"];
     Assign(scan,"measured_turn_deg",c.scan_correction.measured_turn_deg);
     Assign(scan,"near_angle_deg",c.scan_correction.near_angle_deg);
     Assign(scan,"max_attempts",c.scan_correction.max_attempts);

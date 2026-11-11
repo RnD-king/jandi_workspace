@@ -172,6 +172,22 @@ int main() {
       returned=curve_point.ConfirmArrival(cfg.forward,now);
   }
   assert(returned && curve_point.ScanStopId()==1);
+  // RIGHT-first visits the opposite side as well: RIGHT -> LEFT -> CENTER.
+  CameraMotion right_points(cfg);
+  right_points.StartScan(false,45,.1,.5,.1,positions,now,false,2.0);
+  int right_stops=0;
+  for(int i=0;i<500 && right_stops<3;++i) {
+    now+=std::chrono::milliseconds(21);
+    if(right_points.Update(now)==CameraMotion::Result::Verify) {
+      assert(!right_points.ConfirmArrival(right_points.TargetPose(),now));
+      ++right_stops;
+      const auto yaw=right_points.ScanCommandedYawDeg();
+      assert(right_stops==1 ? yaw<-44 : right_stops==2 ? yaw>44 : std::abs(yaw)<.1);
+      now+=std::chrono::milliseconds(510);right_points.Update(now);
+      if(right_stops<3) assert(right_points.ResumeScan(now));
+    }
+  }
+  assert(right_stops==3);
   // The normal forward/down/goal interpolation remains available.
   camera.Start(1,positions,start);
   assert(!camera.ScanActive());

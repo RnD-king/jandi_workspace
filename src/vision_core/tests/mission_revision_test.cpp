@@ -19,6 +19,9 @@ void VerifiedFineWindows() {
   BallController ball(c.ball,3); ball.StartTestExecute();
   ball.UseVerifiedObservation(Target(345,100),hits,640,480);
   auto b=ball.Compute(Target(0,0),640,480,1,{CameraMode::kBallView,true},done);
+  assert(b.pickup_verifying && b.action.action==MissionAction::kNone);
+  for(int i=1;i<=10;++i)
+    b=ball.Compute(Target(345,100),640,480,1+.1*i,{CameraMode::kBallView,true},{});
   assert(b.action.action==MissionAction::kPickBall && b.tracked.stable);
   BallController single(c.ball,3);single.StartTestExecute();
   single.UseVerifiedObservation(Target(345,100),{true},640,480);
@@ -483,7 +486,9 @@ void PoseSettleAndConcurrentObservation() {
     assert(r.post_motion_window_frames>0);
   }
   f.now_sec=decision_at;f.delivery_feedback={};f.ball_target=Target(345,100);r=core.Step(f);
-  assert(!r.post_motion_observing && r.command.action==MissionAction::kPickBall);
+  assert(r.ball.pickup_verifying && r.command.action==MissionAction::kNone);
+  for(int i=1;i<=10;++i) { f.now_sec=decision_at+.1*i;r=core.Step(f); }
+  assert(r.command.action==MissionAction::kPickBall);
 }
 void FineObservationTiming(double extra_settle, bool manual=false,
                             double observation_sec=1.0, bool trailing_misses=false) {

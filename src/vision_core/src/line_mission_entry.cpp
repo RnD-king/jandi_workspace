@@ -18,6 +18,54 @@ bool SameIssuedAction(MissionAction requested, MissionAction issued) {
 }
 }
 
+void MissionController::RetryLineHeadSearch() {
+  auto& scan=line_head_search_;using Phase=LineHeadSearch::Phase;
+  if(++scan.completed_pairs<std::min(config_.line_recovery.scan_max_pairs,config_.scan_correction.max_attempts)) {
+    scan.first_left=scan.last_found_left.value_or(scan.first_left);
+    scan.phase=scan.first_left ? Phase::kPendingLeft : Phase::kPendingRight;
+    scan.observation.Reset();
+  } else { scan.phase=Phase::kIdle;line_state_=LineState::kFinalHold; }
+}
+void MissionController::RetryGoalHeadSearch() {
+  auto& scan=goal_head_search_;using Phase=GoalHeadSearch::Phase;
+  scan.observation.Reset();scan.observed_target.reset();scan.started=false;
+  if(scan.attempts<config_.scan_correction.max_attempts) {
+    scan.first_left=scan.last_found_left.value_or(scan.first_left);
+    scan.phase=scan.first_left ? Phase::kPendingLeft : Phase::kPendingRight;
+  } else { scan.phase=Phase::kIdle;scan.exhausted=true;approach_goal_empty_frames_=0; }
+}
+void MissionController::RetryCurveHeadSearch() {
+  using Phase=CurveSearchState::Phase;
+  curve_.observation.Reset();curve_.started=false;
+  if(curve_.head_attempts<std::min(config_.curve_search.head_search_max_attempts,config_.scan_correction.max_attempts))
+    curve_.phase=Phase::kDrain;
+  else {
+    curve_.phase=Phase::kLocked;curve_.unlock_blocks=config_.curve_search.failure_lock_line_blocks;
+    curve_.skip_pending=true;
+    if(course_curve_index_==3) { course_curve_index_=5;curve_.unlock_blocks=0; }
+    BeginLineReacquisition();
+  }
+}
+void MissionController::AdvanceScanDeadlines(double now) {
+  // A transport tick supplies time only: no RGB vote, body request or fake DONE.
+  const auto failed=[](StationaryScanObservation::Result value) {
+    return value==StationaryScanObservation::Result::kEmpty ||
+        value==StationaryScanObservation::Result::kRejected;
+  };
+  if(line_head_search_.phase==LineHeadSearch::Phase::kReobserve &&
+     failed(line_head_search_.observation.Observe(1,false,now,false,
+         config_.line_recovery.scan_hold_sec,config_.line_recovery.scan_observation_timeout_sec,
+         config_.line.line_stable_window,config_.line.line_stable_min_hits))) RetryLineHeadSearch();
+  if(goal_head_search_.phase==GoalHeadSearch::Phase::kReobserve &&
+     failed(goal_head_search_.observation.Observe(1,false,now,false,
+         config_.goal.head_scan_hold_sec,config_.goal.head_scan_observation_timeout_sec,
+         config_.goal.stable_window,config_.goal.stable_min_hits))) RetryGoalHeadSearch();
+  if(curve_.phase==CurveSearchState::Phase::kBodyObserve &&
+     failed(curve_.observation.Observe(1,false,now,false,
+         config_.curve_search.scan_hold_sec,config_.curve_search.scan_observation_timeout_sec,
+         config_.ball.stable_window,config_.ball.stable_min_hits))) RetryCurveHeadSearch();
+}
+
 void MissionController::ObserveLineFeedback(const CommandDeliveryFeedback& feedback, double now) {
   if(feedback.done && feedback.action_id!=0 && continuous_.mission==MissionType::kGoal &&
      line_plan_.ObjectOwned(feedback.action_id,continuous_.epoch) &&
@@ -25,6 +73,30 @@ void MissionController::ObserveLineFeedback(const CommandDeliveryFeedback& feedb
     goal_approach_walk_done_=true;
   line_plan_.Feedback(feedback, now, config_.walk_inter_action_hold_sec);
   if (feedback.done && feedback.action_id != 0) {
+    if(line_head_search_.phase==LineHeadSearch::Phase::kAlignBody &&
+       feedback.action_id==line_head_search_.align_action_id) {
+      auto& scan=line_head_search_;scan.align_action_id=0;
+      if(scan.align_remaining>0) --scan.align_remaining;
+      if(scan.align_remaining==0) {
+        scan.phase=LineHeadSearch::Phase::kReobserve;scan.observation.Begin(1,now);scan.observed_line.reset();
+      }
+    }
+    if(goal_head_search_.phase==GoalHeadSearch::Phase::kBodyTurn &&
+       feedback.action_id==goal_head_search_.body_action_id) {
+      auto& scan=goal_head_search_;scan.body_action_id=0;
+      if(scan.turns_remaining>0) --scan.turns_remaining;
+      if(scan.turns_remaining==0) {
+        scan.phase=GoalHeadSearch::Phase::kReobserve;scan.observation.Begin(1,now);
+        scan.observed_target.reset();scan.reobserve_started_sec=now;
+      }
+    }
+    if(curve_.phase==CurveSearchState::Phase::kBodyTurn &&
+       feedback.action_id==curve_.correction_action_id) {
+      curve_.correction_action_id=0;if(curve_.turns_remaining>0) --curve_.turns_remaining;
+      if(curve_.turns_remaining==0) {
+        curve_.phase=CurveSearchState::Phase::kBodyObserve;curve_.observation.Begin(1,now);curve_.observed_frames=0;
+      }
+    }
     if (feedback.action_id == candidate_.turn_id) {
       if (candidate_.turn_is_restore) ++candidate_.restores; else ++candidate_.searches;
       candidate_.observe_after_turn = !candidate_.turn_is_restore;
@@ -140,6 +212,8 @@ MissionFrameResult MissionController::StepPlannedLine(
               eligible=false;
             }
             if(eligible) {
+              curve_.head_attempts=curve_.body_attempts=0;
+              curve_.turns_remaining=0;curve_.correction_action_id=0;curve_.found_yaw.reset();
               curve_.delay_remaining=config_.curve_search.scan_delay_walk_sequences;
               curve_.phase=curve_.delay_remaining>0 ?
                   CurveSearchState::Phase::kDelay : CurveSearchState::Phase::kDrain;
@@ -337,6 +411,9 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   if (input.advance_line_fsm) {
     actual_line_stability_history_.push_back(line_state_==LineState::kNormal &&
+        !curve_special && input.camera_feedback.settled &&
+        (input.camera_feedback.actual_mode==CameraMode::kForward ||
+         input.camera_feedback.actual_mode==CameraMode::kBallView) &&
         actual_line_guide.valid && std::isfinite(actual_line_guide.offset) &&
         std::isfinite(actual_line_guide.heading_rad));
     while (actual_line_stability_history_.size() >
@@ -399,7 +476,10 @@ MissionFrameResult MissionController::StepPlannedLine(
       std::isfinite(actual_line_guide.heading_rad)) {
     const auto real=line_p2p_controller_.Compute(actual_line_guide);
     if (real.direction!=CruiseDirection::kNone) last_line_score_=real.error;
-    if(continuous_.mission==MissionType::kNone && line_recovery_memory_.budget<0) {
+    if(continuous_.mission==MissionType::kNone && line_recovery_memory_.budget<0 &&
+       !curve_special && input.camera_feedback.settled &&
+       (input.camera_feedback.actual_mode==CameraMode::kForward ||
+        input.camera_feedback.actual_mode==CameraMode::kBallView)) {
       line_recovery_memory_.normal=actual_line_guide;
       if(real.direction==CruiseDirection::kLeft) line_recovery_memory_.last_left=true;
       else if(real.direction==CruiseDirection::kRight) line_recovery_memory_.last_left=false;
@@ -491,13 +571,13 @@ MissionFrameResult MissionController::StepPlannedLine(
         hint.ransac_enabled=false;hint.guide_min_points=2;
         const auto guide=ComputeLineFeatures(input.line_centers,input.image_width,
             input.image_height,hint,2).guide;
-        const bool centered=guide.valid && std::isfinite(guide.offset) &&
+        const bool valid_guide=guide.valid && std::isfinite(guide.offset) &&
             std::isfinite(guide.heading_rad);
         const auto verdict=scan.observation.Observe(sf.stop_id,sf.frame_is_fresh,
-            input.now_sec,centered,config_.line_recovery.scan_hold_sec,
+            input.now_sec,valid_guide,config_.line_recovery.scan_hold_sec,
             config_.line_recovery.scan_observation_timeout_sec,
             config_.line_recovery.scan_verify_window,config_.line_recovery.scan_verify_hits,
-            std::nullopt,sf.stationary_since_sec);
+            std::nullopt,sf.stationary_since_sec,input.frame_capture_sec);
         using Verdict=StationaryScanObservation::Result;
         if(verdict==Verdict::kConfirmed) {
           scan.align_left=sf.yaw_deg>0.0;
@@ -507,7 +587,9 @@ MissionFrameResult MissionController::StepPlannedLine(
         } else if(verdict==Verdict::kEmpty || verdict==Verdict::kRejected)
           camera=CameraRequest::kScanResume;
       }
-      if (sf.finished && scan.scan_started) {
+      if (sf.finished && scan.scan_started &&
+          (scan.phase==Phase::kScanningLeft || scan.phase==Phase::kScanningRight ||
+           scan.phase==Phase::kHoldingLeft || scan.phase==Phase::kHoldingRight)) {
         if(++scan.completed_pairs<std::min(config_.line_recovery.scan_max_pairs,
                                           config_.scan_correction.max_attempts))
           scan.phase=scan.first_left ? Phase::kPendingLeft : Phase::kPendingRight;
@@ -550,48 +632,40 @@ MissionFrameResult MissionController::StepPlannedLine(
         if (scan.align_remaining>0) --scan.align_remaining;
       }
       if (scan.align_remaining==0 && scan.align_action_id==0 && idle) {
-        scan.phase=Phase::kReobserve;scan.observation.Reset();
+        scan.phase=Phase::kReobserve;scan.observation.Begin(1,input.now_sec);scan.observed_line.reset();
       } else if (scan.align_action_id==0 && idle && commands_allowed &&
                  input.allow_new_line_action) {
         request=WalkTurn(scan.align_left);
       }
     } else if(scan.phase==Phase::kReobserve) {
       const auto normal=ComputeLineFeaturesForFrame(input,features).guide;
+      if(normal.valid && std::isfinite(normal.offset) && std::isfinite(normal.heading_rad)) scan.observed_line=normal;
       const auto verdict=scan.observation.Observe(1,true,input.now_sec,
           normal.valid && std::isfinite(normal.offset) && std::isfinite(normal.heading_rad),
           config_.line_recovery.scan_hold_sec,config_.line_recovery.scan_observation_timeout_sec,
-          config_.line.line_stable_window,config_.line.line_stable_min_hits);
+          config_.line.line_stable_window,config_.line.line_stable_min_hits,
+          std::nullopt,std::nullopt,input.frame_capture_sec);
       using Verdict=StationaryScanObservation::Result;
       if(verdict==Verdict::kConfirmed) {
+        if(scan.observed_line) {
+          line_recovery_memory_.normal=scan.observed_line;
+          const auto dir=line_p2p_controller_.Compute(*scan.observed_line).direction;
+          if(dir==CruiseDirection::kLeft) line_recovery_memory_.last_left=true;
+          else if(dir==CruiseDirection::kRight) line_recovery_memory_.last_left=false;
+        }
         scan={};line_state_=LineState::kNormal;
-        line_recovery_memory_.budget=-1;line_recovery_memory_.frozen.reset();
+        line_visible_recovery_turns_=line_last_score_recovery_turns_=0;
+        line_recovery_memory_.budget=-1;line_recovery_memory_.frozen.reset();line_recovery_memory_.frozen_left.reset();
         line_forward_recovery_issued_=0;line_forward_recovery_pending_=false;
         line_failure_pending_done_=false;
         // The usual normal LINE accumulator resumes on subsequent fresh frames.
       } else if(verdict!=Verdict::kWaiting) {
-        if(++scan.completed_pairs<std::min(config_.line_recovery.scan_max_pairs,
-                                          config_.scan_correction.max_attempts)) {
-          scan.first_left=scan.last_found_left.value_or(scan.first_left);
-          scan.phase=scan.first_left ? Phase::kPendingLeft : Phase::kPendingRight;
-          scan.observation.Reset();
-        } else { scan.phase=Phase::kIdle;line_state_=LineState::kFinalHold; }
+        RetryLineHeadSearch();
       }
     }
   }
   if(curve_override) {
     using Phase=CurveSearchState::Phase;
-    const auto failed=[&]() {
-      curve_.phase=Phase::kLocked;curve_.unlock_blocks=config_.curve_search.failure_lock_line_blocks;
-      curve_.skip_pending=true;
-      if(course_curve_index_==3) { course_curve_index_=5;curve_.unlock_blocks=0; }
-      BeginLineReacquisition();
-    };
-    const auto retry=[&]() {
-      curve_.observation.Reset();curve_.started=false;
-      if(curve_.head_attempts<std::min(config_.curve_search.head_search_max_attempts,
-                                       config_.scan_correction.max_attempts)) curve_.phase=Phase::kDrain;
-      else failed();
-    };
     const auto phase=curve_.phase;
     if(phase==Phase::kDrain && idle && commands_allowed) {
       if(last_ready_line_guide_ && last_ready_line_guide_->valid)
@@ -613,7 +687,7 @@ MissionFrameResult MissionController::StepPlannedLine(
             input.now_sec,input.scan_ball_u && std::isfinite(*input.scan_ball_u),
             config_.curve_search.scan_hold_sec,config_.curve_search.scan_observation_timeout_sec,
             config_.curve_search.verify_window,config_.curve_search.verify_hits,
-            input.scan_ball_u,sf.stationary_since_sec);
+            input.scan_ball_u,sf.stationary_since_sec,input.frame_capture_sec);
         using Verdict=StationaryScanObservation::Result;
         if(verdict==Verdict::kConfirmed) {
           const auto correction=ObjectScanCorrection(sf.yaw_deg,curve_.observation.MeanU(),
@@ -630,14 +704,14 @@ MissionFrameResult MissionController::StepPlannedLine(
       }
       if(sf.finished && curve_.started &&
          (curve_.phase==Phase::kScan || curve_.phase==Phase::kHold)) curve_.phase=Phase::kReturnMiss;
-    } else if(phase==Phase::kReturnFound && input.camera_scan.finished &&
+    } else if(phase==Phase::kReturnFound &&
               input.camera_feedback.settled && input.camera_feedback.actual_mode==CameraMode::kForward) {
       ++curve_.body_attempts; // Finding a target never resets head_attempts.
       curve_.phase=curve_.turns_remaining ? Phase::kBodyTurn : Phase::kBodyObserve;
-      curve_.observation.Reset();
-    } else if(phase==Phase::kReturnMiss && input.camera_scan.finished &&
+      curve_.observation.Begin(1,input.now_sec);
+    } else if(phase==Phase::kReturnMiss &&
               input.camera_feedback.settled && input.camera_feedback.actual_mode==CameraMode::kForward) {
-      retry();
+      RetryCurveHeadSearch();
     } else if(phase==Phase::kBodyTurn && idle && commands_allowed && curve_.correction_action_id==0) {
       request=WalkTurn(curve_.turn_left);
     } else if(phase==Phase::kBodyObserve && idle && input.camera_feedback.settled &&
@@ -646,12 +720,13 @@ MissionFrameResult MissionController::StepPlannedLine(
           std::isfinite(input.ball_target->center_px.v);
       const auto verdict=curve_.observation.Observe(1,true,input.now_sec,valid,
           config_.curve_search.scan_hold_sec,config_.curve_search.scan_observation_timeout_sec,
-          config_.ball.stable_window,config_.ball.stable_min_hits);
+          config_.ball.stable_window,config_.ball.stable_min_hits,
+          std::nullopt,std::nullopt,input.frame_capture_sec);
       using Verdict=StationaryScanObservation::Result;
       if(verdict==Verdict::kConfirmed) {
         curve_.phase=Phase::kIdle;
         // Admission resumes through the existing BALL course/lock policy.
-      } else if(verdict!=Verdict::kWaiting) retry();
+      } else if(verdict!=Verdict::kWaiting) RetryCurveHeadSearch();
     }
   }
   bool manual_line_hold = false;
@@ -1152,16 +1227,6 @@ MissionFrameResult MissionController::StepPlannedLine(
      command.command_type==CommandType::kAction &&
      command.action_id!=0 && command.action==request.action)
     curve_.correction_action_id=command.action_id;
-  if(curve_.phase==CurveSearchState::Phase::kBodyTurn &&
-     input.delivery_feedback.done && curve_.correction_action_id!=0 &&
-     input.delivery_feedback.action_id==curve_.correction_action_id) {
-    curve_.correction_action_id=0;
-    if(curve_.turns_remaining>0) --curve_.turns_remaining;
-    if(curve_.turns_remaining==0) {
-      curve_.phase=CurveSearchState::Phase::kBodyObserve;
-      curve_.observation.Reset();curve_.observed_frames=0;
-    }
-  }
   if (LinePlan::IsUnit(command.action)) {
     line_plan_.Issued(command,
       command.control_phase == ControlPhase::kWaitingQueuedActionAck ? parent_id : 0);
@@ -1193,6 +1258,7 @@ MissionFrameResult MissionController::StepPlannedLine(
       ++line_forward_recovery_issued_;
       line_forward_recovery_pending_=false;
       line_failure_pending_done_=true;
+      line_plan_.Abort(); // Recovery is exactly one physical unit; issued IDs still drain DONE.
     }
   }
   if (line_scan_override && line_head_search_.phase==LineHeadSearch::Phase::kAlignBody &&

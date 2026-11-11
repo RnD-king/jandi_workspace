@@ -16,7 +16,7 @@ void ZeroDelayCurveRegression() {
   cfg.line_p2p.left_repetitions=cfg.line_p2p.straight_repetitions=
       cfg.line_p2p.right_repetitions=1;
   MissionController core(cfg);MissionFrameInput in;MissionFrameResult out;
-  in.image_width=640;in.image_height=480;
+  in.image_width=640;in.image_height=480;in.intrinsics={600,600,320,240};
   in.command_transport_enabled=true;
   in.camera_feedback={CameraMode::kForward,true};
   in.line_centers={{380,450},{380,400},{380,350},{380,300},{430,250}};
@@ -51,7 +51,7 @@ int main() {
   cfg.curve_search.stable_min_hits=5;
   MissionController controller(cfg);
   MissionFrameInput in;
-  in.image_width=640;in.image_height=480;
+  in.image_width=640;in.image_height=480;in.intrinsics={600,600,320,240};
   in.camera_feedback={CameraMode::kForward,true};
   in.command_transport_enabled=true;
   // Four lower RANSAC survivors and one upper original point: shared-anchor

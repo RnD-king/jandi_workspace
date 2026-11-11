@@ -1934,10 +1934,10 @@ private:
 
     // An automatic pre-PICK verification must never vote the same RGB frame twice.
     const double capture_sec=StampSeconds(msg->header);
-    if(last_debug_result_.mission.ball.pickup_verifying) {
-      if(!std::isfinite(capture_sec) || capture_sec<=last_pickup_verification_capture_sec_) return;
-      last_pickup_verification_capture_sec_=capture_sec;
-    }
+    if(last_debug_result_.mission.ball.pickup_verifying &&
+       (!std::isfinite(capture_sec) || capture_sec<=last_pickup_verification_capture_sec_)) return;
+    if(std::isfinite(capture_sec))
+      last_pickup_verification_capture_sec_=std::max(last_pickup_verification_capture_sec_,capture_sec);
     // 3) YOLO 추론
     std::vector<Detection> dets;
 

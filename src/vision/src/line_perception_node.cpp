@@ -1580,10 +1580,11 @@ private:
         last_debug_result_.mission.stationary_scan_observing ||
         last_debug_result_.mission.goal.shoot_verifying ||
         last_debug_result_.mission.ball.pickup_verifying;
-    if(stationary_observation) {
-      if(!std::isfinite(capture_sec) || capture_sec<=last_stationary_capture_sec_) return;
-      last_stationary_capture_sec_=capture_sec;
-    }
+    if(stationary_observation &&
+       (!std::isfinite(capture_sec) || capture_sec<=last_stationary_capture_sec_)) return;
+    // Retain the candidate-frame stamp too: verification starts after it.
+    if(std::isfinite(capture_sec))
+      last_stationary_capture_sec_=std::max(last_stationary_capture_sec_,capture_sec);
     const bool fresh_scan_frame=stationary_scan && scan_frame_guard_.Accept(
         camera_scan_feedback_.command_id,camera_scan_feedback_.stop_id,
         capture_sec,scan_stationary_since_sec_,

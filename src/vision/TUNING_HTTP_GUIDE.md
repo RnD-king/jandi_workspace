@@ -193,11 +193,16 @@ cmake -S "$jandi_core_source" -B "$jandi_test_release/build/core-tests" \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 cmake --build "$jandi_test_release/build/core-tests" -j2
 ctest --test-dir "$jandi_test_release/build/core-tests" \
-  -R 'ball_fine_pose_hold|config_loader' --output-on-failure
+  -R 'stationary_scan|scan_body_correction|scan_recovery_sequence|ball_pickup_verification|ball_fine_pose_hold|ball_controller|pickup_polygon|curve_search|curve_rearm|mission_controller|mission_revision|staged_mission|unified_sequence|continuous_object_approach|config_loader' --output-on-failure
 ctest --test-dir "$jandi_test_release/build/ros/vision" \
   -R 'vision_(debug_mjpeg|qt_web_view|mission_parameters)_test' --output-on-failure
+ctest --test-dir "$jandi_test_release/build/ros/forward_walk" \
+  -R 'scan_motion_test|executor_source_contract' --output-on-failure
 ```
 
 로컬 확인을 마치면 기존 push 명령으로 해당 버전을 GitHub에 올린다.
 Jetson에서는 `~/jandi_update.sh main` / `~/jandi_update.sh fast`로 내려받아
 빌드·설치한다. 이 문서의 로컬 빌드 명령은 PC용이다.
+
+LINE 복구·목 탐색·픽업 전 재검증의 확정 동작과 새 파라미터는
+[SCAN_RECOVERY_UPDATE.md](SCAN_RECOVERY_UPDATE.md)에 정리했다.

@@ -295,6 +295,7 @@ public:
         point_index_=0;scan_first_sign_=left ? 1 : -1;
         scan_amplitude_=std::abs(proposed-scan_origin_.yaw);
         if(point_scan_ && (scan_origin_.yaw-scan_amplitude_<0 ||
+                          scan_origin_.yaw+scan_amplitude_>4095 ||
                           !std::isfinite(observation_timeout_sec) || observation_timeout_sec<hold_sec))
             throw std::invalid_argument("invalid stationary scan range/timeout");
         scan_stop_id_=0;

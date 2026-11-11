@@ -109,6 +109,21 @@ if(BUILD_TESTING)
   add_test(NAME shared_vision_core_race_round2_fast_test COMMAND shared_vision_core_race_round2_fast_test)
   set_tests_properties(shared_vision_core_race_round2_fast_test PROPERTIES ENVIRONMENT
     "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml")
+  add_executable(shared_vision_core_ball_pickup_verification_test tests/ball_pickup_verification_test.cpp)
+  target_link_libraries(shared_vision_core_ball_pickup_verification_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_ball_pickup_verification_test COMMAND shared_vision_core_ball_pickup_verification_test)
+  set_tests_properties(shared_vision_core_ball_pickup_verification_test PROPERTIES LABELS "logic" ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
+  add_executable(shared_vision_core_scan_body_correction_test tests/scan_body_correction_test.cpp)
+  target_link_libraries(shared_vision_core_scan_body_correction_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_scan_body_correction_test COMMAND shared_vision_core_scan_body_correction_test)
+  set_tests_properties(shared_vision_core_scan_body_correction_test PROPERTIES LABELS "logic" ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
+  add_executable(shared_vision_core_scan_recovery_sequence_test tests/scan_recovery_sequence_test.cpp)
+  target_link_libraries(shared_vision_core_scan_recovery_sequence_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_scan_recovery_sequence_test COMMAND shared_vision_core_scan_recovery_sequence_test)
+  set_tests_properties(shared_vision_core_scan_recovery_sequence_test PROPERTIES LABELS "logic" ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
   add_executable(shared_vision_core_stationary_scan_observation_test tests/stationary_scan_observation_test.cpp)
   target_link_libraries(shared_vision_core_stationary_scan_observation_test PRIVATE shared_vision_core)
   add_test(NAME shared_vision_core_stationary_scan_observation_test COMMAND shared_vision_core_stationary_scan_observation_test)

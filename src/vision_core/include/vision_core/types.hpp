@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace vision_core {
@@ -256,7 +257,7 @@ struct CameraScanFeedback {
   bool finished{false}; // final camera DONE edge
   std::uint32_t stop_id{0}; // Encoder-confirmed stationary pose within this scan.
   bool frame_is_fresh{true}; // Adapter rejects captures preceding this stop.
-  std::optional<double> stationary_since_sec; // Same logical clock as the core.
+  std::optional<double> stationary_since_sec{}; // Same logical clock as the core.
 };
 
 struct CameraFeedback {

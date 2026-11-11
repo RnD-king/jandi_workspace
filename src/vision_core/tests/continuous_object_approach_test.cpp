@@ -46,7 +46,7 @@ struct Driver {
   MissionFrameResult out;
   std::uint64_t current{}, last_done{};
   explicit Driver(const MissionControllerConfig& c):core(c) {
-    in.image_width=640;in.image_height=480;
+    in.image_width=640;in.image_height=480;in.intrinsics={600,600,320,240};
     in.camera_feedback={CameraMode::kForward,true};in.command_transport_enabled=true;
     in.line_centers={{320,450},{320,400},{320,350},{320,300},{320,250}};
     in.ball_target=Target();in.ball_track_id=41;
@@ -1605,20 +1605,25 @@ void AcquiredGoalLossScansBeforeLineReturn() {
     started=d.out.command.camera_request==CameraRequest::kGoalScanLeft;
   }
   Check(started,"acquired far GOAL loss skipped left head scan and returned to LINE");
-  for(unsigned stop=1;stop<=3;++stop) {
-    d.in.camera_feedback={CameraMode::kTransition,false};
-    d.in.camera_scan={1,2,stop==1 ? 25.0 : stop==2 ? -25.0 : 0.0,false,stop,true};
-    bool advanced=false;
-    for(int i=0;i<13;++i) {
-      d.Tick();advanced |= d.out.command.camera_request==CameraRequest::kScanResume;
-      Check(d.out.command.camera_request!=CameraRequest::kBallViewLine,
-            "GOAL scan returned to LINE before trying all three stationary stops");
+  for(unsigned round=1;round<=3;++round) {
+    for(unsigned stop=1;stop<=3;++stop) {
+      d.in.camera_feedback={CameraMode::kTransition,false};
+      d.in.camera_scan={round,2,stop==1 ? 25.0 : stop==2 ? -25.0 : 0.0,false,stop,true};
+      bool advanced=false;
+      for(int i=0;i<13;++i) {
+        d.Tick();advanced |= d.out.command.camera_request==CameraRequest::kScanResume;
+        Check(d.out.command.camera_request!=CameraRequest::kBallViewLine,
+              "GOAL scan returned to LINE before its three rounds");
+      }
+      Check(advanced,"empty GOAL stop did not finish its full observation window");
     }
-    Check(advanced,"empty stationary GOAL stop did not advance after 0.5s");
+    d.in.camera_feedback={CameraMode::kGoal,true};
+    d.in.camera_scan={round,0,0,true};d.Tick();d.in.camera_scan.finished=false;
+    if(round<3) {
+      d.Tick();Check(d.out.command.camera_request==CameraRequest::kGoalScanLeft,
+                     "GOAL did not retry its next full scan round");
+    }
   }
-  d.in.camera_feedback={CameraMode::kGoal,true};
-  d.in.camera_scan={1,0,0,true};d.Tick();
-  d.in.camera_scan.finished=false;
   bool returned=false;
   for(int i=0;i<12 && !returned;++i){
     d.Tick();returned=d.out.command.camera_request==CameraRequest::kBallViewLine;
@@ -1626,7 +1631,7 @@ void AcquiredGoalLossScansBeforeLineReturn() {
   Check(returned,"GOAL scan exhausted both sides without BALL_VIEW_LINE fallback");
 }
 // A found LEFT must not count as an exhausted search when the central
-// tracker is lost. Conversely, 5/10 central hits survive a final missing frame.
+// tracker is lost. Normal 7/10 central hits survive a final missing frame.
 void GoalStationaryRecheck(bool reacquired) {
   auto c=Config();c.enable_ball=false;c.enable_goal=true;c.initial_has_ball=true;
   c.goal_trial_start_goal=true;c.goal.lost_frames=3;c.goal.head_scan_enabled=true;
@@ -1648,13 +1653,13 @@ void GoalStationaryRecheck(bool reacquired) {
   }
   Check(scanning,"GOAL recheck fixture did not start scan");
   d.in.camera_feedback={CameraMode::kTransition,false};
-  d.in.scan_backboard_u=280;
-  d.in.camera_scan={1,1,8,false,0,true};
+  d.in.scan_backboard_u=320;
+  d.in.camera_scan={1,1,0,false,0,true};
   for(int i=0;i<20;++i) {
     d.Tick();Check(d.out.command.camera_request!=CameraRequest::kScanReturn,
                    "moving frames confirmed a stationary GOAL scan");
   }
-  d.in.camera_scan={1,2,8,false,1,false};
+  d.in.camera_scan={1,2,0,false,1,false};
   for(int i=0;i<15;++i) {
     d.Tick();Check(d.out.command.camera_request!=CameraRequest::kScanReturn,
                    "stale captured frames confirmed a stationary GOAL scan");
@@ -1674,19 +1679,19 @@ void GoalStationaryRecheck(bool reacquired) {
   Check(central,"LEFT success did not begin a fresh central recheck");
   bool right=false;
   for(int i=0;i<25;++i) {
-    // Start with a late candidate, then exactly 5 valid samples / 10.
-    if(reacquired && i>=5 && i<10) {
+    // Normal GOAL reacquisition needs seven valid samples in a full ten-frame window.
+    if(reacquired && i<7) {
       d.in.backboard_target=Target(280,100);d.in.backboard_track_id=99;
       d.in.backboard_center_depth_m=2;
     } else { d.in.backboard_target.reset();d.in.backboard_center_depth_m.reset(); }
     d.Tick();
-    right |= d.out.command.camera_request==CameraRequest::kGoalScanRight;
+    right |= d.out.command.camera_request==CameraRequest::kGoalScanLeft;
     Check(d.out.command.camera_request!=CameraRequest::kBallViewLine,
           "LEFT success prematurely fell back to floor LINE");
     if(!reacquired && right)break;
   }
   Check(reacquired ? !right : right,
-        "central 5/10 success was lost, or failed central recheck skipped remaining RIGHT");
+        "central 7/10 success was lost, or failed central recheck skipped a new scan round");
 }
 
 void GoalAutoThreePixelZones() {

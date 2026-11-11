@@ -716,6 +716,10 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
   } else {
     add_row(ball_approach_rows,"far u-target: --",ball_color);
   }
+  if(ball_cmd.pickup_verifying) {
+    std::snprintf(buf,sizeof(buf),"PRE-PICK VERIFY: fresh stationary %.2fs",bc.pickup_verification_sec);
+    add_row(ball_fine_rows,buf,ball_color);
+  }
   const auto effective_pickup=bc.PickupRegionAfterFailures(ball_cmd.pickup_shrink_count);
   const auto pickup_vertices=effective_pickup.PickupVertices();
   std::snprintf(buf,sizeof(buf),
