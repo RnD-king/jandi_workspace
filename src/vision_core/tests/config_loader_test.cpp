@@ -84,6 +84,12 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.line.line_stable_window==baseline.line.line_stable_window);
   assert(c.line_p2p.ready_lead_sec==baseline.line_p2p.ready_lead_sec);
   assert(c.line_p2p.observation_start_ratio==baseline.line_p2p.observation_start_ratio);
+  root["vision_algorithm"]["line"]["walk"]["finish_offset_gain"]=.7;
+  root["vision_algorithm"]["line"]["walk"]["finish_heading_gain"]=.8;
+  const auto finish=LoadText(YAML::Dump(root));
+  assert(finish.line_p2p.finish_offset_gain==.7 && finish.line_p2p.finish_heading_gain==.8);
+  assert(finish.line_p2p.offset_gain==baseline.line_p2p.offset_gain &&
+         finish.line_p2p.heading_gain==baseline.line_p2p.heading_gain);
   assert(c.ball.pickup_v2_px==baseline.ball.pickup_v2_px);
   assert(c.ball.pickup_shrink_enabled==baseline.ball.pickup_shrink_enabled);
   assert(c.ball.pickup_shrink_step_px==baseline.ball.pickup_shrink_step_px);
@@ -514,6 +520,12 @@ int main(int argc, char **argv) {
   Reject(text.str(), "camera_motion_timeout_sec: 3.0",
          "camera_motion_timeout_sec: .inf");
   Reject(text.str(), "heading_gain: 0.3", "heading_gain: -1.0");
+  for (const auto* key : {"finish_offset_gain", "finish_heading_gain"}) {
+    const auto field=std::string(key)+": 0.3";
+    Reject(text.str(),field,"");
+    for (const auto* value : {"-1.0", ".nan", ".inf", "not_a_number"})
+      Reject(text.str(),field,std::string(key)+": "+value);
+  }
   Reject(text.str(), "steering_deadband: 0.10", "steering_deadband: -0.1");
   Reject(text.str(), "line_stable_min_hits: 5", "line_stable_min_hits: 11");
   Reject(text.str(), "failure_min_valid_samples: 5",

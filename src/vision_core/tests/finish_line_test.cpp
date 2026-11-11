@@ -29,6 +29,7 @@
 #include <limits>
 
 using namespace vision_core;
+using LineState = MissionController::LineState;
 namespace {
 void Check(bool value,const char* message) { if(!value) throw std::runtime_error(message); }
 MissionControllerConfig Config() {
@@ -38,6 +39,7 @@ MissionControllerConfig Config() {
   c.curve_search.enabled=false;
   c.line_features.image_center_u=c.hurdle.target_u_px=320;
   c.line_p2p.offset_gain=1;c.line_p2p.heading_gain=0;
+  c.line_p2p.finish_offset_gain=1;c.line_p2p.finish_heading_gain=0;
   c.line_p2p.steering_deadband=.1;c.line_p2p.in_place_turn_score=1;
   c.line_p2p.left_repetitions=c.line_p2p.right_repetitions=c.line_p2p.straight_repetitions=2;
   c.transition_settle_sec=0;c.hurdle.contact_steps=1;
@@ -52,7 +54,7 @@ struct Driver {
   MissionController core;
   MissionFrameInput in;
   MissionFrameResult out;
-  explicit Driver(int crosses=2,int index=5):core(Config()) {
+  explicit Driver(int crosses=2,int index=5,MissionControllerConfig config=Config()):core(config) {
     core.hurdle_crosses_completed_=crosses;core.course_curve_index_=index;
     in.image_width=640;in.image_height=480;in.command_transport_enabled=true;
     in.camera_feedback={CameraMode::kForward,true};
@@ -69,6 +71,27 @@ struct Driver {
     for(int i=0;i<count;++i)in.line_centers.push_back({u,450.0-40*i});
   }
 };
+void FinishGains() {
+  auto config=Config();
+  config.line_p2p.offset_gain=.2;config.line_p2p.heading_gain=.4;
+  config.line_p2p.finish_offset_gain=.3;config.line_p2p.finish_heading_gain=.6;
+  config.line_p2p.steering_deadband=.08;
+  LineGuide guide;guide.valid=true;guide.offset=-.3;
+  Driver finish(2,5,config);
+  Check(finish.core.SteeringDecision(guide).direction==CruiseDirection::kStraight,
+        "finish gains leaked into ordinary steering");
+  finish.Floor(224);finish.Tick();
+  Check(finish.out.command.action==MissionAction::kLineLeftUnit,
+        "finish did not correct an offset inside the ordinary deadband");
+  config.line_p2p.finish_offset_gain=.2;config.line_p2p.finish_heading_gain=.4;
+  Driver baseline(2,5,config);baseline.Floor(224);baseline.Tick();
+  Check(baseline.out.command.action==MissionAction::kLineStraightUnit,
+        "finish ignored its separately configured gains");
+  guide.offset=0;guide.heading_rad=.15;
+  Check(finish.core.SteeringDecision(guide,true).direction==CruiseDirection::kRight &&
+        finish.core.SteeringDecision(guide).direction==CruiseDirection::kStraight,
+        "finish heading gain was not applied independently");
+}
 void PriorityAndGates() {
   Driver floor;floor.Floor(200);floor.in.hurdle_target=Finish(450);floor.Tick();
   Check(floor.out.command.action==MissionAction::kLineLeftUnit,"valid LINE did not win over finish bbox");
@@ -269,4 +292,4 @@ void ReadyDonePauseReset() {
         d.out.command.action_id==0,"RESET retained finish-only forward policy");
 }
 }
-int main() { PriorityAndGates();CooldownScope();AllObjectsAreIgnored();ReadyDonePauseReset(); }
+int main() { FinishGains();PriorityAndGates();CooldownScope();AllObjectsAreIgnored();ReadyDonePauseReset(); }

@@ -90,6 +90,9 @@ vision_algorithm:
       # 보행 방향·제자리 회전 판단
       offset_gain: 0.2 # 위치 오차 가중치 (직선 O 보정 완화)
       heading_gain: 0.4 # 직선 방향각 보정 우선
+      # 결승 구간(커브 인덱스 5 + 허들 2회 이상 완료) 전용 조향 게인
+      finish_offset_gain: 0.3
+      finish_heading_gain: 0.6
       steering_deadband: 0.08 # |라인 점수|가 이 값보다 작으면 직진, 크면 회전
       in_place_turn_score: 0.5 # |라인 점수|가 이 값보다 크면 WALK 제자리 회전 1회 후 재관측
 
@@ -257,8 +260,8 @@ vision_algorithm:
 
       # DOWN 완료부터 LINE O/H 기억; 2번 자세 DONE 후 FINE 정렬에만 사용
       fine_line_reference_u_px: 380.0 # 허들 DOWN 화면의 로봇 기준선
-      fine_line_offset_tolerance_px: 200.0 # |O| 허용 범위 (px)
-      fine_line_heading_tolerance_deg: 10.0 # |H| 허용 범위 (도)
+      fine_line_offset_tolerance_px: 150.0 # |O| 허용 범위 (px)
+      fine_line_heading_tolerance_deg: 8.0 # |H| 허용 범위 (도)
       fine_line_observation_sec: 1.0 # 최초 정렬 판단 및 회전+횡이동 묶음의 최종 DONE 이후 정지 관측 (초)
       fine_line_stable_window: 10
       fine_line_stable_min_hits: 5

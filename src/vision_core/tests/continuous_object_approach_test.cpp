@@ -1707,9 +1707,8 @@ void GoalAutoReferenceIsIsolated() {
 }
 void ContinuousStageOneMatchesProduction() {
   for (const auto mission:{MissionType::kBall,MissionType::kHurdle,MissionType::kGoal}) {
-    for (const bool fast:{false,true}) {
+    { // MAIN has one production policy; FAST exercises its flag in its own branch.
       auto production_config=Config();
-      production_config.race_round2_fast_enabled=fast;
       production_config.test_stage=0;
       production_config.enable_ball=mission==MissionType::kBall;
       production_config.enable_hurdle=mission==MissionType::kHurdle;
