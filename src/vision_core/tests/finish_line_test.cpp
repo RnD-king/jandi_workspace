@@ -342,5 +342,23 @@ void SingleSparseRecoveryAndContinuousStraight() {
   Check(fresh.core.finish_loss_used_ && fresh.out.command.action==MissionAction::kLineLeftUnit,
         "real pre-loss O/H did not select recovery at READY");
 }
+void SparseRecoveryResumesRealThreePointSteering() {
+  Driver d;
+  LineGuide memory;memory.valid=true;memory.offset=-.4;
+  d.core.finish_last_stable_guide_=memory;
+  d.Floor(100,2);d.Tick();
+  const auto recovery=d.out.command.action_id;
+  Check(recovery && d.out.command.action==MissionAction::kLineLeftUnit,
+        "FINISH did not begin its remembered-left recovery");
+  d.Tick({recovery,true,false,false});
+  // Three valid floor LINE points reappear while the one-shot unit is active.
+  // Its READY successor must use fresh real steering instead of blind straight.
+  d.Floor(600,3);d.Tick({recovery,true,false,true});
+  Check(d.out.command.action==
+        static_cast<MissionAction>(d.core.config_.line_p2p.right_unit_action) &&
+        d.out.command.action_id!=recovery &&
+        d.core.command_coordinator_.HasQueuedAction(),
+        "FINISH recovery READY ignored newly valid three-point floor LINE");
 }
-int main() { SingleSparseRecoveryAndContinuousStraight();FinishGains();PriorityAndGates();CooldownScope();AllObjectsAreIgnored();ReadyDonePauseReset(); }
+}
+int main() { SparseRecoveryResumesRealThreePointSteering();SingleSparseRecoveryAndContinuousStraight();FinishGains();PriorityAndGates();CooldownScope();AllObjectsAreIgnored();ReadyDonePauseReset(); }
