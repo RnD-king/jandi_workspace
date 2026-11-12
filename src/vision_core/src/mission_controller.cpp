@@ -7,6 +7,7 @@
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/coordinate_rectifier.hpp"
+#include "vision_core/cruise_selector.hpp"
 #include "vision_core/stationary_window.hpp"
 
 namespace vision_core {
@@ -247,6 +248,15 @@ ActionRequest MissionController::ComputeLineAction(
         std::isfinite(guide.heading_rad);
     if (finish_line_straight_only_ || !usable) {
       line_state_=LineState::kNormal;
+      if (!finish_line_straight_only_ && finish_sparse_line_ && !finish_loss_used_ &&
+          finish_last_stable_guide_) {
+        const auto direction = SteeringDecision(*finish_last_stable_guide_, true).direction;
+        const auto cruise = vision_core::CruiseAction(direction);
+        if (cruise != MissionAction::kNone) {
+          finish_loss_request_ = true;
+          return LineLocomotion(cruise, true);
+        }
+      }
       return LineLocomotion(MissionAction::kStepForwardFour,true);
     }
     // Finish gains share the ordinary WALK turn assets, thresholds and turn budget.
@@ -3266,13 +3276,9 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
     mission_recovery_hits_.pop_front();
     mission_recovery_guides_.pop_front();
   }
-  // Only BALL pickup / GOAL throw LINE reacquisition uses this independent
-  // threshold. Ordinary LINE planning, FINISH and HURDLE votes are unchanged.
-  const int recovery_min_hits = config_.mission_recovery_stable_min_hits > 0
-      ? config_.mission_recovery_stable_min_hits : config_.line.line_stable_min_hits;
   const bool qualified = mission_recovery_hits_.size() == window &&
       std::count(mission_recovery_hits_.begin(), mission_recovery_hits_.end(), true) >=
-          recovery_min_hits;
+          config_.line.line_stable_min_hits;
   if (mission_recovery_verifying_) {
     if (input.now_sec - mission_recovery_verify_start_sec_ + 1e-9 <
             config_.line_p2p.recovery_observation_sec || mission_recovery_hits_.size() < window)
@@ -3442,7 +3448,6 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.backboard_max_depth_m = candidate.backboard_max_depth_m;
   updated.mission_recovery_max_turns = candidate.mission_recovery_max_turns;
   updated.mission_recovery_heading_tolerance_deg = candidate.mission_recovery_heading_tolerance_deg;
-  updated.mission_recovery_stable_min_hits = candidate.mission_recovery_stable_min_hits;
   updated.backboard_depth_strip_width_ratio =
       candidate.backboard_depth_strip_width_ratio;
   updated.backboard_depth_center_size_px=candidate.backboard_depth_center_size_px;
@@ -3652,6 +3657,9 @@ void MissionController::Reset(bool preserve_action_ids) {
   decision_observation_restart_pending_ = false;
   line_guard_turns_completed_ = 0;
   finish_line_started_=finish_line_straight_only_=false;
+  finish_last_stable_guide_.reset();finish_line_hits_.clear();
+  finish_sparse_line_=finish_loss_used_=finish_loss_request_=false;
+  finish_loss_action_id_=0;
   settle_until_sec_ = 0.0;
   last_settle_done_id_ = 0;
   decision_observation_camera_only_ = false;

@@ -447,8 +447,7 @@ vision_algorithm:
       # 후보·라인 유실 복구
       candidate_search_max_turns: 2 # 수동·단독 시험의 후보 재탐색용; 일반 AUTO 객체 접근에는 불필요
       mission_recovery_max_turns: 30 # 미션 전후 라인 복구 최대 회전 횟수
-      mission_recovery_heading_tolerance_deg: 30.0 # 공 줍기/슛 후 유효 LINE + |H| <= 30도
-      mission_recovery_stable_min_hits: 5 # ULTRAFAST만: 공 줍기/슛 후 LINE 복귀 8프레임 중 5회 (일반 LINE은 8중4 유지)
+      mission_recovery_heading_tolerance_deg: 30.0 # 복귀 합격: 유효 LINE + |H| <= 30도, MAIN 5/10 / FAST 4/8
       mission_recovery_turn_yaw_deg: 15 # 공 줍기/슛 후 FINE 제자리 회전 1회 요청각 (도)
 
       # 카메라 전환·동작 후 안정 대기

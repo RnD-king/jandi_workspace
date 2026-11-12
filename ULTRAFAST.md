@@ -31,19 +31,6 @@ vision_algorithm:
 화면의 근거리 가로선도 실제 FSM과 같은 두 값을 표시한다.
 YAML 값 변경은 노드를 완전히 종료·재실행하면 적용되며 재빌드는 필요 없다.
 
-## 공 줍기·던지기 후 LINE 복귀 안정 판정
-
-ULTRAFAST에서만 미션 후 LINE 복귀 확인을 기존 8프레임 중 4회에서
-**8프레임 중 5회**로 강화한다. 일반 LINE 보행·결승선·허들 판단의
-8중4 조건은 바꾸지 않는다. H 허용각 ±30°와 회전 DONE 이후 신규
-정지 관측 최소 1초, 30회 회전 한도는 그대로 유지한다.
-
-`vision_algorithm.mission.mission_recovery_stable_min_hits: 5`를 사용한다.
-값 0은 기존 일반 LINE 판정 횟수를 상속한다. 1~LINE 창 길이의 정수로
-조정할 수 있고, 잘못된 값은 시작 시 검증에서 거부된다.
-BALL 픽업과 GOAL 투척 후의 공통 `ComputeMissionLineRecovery` 경로에만
-적용한다.
-
 ## 커브 확인 후 반대쪽 전진
 
 일반 LINE의 O/H 게인은 `line.walk.offset_gain: 0.2`, `heading_gain: 0.4`다.

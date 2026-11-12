@@ -218,9 +218,6 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.mission_recovery_max_turns,"mission.mission_recovery_max_turns");
   PositiveInt(c.mission_recovery_turn_yaw_deg,"mission.mission_recovery_turn_yaw_deg");
   Positive(c.mission_recovery_heading_tolerance_deg,"mission.mission_recovery_heading_tolerance_deg");
-  if (c.mission_recovery_stable_min_hits < 0 ||
-      c.mission_recovery_stable_min_hits > c.line.line_stable_window)
-    throw std::runtime_error("mission.mission_recovery_stable_min_hits must be 0 or within LINE window");
   if (c.mission_recovery_heading_tolerance_deg > 90.0)
     throw std::runtime_error("mission recovery heading tolerance must be <= 90 degrees");
   Nonnegative(c.hurdle.line_reference_u_px,"hurdle.line_reference_u_px");
@@ -1105,7 +1102,6 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(m, "mission_recovery_max_turns", c.mission_recovery_max_turns);
   Assign(m, "mission_recovery_turn_yaw_deg", c.mission_recovery_turn_yaw_deg);
   Assign(m, "mission_recovery_heading_tolerance_deg", c.mission_recovery_heading_tolerance_deg);
-  Assign(m, "mission_recovery_stable_min_hits", c.mission_recovery_stable_min_hits);
 
   Assign(m, "camera_motion_timeout_sec", c.camera_motion_timeout_sec);
   Assign(m, "transition_settle_sec", c.transition_settle_sec);

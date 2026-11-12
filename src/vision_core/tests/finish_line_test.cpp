@@ -291,5 +291,56 @@ void ReadyDonePauseReset() {
   Check(d.core.hurdle_crosses_completed_==0 && d.out.course_curve_index==1 &&
         d.out.command.action_id==0,"RESET retained finish-only forward policy");
 }
+void SingleSparseRecoveryAndContinuousStraight() {
+  for(int points : {0,1,2}) for(double offset : {-.4,0.,.4}) {
+    auto cfg=Config();
+    cfg.line_p2p.left_repetitions=cfg.line_p2p.right_repetitions=cfg.line_p2p.straight_repetitions=3;
+    Driver d(2,5,cfg);
+    LineGuide memory;memory.valid=true;memory.offset=offset;
+    d.core.finish_last_stable_guide_=memory;
+    d.Floor(320,points);d.Tick();
+    const auto recovery=d.out.command.action_id;
+    const auto expected=offset<0 ? MissionAction::kLineLeftUnit : offset>0 ?
+        static_cast<MissionAction>(cfg.line_p2p.right_unit_action) : MissionAction::kLineStraightUnit;
+    Check(recovery && d.out.command.action==expected && d.core.finish_loss_used_,
+          "sparse FINISH did not use its last stable direction once");
+    Check(!d.core.line_plan_.Active(),"loss walk retained unissued repetitions");
+    d.Tick({recovery,true,false,false});
+    d.in.allow_new_commands=d.in.allow_new_body_actions=false;
+    d.Tick({recovery,true,false,true});
+    Check(!d.core.command_coordinator_.HasQueuedAction(),"PAUSE booked a FINISH successor");
+    d.in.allow_new_commands=d.in.allow_new_body_actions=true;
+    d.Tick({recovery,true,false,true});
+    const auto straight=d.out.command.action_id;
+    Check(straight && straight!=recovery && d.out.command.action==MissionAction::kLineStraightUnit &&
+          d.core.command_coordinator_.HasQueuedAction(),"recovery READY did not reserve straight continuation");
+    Check(!d.core.line_plan_.Done(recovery) && !d.out.post_motion_observing,
+          "READY finished recovery or added a stationary observation");
+    d.Tick({straight,true,false,false});
+    d.Tick({recovery,true,false,true});
+    Check(d.core.command_coordinator_.QueuedActionId()==straight,"duplicate READY replaced successor");
+    d.Tick({recovery,true,true,false});
+    Check(d.core.line_plan_.Done(recovery) && !d.core.line_plan_.Done(straight) &&
+          !d.out.post_motion_observing,"real DONE lost the straight successor");
+    for(int i=0;i<12;++i) {
+      d.Tick();Check(d.core.finish_loss_used_,"persistent loss rearmed another recovery");
+    }
+    d.Tick({straight,true,false,true});
+    Check(d.out.command.action==MissionAction::kLineStraightUnit && d.out.command.action_id!=recovery,
+          "persistent sparse FINISH repeated the correction instead of continuing straight");
+    d.core.Reset(true);
+    Check(!d.core.finish_last_stable_guide_ && !d.core.finish_loss_used_ && !d.core.finish_loss_action_id_,
+          "RESET retained sparse FINISH memory or action ownership");
+  }
+  // Reacquisition must use a complete fresh stability window before another loss.
+  Driver fresh;fresh.Floor(200);
+  fresh.Tick();const auto original=fresh.out.command.action_id;
+  fresh.Tick({original,true,false,false});
+  for(int i=0;i<12;++i)fresh.Tick();
+  Check(fresh.core.finish_last_stable_guide_.has_value(),"stable floor did not build FINISH memory");
+  fresh.Floor(320,0);fresh.Tick({original,true,false,true});
+  Check(fresh.core.finish_loss_used_ && fresh.out.command.action==MissionAction::kLineLeftUnit,
+        "real pre-loss O/H did not select recovery at READY");
 }
-int main() { FinishGains();PriorityAndGates();CooldownScope();AllObjectsAreIgnored();ReadyDonePauseReset(); }
+}
+int main() { SingleSparseRecoveryAndContinuousStraight();FinishGains();PriorityAndGates();CooldownScope();AllObjectsAreIgnored();ReadyDonePauseReset(); }
