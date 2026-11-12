@@ -117,6 +117,12 @@ static void NearAlwaysUsesFine(double yaw_limit_deg) {
     r=goal.Compute({},Board(),pose,640,480,.3,true,camera,{true,false,false});
     assert(r.mode==GoalMode::kFineAdjust);
     r=goal.Compute({},Board(),pose,640,480,.4,true,camera,{});
+    if(r.shoot_verifying) {
+      assert(r.action.action==MissionAction::kNone);
+      for(int frame=1;frame<=10;++frame)
+        r=goal.Compute({},Board(),pose,640,480,.4+.1*frame,true,camera,{});
+      assert(r.action.action==MissionAction::kShoot);
+    }
     assert(r.action.action==MissionAction::kStepForwardHalf || r.action.action==MissionAction::kStepBack ||
         r.action.action==MissionAction::kLeftSideStep || r.action.action==MissionAction::kRightSideStep ||
         r.action.action==MissionAction::kShoot);
@@ -185,14 +191,19 @@ static void RotationBeforeTranslation() {
     const auto pose=rim_at(sign*22);
     // Preview can recommend a shot without entering SHOOT.
     auto r=goal.Compute({},Board(),pose,640,480,0,true,camera,{},false);
+    assert(r.mode==GoalMode::kFineAdjust && r.action.action==MissionAction::kNone && r.shoot_verifying);
+    for(int frame=1;frame<=10;++frame) {
+      r=goal.Compute({},Board(),pose,640,480,.1*frame,true,camera,{},false);
+      if(frame<10)assert(r.action.action==MissionAction::kNone && r.shoot_verifying);
+    }
     assert(r.mode==GoalMode::kFineAdjust && r.action.action==MissionAction::kShoot);
     assert(r.action.target_yaw_deg==sign*20);
-    r=goal.Compute({},Board(),pose,640,480,.1,true,camera,{});
+    r=goal.Compute({},Board(),pose,640,480,1.1,true,camera,{});
     assert(r.mode==GoalMode::kShoot && r.action.target_yaw_deg==sign*20);
     assert(std::abs(r.shoot_yaw_rad-sign*20*pi/180)<1e-12);
     // A later pose must not replace the accepted endpoint with the ideal
     // +/-22 degree angle, or recompute a different throw command.
-    r=goal.Compute({},Board(),rim_at(-sign*10),640,480,.2,true,camera,{});
+    r=goal.Compute({},Board(),rim_at(-sign*10),640,480,1.2,true,camera,{});
     assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==sign*20);
     assert(std::abs(r.shoot_yaw_rad-sign*20*pi/180)<1e-12);
 
@@ -202,13 +213,19 @@ static void RotationBeforeTranslation() {
   }
   for (double half_degree : {-.5,.5}) {
     GoalController tied(c,3);tied.StartTestExecute();
-    const auto r=tied.Compute({},Board(),rim_at(half_degree),640,480,0,true,camera,{});
+    auto r=tied.Compute({},Board(),rim_at(half_degree),640,480,0,true,camera,{});
+    assert(r.action.action==MissionAction::kNone && r.shoot_verifying);
+    for(int frame=1;frame<=10;++frame)
+      r=tied.Compute({},Board(),rim_at(half_degree),640,480,.1*frame,true,camera,{});
     assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==0);
   }
   // A fractional configured limit must not round up to a prohibited integer.
   auto fractional=c;fractional.shoot_yaw_limit_deg=19.6;fractional.position_tolerance_m=.006;
   GoalController within(fractional,3);within.StartTestExecute();
   auto r=within.Compute({},Board(),rim_at(19.6),640,480,0,true,camera,{});
+  assert(r.action.action==MissionAction::kNone && r.shoot_verifying);
+  for(int frame=1;frame<=10;++frame)
+    r=within.Compute({},Board(),rim_at(19.6),640,480,.1*frame,true,camera,{});
   assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==19);
   fractional.position_tolerance_m=.001;
   GoalController outside(fractional,3);outside.StartTestExecute();
@@ -227,6 +244,11 @@ static void RotationBeforeTranslation() {
   r=stable.Compute({},Board(),rim_at(22),640,480,0,true,camera,{});
   assert(r.action.action==MissionAction::kNone);
   r=stable.Compute({},Board(),rim_at(22),640,480,.1,true,camera,{});
+  assert(r.action.action==MissionAction::kNone && r.shoot_verifying);
+  for(int frame=1;frame<=10;++frame) {
+    r=stable.Compute({},Board(),rim_at(22),640,480,.1+.1*frame,true,camera,{});
+    if(frame<10)assert(r.action.action==MissionAction::kNone && r.shoot_verifying);
+  }
   assert(r.action.action==MissionAction::kShoot && r.action.target_yaw_deg==20);
 }
 static void StatelessShotBench() {
@@ -351,6 +373,9 @@ int main() {
   r=controller.Compute({},Board(),Pose(0,.3),640,480,.4,true,{CameraMode::kGoal,true},{});
   assert(r.action.action==MissionAction::kStepBack);
   r=controller.Compute({},Board(),Pose(0,.6),640,480,.5,true,{CameraMode::kGoal,true},{});
+  assert(r.action.action==MissionAction::kNone && r.shoot_verifying);
+  for(int frame=1;frame<=10;++frame)
+    r=controller.Compute({},Board(),Pose(0,.6),640,480,.5+.1*frame,true,{CameraMode::kGoal,true},{});
   assert(r.action.action==MissionAction::kShoot);
   assert(std::abs(r.action.target_yaw_deg)<=30);
 
@@ -364,6 +389,10 @@ int main() {
   const double radial_range=std::hypot(-.08,.48);
   auto calibrated_shot=calibrated.Compute({},Board(),Pose(0,radial_range+.1),
       640,480,1.0,true,{CameraMode::kGoal,true},{});
+  assert(calibrated_shot.action.action==MissionAction::kNone && calibrated_shot.shoot_verifying);
+  for(int frame=1;frame<=10;++frame)
+    calibrated_shot=calibrated.Compute({},Board(),Pose(0,radial_range+.1),
+        640,480,1.0+.1*frame,true,{CameraMode::kGoal,true},{});
   assert(calibrated_shot.action.action == MissionAction::kShoot);
   assert(calibrated_shot.action.target_yaw_deg == -9);
   // Offset/angle-limit violations must not accidentally fire.

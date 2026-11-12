@@ -121,7 +121,7 @@ void GoalEdges() {
     c.edge_margin_px=margin;
     GoalController goal(c,3);goal.StartTestNear();
     goal.Compute({},{},{},640,480,0,true,camera,{});
-    const auto edge=Target(left?margin+10:640-margin-10,100,20);
+    const auto edge=Target(left?margin:640-margin,100,20);
     auto g=goal.Compute({},edge,{},640,480,.1,true,camera,{});
     const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
     assert(g.mode==GoalMode::kEdgeTurn && g.action.action==turn);
@@ -149,7 +149,7 @@ void GoalEdges() {
     // A box one pixel outside the margin does not trigger a pair.
     GoalController outside(c,3);outside.StartTestNear();
     outside.Compute({},{},{},640,480,0,true,camera,{});
-    g=outside.Compute({},Target(left?margin+11:640-margin-11),{},640,480,.1,true,camera,{});
+    g=outside.Compute({},Target(left?margin+1:640-margin-1),{},640,480,.1,true,camera,{});
     assert(g.mode!=GoalMode::kEdgeTurn);
   }
   c.edge_margin_px=50;
@@ -160,17 +160,17 @@ void GoalEdges() {
   // Retuning a not-yet-committed pair re-evaluates the new boundary.
   GoalController preview(c,3);preview.StartTestNear();
   preview.Compute({},{},{},640,480,0,true,camera,{});
-  g=preview.Compute({},Target(60),{},640,480,.1,true,camera,{},false);
+  g=preview.Compute({},Target(50),{},640,480,.1,true,camera,{},false);
   assert(g.action.action==MissionAction::kTurnLeftInPlace);
   c.edge_margin_px=20;preview.UpdateTuning(c);
-  g=preview.Compute({},Target(60),{},640,480,.2,true,camera,{},false);
+  g=preview.Compute({},Target(50),{},640,480,.2,true,camera,{},false);
   assert(g.mode!=GoalMode::kEdgeTurn);
   // PAUSE can consume A DONE without authorizing B yet. Retuning in that
   // idle gap must preserve the accepted pair and its one remaining turn.
   c.edge_margin_px=50;
   GoalController paused(c,3);paused.StartTestNear();
   paused.Compute({},{},{},640,480,0,true,camera,{});
-  g=paused.Compute({},Target(60),{},640,480,.1,true,camera,{});
+  g=paused.Compute({},Target(50),{},640,480,.1,true,camera,{});
   assert(g.action.action==MissionAction::kTurnLeftInPlace);
   g=paused.Compute({},Target(320),{},640,480,.2,true,camera,{true,false,false},false);
   assert(g.mode==GoalMode::kEdgeTurn);
