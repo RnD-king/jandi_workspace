@@ -103,6 +103,10 @@ static void CheckGroupedConfiguration(const std::string &text) {
   assert(c.object_approach.prelock_loss_extra_blocks==1);
   assert(c.object_approach.goal_empty_max_retries==3);
   assert(c.mission_recovery_turn_yaw_deg==baseline.mission_recovery_turn_yaw_deg);
+  assert(c.mission_recovery_heading_tolerance_deg==baseline.mission_recovery_heading_tolerance_deg);
+  assert(c.hurdle.line_reference_u_px==baseline.hurdle.line_reference_u_px);
+  assert(c.hurdle.second_line_reference_u_px==baseline.hurdle.second_line_reference_u_px);
+  assert(c.hurdle.course_line_reference_enabled==baseline.hurdle.course_line_reference_enabled);
   const auto continuous=LoadText(YAML::Dump(root));
   assert(continuous.object_approach.steering_deadband_deg==15.0);
   assert(continuous.object_approach.in_place_turn_deg==100.0);
@@ -299,6 +303,16 @@ int main(int argc, char **argv) {
            std::string("  mission:\n    object_approach_continous: ") + old_value + "\n");
   Reject(text.str(),"lock_blocks: 3","lock_blocks: 0");
   Reject(text.str(),"prelock_loss_extra_blocks: 1","prelock_loss_extra_blocks: 2");
+  for (const auto* value : {"0", "-1", "91", ".nan", ".inf", "not_a_number"})
+    Reject(text.str(),"mission_recovery_heading_tolerance_deg: 30.0",
+        std::string("mission_recovery_heading_tolerance_deg: ")+value);
+  Reject(text.str(),"mission_recovery_heading_tolerance_deg: 30.0","");
+  for (const auto* key : {"line_reference_u_px", "second_line_reference_u_px"}) {
+    const auto field=std::string(key)+": 320.0";
+    Reject(text.str(),field,"");
+    for (const auto* value : {"-1", ".nan", ".inf", "not_a_number"})
+      Reject(text.str(),field,std::string(key)+": "+value);
+  }
   Reject(text.str(),"mission_recovery_turn_yaw_deg: 15","mission_recovery_turn_yaw_deg: 0");
   Reject(text.str(),"mission_recovery_turn_yaw_deg: 15","mission_recovery_turn_yaw_deg: 32768");
   Reject(text.str(),"goal_empty_max_retries: 3","goal_empty_max_retries: -1");

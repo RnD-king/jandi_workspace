@@ -239,7 +239,10 @@ vision_algorithm:
       upper_acquire_v_px: 470.0 # 허들이 있을 조건
 
       # FORWARD 접근·수평 기준
-      target_u_px: 380 # 세로선 중심
+      course_line_reference_enabled: true # 공을 줍기 전 LINE과 허들 FINE에 아래 기준을 함께 적용
+      line_reference_u_px: 370.0 # 첫 공 전: MAIN 320 / FAST 370 (라인 왼쪽 보행)
+      second_line_reference_u_px: 270.0 # 두 번째 공 전: MAIN 320 / FAST 270 (라인 오른쪽 보행)
+      target_u_px: 370 # 단독 시험 기본값; AUTO는 선택된 LINE 기준과 동일값 사용
       approach_short_v_px: 100.0 # 위 가로선 (4걸음)
       pre_down_extra_forward_steps: 2 # Legacy: AUTO near now selects one 32/33/36 instead
       approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
@@ -259,7 +262,7 @@ vision_algorithm:
       fine_mode_v_px: 220.0 # v>=220 투표 충족 시 FINE 자세
 
       # DOWN 완료부터 LINE O/H 기억; 2번 자세 DONE 후 FINE 정렬에만 사용
-      fine_line_reference_u_px: 250.0 # 허들 DOWN 화면의 로봇 기준선
+      fine_line_reference_u_px: 370.0 # 단독 시험 기본값; AUTO는 첫/두 번째 LINE 기준 사용
       fine_line_offset_tolerance_px: 80.0 # |O| 허용 범위 (px)
       fine_line_heading_tolerance_deg: 8.0 # |H| 허용 범위 (도)
       fine_line_observation_sec: 1.0 # 최초 정렬 판단 및 회전+횡이동 묶음의 최종 DONE 이후 정지 관측 (초)
@@ -439,6 +442,7 @@ vision_algorithm:
       # 후보·라인 유실 복구
       candidate_search_max_turns: 2 # 수동·단독 시험의 후보 재탐색용; 일반 AUTO 객체 접근에는 불필요
       mission_recovery_max_turns: 30 # 미션 전후 라인 복구 최대 회전 횟수
+      mission_recovery_heading_tolerance_deg: 30.0 # 복귀 합격: 유효 LINE + |H| <= 30도, MAIN 5/10 / FAST 4/8
       mission_recovery_turn_yaw_deg: 15 # 공 줍기/슛 후 FINE 제자리 회전 1회 요청각 (도)
 
       # 카메라 전환·동작 후 안정 대기

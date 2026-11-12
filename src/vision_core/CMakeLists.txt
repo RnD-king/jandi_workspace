@@ -89,6 +89,11 @@ install(FILES
 )
 
 if(BUILD_TESTING)
+  add_executable(shared_vision_core_course_reference_recovery_test tests/course_reference_recovery_test.cpp)
+  target_link_libraries(shared_vision_core_course_reference_recovery_test PRIVATE shared_vision_core)
+  add_test(NAME shared_vision_core_course_reference_recovery_test COMMAND shared_vision_core_course_reference_recovery_test)
+  set_tests_properties(shared_vision_core_course_reference_recovery_test PROPERTIES LABELS "logic" ENVIRONMENT
+    "VISION_CORE_ALGORITHM_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mission_scenarios.yaml")
   add_test(NAME shared_vision_core_config_check_valid
     COMMAND shared_vision_core_config_check ${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml)
   file(READ ${CMAKE_CURRENT_SOURCE_DIR}/config/vision_algorithm.yaml invalid_algorithm)

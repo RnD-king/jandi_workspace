@@ -80,6 +80,21 @@ bool MissionController::FinishCourseEnabled(const MissionFrameInput& input) cons
       hurdle_crosses_completed_>=2 && course_curve_index_==5;
 }
 
+double MissionController::HurdleLineReferenceU() const {
+  const bool second = course_curve_index_ >= 3 || ball_mission_index_ >= 1;
+  return second ? config_.hurdle.second_line_reference_u_px : config_.hurdle.line_reference_u_px;
+}
+
+double MissionController::EffectiveLineReferenceU(const MissionFrameInput& input,
+                                                  double fallback) const {
+  if (config_.hurdle.course_line_reference_enabled && config_.enable_hurdle &&
+      UsesAutomaticMissionPolicy() && !input.manual_observation_control &&
+      input.camera_feedback.actual_mode == CameraMode::kForward &&
+      (active_mission_ == MissionType::kHurdle || (!has_ball_ && !FinishCourseEnabled(input))))
+    return HurdleLineReferenceU();
+  return fallback;
+}
+
 Features MissionController::ComputeLineFeaturesForFrame(
     const MissionFrameInput& input, const FeatureConfig& features) const {
   // Carrying GOAL-return LINE and the verified finish straight both steer
@@ -96,6 +111,7 @@ Features MissionController::ComputeLineFeaturesForFrame(
       input.camera_feedback.actual_mode == CameraMode::kForward;
   const bool allow_three_points = goal_line_view || finish_line_view;
   auto frame_features = features;
+  frame_features.image_center_u = EffectiveLineReferenceU(input, frame_features.image_center_u);
   if (allow_three_points) frame_features.guide_min_points = 3;
   return ComputeLineFeatures(input.line_centers, input.image_width,
       input.image_height, frame_features, allow_three_points ? 3 : 4);
@@ -480,6 +496,8 @@ void MissionController::BeginLineReacquisition() {
   mission_recovery_verifying_ = false;
   mission_recovery_qualified_ = false;
   mission_recovery_hits_.clear();
+  mission_recovery_guides_.clear();
+  mission_recovery_line_guide_.reset();
   last_line_score_.reset();line_recovery_memory_={};
   actual_line_stability_history_.clear();
   line_recovery_uses_visible_centers_ = line_recovery_left_ = false;
@@ -519,6 +537,8 @@ void MissionController::EnterMission(MissionType mission) {
     hurdle_result_ = {};
     goal_result_ = {};
   } else if (mission == MissionType::kHurdle) {
+    if (config_.hurdle.course_line_reference_enabled && UsesAutomaticMissionPolicy())
+      hurdle_controller_.SetLineReferenceU(HurdleLineReferenceU());
     goal_early_camera_armed_=false;
     goal_early_camera_action_id_=0;
     hurdle_down_camera_armed_=false;
@@ -1120,6 +1140,11 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     const MissionFrameInput &source, std::optional<double> line_image_center_u,
     bool evaluating_ready_successor) {
   MissionFrameInput input = source;
+  line_image_center_u = EffectiveLineReferenceU(input,
+      line_image_center_u.value_or(config_.line_features.image_center_u));
+  if (active_mission_ == MissionType::kHurdle && config_.hurdle.course_line_reference_enabled &&
+      UsesAutomaticMissionPolicy() && !input.manual_observation_control)
+    hurdle_controller_.SetLineReferenceU(HurdleLineReferenceU());
   if (decision_observation_restart_pending_) {
     decision_observation_restart_pending_ = false;
     if (decision_observation_active_)
@@ -1545,7 +1570,7 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
       input.camera_feedback.settled &&
       input.now_sec + 1e-9 >= settle_until_sec_) {
     FeatureConfig hurdle_line_config = config_.line_features;
-    hurdle_line_config.image_center_u = config_.hurdle.fine_line_reference_u_px;
+    hurdle_line_config.image_center_u = hurdle_controller_.FineLineReferenceU();
     hurdle_line_config.guide_min_points = 2;
     hurdle_line_config.ransac_enabled = false;
     const auto guide = ComputeLineFeatures(
@@ -1830,8 +1855,10 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 
   const auto hurdle_line_decision = [&]() {
     // Compute LINE O/H steering during HURDLE without advancing LINE FSM.
+    auto line_config = config_.line_features;
+    line_config.image_center_u = EffectiveLineReferenceU(input, line_config.image_center_u);
     const auto features=ComputeLineFeatures(input.line_centers, input.image_width,
-                                            input.image_height, config_.line_features);
+                                            input.image_height, line_config);
     if (!output.line_computed) {
       output.line_features=features;
       output.line_computed=true;
@@ -3134,7 +3161,8 @@ bool MissionController::NeedsStationaryObservation() const {
            hurdle_result_.mode == HurdleMode::kRecoveryForward ||
            hurdle_result_.mode == HurdleMode::kRecoveryStepObserve)) ||
          (active_mission_ == MissionType::kGoal &&
-          (goal_result_.mode == GoalMode::kFineRecovery ||
+          (goal_controller_.ShootVerificationActive() ||
+           goal_result_.mode == GoalMode::kFineRecovery ||
            goal_result_.mode == GoalMode::kCoarseRecovery ||
            goal_result_.mode == GoalMode::kRecoverySearch)) ||
          mission_recovery_verifying_;
@@ -3160,73 +3188,85 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
     const MissionFrameInput &input, const ActionExecutionFeedback &feedback,
     bool *valid, MissionFrameResult *output) {
   *valid = false;
-  if (mission_recovery_failed_)
-    return {};
-  output->line_features =
-      ComputeLineFeatures(input.line_centers, input.image_width,
-                          input.image_height, config_.line_features);
+  if (mission_recovery_failed_) return {};
+  auto features = config_.line_features;
+  features.image_center_u = EffectiveLineReferenceU(input, features.image_center_u);
+  output->line_reference_u_px = features.image_center_u;
+  output->line_features = ComputeLineFeatures(input.line_centers, input.image_width,
+                                             input.image_height, features);
   output->line_computed = true;
   const auto &guide = output->line_features.guide;
-  if (mission_recovery_verifying_) {
-    mission_recovery_hits_.push_back(guide.valid);
-    while (mission_recovery_hits_.size() >
-           static_cast<std::size_t>(config_.line.line_stable_window))
-      mission_recovery_hits_.pop_front();
-    if (mission_recovery_hits_.size()==static_cast<std::size_t>(config_.line.line_stable_window) &&
-        std::count(mission_recovery_hits_.begin(),mission_recovery_hits_.end(),true)>=
-            config_.line.line_stable_min_hits)
-      mission_recovery_qualified_=true;
-    if (input.now_sec - mission_recovery_verify_start_sec_ + 1e-9 <
-            config_.line_p2p.recovery_observation_sec ||
-        mission_recovery_hits_.size() <
-            static_cast<std::size_t>(config_.line.line_stable_window))
-      return {};
-    const bool confirmed = mission_recovery_qualified_;
-    mission_recovery_verifying_ = false;
-    mission_recovery_qualified_=false;
-    if (confirmed) {
-      *valid = true;
-      line_state_ = LineState::kNormal;
-      line_stability_history_ = mission_recovery_hits_;
-      return {};
-    }
-    mission_recovery_found_ = false;
+  const bool aligned = guide.valid && std::isfinite(guide.offset) &&
+      std::isfinite(guide.heading_rad) &&
+      std::abs(guide.heading_rad) * kRadToDeg <= config_.mission_recovery_heading_tolerance_deg + 1e-9;
+  const auto clear_window = [&]() {
     mission_recovery_hits_.clear();
-    if (mission_recovery_turns_ >= config_.mission_recovery_max_turns)
-      mission_recovery_failed_ = true;
+    mission_recovery_guides_.clear();
+    mission_recovery_found_ = mission_recovery_qualified_ = false;
+  };
+  // Moving images, including a transient zero-H crossing, cannot qualify return.
+  if (feedback.action_active && !feedback.action_done) {
+    clear_window();
     return {};
   }
-  mission_recovery_hits_.push_back(guide.valid);
-  while (mission_recovery_hits_.size() >
-         static_cast<std::size_t>(config_.line.line_stable_window))
-    mission_recovery_hits_.pop_front();
-  const int hits = std::count(mission_recovery_hits_.begin(),
-                              mission_recovery_hits_.end(), true);
-  mission_recovery_found_ =
-      mission_recovery_found_ || hits >= config_.line.line_stable_min_hits;
   if (feedback.action_done && mission_recovery_issued_ &&
       (last_command_.action == MissionAction::kTurnLeft ||
        last_command_.action == MissionAction::kTurnRight)) {
     ++mission_recovery_turns_;
     mission_recovery_issued_ = false;
-  }
-  *valid = false;
-  if (feedback.action_active && !feedback.action_done)
-    return {};
-  if (mission_recovery_found_ ||
-      mission_recovery_turns_ >= config_.mission_recovery_max_turns) {
+    clear_window();
     mission_recovery_verifying_ = true;
-    mission_recovery_qualified_=false;
+    mission_recovery_verify_start_sec_ = std::max(input.now_sec, settle_until_sec_);
+    return {}; // The physical DONE frame itself is not a stationary vote.
+  }
+  if (mission_recovery_verifying_ &&
+      input.now_sec <= mission_recovery_verify_start_sec_ + 1e-9) return {};
+  mission_recovery_hits_.push_back(aligned);
+  mission_recovery_guides_.push_back(aligned ? std::optional<LineGuide>(guide) : std::nullopt);
+  const auto window = static_cast<std::size_t>(config_.line.line_stable_window);
+  while (mission_recovery_hits_.size() > window) {
+    mission_recovery_hits_.pop_front();
+    mission_recovery_guides_.pop_front();
+  }
+  const bool qualified = mission_recovery_hits_.size() == window &&
+      std::count(mission_recovery_hits_.begin(), mission_recovery_hits_.end(), true) >=
+          config_.line.line_stable_min_hits;
+  if (mission_recovery_verifying_) {
+    if (input.now_sec - mission_recovery_verify_start_sec_ + 1e-9 <
+            config_.line_p2p.recovery_observation_sec || mission_recovery_hits_.size() < window)
+      return {};
+    mission_recovery_verifying_ = false;
+    if (qualified) {
+      LineGuide mean;
+      int count = 0;
+      for (const auto& sample : mission_recovery_guides_) if (sample) {
+        mean.offset += sample->offset;
+        mean.heading_rad += sample->heading_rad;
+        mean.confidence += sample->confidence;
+        ++count;
+      }
+      mean.offset /= count;
+      mean.heading_rad /= count;
+      mean.confidence /= count;
+      mean.valid = true;
+      mission_recovery_line_guide_ = mean;
+      output->line_decision_guide = mean;
+      *valid = true;
+      line_state_ = LineState::kNormal;
+      line_stability_history_ = mission_recovery_hits_;
+      return {};
+    }
+    clear_window();
+    if (mission_recovery_turns_ >= config_.mission_recovery_max_turns)
+      mission_recovery_failed_ = true;
+    return {};
+  }
+  if (qualified || mission_recovery_turns_ >= config_.mission_recovery_max_turns) {
+    clear_window();
+    mission_recovery_verifying_ = true;
     mission_recovery_verify_start_sec_ = input.now_sec;
-    mission_recovery_hits_.clear();
     return {};
   }
-  if (mission_recovery_turns_ >= config_.mission_recovery_max_turns) {
-    mission_recovery_failed_ = true;
-    return {};
-  }
-  if (mission_recovery_failed_)
-    return {};
   const int index = active_mission_ == MissionType::kBall ? ball_mission_index_
                                                           : goal_mission_index_;
   return RecoveryTurn(UsesAutomaticMissionPolicy() ?
@@ -3359,6 +3399,7 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.backboard_min_depth_m = candidate.backboard_min_depth_m;
   updated.backboard_max_depth_m = candidate.backboard_max_depth_m;
   updated.mission_recovery_max_turns = candidate.mission_recovery_max_turns;
+  updated.mission_recovery_heading_tolerance_deg = candidate.mission_recovery_heading_tolerance_deg;
   updated.backboard_depth_strip_width_ratio =
       candidate.backboard_depth_strip_width_ratio;
   updated.backboard_depth_center_size_px=candidate.backboard_depth_center_size_px;
@@ -3527,6 +3568,8 @@ void MissionController::Reset(bool preserve_action_ids) {
   mission_recovery_issued_ = false;
   mission_recovery_failed_ = mission_recovery_found_ = false;
   mission_recovery_hits_.clear();
+  mission_recovery_guides_.clear();
+  mission_recovery_line_guide_.reset();
   mission_recovery_verifying_ = false;
   mission_recovery_qualified_ = false;
   post_pickup_goal_line_gate_active_ = false;

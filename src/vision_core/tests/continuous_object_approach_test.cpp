@@ -1689,6 +1689,9 @@ void GoalStationaryRecheck(bool reacquired) {
     Check(d.out.command.camera_request!=CameraRequest::kBallViewLine,
           "LEFT success prematurely fell back to floor LINE");
     if(!reacquired && right)break;
+    // Judge the completed 7/10 recheck, not another 15 missing frames.
+    // Those later misses legitimately create a new loss/search episode.
+    if(reacquired && i==9)break;
   }
   Check(reacquired ? !right : right,
         "central 7/10 success was lost, or failed central recheck skipped a new scan round");

@@ -205,3 +205,36 @@ cmake --install build
   이미 결정된 연속 시퀀스에는 추가 관측 대기를 삽입하지 않는다.
 - 실기 ROS 이미지 어댑터는 DONE 수신 이전 timestamp의 이미지를 폐기한다.
   카메라/시스템 ROS clock과 이미지 header stamp가 같은 시계 기준이어야 한다.
+
+
+## 공 순서별 허들 기준과 LINE 복귀
+
+`hurdle.control.course_line_reference_enabled`가 켜져 있으면 공을 줍기 전
+FORWARD LINE(허들 원거리 접근 및 통과 후 LINE 포함)은
+`line_reference_u_px` / `second_line_reference_u_px`를 사용한다.
+첫 공 전/두 번째 공 전의 코스 상태로 선택하며, HURDLE DONE 횟수만으로
+기준을 바꾸지 않는다. 허들 AUTO 진입 시 `target_u_px`와
+`fine_line_reference_u_px`도 선택한 값으로 맞춘다.
+MAIN 기본값은 320/320, FAST 기본값은 370/270이다.
+공을 소지한 LINE, BALL_VIEW LINE, 결승 구간은 기존의 별도 기준을 유지한다.
+화면의 LINE 기준선은 코어가 실제 계산에 사용한 위치를 표시한다.
+단독 시험의 기본 기준은 `target_u_px`와 `fine_line_reference_u_px`다.
+
+공 줍기/투척 후 LINE 복귀는 실제 회전 DONE 뒤 새 정지 관측에서
+유효 LINE이며 `|H| <= mission_recovery_heading_tolerance_deg`인 프레임만
+합격 표본으로 센다. 기본 허용각은 30도이며 MAIN 5/10, FAST 4/8이다.
+기존 `recovery_observation_sec`와 회전 한도를 유지하고, 합격 표본의 O/H
+평균을 첫 복귀 보행 선택에 사용한다. 움직이는 중의 순간적인 H 통과나
++/-큰 각도의 평균 상쇄로 복귀하지 않는다.
+
+FAST 결승은 기존 정책을 유지한다. MAIN에 추가된 0/1/2점 유실 보행
+한 번 정책은 FAST에 적용하지 않는다.
+
+카메라 높이 변경 및 공 근거리 진입 임계값 변경은 이 변경에 포함하지 않는다.
+검증용 명령(설치/빌드는 운영자가 수행):
+
+```bash
+cmake -S src/vision_core -B build/review-core -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/review-core -j2
+ctest --test-dir build/review-core --output-on-failure
+```

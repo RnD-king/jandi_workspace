@@ -263,6 +263,8 @@ MissionFrameResult MissionController::StepPlannedLine(
   FeatureConfig features = config_.line_features;
   if (image_center && std::isfinite(*image_center) && *image_center >= 0 &&
       *image_center < input.image_width) features.image_center_u = *image_center;
+  features.image_center_u = EffectiveLineReferenceU(input, features.image_center_u);
+  output.line_reference_u_px = features.image_center_u;
   output.line_features = ComputeLineFeaturesForFrame(input, features);
   output.line_computed = true;
   // The normal LINE guide is untouched; this only records independent curve
@@ -311,6 +313,8 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   LineGuide decision = input.line_decision_guide_override.value_or(raw);
   if (finish_course) decision=raw;
+  else if (mission_recovery_line_guide_ && !command_coordinator_.HasPendingAction())
+    decision = *mission_recovery_line_guide_;
   output.line_decision_guide = decision;
   last_line_image_width_ = input.image_width;
   last_line_image_center_u_ = features.image_center_u >= 0
@@ -1237,6 +1241,9 @@ MissionFrameResult MissionController::StepPlannedLine(
           1000 + static_cast<int>(candidate_.phase), request, camera,
       input.delivery_feedback, input.now_sec);
   const auto& command = output.command;
+  if (command.command_type == CommandType::kAction && command.action_id &&
+      request.action != MissionAction::kNone && command.action == request.action)
+    mission_recovery_line_guide_.reset();
   if(curve_.phase==CurveSearchState::Phase::kBodyTurn &&
      request.action!=MissionAction::kNone &&
      command.command_type==CommandType::kAction &&

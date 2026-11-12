@@ -183,6 +183,9 @@ void CheckConfiguration(const std::string& path) {
   FIELD(hurdle, upper_acquire_v_px);
   FIELD(hurdle, approach_short_v_px);
   FIELD(hurdle, approach_two_step_v_px);
+  FIELD(hurdle, course_line_reference_enabled);
+  FIELD(hurdle, line_reference_u_px);
+  FIELD(hurdle, second_line_reference_u_px);
   FIELD(hurdle, target_u_px);
   FIELD(hurdle, down_one_step_v_px);
   FIELD(hurdle, fine_mode_v_px);
@@ -309,6 +312,7 @@ void CheckConfiguration(const std::string& path) {
   MISSION(candidate_search_max_turns);
   MISSION(mission_recovery_max_turns);
   MISSION(mission_recovery_turn_yaw_deg);
+  MISSION(mission_recovery_heading_tolerance_deg);
   MISSION(camera_motion_timeout_sec);
   MISSION(transition_settle_sec);
   MISSION(walk_inter_action_hold_sec);

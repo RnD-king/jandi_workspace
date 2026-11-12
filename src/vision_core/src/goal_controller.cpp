@@ -914,17 +914,17 @@ GoalResult GoalController::Compute(
         result.action.action == MissionAction::kShoot &&
         !ExecutionObservationReady())
       result.action = {};
-    if (allow_new_body_actions &&
-        result.action.action == MissionAction::kShoot) {
-      if (!shoot_verification_active_) {
-        // Keep the robot stationary and discard all candidate/preaveraged poses.
-        ClearTracking();
-        shoot_verification_active_=true;
-        shoot_verification_start_sec_=now_sec;
-        result.shoot_verifying=true;
-        result.action={};
-        return result;
-      }
+    // Observation does not dispatch a body action. Keep it on the live FSM,
+    // so an idle caller can finish verification before requesting a preview.
+    if (result.action.action == MissionAction::kShoot && !shoot_verification_active_) {
+      ClearTracking();
+      shoot_verification_active_=true;
+      shoot_verification_start_sec_=now_sec;
+      result.shoot_verifying=true;
+      result.action={};
+      return result;
+    }
+    if (allow_new_body_actions && result.action.action == MissionAction::kShoot) {
       shoot_verification_active_=false;
       result.shoot_verifying=false;
       // Latch the selected, permitted integer command, not the unconstrained

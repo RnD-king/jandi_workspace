@@ -278,6 +278,9 @@ void TestGoalForwardTrial() {
   t.Commit(); t.Tick(true);
   for(int i=0;i<10;++i)t.Tick();
   assert(t.out.goal.mode==GoalMode::kFineAdjust);
+  for(int frame=0;frame<30 && t.Preview().command.action!=MissionAction::kShoot;++frame) {
+    t.Tick();assert(t.out.command.action_id==0);
+  }
   assert(t.Preview().command.action==MissionAction::kShoot);
   t.Commit(); t.Tick(true); assert(t.out.command.action_id==0);
   assert(t.out.goal.mode==GoalMode::kReturnCameraToLine);
