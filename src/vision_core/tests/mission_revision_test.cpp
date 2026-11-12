@@ -156,7 +156,15 @@ void GoalEdges() {
   GoalController both(c,3);both.StartTestNear();
   both.Compute({},{},{},640,480,0,true,camera,{});
   auto g=both.Compute({},Target(320,100,600),{},640,480,.1,true,camera,{});
+  // A wide board with a centered bbox follows the ordinary straight approach.
+  assert(g.action.action==MissionAction::kStepForwardThree && g.mode==GoalMode::kApproach);
+  // Ambiguity applies when the configured center margins themselves overlap.
+  c.edge_margin_px=400;
+  GoalController overlap(c,3);overlap.StartTestNear();
+  overlap.Compute({},{},{},640,480,0,true,camera,{});
+  g=overlap.Compute({},Target(320),{},640,480,.1,true,camera,{});
   assert(g.action.action==MissionAction::kNone && g.mode==GoalMode::kSearch);
+  c.edge_margin_px=50;
   // Retuning a not-yet-committed pair re-evaluates the new boundary.
   GoalController preview(c,3);preview.StartTestNear();
   preview.Compute({},{},{},640,480,0,true,camera,{});
@@ -418,7 +426,7 @@ void GoalPairHasOneObservation(bool left) {
   auto f=Frame(0);f.camera_feedback={CameraMode::kGoal,true};
   // The CTest fixture's near threshold is 1.20 m; keep this edge-turn
   // scenario in the far approach instead of entering FINE on equality.
-  f.backboard_target=Target(left?60:580);f.goal_pose={true,0,1.5,0,1};
+  f.backboard_target=Target(left?50:590);f.goal_pose={true,0,1.5,0,1};
   f.backboard_center_depth_m=1.5;
   const auto turn=left?MissionAction::kTurnLeftInPlace:MissionAction::kStepForwardRightOneHurdle;
   MissionFrameResult r;
