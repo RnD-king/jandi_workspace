@@ -95,7 +95,14 @@ void BallSearchLastMissAndSkipHold() {
   }
   r=ball.Compute({},640,480,.65,down,Done());
   assert(r.mode==BallMode::kWaitFinePose);
-  assert(r.action.action==MissionAction::kDefaultPoseMode);
+  // The production config holds the actual post-discovery FINE transition
+  // for 0.5 seconds; the original fixture incorrectly expected it on DONE.
+  assert(cfg.fine_pose_pre_hold_sec > 0);
+  assert(r.action.action==MissionAction::kNone);
+  r=ball.Compute({},640,480,.65+cfg.fine_pose_pre_hold_sec-.01,down,{});
+  assert(r.mode==BallMode::kWaitFinePose && r.action.action==MissionAction::kNone);
+  r=ball.Compute({},640,480,.65+cfg.fine_pose_pre_hold_sec+.01,down,{});
+  assert(r.mode==BallMode::kWaitFinePose && r.action.action==MissionAction::kDefaultPoseMode);
 }
 
 void HurdleMovingDiscoveryNeedsStationaryVerification() {
