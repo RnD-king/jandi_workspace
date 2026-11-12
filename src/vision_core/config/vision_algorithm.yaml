@@ -183,13 +183,12 @@ vision_algorithm:
       # 점들을 둘레 순서대로 나열하고 새 꼭짓점은 목록에 [u,v]로 추가.
       pickup_polygon_px:
         - [418, 250]
-        - [440, 284]
-        - [440, 298]
-        - [408, 320]
-        - [365, 325]
-        - [355, 305]
-        - [355, 283]
-        - [380, 250]
+        - [442, 278]
+        - [442, 297]
+        - [409, 328]
+        - [365, 330]
+        - [360, 320]
+        - [360, 284]
       pickup_max_attempts: 100
       pickup_verify_min_hits: 3 # 픽업 DONE 후 stable_window 중 잔존 공 검출 기준; 이상이면 재픽업
       pickup_shrink_enabled: true # 두 노드 모두 활성화, rqt에서 ON/OFF 조정 가능
