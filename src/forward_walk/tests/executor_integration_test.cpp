@@ -259,7 +259,7 @@ int main() {
         for(uint16_t code:{1,2,3,7,11,13,18,21,22,23,24,25,26,27,28,31})
             Check(MainNode::UsesFixedGripperPose(code),"normal action gripper override missing");
         // 공을 향해 걷기 → 공 잡기 → 다시 걷기에서 action별 팔 목표 전환을 검증한다.
-        WriteMotion(directory/"motions/공_줍고일어나기_최종_찐.json");
+        WriteMotion(directory/"motions/공_줍고일어나기찐찐_자세고정.json");
         action(9190,14,2);
         action(9190,14,2); // Duplicate remains ACK-only during the JSON motion.
         pump([&]{return node->action_transactions_.completed.Contains(9190);});flush();
