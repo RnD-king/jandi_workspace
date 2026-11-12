@@ -1249,7 +1249,7 @@ MissionFrameResult MissionController::StepPlannedLine(
       input.delivery_feedback.ready && !input.delivery_feedback.done &&
       !line_plan_.Done(finish_loss_action_id_) &&
       !command_coordinator_.HasQueuedAction() && input.allow_new_line_plan)
-    request = LineLocomotion(MissionAction::kStepForwardFour, true);
+    request = {MissionAction::kStepForwardFour, ActionCategory::kLocomotion, 0, true};
   if(automatic_approach && !finish_course && curve_.phase==CurveSearchState::Phase::kDelay &&
      curve_.delay_remaining==1 && input.delivery_feedback.ready &&
      line_plan_.LastUnit(input.delivery_feedback.action_id))
