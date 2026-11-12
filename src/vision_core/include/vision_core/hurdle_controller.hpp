@@ -43,6 +43,9 @@ struct HurdleConfig {
   int recovery_max_observations{};
   int entry_recovery_max_steps{}; // First FORWARD observation loss; exhausted -> LINE.
   int recovery_max_steps{}; // DOWN loss: WALK step or FINE step, then stationary fallback.
+  // Select one course reference before the first/second BALL pickup.
+  bool course_line_reference_enabled{false};
+  double line_reference_u_px{}, second_line_reference_u_px{};
   double target_u_px{};
   double contact_v_px{};
   int contact_steps{};
@@ -154,6 +157,10 @@ public:
       const std::deque<bool>& hits, int width, int height,
       const std::deque<std::optional<double>>* raw_v_samples = nullptr);
   void UseNextObservationAsMean() { has_smoothed_ = false; observation_window_.Clear(); }
+  void SetLineReferenceU(double reference_u) {
+    config_.target_u_px = config_.fine_line_reference_u_px = reference_u;
+  }
+  double FineLineReferenceU() const { return config_.fine_line_reference_u_px; }
   void UpdateTuning(const HurdleConfig &config) {
     if (contact_next_step_sec_>0.0)
       contact_next_step_sec_+=completed_contact_steps_>=config_.contact_steps

@@ -37,6 +37,11 @@ void VerifiedFineWindows() {
   GoalPoseObservation pose{true,-.08,.5,0,1};
   goal.UseVerifiedObservation(Target(320),pose,hits,hits,640,480);
   auto g=goal.Compute({},{},{},640,480,1,true,{CameraMode::kGoal,true},done);
+  assert(g.shoot_verifying && g.action.action==MissionAction::kNone && g.fine_decision_pose_used);
+  for (int i=1;i<=10;++i) {
+    g=goal.Compute({},Target(320),pose,640,480,1+.1*i,true,{CameraMode::kGoal,true},{});
+    if(i<10) assert(g.action.action==MissionAction::kNone && g.shoot_verifying);
+  }
   assert(g.action.action==MissionAction::kShoot && g.fine_decision_pose_used);
 }
 void InvalidAndNearWindows() {

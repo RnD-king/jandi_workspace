@@ -398,8 +398,9 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
       DrawFilteredDebugDetection(vis,detection,config,id,mission_target);
     }
   }
-  const double line_reference_u = camera.actual_mode==vision_core::CameraMode::kBallView
-      ? config.ball_view_line_image_center_u : config.line_features.image_center_u;
+  const double line_reference_u = mission_result.line_reference_u_px.value_or(
+      camera.actual_mode==vision_core::CameraMode::kBallView
+      ? config.ball_view_line_image_center_u : config.line_features.image_center_u);
   const int ref_u = static_cast<int>(std::lround(line_reference_u));
   const bool active_goal_auto=mission_result.approach_mission==vision_core::MissionType::kGoal &&
       camera.actual_mode==vision_core::CameraMode::kGoal;

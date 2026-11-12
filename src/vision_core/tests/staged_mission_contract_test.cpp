@@ -39,8 +39,8 @@ struct Trial {
   }
   MissionFrameResult Preview() const {auto trial=core;auto input=in;input.allow_new_body_actions=true;input.delivery_feedback={};return trial.Step(input);}
   void Commit(MissionAction action) {
-    if(action==MissionAction::kPickBall) {
-      for(int i=0;i<30 && Preview().command.action!=action;++i) {
+    if(action==MissionAction::kPickBall || action==MissionAction::kShoot) {
+      for(int i=0;i<40 && Preview().command.action!=action;++i) {
         Tick();assert(out.ball.pickup_attempt_count==0 && out.command.action_id==0);
       }
     }

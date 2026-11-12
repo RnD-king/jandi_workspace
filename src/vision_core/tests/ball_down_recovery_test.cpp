@@ -28,6 +28,9 @@ struct Driver {
   void Lose(Point2 p) {
     for(int i=0;i<10;++i) Tick(Target(p),{},false);
     for(int i=0;i<3;++i) Tick({}, {},false);
+    // An inside-region PICK candidate first owns its extra stationary second.
+    // Let that observation fail before asserting the following lost-ball recovery.
+    for(int i=0;i<20 && out.pickup_verifying;++i) Tick({}, {},false);
     Check(out.mode==BallMode::kBallRecoveryDown,"DOWN loss did not enter recovery");
   }
   void Observe(std::optional<ObjectTarget> t={}) {

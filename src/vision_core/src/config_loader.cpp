@@ -217,6 +217,11 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   PositiveInt(c.test_goal_mission_index,"goal.test_mission_index");
   PositiveInt(c.mission_recovery_max_turns,"mission.mission_recovery_max_turns");
   PositiveInt(c.mission_recovery_turn_yaw_deg,"mission.mission_recovery_turn_yaw_deg");
+  Positive(c.mission_recovery_heading_tolerance_deg,"mission.mission_recovery_heading_tolerance_deg");
+  if (c.mission_recovery_heading_tolerance_deg > 90.0)
+    throw std::runtime_error("mission recovery heading tolerance must be <= 90 degrees");
+  Nonnegative(c.hurdle.line_reference_u_px,"hurdle.line_reference_u_px");
+  Nonnegative(c.hurdle.second_line_reference_u_px,"hurdle.second_line_reference_u_px");
   if (c.mission_recovery_turn_yaw_deg > 32767)
     throw std::runtime_error("mission.mission_recovery_turn_yaw_deg exceeds action protocol range");
   // An invalid ID would never receive READY from forward_walk. Reject such
@@ -874,6 +879,9 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(h, "recovery_max_observations", c.hurdle.recovery_max_observations);
   Assign(h, "entry_recovery_max_steps", c.hurdle.entry_recovery_max_steps);
   Assign(h, "recovery_max_steps", c.hurdle.recovery_max_steps);
+  Assign(h, "course_line_reference_enabled", c.hurdle.course_line_reference_enabled);
+  Assign(h, "line_reference_u_px", c.hurdle.line_reference_u_px);
+  Assign(h, "second_line_reference_u_px", c.hurdle.second_line_reference_u_px);
   Assign(h, "target_u_px", c.hurdle.target_u_px);
   Assign(h, "contact_v_px", c.hurdle.contact_v_px);
   Assign(h, "contact_steps", c.hurdle.contact_steps);
@@ -1073,6 +1081,7 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   Assign(m,"test_stage",c.test_stage);
   Assign(m, "mission_recovery_max_turns", c.mission_recovery_max_turns);
   Assign(m, "mission_recovery_turn_yaw_deg", c.mission_recovery_turn_yaw_deg);
+  Assign(m, "mission_recovery_heading_tolerance_deg", c.mission_recovery_heading_tolerance_deg);
 
   Assign(m, "camera_motion_timeout_sec", c.camera_motion_timeout_sec);
   Assign(m, "transition_settle_sec", c.transition_settle_sec);

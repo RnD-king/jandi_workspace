@@ -98,6 +98,7 @@ struct MissionControllerConfig {
   int test_goal_mission_index{};
   int mission_recovery_max_turns{};
   int mission_recovery_turn_yaw_deg{};
+  double mission_recovery_heading_tolerance_deg{};
   MissionType test_mission{MissionType::kNone};
   int test_stage{}; // 0 full, 1 far approach, 2 near alignment, 3 mission execution/recovery
   // Runtime-only dedicated test policy; stage selects entry, not an end boundary.
@@ -200,6 +201,7 @@ struct MissionFrameResult {
   bool approach_goal_depth_failed{false};
   // The guide supplied to LINE selector (raw, READY-cache, or post-DONE mean).
   std::optional<LineGuide> line_decision_guide;
+  std::optional<double> line_reference_u_px; // Effective reference used by the core.
   // The current BALL/GOAL approach guide and its image-space anchor, before
   // a LINE block's READY/DONE mean can replace line_decision_guide.
   std::optional<LineGuide> approach_path_guide;
@@ -594,6 +596,8 @@ private:
   void FinishMission();
   bool StraightGoalGateReached(int additional_straight_blocks = 0) const;
   bool FinishCourseEnabled(const MissionFrameInput& input) const;
+  double HurdleLineReferenceU() const;
+  double EffectiveLineReferenceU(const MissionFrameInput& input, double fallback) const;
   Features ComputeLineFeaturesForFrame(const MissionFrameInput& input,
                                       const FeatureConfig& features) const;
   void PopulateDiagnostics(MissionFrameResult &output, double now_sec) const;
@@ -634,6 +638,10 @@ private:
   bool decision_observation_restart_pending_{false};
   int line_guard_turns_completed_{0};
   bool finish_line_started_{false}, finish_line_straight_only_{false};
+  std::optional<LineGuide> finish_last_stable_guide_;
+  std::deque<bool> finish_line_hits_;
+  bool finish_sparse_line_{false}, finish_loss_used_{false}, finish_loss_request_{false};
+  std::uint64_t finish_loss_action_id_{0};
   bool test_setup_camera_started_{false}, test_failed_{false};
   bool test_setup_pose_done_{false};
   bool goal_start_camera_pending_{false};
@@ -690,6 +698,8 @@ private:
   std::unordered_map<std::uint64_t,WalkRecord> walk_records_;
   WalkDiagnostics walk_stats_;
   std::deque<bool> mission_recovery_hits_;
+  std::deque<std::optional<LineGuide>> mission_recovery_guides_;
+  std::optional<LineGuide> mission_recovery_line_guide_;
   double decision_object_weight_{0.0};
   // Width for renormalizing cached LINE offsets after optical reference edits.
   int last_line_image_width_{0};

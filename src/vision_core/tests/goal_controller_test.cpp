@@ -146,7 +146,12 @@ static void TiltedBackboardNormal() {
     const double phi=degrees*std::acos(-1.0)/180;
     const auto pose=BoardPoseFromPhysicalRim(.4,phi);
     GoalController fine(c,3);fine.StartTestExecute();
-    const auto shot=fine.Compute({},Board(),pose,640,480,0,true,camera,{});
+    auto shot=fine.Compute({},Board(),pose,640,480,0,true,camera,{});
+    assert(shot.action.action==MissionAction::kNone && shot.shoot_verifying);
+    for(int frame=1;frame<=10;++frame) {
+      shot=fine.Compute({},Board(),pose,640,480,.1*frame,true,camera,{});
+      if(frame<10) assert(shot.action.action==MissionAction::kNone && shot.shoot_verifying);
+    }
     // Tilting the board while holding its real rim fixed must not invent
     // lateral/forward motion or a different waist angle.
     assert(shot.action.action==MissionAction::kShoot && shot.action.target_yaw_deg==0);
