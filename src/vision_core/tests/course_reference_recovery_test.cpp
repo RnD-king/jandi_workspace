@@ -89,6 +89,7 @@ void References() {
 }
 void StationaryVotes(int window,int required,int hits,bool pass,double heading=20) {
   auto c=Config();c.line.line_stable_window=window;c.line.line_stable_min_hits=required;
+  c.mission_recovery_stable_min_hits=0; // Verify legacy inherited thresholds independently.
   MissionController core(c);core.active_mission_=MissionType::kBall;
   core.mission_recovery_verifying_=true;core.mission_recovery_verify_start_sec_=0;
   MissionFrameInput in;in.image_width=640;in.image_height=480;
@@ -111,6 +112,36 @@ void StationaryVotes(int window,int required,int hits,bool pass,double heading=2
     Check(next.command.action==MissionAction::kLineLeftUnit,
           "first resumed walk ignored the qualified O/H mean");
     Check(!core.mission_recovery_line_guide_,"issued walk retained a stale return mean");
+  }
+}
+void UltrafastMissionRecoveryVotes() {
+  const auto production=Production();
+  Check(production.line.line_stable_window==8 && production.line.line_stable_min_hits==4,
+        "ULTRAFAST normal LINE threshold changed");
+  Check(production.mission_recovery_stable_min_hits==5,
+        "ULTRAFAST post-pickup/shot return must require 5/8");
+  auto bad=production;
+  bad.mission_recovery_stable_min_hits=bad.line.line_stable_window+1;
+  bool rejected=false;
+  try { ValidateAlgorithmConfig(bad); } catch (const std::runtime_error&) { rejected=true; }
+  Check(rejected,"out-of-window mission return threshold was accepted");
+  for(const auto mission : {MissionType::kBall,MissionType::kGoal}) {
+    for(const int hits : {4,5}) {
+      auto c=Config();c.line.line_stable_window=8;c.line.line_stable_min_hits=4;
+      c.mission_recovery_stable_min_hits=5;
+      MissionController core(c);core.active_mission_=mission;
+      core.mission_recovery_verifying_=true;core.mission_recovery_verify_start_sec_=0;
+      MissionFrameInput in;in.image_width=640;in.image_height=480;
+      in.camera_feedback={CameraMode::kForward,true};
+      bool valid=false;MissionFrameResult out;
+      for(int i=0;i<8;++i) {
+        in.now_sec=(i+1.0)/8;
+        in.line_centers=Floor(i<hits ? 0 : 40,320);
+        core.ComputeMissionLineRecovery(in,{},&valid,&out);
+        if(i<7) Check(!valid,"partial strict LINE window passed");
+      }
+      Check(valid==(hits==5),"strict mission return did not distinguish 4/8 from 5/8");
+    }
   }
 }
 void MovingDoneAndLimit() {
@@ -148,5 +179,6 @@ int main() {
   StationaryVotes(8,4,4,true);StationaryVotes(8,4,3,false);
   StationaryVotes(10,5,10,true,30);StationaryVotes(8,4,8,false,30.1);
   StationaryVotes(10,5,0,false); // +40/-40 averaging to zero must not pass.
+  UltrafastMissionRecoveryVotes();
   MovingDoneAndLimit();
 }

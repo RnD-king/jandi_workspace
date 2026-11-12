@@ -3266,9 +3266,13 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
     mission_recovery_hits_.pop_front();
     mission_recovery_guides_.pop_front();
   }
+  // Only BALL pickup / GOAL throw LINE reacquisition uses this independent
+  // threshold. Ordinary LINE planning, FINISH and HURDLE votes are unchanged.
+  const int recovery_min_hits = config_.mission_recovery_stable_min_hits > 0
+      ? config_.mission_recovery_stable_min_hits : config_.line.line_stable_min_hits;
   const bool qualified = mission_recovery_hits_.size() == window &&
       std::count(mission_recovery_hits_.begin(), mission_recovery_hits_.end(), true) >=
-          config_.line.line_stable_min_hits;
+          recovery_min_hits;
   if (mission_recovery_verifying_) {
     if (input.now_sec - mission_recovery_verify_start_sec_ + 1e-9 <
             config_.line_p2p.recovery_observation_sec || mission_recovery_hits_.size() < window)
@@ -3438,6 +3442,7 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.backboard_max_depth_m = candidate.backboard_max_depth_m;
   updated.mission_recovery_max_turns = candidate.mission_recovery_max_turns;
   updated.mission_recovery_heading_tolerance_deg = candidate.mission_recovery_heading_tolerance_deg;
+  updated.mission_recovery_stable_min_hits = candidate.mission_recovery_stable_min_hits;
   updated.backboard_depth_strip_width_ratio =
       candidate.backboard_depth_strip_width_ratio;
   updated.backboard_depth_center_size_px=candidate.backboard_depth_center_size_px;

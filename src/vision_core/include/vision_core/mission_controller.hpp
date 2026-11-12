@@ -107,6 +107,8 @@ struct MissionControllerConfig {
   int mission_recovery_max_turns{};
   int mission_recovery_turn_yaw_deg{};
   double mission_recovery_heading_tolerance_deg{};
+  // 0 inherits ordinary LINE stable hits; positive values strengthen BALL/GOAL return only.
+  int mission_recovery_stable_min_hits{0};
   MissionType test_mission{MissionType::kNone};
   int test_stage{}; // 0 full, 1 far approach, 2 near alignment, 3 mission execution/recovery
   // Runtime-only dedicated test policy; stage selects entry, not an end boundary.
