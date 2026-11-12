@@ -55,6 +55,10 @@ MAIN → FAST → ULTRAFAST 순서로 순환하며, 각 버전의 소스 YAML을
 
 ## 검증 범위
 
+젯슨 `jandi_update.sh`의 코어·ROS 빌드는 이미 `BUILD_TESTING=OFF`이며 회귀 테스트를
+빌드하거나 실행하지 않는다. 시작 전 `config_check`는 잘못된 YAML을 거부하는 실행용
+검증이라 유지한다. GitHub CI가 테스트를 담당한다.
+
 GitHub CI는 코어·회귀 테스트, 표시 코드, 카메라 모션과 탐색 복귀, 배포 도구의
 모의 테스트를 실행한다. 실제 ROS2 메시지 생성과 forward_walk 전체 빌드는 Jetson에서 한다.
 `executor_integration_test`에도 YAML pitch/팔 자세/중복 DONE 검증을 추가했다.

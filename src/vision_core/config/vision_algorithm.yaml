@@ -152,9 +152,9 @@ vision_algorithm:
       approach_bottom_center_u_px: 400.0 # 사다리꼴 아래쪽 중심
       approach_top_half_width_px: 45.0 # 화면 위쪽(v=0) 반폭
       approach_bottom_half_width_px: 100.0 # 화면 아래쪽(v=height-1) 반폭
-      approach_short_v_px: 100.0 # 위 가로선 (4걸음)
-      approach_two_step_v_px: 240.0 # 아래 가로선 (3걸음 / 2걸음 후 down)
-      approach_direct_down_v_px: 410.0 # 8번 중앙 가로선 (1걸음 후 down)
+      approach_short_v_px: 100.0 # 과거 단독 격자 시험용; AUTO 원거리에서는 사용하지 않음
+      approach_two_step_v_px: 240.0 # 일반 FORWARD의 근거리 진입 v; 높은 시야는 common.camera의 별도 값
+      approach_direct_down_v_px: 410.0 # 일반 시야 전진 2/1걸음 경계; AUTO 좌우 회전 뒤에도 같은 기준
       approach_near_outer_margin_px: 80.0 # 근거리 격자 바깥 사선 평행이동 간격 (상단·하단 동일)
 
       # DOWN 1걸음 탐색

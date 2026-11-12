@@ -77,10 +77,11 @@ void StationaryPolicy() {
          StationaryObjectRecovery::Result::kFailed);
 }
 
-void BallSearchLastMissAndSkipHold() {
+void BallSearchLastMissKeepsFinePoseHold() {
   auto cfg=LoadDefaultAlgorithmConfig().ball;
   cfg.down_search_min_hits=3;
   cfg.down_search_inter_action_hold_sec=.3;
+  cfg.fine_pose_pre_hold_sec=.5;
   BallController ball(cfg,3.0);
   const CameraFeedback down{CameraMode::kBallView,true};
   ball.StartTestNear();
@@ -94,8 +95,12 @@ void BallSearchLastMissAndSkipHold() {
     assert(r.mode==BallMode::kDownSearch);
   }
   r=ball.Compute({},640,480,.65,down,Done());
-  assert(r.mode==BallMode::kWaitFinePose);
-  assert(r.action.action==MissionAction::kDefaultPoseMode);
+  assert(r.mode==BallMode::kWaitFinePose); // Found skips the DOWN search's extra hold.
+  assert(r.action.action==MissionAction::kNone); // Separate pre-FINE hold is retained.
+  r=ball.Compute({},640,480,.65+cfg.fine_pose_pre_hold_sec-.001,down,{});
+  assert(r.mode==BallMode::kWaitFinePose && r.action.action==MissionAction::kNone);
+  r=ball.Compute({},640,480,.65+cfg.fine_pose_pre_hold_sec,down,{});
+  assert(r.mode==BallMode::kWaitFinePose && r.action.action==MissionAction::kDefaultPoseMode);
 }
 
 void HurdleMovingDiscoveryNeedsStationaryVerification() {
@@ -152,7 +157,7 @@ void HurdleMissingSearchAndHold() {
 
 int main() {
   StationaryPolicy();
-  BallSearchLastMissAndSkipHold();
+  BallSearchLastMissKeepsFinePoseHold();
   HurdleMovingDiscoveryNeedsStationaryVerification();
   HurdleMissingSearchAndHold();
 }
