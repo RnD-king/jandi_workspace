@@ -87,7 +87,7 @@ void References() {
     Check(core.EffectiveLineReferenceU(in,380)==380,"hurdle reference leaked into FINISH");
   }
 }
-void StationaryVotes(int window,int required,int hits,bool pass,double heading=20) {
+void LegacyVotes(int window,int required,int hits,bool pass,double heading=20) {
   auto c=Config();c.line.line_stable_window=window;c.line.line_stable_min_hits=required;
   MissionController core(c);core.active_mission_=MissionType::kBall;
   core.mission_recovery_verifying_=true;core.mission_recovery_verify_start_sec_=0;
@@ -96,57 +96,40 @@ void StationaryVotes(int window,int required,int hits,bool pass,double heading=2
   bool valid=false;MissionFrameResult out;
   for(int i=0;i<window;++i) {
     in.now_sec=(i+1.0)/window;
-    in.line_centers=Floor(i<hits ? heading : (i%2 ? 40.0 : -40.0),300);
+    in.line_centers=i<hits ? Floor(heading,300) : std::vector<Point2>{};
     core.ComputeMissionLineRecovery(in,{},&valid,&out);
-    if(i+1<window) Check(!valid,"partial window completed LINE return");
+    if(i+1<window) Check(!valid,"legacy verification finished before observation interval");
   }
-  Check(valid==pass,"30-degree vote count was not enforced");
+  Check(valid==pass,"legacy LINE guide.valid votes were not enforced");
   if(pass) {
-    Check(core.mission_recovery_line_guide_.has_value(),"qualified O/H mean was not retained");
-    Check(std::abs(core.mission_recovery_line_guide_->heading_rad-heading*kPi/180)<1e-9,
-          "out-of-tolerance H contaminated return mean");
-    core.active_mission_=MissionType::kLine;
-    in.command_transport_enabled=true;in.line_centers=Floor(0,500);in.now_sec+=.1;
-    const auto next=core.Step(in);
-    Check(next.command.action==MissionAction::kLineLeftUnit,
-          "first resumed walk ignored the qualified O/H mean");
-    Check(!core.mission_recovery_line_guide_,"issued walk retained a stale return mean");
+    Check(core.line_state_==MissionController::LineState::kNormal,
+          "legacy LINE return did not resume normal walking");
+    Check(!core.mission_recovery_line_guide_,
+          "legacy LINE return unexpectedly synthesized a next-walk O/H mean");
   }
 }
-void MovingDoneAndLimit() {
-  auto c=Config();c.line.line_stable_window=10;c.line.line_stable_min_hits=5;
-  MissionController core(c);core.active_mission_=MissionType::kGoal;
-  MissionFrameInput in;in.image_width=640;in.image_height=480;
-  in.camera_feedback={CameraMode::kForward,true};in.line_centers=Floor(0);
+void LegacyTurnDoneAndReset() {
+  auto c=Config();MissionController core(c);core.active_mission_=MissionType::kGoal;
+  MissionFrameInput in;in.image_width=640;in.image_height=480;in.now_sec=.2;
+  in.camera_feedback={CameraMode::kForward,true};in.line_centers=Floor(45);
   bool valid=false;MissionFrameResult out;
-  ActionExecutionFeedback moving;moving.action_active=true;
-  for(int i=0;i<12;++i) {
-    in.now_sec+=.1;core.ComputeMissionLineRecovery(in,moving,&valid,&out);
-    Check(!valid && core.mission_recovery_hits_.empty(),"moving line qualified return");
-  }
   core.mission_recovery_issued_=true;core.last_command_.action=MissionAction::kTurnLeft;
   ActionExecutionFeedback done;done.action_done=true;
   core.ComputeMissionLineRecovery(in,done,&valid,&out);
-  Check(core.mission_recovery_turns_==1 && core.mission_recovery_hits_.empty(),
-        "physical DONE failed to start a fresh stationary window");
+  Check(core.mission_recovery_turns_==1,"legacy turn DONE did not count exactly once");
   core.ComputeMissionLineRecovery(in,done,&valid,&out);
-  Check(core.mission_recovery_turns_==1,"duplicate DONE counted a turn twice");
-  core.mission_recovery_turns_=c.mission_recovery_max_turns;
-  core.mission_recovery_verify_start_sec_=in.now_sec;
-  for(int i=0;i<10;++i) {
-    in.now_sec+=.11;in.line_centers=Floor(45);
-    core.ComputeMissionLineRecovery(in,{},&valid,&out);
-  }
-  Check(!valid && core.mission_recovery_failed_,"turn exhaustion accepted a diagonal LINE");
+  Check(core.mission_recovery_turns_==1,"duplicate DONE counted a legacy turn twice");
   core.Reset(true);
-  Check(!core.mission_recovery_line_guide_ && core.mission_recovery_guides_.empty(),"RESET retained return evidence");
+  Check(core.mission_recovery_turns_==0 && core.mission_recovery_hits_.empty() &&
+        !core.mission_recovery_line_guide_,"RESET retained old recovery state");
 }
+
 }
 int main() {
   References();
-  StationaryVotes(10,5,5,true);StationaryVotes(10,5,4,false);
-  StationaryVotes(8,4,4,true);StationaryVotes(8,4,3,false);
-  StationaryVotes(10,5,10,true,30);StationaryVotes(8,4,8,false,30.1);
-  StationaryVotes(10,5,0,false); // +40/-40 averaging to zero must not pass.
-  MovingDoneAndLimit();
+  LegacyVotes(10,5,5,true);LegacyVotes(10,5,4,false);
+  LegacyVotes(8,4,4,true);LegacyVotes(8,4,3,false);
+  LegacyVotes(8,4,4,true,45); // Old FAST deliberately has no +/-30-degree gate.
+  LegacyVotes(8,4,0,false);
+  LegacyTurnDoneAndReset();
 }

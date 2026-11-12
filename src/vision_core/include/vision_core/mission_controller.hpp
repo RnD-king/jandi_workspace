@@ -99,7 +99,6 @@ struct MissionControllerConfig {
   int test_goal_mission_index{};
   int mission_recovery_max_turns{};
   int mission_recovery_turn_yaw_deg{};
-  double mission_recovery_heading_tolerance_deg{};
   MissionType test_mission{MissionType::kNone};
   int test_stage{}; // 0 full, 1 far approach, 2 near alignment, 3 mission execution/recovery
   // Runtime-only dedicated test policy; stage selects entry, not an end boundary.
@@ -644,6 +643,10 @@ private:
   bool decision_observation_restart_pending_{false};
   int line_guard_turns_completed_{0};
   bool finish_line_started_{false}, finish_line_straight_only_{false};
+  std::optional<LineGuide> finish_last_stable_guide_;
+  std::deque<bool> finish_line_hits_;
+  bool finish_sparse_line_{false}, finish_loss_used_{false}, finish_loss_request_{false};
+  std::uint64_t finish_loss_action_id_{0};
   bool test_setup_camera_started_{false}, test_failed_{false};
   bool test_setup_pose_done_{false};
   bool goal_start_camera_pending_{false};

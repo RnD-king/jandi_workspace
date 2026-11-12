@@ -7,6 +7,7 @@
 
 #include "vision_core/config_loader.hpp"
 #include "vision_core/coordinate_rectifier.hpp"
+#include "vision_core/cruise_selector.hpp"
 #include "vision_core/stationary_window.hpp"
 
 namespace vision_core {
@@ -231,6 +232,15 @@ ActionRequest MissionController::ComputeLineAction(
         std::isfinite(guide.heading_rad);
     if (finish_line_straight_only_ || !usable) {
       line_state_=LineState::kNormal;
+      if (!finish_line_straight_only_ && finish_sparse_line_ && !finish_loss_used_ &&
+          finish_last_stable_guide_) {
+        const auto direction = SteeringDecision(*finish_last_stable_guide_, true).direction;
+        const auto cruise = vision_core::CruiseAction(direction);
+        if (cruise != MissionAction::kNone) {
+          finish_loss_request_ = true;
+          return LineLocomotion(cruise, true);
+        }
+      }
       return LineLocomotion(MissionAction::kStepForwardFour,true);
     }
     // Finish gains share the ordinary WALK turn assets, thresholds and turn budget.
@@ -3188,85 +3198,75 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
     const MissionFrameInput &input, const ActionExecutionFeedback &feedback,
     bool *valid, MissionFrameResult *output) {
   *valid = false;
-  if (mission_recovery_failed_) return {};
+  if (mission_recovery_failed_)
+    return {};
   auto features = config_.line_features;
   features.image_center_u = EffectiveLineReferenceU(input, features.image_center_u);
   output->line_reference_u_px = features.image_center_u;
-  output->line_features = ComputeLineFeatures(input.line_centers, input.image_width,
-                                             input.image_height, features);
+  output->line_features = ComputeLineFeatures(
+      input.line_centers, input.image_width, input.image_height, features);
   output->line_computed = true;
   const auto &guide = output->line_features.guide;
-  const bool aligned = guide.valid && std::isfinite(guide.offset) &&
-      std::isfinite(guide.heading_rad) &&
-      std::abs(guide.heading_rad) * kRadToDeg <= config_.mission_recovery_heading_tolerance_deg + 1e-9;
-  const auto clear_window = [&]() {
-    mission_recovery_hits_.clear();
-    mission_recovery_guides_.clear();
-    mission_recovery_found_ = mission_recovery_qualified_ = false;
-  };
-  // Moving images, including a transient zero-H crossing, cannot qualify return.
-  if (feedback.action_active && !feedback.action_done) {
-    clear_window();
-    return {};
-  }
-  if (feedback.action_done && mission_recovery_issued_ &&
-      (last_command_.action == MissionAction::kTurnLeft ||
-       last_command_.action == MissionAction::kTurnRight)) {
-    ++mission_recovery_turns_;
-    mission_recovery_issued_ = false;
-    clear_window();
-    mission_recovery_verifying_ = true;
-    mission_recovery_verify_start_sec_ = std::max(input.now_sec, settle_until_sec_);
-    return {}; // The physical DONE frame itself is not a stationary vote.
-  }
-  if (mission_recovery_verifying_ &&
-      input.now_sec <= mission_recovery_verify_start_sec_ + 1e-9) return {};
-  mission_recovery_hits_.push_back(aligned);
-  mission_recovery_guides_.push_back(aligned ? std::optional<LineGuide>(guide) : std::nullopt);
-  const auto window = static_cast<std::size_t>(config_.line.line_stable_window);
-  while (mission_recovery_hits_.size() > window) {
-    mission_recovery_hits_.pop_front();
-    mission_recovery_guides_.pop_front();
-  }
-  const bool qualified = mission_recovery_hits_.size() == window &&
-      std::count(mission_recovery_hits_.begin(), mission_recovery_hits_.end(), true) >=
-          config_.line.line_stable_min_hits;
   if (mission_recovery_verifying_) {
+    mission_recovery_hits_.push_back(guide.valid);
+    while (mission_recovery_hits_.size() >
+           static_cast<std::size_t>(config_.line.line_stable_window))
+      mission_recovery_hits_.pop_front();
+    if (mission_recovery_hits_.size()==static_cast<std::size_t>(config_.line.line_stable_window) &&
+        std::count(mission_recovery_hits_.begin(),mission_recovery_hits_.end(),true)>=
+            config_.line.line_stable_min_hits)
+      mission_recovery_qualified_=true;
     if (input.now_sec - mission_recovery_verify_start_sec_ + 1e-9 <
-            config_.line_p2p.recovery_observation_sec || mission_recovery_hits_.size() < window)
+            config_.line_p2p.recovery_observation_sec ||
+        mission_recovery_hits_.size() <
+            static_cast<std::size_t>(config_.line.line_stable_window))
       return {};
+    const bool confirmed = mission_recovery_qualified_;
     mission_recovery_verifying_ = false;
-    if (qualified) {
-      LineGuide mean;
-      int count = 0;
-      for (const auto& sample : mission_recovery_guides_) if (sample) {
-        mean.offset += sample->offset;
-        mean.heading_rad += sample->heading_rad;
-        mean.confidence += sample->confidence;
-        ++count;
-      }
-      mean.offset /= count;
-      mean.heading_rad /= count;
-      mean.confidence /= count;
-      mean.valid = true;
-      mission_recovery_line_guide_ = mean;
-      output->line_decision_guide = mean;
+    mission_recovery_qualified_=false;
+    if (confirmed) {
       *valid = true;
       line_state_ = LineState::kNormal;
       line_stability_history_ = mission_recovery_hits_;
       return {};
     }
-    clear_window();
+    mission_recovery_found_ = false;
+    mission_recovery_hits_.clear();
     if (mission_recovery_turns_ >= config_.mission_recovery_max_turns)
       mission_recovery_failed_ = true;
     return {};
   }
-  if (qualified || mission_recovery_turns_ >= config_.mission_recovery_max_turns) {
-    clear_window();
+  mission_recovery_hits_.push_back(guide.valid);
+  while (mission_recovery_hits_.size() >
+         static_cast<std::size_t>(config_.line.line_stable_window))
+    mission_recovery_hits_.pop_front();
+  const int hits = std::count(mission_recovery_hits_.begin(),
+                              mission_recovery_hits_.end(), true);
+  mission_recovery_found_ =
+      mission_recovery_found_ || hits >= config_.line.line_stable_min_hits;
+  if (feedback.action_done && mission_recovery_issued_ &&
+      (last_command_.action == MissionAction::kTurnLeft ||
+       last_command_.action == MissionAction::kTurnRight)) {
+    ++mission_recovery_turns_;
+    mission_recovery_issued_ = false;
+  }
+  *valid = false;
+  if (feedback.action_active && !feedback.action_done)
+    return {};
+  if (mission_recovery_found_ ||
+      mission_recovery_turns_ >= config_.mission_recovery_max_turns) {
     mission_recovery_verifying_ = true;
+    mission_recovery_qualified_=false;
     mission_recovery_verify_start_sec_ = input.now_sec;
+    mission_recovery_hits_.clear();
     return {};
   }
+  if (mission_recovery_turns_ >= config_.mission_recovery_max_turns) {
+    mission_recovery_failed_ = true;
+    return {};
+  }
+  if (mission_recovery_failed_)
+    return {};
   const int index = active_mission_ == MissionType::kBall ? ball_mission_index_
                                                           : goal_mission_index_;
   return RecoveryTurn(UsesAutomaticMissionPolicy() ?
@@ -3399,7 +3399,6 @@ bool MissionController::UpdateTuning(const MissionControllerConfig &candidate) {
   updated.backboard_min_depth_m = candidate.backboard_min_depth_m;
   updated.backboard_max_depth_m = candidate.backboard_max_depth_m;
   updated.mission_recovery_max_turns = candidate.mission_recovery_max_turns;
-  updated.mission_recovery_heading_tolerance_deg = candidate.mission_recovery_heading_tolerance_deg;
   updated.backboard_depth_strip_width_ratio =
       candidate.backboard_depth_strip_width_ratio;
   updated.backboard_depth_center_size_px=candidate.backboard_depth_center_size_px;
@@ -3608,6 +3607,9 @@ void MissionController::Reset(bool preserve_action_ids) {
   decision_observation_restart_pending_ = false;
   line_guard_turns_completed_ = 0;
   finish_line_started_=finish_line_straight_only_=false;
+  finish_last_stable_guide_.reset();finish_line_hits_.clear();
+  finish_sparse_line_=finish_loss_used_=finish_loss_request_=false;
+  finish_loss_action_id_=0;
   settle_until_sec_ = 0.0;
   last_settle_done_id_ = 0;
   decision_observation_camera_only_ = false;

@@ -164,6 +164,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   const bool automatic_approach = !input.manual_observation_control &&
                                   UsesAutomaticMissionPolicy();
   const bool finish_course=FinishCourseEnabled(input);
+  finish_loss_request_ = false;
   if (finish_course && !finish_line_started_ && input.advance_line_fsm &&
       input.camera_feedback.settled && input.camera_feedback.actual_mode==CameraMode::kForward) {
     finish_line_started_=true;
@@ -299,6 +300,20 @@ MissionFrameResult MissionController::StepPlannedLine(
   auto raw = output.line_features.guide;
   const auto actual_line_guide=raw;
   const bool finish_floor_usable=actual_line_guide.valid && output.line_features.n_visible>=3;
+  finish_sparse_line_ = finish_course && output.line_features.n_visible < 3;
+  if (finish_course && input.advance_line_fsm && input.camera_feedback.settled &&
+      input.camera_feedback.actual_mode == CameraMode::kForward) {
+    finish_line_hits_.push_back(finish_floor_usable);
+    while (finish_line_hits_.size() > static_cast<std::size_t>(config_.line.line_stable_window))
+      finish_line_hits_.pop_front();
+    const bool stable = finish_line_hits_.size() == static_cast<std::size_t>(config_.line.line_stable_window) &&
+        std::count(finish_line_hits_.begin(), finish_line_hits_.end(), true) >= config_.line.line_stable_min_hits;
+    if (stable && finish_floor_usable) {
+      finish_last_stable_guide_ = actual_line_guide;
+      if (!finish_loss_action_id_ || line_plan_.Done(finish_loss_action_id_))
+        finish_loss_used_ = false;
+    }
+  }
   if (finish_course && !finish_floor_usable) {
     // Finish steering needs >=3 valid floor LINE points. Objects, including a
     // finish gate detected as HURDLE, must never substitute for missing floor evidence.
@@ -1199,6 +1214,26 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
 
   if (!curve_override && route.action.action!=MissionAction::kNone) request=route.action;
+  // At predecessor READY, reserve a single remembered-direction correction
+  // instead of another unit from the former LINE repetition plan.
+  if (finish_course && finish_sparse_line_ && !finish_loss_used_ && finish_last_stable_guide_ &&
+      input.advance_line_fsm && commands_allowed && input.allow_new_line_action && input.allow_new_line_plan &&
+      input.delivery_feedback.ready && !input.delivery_feedback.done &&
+      command_coordinator_.PendingActionId() == input.delivery_feedback.action_id &&
+      line_plan_.Contains(input.delivery_feedback.action_id) && !command_coordinator_.HasQueuedAction()) {
+    line_plan_.Abort(); // Preserve issued IDs and their actual DONE.
+    bool reference = false;
+    request = ComputeLineAction({}, input, false, false, &reference, false);
+  }
+  // One physical loss-correction unit only. With no valid floor LINE after it,
+  // continue straight; when >=3 valid points return, use normal steering.
+  if (finish_course && finish_loss_action_id_ && !finish_floor_usable &&
+      command_coordinator_.PendingActionId() == finish_loss_action_id_ &&
+      input.delivery_feedback.action_id == finish_loss_action_id_ &&
+      input.delivery_feedback.ready && !input.delivery_feedback.done &&
+      !line_plan_.Done(finish_loss_action_id_) &&
+      !command_coordinator_.HasQueuedAction() && input.allow_new_line_plan)
+    request = LineLocomotion(MissionAction::kStepForwardFour, true);
   if(automatic_approach && !finish_course && curve_.phase==CurveSearchState::Phase::kDelay &&
      curve_.delay_remaining==1 && input.delivery_feedback.ready &&
      line_plan_.LastUnit(input.delivery_feedback.action_id))
@@ -1252,6 +1287,13 @@ MissionFrameResult MissionController::StepPlannedLine(
   if (LinePlan::IsUnit(command.action)) {
     line_plan_.Issued(command,
       command.control_phase == ControlPhase::kWaitingQueuedActionAck ? parent_id : 0);
+    if (finish_course && finish_loss_request_ && !finish_loss_used_ &&
+        request.action == command.action && command.command_type == CommandType::kAction && command.action_id) {
+      finish_loss_used_ = true;
+      finish_loss_action_id_ = command.action_id;
+      finish_line_hits_.clear();
+      line_plan_.Abort(); // Exactly one physical unit; preserve pending DONE ownership.
+    }
     if(curve_.phase==CurveSearchState::Phase::kProbeWalk &&
        curve_.probe_action_id==0 && continuous_.mission==MissionType::kNone &&
        line_state_==LineState::kNormal && request.action==command.action &&
