@@ -728,6 +728,8 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
     Assign(cs,"stable_min_hits",c.curve_search.stable_min_hits);
     Assign(cs,"confirm_extra_sequences",c.curve_search.confirm_extra_sequences);
     Assign(cs,"scan_delay_walk_sequences",c.curve_search.scan_delay_walk_sequences);
+    if(cs["opposite_walk_before_scan"])
+      Assign(cs,"opposite_walk_before_scan",c.curve_search.opposite_walk_before_scan);
     Assign(cs,"max_scan_yaw_deg",c.curve_search.max_scan_yaw_deg);
     Assign(cs,"scan_move_sec",c.curve_search.scan_move_sec);
     Assign(cs,"scan_hold_sec",c.curve_search.scan_hold_sec);

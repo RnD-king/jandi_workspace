@@ -47,6 +47,7 @@ struct CurveSearchConfig {
   int stable_min_hits{5};
   int confirm_extra_sequences{1};
   int scan_delay_walk_sequences{1};
+  bool opposite_walk_before_scan{false}; // One physical LINE unit per confirmed curve.
   int max_scan_yaw_deg{45};
   double scan_move_sec{0.5};
   double scan_hold_sec{0.5};

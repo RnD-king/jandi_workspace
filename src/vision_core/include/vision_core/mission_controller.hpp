@@ -676,7 +676,7 @@ private:
   struct CurveSearchState {
     enum class Phase { kIdle, kConfirm, kDelay, kDrain, kScan, kHold,
       kReturnFound, kReturnMiss, kProbeWalk, kBodyTurn, kBodyForward,
-      kBodyObserve, kLocked };
+      kBodyObserve, kLocked, kOppositeWalk }; // Append to preserve diagnostic phase values.
     Phase phase{Phase::kIdle};
     std::deque<int> frame_directions;
     // Latch a qualified rolling window anywhere within the current block.
@@ -687,10 +687,12 @@ private:
     int observed_frames{0}, turns_remaining{0};
     bool turn_left{false};
     bool skip_pending{false}, started{false};
+    bool opposite_walk_pending{false};
     std::optional<double> found_yaw;
     std::optional<LineGuide> saved_line;
     std::uint64_t correction_action_id{0};
     std::uint64_t probe_action_id{0}; // One normal LINE unit between head attempts.
+    std::uint64_t opposite_walk_action_id{0};
   } curve_;
   int mission_recovery_turns_{0};
   bool mission_recovery_issued_{false};

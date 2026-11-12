@@ -61,6 +61,7 @@ vision_algorithm:
       stable_min_hits: 4
       confirm_extra_sequences: 1
       scan_delay_walk_sequences: 0 # 확정 후 추가 LINE 보행 묶음 없음; CONFIRM 마지막 READY 선예약 보류
+      opposite_walk_before_scan: true # 커브 확정 후 반대쪽 전진 1유닛 DONE → 공 재확인 → 기존 목 탐색
       max_scan_yaw_deg: 45
       scan_move_sec: 0.5
       scan_hold_sec: 0.5
@@ -88,7 +89,7 @@ vision_algorithm:
       right_unit_action: 36 # 34 기존: 직진→우회전, 36 신규: 우회전→직진; 변경 후 노드 재시작
 
       # 보행 방향·제자리 회전 판단
-      offset_gain: 0.3 # 위치 오차 가중치 (직선 O 보정 완화)
+      offset_gain: 0.2 # 일반 LINE 위치 오차 가중치
       heading_gain: 0.4 # 직선 방향각 보정 우선
       # 결승 구간(커브 인덱스 5 + 허들 2회 이상 완료) 전용 조향 게인
       finish_offset_gain: 0.3

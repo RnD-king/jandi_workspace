@@ -80,6 +80,12 @@ void MissionController::ObserveLineFeedback(const CommandDeliveryFeedback& feedb
     goal_approach_walk_done_=true;
   line_plan_.Feedback(feedback, now, config_.walk_inter_action_hold_sec);
   if (feedback.done && feedback.action_id != 0) {
+    if(curve_.phase==CurveSearchState::Phase::kOppositeWalk &&
+       feedback.action_id==curve_.opposite_walk_action_id) {
+      curve_.opposite_walk_action_id=0;
+      curve_.opposite_walk_pending=false;
+      curve_.phase=CurveSearchState::Phase::kDrain;
+    }
     if(curve_.phase==CurveSearchState::Phase::kProbeWalk &&
        feedback.action_id==curve_.probe_action_id) {
       curve_.probe_action_id=0;
@@ -222,6 +228,8 @@ MissionFrameResult MissionController::StepPlannedLine(
               eligible=false;
             }
             if(eligible) {
+              curve_.opposite_walk_pending=config_.curve_search.opposite_walk_before_scan;
+              curve_.opposite_walk_action_id=0;
               curve_.head_attempts=curve_.body_attempts=0;
               curve_.turns_remaining=0;curve_.correction_action_id=0;curve_.found_yaw.reset();
               curve_.delay_remaining=config_.curve_search.scan_delay_walk_sequences;
@@ -338,6 +346,7 @@ MissionFrameResult MissionController::StepPlannedLine(
   }
   RouteDecision route;
   bool curve_special=curve_.phase==CurveSearchState::Phase::kDrain ||
+      curve_.phase==CurveSearchState::Phase::kOppositeWalk ||
       curve_.phase==CurveSearchState::Phase::kScan ||
       curve_.phase==CurveSearchState::Phase::kHold ||
       curve_.phase==CurveSearchState::Phase::kReturnFound ||
@@ -369,6 +378,8 @@ MissionFrameResult MissionController::StepPlannedLine(
       // BALL admission wins over an UNSTARTED camera scan; never cancel an
       // already running scan or an already issued motor action.
       curve_.phase=CurveSearchState::Phase::kIdle;
+      curve_.opposite_walk_pending=false;
+      curve_.opposite_walk_action_id=0;
       curve_.delay_remaining=curve_.confirmations=0;
       curve_.frame_directions.clear();curve_.block_curve_direction=0;
       curve_special=false;
@@ -686,7 +697,16 @@ MissionFrameResult MissionController::StepPlannedLine(
   if(curve_override) {
     using Phase=CurveSearchState::Phase;
     const auto phase=curve_.phase;
-    if(phase==Phase::kDrain && idle && commands_allowed) {
+    if(phase==Phase::kDrain && curve_.opposite_walk_pending &&
+       idle && commands_allowed && curve_.opposite_walk_action_id==0 &&
+       input.camera_feedback.settled &&
+       input.camera_feedback.actual_mode==CameraMode::kForward) {
+      // Right curve -> left-forward; left curve -> configured right-forward.
+      // Issue a single physical unit, independent of LINE repetition counts.
+      request={curve_.direction>0 ? MissionAction::kLineLeftUnit :
+          static_cast<MissionAction>(config_.line_p2p.right_unit_action),
+          ActionCategory::kLocomotion,0,false};
+    } else if(phase==Phase::kDrain && !curve_.opposite_walk_pending && idle && commands_allowed) {
       if(last_ready_line_guide_ && last_ready_line_guide_->valid)
         curve_.saved_line=last_ready_line_guide_;
       curve_.observation.Reset();curve_.phase=Phase::kScan;curve_.started=false;
@@ -1241,6 +1261,13 @@ MissionFrameResult MissionController::StepPlannedLine(
           1000 + static_cast<int>(candidate_.phase), request, camera,
       input.delivery_feedback, input.now_sec);
   const auto& command = output.command;
+  if(curve_.phase==CurveSearchState::Phase::kDrain && curve_.opposite_walk_pending &&
+     LinePlan::IsUnit(request.action) &&
+     command.command_type==CommandType::kAction && command.action_id!=0 &&
+     command.action==request.action) {
+    curve_.phase=CurveSearchState::Phase::kOppositeWalk;
+    curve_.opposite_walk_action_id=command.action_id;
+  }
   if (command.command_type == CommandType::kAction && command.action_id &&
       request.action != MissionAction::kNone && command.action == request.action)
     mission_recovery_line_guide_.reset();
