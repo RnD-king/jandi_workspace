@@ -55,7 +55,7 @@ for action, filename in {
     'STEP_FORWARD_LEFT_ONE': 'missions/좌회전전진_1회.json',
     'STEP_FORWARD_RIGHT_ONE_HUDDLE': 'motions/우회전_최종.json',
     'TURN_LEFT_IN_PLACE': 'motions/좌회전_최종__찐.json',
-    'PICK_BALL': 'motions/공_줍고일어나기찐찐_자세고정.json',
+    'PICK_BALL': 'motions/공_줍고일어나기찐찐.json',
     'PICK_BALL_RE': 'motions/공_줍고일어나기_최종_재그립제외.json',
     'PICK_BALL_RE_STAND': 'motions/공_줍고일어나기_최종_재그립제외_일어나기.json',
     'STEP_FORWARD_FIVE': 'missions/연속걷기.json',
