@@ -37,9 +37,16 @@ void MissionController::RetryGoalHeadSearch() {
 void MissionController::RetryCurveHeadSearch() {
   using Phase=CurveSearchState::Phase;
   curve_.observation.Reset();curve_.started=false;
-  if(curve_.head_attempts<std::min(config_.curve_search.head_search_max_attempts,config_.scan_correction.max_attempts))
-    curve_.phase=Phase::kDrain;
-  else {
+  if(curve_.head_attempts<std::min(config_.curve_search.head_search_max_attempts,config_.scan_correction.max_attempts)) {
+    // Reacquire fresh FORWARD LINE evidence, then perform exactly one normal
+    // LINE unit before retrying the head scan. Recovery turns do not count.
+    curve_.phase=Phase::kProbeWalk;curve_.probe_action_id=0;
+    line_plan_.Abort();
+    last_ready_line_guide_.reset();
+    line_auxiliary_id_=0;line_auxiliary_done_=line_auxiliary_observing_=false;
+    decision_observation_active_=decision_observation_restart_pending_=false;
+    BeginLineReacquisition();
+  } else {
     curve_.phase=Phase::kLocked;curve_.unlock_blocks=config_.curve_search.failure_lock_line_blocks;
     curve_.skip_pending=true;
     if(course_curve_index_==3) { course_curve_index_=5;curve_.unlock_blocks=0; }
@@ -73,6 +80,11 @@ void MissionController::ObserveLineFeedback(const CommandDeliveryFeedback& feedb
     goal_approach_walk_done_=true;
   line_plan_.Feedback(feedback, now, config_.walk_inter_action_hold_sec);
   if (feedback.done && feedback.action_id != 0) {
+    if(curve_.phase==CurveSearchState::Phase::kProbeWalk &&
+       feedback.action_id==curve_.probe_action_id) {
+      curve_.probe_action_id=0;
+      curve_.phase=CurveSearchState::Phase::kDrain;
+    }
     if(line_head_search_.phase==LineHeadSearch::Phase::kAlignBody &&
        feedback.action_id==line_head_search_.align_action_id) {
       auto& scan=line_head_search_;scan.align_action_id=0;
@@ -184,8 +196,6 @@ MissionFrameResult MissionController::StepPlannedLine(
           curve_.phase=CurveSearchState::Phase::kDrain;
           line_plan_.Abort(); // Never cancel already-issued motors.
         }
-      } else if(curve_.phase==CurveSearchState::Phase::kProbeWalk) {
-        curve_.phase=CurveSearchState::Phase::kDrain;
       } else if(curve_.phase==CurveSearchState::Phase::kBodyForward) {
         curve_.phase=CurveSearchState::Phase::kBodyObserve;
         curve_.observed_frames=0;
@@ -328,7 +338,11 @@ MissionFrameResult MissionController::StepPlannedLine(
       curve_.phase==CurveSearchState::Phase::kHold ||
       curve_.phase==CurveSearchState::Phase::kReturnFound ||
       curve_.phase==CurveSearchState::Phase::kReturnMiss ||
-      curve_.phase==CurveSearchState::Phase::kProbeWalk ||
+      // Before issue, use normal LINE observation/recovery and BALL admission.
+      // After issue, hold all successors until this exact unit's real DONE.
+      (curve_.phase==CurveSearchState::Phase::kProbeWalk &&
+       (curve_.probe_action_id!=0 || !input.camera_feedback.settled ||
+        input.camera_feedback.actual_mode!=CameraMode::kForward)) ||
       curve_.phase==CurveSearchState::Phase::kBodyTurn ||
       curve_.phase==CurveSearchState::Phase::kBodyForward ||
       curve_.phase==CurveSearchState::Phase::kBodyObserve;
@@ -346,7 +360,8 @@ MissionFrameResult MissionController::StepPlannedLine(
     if (continuous_.mission==MissionType::kBall &&
         (curve_.phase==CurveSearchState::Phase::kConfirm ||
          curve_.phase==CurveSearchState::Phase::kDelay ||
-         curve_.phase==CurveSearchState::Phase::kDrain)) {
+         curve_.phase==CurveSearchState::Phase::kDrain ||
+         curve_.phase==CurveSearchState::Phase::kProbeWalk)) {
       // BALL admission wins over an UNSTARTED camera scan; never cancel an
       // already running scan or an already issued motor action.
       curve_.phase=CurveSearchState::Phase::kIdle;
@@ -1230,6 +1245,15 @@ MissionFrameResult MissionController::StepPlannedLine(
   if (LinePlan::IsUnit(command.action)) {
     line_plan_.Issued(command,
       command.control_phase == ControlPhase::kWaitingQueuedActionAck ? parent_id : 0);
+    if(curve_.phase==CurveSearchState::Phase::kProbeWalk &&
+       curve_.probe_action_id==0 && continuous_.mission==MissionType::kNone &&
+       line_state_==LineState::kNormal && request.action==command.action &&
+       command.command_type==CommandType::kAction && command.action_id!=0) {
+      curve_.probe_action_id=command.action_id;
+      // Exactly one physical 32/33/36, even if LINE repetitions are increased.
+      // Abort only unissued repeats; the coordinator retains this ID to DONE.
+      line_plan_.Abort();
+    }
     // Latch the pre-camera LINE validity when the FINAL required 32/33/36
     // is physically issued. The normal configuration has one unit/block;
     // LastUnit also safely handles changed repetition counts.

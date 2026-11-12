@@ -12,12 +12,14 @@ ros2 run camera_overlay motion_calibration_node
 동시에 `line_perception_node`를 실행하지 않는다. 모션 보정 엔진의 기존 Jetson 경로
 `/home/rnd/jandi/src/dataset/best_1029.engine`에 해당 Jetson용 엔진이 있어야 한다.
 
-아래 세 실행파일도 같은 두 파라미터를 지원한다.
+아래 실행파일도 같은 두 파라미터를 지원한다.
 
 ```bash
 ros2 run camera_overlay camera_overlay_node
 ros2 run camera_overlay click_depth_node
 ros2 run camera_overlay ball_pixel_pin_node
+ros2 run camera_overlay forward_yolo_node
+ros2 run camera_overlay goal_yolo_node
 ```
 
 모든 도구의 기본 포트는 8080이다. 같은 장비에서는 8080을 사용하는 도구를 하나씩 실행한다.
@@ -25,6 +27,7 @@ PC·Jetson 모두 기본 `stream_debug_view=true`, `show_debug_view=false`다.
 로컬 창이 필요하면 `-p show_debug_view:=true`, HTTP를 끄려면
 `-p stream_debug_view:=false`를 지정한다.
 DISPLAY/Wayland가 없는 SSH 환경에서는 로컬 창을 만들지 않는다.
+실시간 YOLO 전용 두 노드의 카메라 동작·깊이 밴드는 [YOLO_INSPECTION.md](YOLO_INSPECTION.md)를 참고한다.
 기존 launch XML도 노드의 HTTP 기본 ON 설정을 따른다. 개별 옵션 지정은 위 `ros2 run`에 파라미터를 추가한다.
 
 ## 송신 화면

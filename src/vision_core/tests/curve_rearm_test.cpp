@@ -44,6 +44,27 @@ struct Harness {
     in.camera_feedback={CameraMode::kForward,true};
     in.camera_scan.finished=false;Tick();
   }
+  void CurveProbe(int next_attempt) {
+    if(out.curve_search_phase!=8)Fail("missed head scan did not schedule one LINE probe");
+    for(int i=0;i<60 && !out.command.action_id;++i)Tick();
+    const auto id=out.command.action_id;
+    if(!id || !LinePlan::IsUnit(out.command.action))Fail("fresh LINE did not produce a probe unit");
+    if(out.curve_head_attempts!=next_attempt-1)Fail("probe consumed a head attempt before scanning");
+    Tick({id,true,false,false});
+    for(int i=0;i<12;++i) {
+      Tick();
+      if(out.curve_search_phase!=8 || out.command.camera_request!=CameraRequest::kNone ||
+         (out.command.action_id && out.command.action_id!=id))
+        Fail("probe must finish before another walk or scan");
+    }
+    Tick({id,true,false,true});
+    if(out.curve_search_phase!=8 || (out.command.action_id && out.command.action_id!=id))
+      Fail("probe READY queued a successor or started scanning");
+    Tick({id,true,true,false});
+    for(int i=0;i<5 && out.curve_search_phase!=4;++i)Tick();
+    if(out.curve_search_phase!=4 || out.curve_head_attempts!=next_attempt)
+      Fail("probe DONE did not start the next head attempt");
+  }
 };
 
 int main() {
@@ -65,9 +86,7 @@ int main() {
   for(int attempt=1;attempt<=3;++attempt) {
     d.FailedHeadScan(attempt);
     if(attempt<3) {
-      if(d.out.curve_search_phase!=3)d.Fail("missed head scan should schedule the next scan without a probe walk");
-      d.Tick();
-      if(d.out.curve_search_phase!=4)d.Fail("retry did not start the next head scan");
+      d.CurveProbe(attempt+1);
     }
   }
   if(d.out.curve_search_phase!=12 || d.out.curve_unlock_blocks!=20 ||
@@ -101,5 +120,5 @@ int main() {
      d.out.curve_skip_pending ||
      d.out.command.camera_request!=CameraRequest::kScanRight)
     d.Fail("second fresh left curve failed to scan index three after right miss");
-  std::puts("PASS: head 3 misses -> 20 physical LINE blocks -> fresh left 2 blocks -> scan");
+  std::puts("PASS: head misses alternate with single LINE probes -> 20 LINE blocks -> fresh left 2 blocks -> scan");
 }

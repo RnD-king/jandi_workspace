@@ -216,3 +216,11 @@ ros2 run camera_overlay click_depth_node --ros-args \
 계산·깊이 표본·상수·시각화·단위 테스트는 모두 `camera_overlay` 내부에 있다.
 `vision_core` 링크, `vision` 헤더 포함, 외부 설정 파일 읽기가 없고,
 CUDA/TensorRT나 vision 실행 노드를 링크하거나 시작하지 않는다.
+
+## 실시간 YOLO 확인
+
+`ros2 run camera_overlay forward_yolo_node`는 카메라 자세를 유지하며 탐지 박스를 표시한다.
+`ros2 run camera_overlay goal_yolo_node`는 GOAL 카메라 자세로 전환한 뒤
+탐지 박스와 중앙·좌우 밴드의 깊이·유효 픽셀 비율을 표시한다.
+둘 다 기본 HTTP ON / 로컬 창 OFF이며 `/start`나 몸 동작 없이 계속 표시한다.
+실행 방법과 파라미터는 [YOLO_INSPECTION.md](YOLO_INSPECTION.md)를 참고한다.
