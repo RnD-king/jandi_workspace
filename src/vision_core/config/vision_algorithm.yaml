@@ -88,8 +88,8 @@ vision_algorithm:
       right_unit_action: 36 # 34 기존: 직진→우회전, 36 신규: 우회전→직진; 변경 후 노드 재시작
 
       # 보행 방향·제자리 회전 판단
-      offset_gain: 0.2 # 위치 오차 가중치 (직선 O 보정 완화)
-      heading_gain: 0.4 # 직선 방향각 보정 우선
+      offset_gain: 0.3 # 일반 LINE 위치 오차 가중치
+      heading_gain: 0.5 # 일반 LINE 방향각 가중치
       # 결승 구간(커브 인덱스 5 + 허들 2회 이상 완료) 전용 조향 게인
       finish_offset_gain: 0.3
       finish_heading_gain: 0.6
