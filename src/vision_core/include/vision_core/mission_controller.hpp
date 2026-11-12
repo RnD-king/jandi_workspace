@@ -667,6 +667,7 @@ private:
     std::optional<double> found_yaw;
     std::optional<LineGuide> saved_line;
     std::uint64_t correction_action_id{0};
+    std::uint64_t probe_action_id{0}; // One normal LINE unit between head attempts.
   } curve_;
   int mission_recovery_turns_{0};
   bool mission_recovery_issued_{false};

@@ -177,8 +177,12 @@ void CurveThreeTurnsAndSharedRetryBudget() {
   }
   Check(curve.phase==Phase::kBodyObserve && curve.head_attempts==2,"three DONEs did not start a fresh recheck");
   for(int i=0;i<10 && curve.phase==Phase::kBodyObserve;++i)t.Tick();
-  Check(curve.phase==Phase::kDrain && curve.head_attempts==2,"failed recheck reset the scan budget");
-  t.Tick();Check(curve.head_attempts==3 && t.out.command.camera_request==CameraRequest::kScanLeft,
+  Check(curve.phase==Phase::kProbeWalk && curve.head_attempts==2,"failed recheck did not schedule a LINE probe with the same scan budget");
+  t.Observe();
+  const auto probe_id=curve.probe_action_id;
+  Check(probe_id && LinePlan::IsUnit(t.out.command.action),"curve recheck failed to issue its intervening LINE unit");
+  t.FinishUnit();
+  Check(curve.head_attempts==3 && t.out.command.camera_request==CameraRequest::kScanLeft,
                  "curve did not consume its third scan round");
   t.in.camera_feedback={CameraMode::kTransition,false};t.in.camera_scan={1,2,45,false,1,true};
   for(int i=0;i<10;++i)t.Tick();
@@ -186,6 +190,93 @@ void CurveThreeTurnsAndSharedRetryBudget() {
   t.in.camera_feedback={CameraMode::kForward,true};t.in.camera_scan={1,0,0,true};t.Tick();
   Check(curve.phase==Phase::kLocked && curve.head_attempts==3 && curve.skip_pending,
         "third failed curve round failed to preserve the course lock policy");
+}
+
+void CurveProbeUsesFreshLineAndOnePhysicalDone() {
+  using Phase=MissionController::CurveSearchState::Phase;
+  Trial t(4,320);
+  auto& curve=t.core.curve_;
+  curve.head_attempts=1;curve.direction=1;
+  // Old guide/auxiliary DONE must not supply the post-scan steering decision.
+  t.core.last_ready_line_guide_=Guide(-.4);
+  t.core.line_auxiliary_id_=88;t.core.line_auxiliary_done_=true;
+  t.core.RetryCurveHeadSearch();
+  Check(curve.phase==Phase::kProbeWalk && !t.core.last_ready_line_guide_ &&
+        !t.core.line_auxiliary_id_,"curve probe retained stale pre-scan LINE evidence");
+  auto repetitions=t.core.config_.line_p2p;
+  repetitions.left_repetitions=repetitions.right_repetitions=repetitions.straight_repetitions=3;
+  t.core.line_plan_.UpdateConfig(repetitions);
+  t.core.config_.line_p2p=repetitions;
+  t.in.camera_feedback={CameraMode::kTransition,false};
+  for(int i=0;i<15;++i) {
+    t.Tick();Check(!curve.probe_action_id && !t.out.command.action_id,
+                  "curve probe moved before FORWARD camera completion");
+  }
+  t.in.camera_feedback={CameraMode::kForward,true};
+  t.Points(0,320);
+  for(int i=0;i<4;++i) {
+    t.Tick();Check(!curve.probe_action_id && !t.out.command.action_id,
+                  "missing fresh LINE used a stale steering value");
+  }
+  t.Points(4,320);
+  t.in.allow_new_body_actions=false;
+  for(int i=0;i<15;++i)t.Tick();
+  Check(!curve.probe_action_id && curve.head_attempts==1,"body gate consumed curve probe intent");
+  t.in.allow_new_body_actions=true;
+  for(int i=0;i<30 && !curve.probe_action_id;++i)t.Tick();
+  const auto id=curve.probe_action_id;
+  Check(id && t.out.command.action==MissionAction::kLineStraightUnit,
+        "curve probe did not steer from the new centered LINE");
+  t.Tick({id,true,false,false});
+  t.Tick({id+1000,true,true,false});
+  Check(curve.phase==Phase::kProbeWalk && curve.probe_action_id==id,
+        "unrelated DONE completed the curve probe");
+  t.Tick({id,true,false,true});
+  Check(curve.probe_action_id==id && !t.core.command_coordinator_.HasQueuedAction(),
+        "curve probe READY queued another physical unit");
+  for(int i=0;i<15;++i) {
+    t.Tick();
+    Check(curve.phase==Phase::kProbeWalk && curve.head_attempts==1 &&
+          (t.out.command.action_id==0 || t.out.command.action_id==id) &&
+          t.out.command.camera_request==CameraRequest::kNone,
+          "curve probe repeated or scanned before real DONE");
+  }
+  // Transport-only DONE must work even without a new RGB frame.
+  t.in.now_sec+=.1;
+  t.core.AcceptDeliveryFeedback({id,true,true,false},t.in.now_sec);
+  Check(curve.phase==Phase::kDrain && !curve.probe_action_id,
+        "transport DONE did not release the curve probe");
+  t.core.AcceptDeliveryFeedback({id,true,true,false},t.in.now_sec+.01);
+  Check(curve.phase==Phase::kDrain && curve.head_attempts==1,
+        "duplicate DONE consumed a head attempt");
+  t.Tick();
+  Check(curve.phase==Phase::kScan && curve.head_attempts==2 &&
+        t.out.command.camera_request==CameraRequest::kScanLeft,
+        "one physical probe did not resume the original-side head scan");
+}
+
+void CurveProbeSteeringAndBallPriority() {
+  using Phase=MissionController::CurveSearchState::Phase;
+  for(const double u:{100.,540.}) {
+    Trial t(4,u);t.core.curve_.head_attempts=1;
+    t.core.RetryCurveHeadSearch();t.Observe();
+    const auto expected=u<320 ? MissionAction::kLineLeftUnit :
+        static_cast<MissionAction>(t.core.config_.line_p2p.right_unit_action);
+    Check(t.core.curve_.probe_action_id && t.out.command.action==expected,
+          "curve probe ignored the new floor LINE steering direction");
+  }
+  Trial t(4,320);t.core.config_.enable_ball=true;
+  t.core.curve_.head_attempts=1;t.core.RetryCurveHeadSearch();
+  ObjectTarget ball;ball.class_id=t.core.config_.object_targets.ball_class_id;
+  ball.confidence=.95;ball.center_px={320,100};
+  ball.width_px=ball.height_px=40;ball.area_px=1600;
+  t.in.ball_target=ball;t.in.ball_track_id=12;
+  t.in.ball_entry_track_hits=t.core.config_.ball.entry_min_hits;
+  t.Tick();
+  Check(t.out.approach_mission==MissionType::kBall &&
+        t.core.curve_.phase==Phase::kIdle && !t.core.curve_.probe_action_id &&
+        t.out.command.camera_request==CameraRequest::kNone,
+        "qualified BALL did not preempt an unissued curve probe");
 }
 
 void NoRgbDeadlineAndDuplicateDone() {
@@ -204,4 +295,4 @@ void NoRgbDeadlineAndDuplicateDone() {
 }
 
 }
-int main() { LossBudgetsAndFallback();OffCenterLineAndBoundedReobserve();GoalNormalVotesDepthAndDone();CurveThreeTurnsAndSharedRetryBudget();NoRgbDeadlineAndDuplicateDone(); }
+int main() { LossBudgetsAndFallback();OffCenterLineAndBoundedReobserve();GoalNormalVotesDepthAndDone();CurveThreeTurnsAndSharedRetryBudget();CurveProbeUsesFreshLineAndOnePhysicalDone();CurveProbeSteeringAndBallPriority();NoRgbDeadlineAndDuplicateDone(); }

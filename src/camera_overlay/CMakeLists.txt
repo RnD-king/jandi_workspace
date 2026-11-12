@@ -355,6 +355,28 @@ set_target_properties(
 # Existing Tests
 # ============================================================
 
+function(configure_inspection_target inspection_target)
+  target_compile_features(${inspection_target} PRIVATE cxx_std_17)
+  target_compile_options(${inspection_target} PRIVATE -Wall -Wextra -Wpedantic)
+  target_include_directories(${inspection_target} PRIVATE include
+    ${VISION_YOLO_INCLUDE_DIR} ${TENSORRT_INCLUDE_DIR}
+    ${CUDAToolkit_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
+  ament_target_dependencies(${inspection_target} rclcpp sensor_msgs cv_bridge ament_index_cpp vision)
+  target_link_libraries(${inspection_target}
+    shared_vision_core::shared_vision_core ${OpenCV_LIBS}
+    ${TENSORRT_NVINFER} ${TENSORRT_NVINFER_PLUGIN} CUDA::cudart vision::vision_debug_mjpeg)
+  set_target_properties(${inspection_target} PROPERTIES
+    BUILD_RPATH "${VISION_PREFIX}/lib/vision;${SHARED_VISION_CORE_ROOT}/lib"
+    INSTALL_RPATH "${VISION_PREFIX}/lib/vision;${SHARED_VISION_CORE_ROOT}/lib")
+endfunction()
+
+foreach(inspection_target forward_yolo_node goal_yolo_node)
+  add_executable(${inspection_target} src/yolo_inspection_node.cpp)
+  configure_inspection_target(${inspection_target})
+  target_link_libraries(${inspection_target} ${VISION_YOLO_LIBRARY})
+endforeach()
+target_compile_definitions(goal_yolo_node PRIVATE CAMERA_OVERLAY_GOAL_INSPECTION=1)
+
 foreach(debug_target camera_overlay_node click_depth_node ball_pixel_pin_node motion_calibration_node)
   target_link_libraries(${debug_target} vision::vision_debug_mjpeg)
 endforeach()
@@ -363,6 +385,20 @@ if(BUILD_TESTING)
 
   enable_testing()
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  # Actual ROS/HTTP viewer with deterministic detections and a fake executor.
+  # Test binaries never initialize TensorRT or access camera/motors.
+  foreach(mode forward goal)
+    add_executable(camera_overlay_${mode}_yolo_test_node
+      src/yolo_inspection_node.cpp tests/fake_yolo_engine.cpp)
+    configure_inspection_target(camera_overlay_${mode}_yolo_test_node)
+  endforeach()
+  target_compile_definitions(camera_overlay_goal_yolo_test_node PRIVATE CAMERA_OVERLAY_GOAL_INSPECTION=1)
+  add_test(NAME camera_overlay_yolo_inspection_test
+    COMMAND /usr/bin/python3 -s ${CMAKE_CURRENT_SOURCE_DIR}/tests/yolo_inspection_test.py
+      $<TARGET_FILE:camera_overlay_forward_yolo_test_node>
+      $<TARGET_FILE:camera_overlay_goal_yolo_test_node>)
+  set_tests_properties(camera_overlay_yolo_inspection_test PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=91;ROS_LOCALHOST_ONLY=1" TIMEOUT 60)
   add_test(NAME camera_overlay_http_debug_view_test
     COMMAND /usr/bin/python3 -s ${CMAKE_CURRENT_SOURCE_DIR}/tests/http_debug_view_test.py
       $<TARGET_FILE:click_depth_node>)
@@ -457,6 +493,8 @@ install(
     click_depth_node
     ball_pixel_pin_node
     motion_calibration_node
+    forward_yolo_node
+    goal_yolo_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -466,7 +504,7 @@ install(
 )
 
 install(
-  FILES README.md HTTP_DEBUG_STREAMING.md DEPTH_COLOR_VIEWER.md
+  FILES README.md HTTP_DEBUG_STREAMING.md DEPTH_COLOR_VIEWER.md YOLO_INSPECTION.md
   DESTINATION share/${PROJECT_NAME}
 )
 
