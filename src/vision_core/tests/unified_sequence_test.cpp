@@ -218,7 +218,25 @@ void TestAlternatingBoundedRecovery() {
   right.Commit(); assert(right.out.command.action==MissionAction::kTurnRight &&
                          right.out.command.target_yaw_deg==15);
   auto found_on_last=right;
-  for(int i=0;i<10;++i)right.Tick(true);
+  const auto complete_turn = [](Trial& t, int expected) {
+    assert(t.out.command.action==MissionAction::kTurnRight && t.out.command.action_id!=0);
+    t.Tick(true);
+    assert(t.out.recovery_turns_completed==expected && t.out.recovery_verifying);
+    assert(t.out.command.action_id==0);
+  };
+  const auto reject_window = [](Trial& t) {
+    for(int frame=0;frame<10;++frame) {
+      t.Tick();
+      assert(t.out.command.action_id==0);
+    }
+    assert(!t.out.recovery_verifying && !t.out.recovery_failed);
+    t.Tick();
+    assert(t.out.command.action==MissionAction::kTurnRight);
+  };
+  for(int turn=1;turn<=10;++turn) {
+    complete_turn(right,turn);
+    if(turn<10)reject_window(right);
+  }
   assert(right.out.recovery_turns_completed==10 && right.out.recovery_verifying);
   assert(!right.out.recovery_failed); // Final turn still receives a full stationary check.
   for(int i=0;i<11;++i)right.Tick();
@@ -227,7 +245,10 @@ void TestAlternatingBoundedRecovery() {
   right.in.line_centers={{420,450},{420,350},{420,250},{420,150}};
   for(int i=0;i<10;++i)right.Tick();
   assert(right.out.recovery_failed && right.out.command.action_id==0);
-  for(int i=0;i<9;++i)found_on_last.Tick(true);
+  for(int turn=1;turn<=9;++turn) {
+    complete_turn(found_on_last,turn);
+    reject_window(found_on_last);
+  }
   found_on_last.in.line_centers={{420,450},{420,350},{420,250},{420,150}};
   for(int i=0;i<7;++i)found_on_last.Tick();
   assert(found_on_last.out.command.action_id!=0);

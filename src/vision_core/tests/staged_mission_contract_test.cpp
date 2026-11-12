@@ -243,6 +243,10 @@ void ExecuteStageNeedsRealPoseAndStableReadiness(MissionType mission) {
     assert(t.out.ball.pickup_verifying && !t.out.test_ready);
     for(int i=0;i<10;++i)t.Tick();
   }
+  if(mission==MissionType::kGoal) {
+    assert(t.out.goal.shoot_verifying && !t.out.test_ready);
+    for(int i=0;i<10;++i)t.Tick();
+  }
   assert(t.out.test_ready && !t.out.trial_complete);
   auto outside=t.core;auto input=t.in;input.allow_new_body_actions=false;
   if(mission==MissionType::kBall)input.ball_target=Target(100,336);
@@ -324,17 +328,23 @@ void FineAdjustmentUsesFreshEqualMeans() {
   assert(g.fine_decision_pose_used && std::abs(g.fine_decision_pose.z_m-.46)<1e-9);
   assert(b.action.action==MissionAction::kPickBall);
   assert(h.action.action==MissionAction::kStepForwardHalf);
+  assert(g.action.action==MissionAction::kNone && g.shoot_verifying);
+  // The pre-shot check uses its own fresh window with the same mean geometry.
+  for(int i=0;i<10;++i)
+    g=goal.Compute({},Target(),{true,0,i>=7 ? .6 : .4,0,1},
+                   640,480,1.2+.12*(i+1),false,goal_camera,{},false);
+  assert(g.fine_decision_pose_used && std::abs(g.fine_decision_pose.z_m-.46)<1e-9);
   assert(g.action.action==MissionAction::kShoot);
   for(int i=0;i<10;++i)
     g=goal.Compute({},Target(),{true,0,.5,i<5 ? 3.12 : -3.12,1},
-                   640,480,1.21+.005*i,false,goal_camera,{},false);
+                   640,480,2.41+.005*i,false,goal_camera,{},false);
   assert(g.fine_decision_pose_used &&
          std::abs(std::abs(g.fine_decision_pose.yaw_rad)-3.141592653589793)<.03);
   goal.UseNextObservationAsMean();
-  g=goal.Compute({},Target(),{true,0,.5,0,1},640,480,1.26,false,
+  g=goal.Compute({},Target(),{true,0,.5,0,1},640,480,2.46,false,
                  goal_camera,{},false);
   assert(g.action.action==MissionAction::kShoot);
-  g=goal.Compute({},Target(),{true,0,.8,0,1},640,480,1.27,false,
+  g=goal.Compute({},Target(),{true,0,.8,0,1},640,480,2.47,false,
                  goal_camera,{},false);
   assert(g.action.action==MissionAction::kShoot &&
          std::abs(g.fine_decision_pose.z_m-.5)<1e-9);
@@ -342,11 +352,11 @@ void FineAdjustmentUsesFreshEqualMeans() {
   ActionExecutionFeedback done; done.action_done=true;
   ball.Compute(Target(600,336),640,480,2.5,down,done,false);
   hurdle.Compute(Target(320,470),640,480,1.3,down,done,StraightLine(),false);
-  goal.Compute({},Target(),{true,0,1.0,0,1},640,480,1.3,false,
+  goal.Compute({},Target(),{true,0,1.0,0,1},640,480,2.5,false,
                goal_camera,done,false);
   b=ball.Compute(Target(300,336),640,480,2.6,down,{},false);
   h=hurdle.Compute(Target(320,420),640,480,1.4,down,{},StraightLine(),false);
-  g=goal.Compute({},Target(),{true,0,.5,0,1},640,480,1.4,false,
+  g=goal.Compute({},Target(),{true,0,.5,0,1},640,480,2.6,false,
                  goal_camera,{},false);
   assert(b.action.action==MissionAction::kNone);
   assert(h.action.action==MissionAction::kStepForwardHalf); // Contact vote remains committed across DONE.
