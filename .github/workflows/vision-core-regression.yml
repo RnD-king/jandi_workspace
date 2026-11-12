@@ -1,7 +1,7 @@
 name: Vision core regression
 on:
   push:
-    branches: [main]
+    branches: [main, race-round2-fast-20261109]
     paths:
       - 'src/vision_core/**'
       - 'src/vision/**'
