@@ -55,7 +55,7 @@ class Plan:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{key} must be a nonempty path in {runtime_path}")
         version = os.environ.get("JANDI_VERSION", "")
-        default_workspace = Path.home() / ("jandi_" + version if version in ("main", "fast") else
+        default_workspace = Path.home() / ("jandi_" + version if version in ("main", "fast", "ultrafast") else
                                             "jandi" if key == "jetson_engine_path" else "my_cv")
         workspace = Path(workspace or default_workspace).expanduser().resolve()
         engine = Path(value).expanduser()

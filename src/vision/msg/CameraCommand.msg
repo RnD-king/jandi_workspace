@@ -12,6 +12,8 @@ uint8 LINE_SCAN_LEFT=11
 uint8 LINE_SCAN_RIGHT=12
 uint8 GOAL_SCAN_LEFT=13
 uint8 GOAL_SCAN_RIGHT=14
+# Same FORWARD observation mode; a distinct pose request and physical DONE.
+uint8 POST_HURDLE_FORWARD=15
 
 uint64 command_id
 uint8 request

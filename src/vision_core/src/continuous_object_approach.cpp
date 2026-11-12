@@ -686,7 +686,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         GoalNearDistanceSample(input.backboard_center_depth_m,input.goal_pose,
                                config_.goal.approach_short_z_m),windows[i]);
     else Push(evidence.near_hits,visible &&
-        targets[i]->center_px.v >= (i==0 ? config_.ball.approach_two_step_v_px
+        targets[i]->center_px.v >= (i==0 ? BallNearV()
                                         : config_.hurdle.approach_two_step_v_px),windows[i]);
     if (visible) { evidence.id=ids[i];evidence.last=targets[i]; }
   }
@@ -791,7 +791,7 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
     continuous_.near=continuous_.near || (target &&
         GoalNearWindowReady(continuous_.hits,continuous_.near_hits,config_.goal));
   } else {
-    const double near_v=i==0 ? config_.ball.approach_two_step_v_px
+    const double near_v=i==0 ? BallNearV()
                               : config_.hurdle.approach_two_step_v_px;
     const int stable_hits=i==0 ? config_.ball.stable_min_hits
                                : config_.hurdle.stable_min_hits;
@@ -1142,12 +1142,12 @@ MissionController::RouteDecision MissionController::PrepareContinuousApproach(
         // All near-grid columns share the same v split: turn(s), then
         // two or one physical forward step(s), then camera DOWN.
         continuous_.near_actions.push_back(
-            v<config_.ball.approach_direct_down_v_px ?
+            v<BallOneStepV() ?
                 MissionAction::kStepForwardTwo : MissionAction::kStepForwardOne);
       } else {
         // Center uses the same lower horizontal split as both side zones.
         continuous_.near_actions.push_back(
-            v<config_.ball.approach_direct_down_v_px ?
+            v<BallOneStepV() ?
                 MissionAction::kStepForwardTwo : MissionAction::kStepForwardOne);
       }
     } else {

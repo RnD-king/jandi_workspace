@@ -80,6 +80,22 @@ bool MissionController::FinishCourseEnabled(const MissionFrameInput& input) cons
       hurdle_crosses_completed_>=2 && course_curve_index_==5;
 }
 
+void MissionController::ApplyPostHurdleCameraProfile(MissionFrameResult& output) const {
+  // Keep FORWARD observation semantics, but select the raised physical pose
+  // for the initial return and any explicit restore after a LINE/curve scan.
+  if (post_hurdle_ball_view_active_ && output.command.camera_request==CameraRequest::kForward)
+    output.command.camera_request=CameraRequest::kPostHurdleForward;
+}
+
+double MissionController::BallNearV() const {
+  return post_hurdle_ball_view_active_ ? config_.post_hurdle_ball_view.near_v_px
+                                     : config_.ball.approach_two_step_v_px;
+}
+double MissionController::BallOneStepV() const {
+  return post_hurdle_ball_view_active_ ? config_.post_hurdle_ball_view.one_step_v_px
+                                     : config_.ball.approach_direct_down_v_px;
+}
+
 double MissionController::HurdleLineReferenceU() const {
   const bool second = course_curve_index_ >= 3 || ball_mission_index_ >= 1;
   return second ? config_.hurdle.second_line_reference_u_px : config_.hurdle.line_reference_u_px;
@@ -1084,6 +1100,7 @@ std::optional<LineGuide> MissionController::DecisionLineGuide() const {
 
 MissionFrameResult MissionController::Step(const MissionFrameInput &input) {
   auto out=StepWithLineImageCenter(input,std::nullopt);
+  ApplyPostHurdleCameraProfile(out);
   UpdateWalkDiagnostics(input,out);
   return out;
 }
@@ -1140,6 +1157,16 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
     const MissionFrameInput &source, std::optional<double> line_image_center_u,
     bool evaluating_ready_successor) {
   MissionFrameInput input = source;
+  // A scan is temporarily Transition, so it must retain the raised profile.
+  // Ignore the old DOWN feedback until the raised FORWARD has actually settled.
+  if (post_hurdle_ball_view_active_ && input.camera_feedback.settled) {
+    if (input.camera_feedback.actual_mode==CameraMode::kForward)
+      post_hurdle_forward_seen_=true;
+    else if (post_hurdle_forward_seen_ &&
+             input.camera_feedback.actual_mode!=CameraMode::kTransition) {
+      post_hurdle_ball_view_active_=post_hurdle_forward_seen_=false;
+    }
+  }
   line_image_center_u = EffectiveLineReferenceU(input,
       line_image_center_u.value_or(config_.line_features.image_center_u));
   if (active_mission_ == MissionType::kHurdle && config_.hurdle.course_line_reference_enabled &&
@@ -1307,8 +1334,15 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
                                     : 0.0);
     settle_until_sec_ = std::max(settle_until_sec_, input.now_sec + delay);
     if (last_command_.mission == MissionType::kHurdle) {
-      if (action == MissionAction::kHurdle && hurdle_crosses_completed_ < 2)
+      if (action == MissionAction::kHurdle && hurdle_crosses_completed_ < 2) {
         ++hurdle_crosses_completed_;
+        if (config_.post_hurdle_ball_view.enabled && UsesAutomaticMissionPolicy() &&
+            !input.manual_observation_control && !has_ball_ &&
+            (course_curve_index_==1 || course_curve_index_==3)) {
+          post_hurdle_ball_view_active_=true;
+          post_hurdle_forward_seen_=false;
+        }
+      }
       hurdle_controller_.OnActualMotionDone(action, settle_until_sec_);
     }
   }
@@ -2355,6 +2389,9 @@ MissionFrameResult MissionController::StepWithLineImageCenter(
 
 void MissionController::PopulateDiagnostics(MissionFrameResult &output,
                                             double now) const {
+  output.post_hurdle_ball_view_active=post_hurdle_ball_view_active_;
+  output.ball_near_v_px=BallNearV();
+  output.ball_one_step_v_px=BallOneStepV();
   output.ball.pickup_verifying=ball_controller_.PickupVerificationActive();
   output.ball.pickup_attempt_count=ball_controller_.PickupAttemptCount();
   output.goal.shoot_verifying=goal_controller_.ShootVerificationActive();
@@ -3024,6 +3061,7 @@ MissionController::StepPerception(const PerceptionFrameInput &input) {
   goal_controller_.SetExternalEdgeGuard(UsesAutomaticMissionPolicy() &&
       !input.manual_observation_control);
   output.mission = StepWithLineImageCenter(prepared, center);
+  ApplyPostHurdleCameraProfile(output.mission);
   UpdateWalkDiagnostics(prepared,output.mission);
   if(config_.ball_candidate_tracking.enabled) {
     const bool continuous_ball=continuous_.mission==MissionType::kBall && continuous_.locked;
@@ -3554,6 +3592,7 @@ void MissionController::Reset(bool preserve_action_ids) {
       test_execution_started_ = false;
   goal_trial_complete_ = false;
   course_curve_index_=1;
+  post_hurdle_ball_view_active_=post_hurdle_forward_seen_=false;
   goal_shot_done_=false;
   hurdle_crosses_completed_=0;
   goal_head_search_={};

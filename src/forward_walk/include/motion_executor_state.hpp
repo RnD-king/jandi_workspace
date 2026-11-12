@@ -231,6 +231,7 @@ struct CameraConfig {
     int yaw_id{21};
     int pitch_id{22};
     CameraPose forward{2048, 1537};
+    CameraPose post_hurdle_forward{2048, 1537};
     CameraPose down{2048, 2013};
     CameraPose goal{2048, 966};
     CameraPose ball_view{2048, 1750};
@@ -245,7 +246,7 @@ struct CameraConfig {
             !std::isfinite(position_tolerance_ratio) || position_tolerance_ratio<0 || position_tolerance_ratio>1) {
             throw std::invalid_argument("invalid camera IDs/timing");
         }
-        for (const auto pose : {forward, down, goal, ball_view}) {
+        for (const auto pose : {forward, down, goal, ball_view, post_hurdle_forward}) {
             if (pose.yaw < 0 || pose.yaw > 4095 || pose.pitch < 0 || pose.pitch > 4095) {
                 throw std::invalid_argument("camera tick outside 0..4095");
             }
@@ -255,6 +256,7 @@ struct CameraConfig {
         switch (request) {
         case 1: return down;
         case 2: return forward;
+        case 15: return post_hurdle_forward;
         case 3: return goal;
         case 9: case 10: return ball_view;
         default: throw std::invalid_argument("unknown camera request");
@@ -281,7 +283,8 @@ public:
         if(max_yaw_deg<1 || max_yaw_deg>90 || move_sec<=0 || hold_sec<0 || return_sec<=0 ||
             !std::isfinite(move_sec) || !std::isfinite(hold_sec) || !std::isfinite(return_sec))
             throw std::invalid_argument("invalid scan configuration");
-        scan_origin_=goal_view ? config_.goal : config_.forward;
+        scan_origin_=goal_view ? config_.goal :
+            (post_hurdle_forward_ ? config_.post_hurdle_forward : config_.forward);
         const int sign=left ? 1 : -1; // Robot-mounted yaw: positive tick delta scans left.
         const int proposed=scan_origin_.yaw + static_cast<int>(
             std::lround(sign*max_yaw_deg*4096.0/360.0));
@@ -358,6 +361,7 @@ public:
     void Start(uint8_t request, const RawPositions& base, Clock::time_point now) {
         point_scan_=single_point_scan_=false;
         const auto target = config_.Target(request);
+        post_hurdle_forward_=request==15;
         current_ = {base.at(config_.yaw_id), base.at(config_.pitch_id)};
         scan_phase_=ScanPhase::None;
         active_ = override_enabled_ = true;
@@ -399,6 +403,7 @@ public:
     }
     bool Active() const { return active_; }
     CameraPose TargetPose() const { return target_; }
+    bool PostHurdleForward() const { return post_hurdle_forward_; }
     bool ConfirmArrival(CameraPose measured, Clock::time_point now=Clock::now()) {
         if (!active_ || step_!=steps_ || !settling_) return false;
         const auto close=[this](int32_t actual,int32_t target) {
@@ -422,6 +427,7 @@ public:
     // 시작 자세 완료 후 기본 FORWARD 목표를 유지한다. 외부 카메라 명령/상태 ID는 만들지 않는다.
     // 실제 전송은 MainNode의 단일 writer가 수행하고, 이후 DOWN/GOAL 명령은 이 자세를 변경할 수 있다.
     void HoldForward() {
+        post_hurdle_forward_=false;
         HoldPose(config_.forward);
     }
     // Adopt an already transmitted head pose, without a new camera command.
@@ -472,6 +478,7 @@ private:
     bool paused_was_dwell_{false},paused_was_returning_{false};
     Clock::time_point dwell_until_{};
     CameraConfig config_;
+    bool post_hurdle_forward_{false};
     CameraPose start_{0, 0}, target_{0, 0}, current_{0, 0};
     std::size_t step_{0}, steps_{0};
     Clock::time_point next_at_{}, settle_started_at_{};

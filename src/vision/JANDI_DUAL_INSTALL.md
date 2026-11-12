@@ -1,3 +1,5 @@
+초FAST 추가 설치·높은 공 탐색 시야는 저장소 루트의 [ULTRAFAST.md](../../ULTRAFAST.md)를 따른다.
+
 # MAIN / FAST 독립 설치와 최종 제어 변경
 
 두 브랜치는 각각 `main`, `race-round2-fast-20261109`를 사용한다.

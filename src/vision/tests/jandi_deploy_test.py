@@ -47,6 +47,20 @@ class DeployTest(unittest.TestCase):
         for name,value in [('HOME_DIR',self.root),('STATE_DIR',self.root/'state'),('CONFIG_DIR',self.root/'config')]:
             p=patch.object(d,name,value);p.start();self.addCleanup(p.stop)
 
+    def test_ultrafast_is_a_separate_version_and_install_extends_existing_repos(self):
+        self.assertEqual(d.BRANCHES['ultrafast'],'race-round2-ultrafast-20261113')
+        self.assertNotEqual(d.release_paths('ultrafast'),d.release_paths('fast'))
+        config=d.CONFIG_DIR/'deployment.json';config.parent.mkdir(parents=True,exist_ok=True)
+        existing={'machine':'jetson','repository':'/keep/base','repositories':{'main':'/keep/main','fast':'/keep/fast'},'selected':'fast'}
+        config.write_text(json.dumps(existing))
+        with patch.object(d,'TOOLS_DIR',self.root/'tools'),contextlib.redirect_stdout(io.StringIO()):
+            d.install('jetson')
+        after=json.loads(config.read_text())
+        self.assertEqual(after['repositories']['main'],'/keep/main')
+        self.assertEqual(after['repositories']['fast'],'/keep/fast')
+        self.assertEqual(after['repositories']['ultrafast'],str(self.root/'jandi_ultrafast'))
+        self.assertEqual(after['selected'],'fast')
+
     def test_three_way_preserves_independent_edits_and_deletions(self):
         self.assertEqual(d.reconcile({'a':b'a','b':b'b','gone':b'old'},
                                      {'a':b'local','b':b'b'},
@@ -325,7 +339,7 @@ class DeployTest(unittest.TestCase):
         release=fixture_release(self.root/'release');core=Path(release['core'])
         installed=(core/'share/shared_vision_core/config/vision_algorithm.yaml').read_bytes()
         for machine in ('pc','jetson'):
-            for version in ('main','fast'):
+            for version in ('main','fast','ultrafast'):
                 repo=self.root/('jetson-'+version)
                 roots=d.source_roots({'machine':machine},version,repo)
                 path=roots['vision_core']/'config/vision_algorithm.yaml'
@@ -339,7 +353,7 @@ class DeployTest(unittest.TestCase):
                 self.assertEqual(path.read_bytes(),previous)
                 self.assertEqual(path.stat().st_mtime_ns,mtime)
                 self.assertEqual(old.read_text(),'invalid ignored old config: [')
-                expected=(self.root/('vision_core' if version=='main' else 'vision_core_fast') if machine=='pc'
+                expected=(self.root/('vision_core' if version=='main' else 'vision_core_'+version) if machine=='pc'
                           else repo/'src/vision_core')/'config/vision_algorithm.yaml'
                 self.assertEqual(path,expected)
         self.assertEqual((core/'share/shared_vision_core/config/vision_algorithm.yaml').read_bytes(),installed)

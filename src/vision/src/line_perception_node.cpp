@@ -1243,6 +1243,7 @@ private:
     case vision_core::CameraRequest::kBallViewLine:
       camera_feedback_ = {vision_core::CameraMode::kBallView, true};
       break;
+    case vision_core::CameraRequest::kPostHurdleForward:
     case vision_core::CameraRequest::kForward:
       camera_feedback_ = {vision_core::CameraMode::kForward, true};
       break;
@@ -1435,6 +1436,7 @@ private:
       case vision_core::CameraRequest::kBallViewLine:
         camera_feedback_ = {vision_core::CameraMode::kBallView, true};
         break;
+      case vision_core::CameraRequest::kPostHurdleForward:
       case vision_core::CameraRequest::kForward:
         camera_feedback_ = {vision_core::CameraMode::kForward, true};
         break;

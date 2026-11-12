@@ -47,7 +47,14 @@ struct LineLossRecoveryConfig {
   int scan_max_pairs{3}; // Bounded LEFT/RIGHT/CENTER search cycles.
 };
 
+struct PostHurdleBallViewConfig {
+  bool enabled{false};
+  int pitch_tick{};
+  double near_v_px{}, one_step_v_px{};
+};
+
 struct MissionControllerConfig {
+  PostHurdleBallViewConfig post_hurdle_ball_view;
   bool race_round2_fast_enabled{false}; // Production branch enables; old scenario fixtures remain legacy.
   FeatureConfig line_features;
   double ball_view_line_image_center_u{360.0};
@@ -203,6 +210,8 @@ struct MissionFrameResult {
   // The guide supplied to LINE selector (raw, READY-cache, or post-DONE mean).
   std::optional<LineGuide> line_decision_guide;
   std::optional<double> line_reference_u_px; // Effective reference used by the core.
+  bool post_hurdle_ball_view_active{false};
+  std::optional<double> ball_near_v_px, ball_one_step_v_px;
   // The current BALL/GOAL approach guide and its image-space anchor, before
   // a LINE block's READY/DONE mean can replace line_decision_guide.
   std::optional<LineGuide> approach_path_guide;
@@ -658,6 +667,10 @@ private:
   bool reset_camera_command_sent_{false};
   int ball_mission_index_{0}, goal_mission_index_{0};
   int course_curve_index_{1};
+  bool post_hurdle_ball_view_active_{false}, post_hurdle_forward_seen_{false};
+  void ApplyPostHurdleCameraProfile(MissionFrameResult& output) const;
+  double BallNearV() const;
+  double BallOneStepV() const;
   bool goal_shot_done_{false};
   int hurdle_crosses_completed_{0}; // Saturating count of physical HURDLE 16 DONE.
   struct CurveSearchState {

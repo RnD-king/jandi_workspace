@@ -491,7 +491,9 @@ inline MissionDebugImages RenderMissionDebug(const cv::Mat& bgr,const DetectionR
     draw_diagonal(upper.second,0,lower.second,vis.rows-1,cv::Scalar(0,100,255));
   }
   if (near_ball_guide && camera.actual_mode==vision_core::CameraMode::kForward) {
-    const auto& c=config.ball;
+    auto c=config.ball;
+    c.approach_two_step_v_px=mission_result.ball_near_v_px.value_or(c.approach_two_step_v_px);
+    c.approach_direct_down_v_px=mission_result.ball_one_step_v_px.value_or(c.approach_direct_down_v_px);
     const double y0=std::clamp(c.approach_two_step_v_px,0.0,static_cast<double>(vis.rows-1));
     const double y1=vis.rows-1;
     const auto top=c.ApproachBounds(y0,vis.rows);

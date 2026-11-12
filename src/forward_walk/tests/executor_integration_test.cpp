@@ -528,6 +528,15 @@ int main() {
         Check(Dxl::current.at(21)==2048&&Dxl::current.at(22)==1537&&
               Dxl::current.at(15)==1379&&Dxl::current.at(16)==2765,
               "FORWARD return from BALL_VIEW/DOWN failed");
+        const auto raised=vision_core::LoadDefaultAlgorithmConfig().post_hurdle_ball_view;
+        camera(2013,15);camera(2013,15);
+        pump([&]{return node->camera_transactions_.completed.Contains(2013);});flush();
+        Check(Dxl::current.at(22)==(raised.enabled ? raised.pitch_tick : 1537) &&
+              Dxl::current.at(15)==1379 && Dxl::current.at(16)==2765 &&
+              Count(cameras,2013,Status::DONE)==1,
+              "post-hurdle camera lost YAML pitch, outward shoulders, or DONE idempotence");
+        camera(2014,2);pump([&]{return node->camera_transactions_.completed.Contains(2014);});flush();
+        Check(Dxl::current.at(22)==1537,"ordinary FORWARD did not reset raised profile");
         // Aborted command must recover from the LAST SUCCESSFUL arm pose,
         // even when the camera is physically at the ambiguous BALL_VIEW head.
         camera(2008,9);

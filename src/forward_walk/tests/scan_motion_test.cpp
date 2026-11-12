@@ -6,7 +6,35 @@
 #include <chrono>
 #include <cmath>
 using namespace motion_executor;
+void PostHurdleForwardProfile() {
+  CameraConfig cfg;cfg.post_hurdle_forward={2048,1452};cfg.position_tolerance_ratio=0;
+  CameraMotion camera(cfg);RawPositions positions{{21,2048},{22,1537}};
+  auto now=Clock::now();camera.Start(15,positions,now);
+  assert(camera.Active() && camera.PostHurdleForward());
+  assert(camera.TargetPose().pitch==1452 && !camera.ConfirmArrival(cfg.post_hurdle_forward,now));
+  const auto complete=[&]() {
+    bool verified=false;
+    for(int frame=0;frame<100;++frame) {
+      now+=std::chrono::milliseconds(21);
+      if(camera.Update(now)==CameraMotion::Result::Verify) {verified=true;break;}
+    }
+    assert(verified);camera.Merge(positions);
+    assert(camera.ConfirmArrival(camera.TargetPose(),now));
+  };
+  complete();assert(positions.at(22)==1452);
+  camera.StartScan(true,45,.5,.5,.5,positions,now);
+  assert(camera.TargetPose().pitch==1452);
+  assert(camera.ReturnScan(now));complete();
+  assert(positions.at(21)==2048 && positions.at(22)==1452);
+  camera.Start(9,positions,now);complete();
+  assert(!camera.PostHurdleForward() && positions.at(22)==cfg.ball_view.pitch);
+  camera.StartScan(false,45,.5,.5,.5,positions,now);
+  assert(camera.TargetPose().pitch==1537);assert(camera.ReturnScan(now));complete();
+  camera.Start(15,positions,now);complete();camera.HoldForward();
+  assert(!camera.PostHurdleForward() && camera.TargetPose().pitch==1537);
+}
 int main() {
+  PostHurdleForwardProfile();
   CameraConfig cfg;
   assert(cfg.forward.yaw==2048 && cfg.down.yaw==2048 &&
          cfg.goal.yaw==2048 && cfg.ball_view.yaw==2048);

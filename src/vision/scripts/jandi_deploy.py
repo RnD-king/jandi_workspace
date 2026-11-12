@@ -21,7 +21,7 @@ import tempfile
 import time
 import yaml
 
-BRANCHES={'main':'main','fast':'race-round2-fast-20261109'}
+BRANCHES={'main':'main','fast':'race-round2-fast-20261109','ultrafast':'race-round2-ultrafast-20261113'}
 PACKAGES=('vision','forward_walk','camera_overlay','vision_core')
 ORIGIN='https://github.com/RnD-king/jandi_workspace.git'
 SKIP={'.git','install','log','__pycache__'}
@@ -150,8 +150,8 @@ def check_origin(repo):
 
 def source_roots(cfg,version,repo):
     if cfg['machine']=='jetson':return {p:repo/'src'/p for p in PACKAGES}
-    ws=HOME_DIR/'my_cv' if version=='main' else HOME_DIR/'my_cv/variants/fast'
-    core=HOME_DIR/'vision_core' if version=='main' else HOME_DIR/'vision_core_fast'
+    ws=HOME_DIR/'my_cv' if version=='main' else HOME_DIR/'my_cv/variants'/version
+    core=HOME_DIR/('vision_core' if version=='main' else 'vision_core_'+version)
     return {p:(core if p=='vision_core' else ws/'src'/p) for p in PACKAGES}
 
 
@@ -288,7 +288,7 @@ def clean_environment():
                 'VISION_CORE_ALGORITHM_CONFIG','YOLO26_ENGINE_PATH','YOLO26_RUNTIME_CONFIG','JANDI_RELEASE','JANDI_VERSION','JANDI_CAMERA_CONFIG','JANDI_CAMERA_LAUNCH','COLCON_CURRENT_PREFIX','AMENT_CURRENT_PREFIX'):
         env.pop(key,None)
     env['PATH']=':'.join(p for p in env.get('PATH',os.defpath).split(':')
-                         if p and not any(x in p for x in ('/jandi_main/','/jandi_fast/','/my_cv/install','/variants/fast/')))
+                         if p and not any(x in p for x in ('/jandi_main/','/jandi_fast/','/jandi_ultrafast/','/my_cv/install','/variants/fast/','/variants/ultrafast/')))
     env['ROS_DOMAIN_ID']='22'
     return env
 
@@ -438,7 +438,7 @@ def choose_start(default):
         key=input('선택: ').strip()
         if not key:return version,show,terminal,stream
         if key=='0':return None
-        if key=='1':version='fast' if version=='main' else 'main'
+        if key=='1':version=list(BRANCHES)[(list(BRANCHES).index(version)+1)%len(BRANCHES)]
         elif key=='3':show=not show
         elif key=='4':terminal=not terminal
         elif key=='5':stream=not stream
@@ -506,7 +506,7 @@ def install(machine):
             found=next((base/name for base in bases if (base/name/'share'/name/'local_setup.bash').is_file()),None)
             if found:prefixes.append(str(found))
         repo=HOME_DIR/('jandi_workspace' if machine=='pc' else 'jandi')
-        repos={'main':str(repo),'fast':str(HOME_DIR/'jandi_workspace_fast')} if machine=='pc' else {
+        repos={v:str(repo if v=='main' else HOME_DIR/('jandi_workspace_'+v)) for v in BRANCHES} if machine=='pc' else {
             v:str(HOME_DIR/('jandi_'+v)) for v in BRANCHES}
         cfg={'machine':machine,'repository':str(repo),'repositories':repos,'selected':'main','jobs':2,
              'dependency_prefixes':prefixes,
@@ -514,6 +514,12 @@ def install(machine):
         atomic_json(config,cfg)
     cfg=json.loads(config.read_text())
     cfg.pop('camera_config',None);cfg.pop('camera_launch',None);cfg.pop('engine',None)
+    # Add only missing profiles; preserve every existing repository and install.
+    repos=cfg.setdefault('repositories',{})
+    for version in BRANCHES:
+        default=HOME_DIR/('jandi_'+version if machine=='jetson' else
+                         'jandi_workspace' if version=='main' else 'jandi_workspace_'+version)
+        repos.setdefault(version,str(default))
     atomic_json(config,cfg)
     wrappers={'push_jandi_workspace.sh':('push','pc'),'sync_jandi_to_my_cv.sh':('update','pc'),
               'jetson_push_to_github.sh':('push','jetson'),'jetson_pull_from_github.sh':('update','jetson'),
@@ -541,7 +547,7 @@ def install(machine):
     entry.chmod(0o755)
     print('명령 설치 완료. 기존 파일 보존: '+str(saved))
     print('설정: '+str(config)+'\n카메라: ros2 launch realsense2_camera rs_launch.py')
-    print('브랜치 선택은 기본 버전만 바꿉니다. 설치: ~/jandi_update.sh main 또는 fast')
+    print('브랜치 선택은 기본 버전만 바꿉니다. 설치: ~/jandi_update.sh main / fast / ultrafast')
     for version in BRANCHES:
         repo=Path(cfg['repositories'][version]).expanduser()
         print(version.upper()+' 알고리즘 YAML: '+str(source_roots(cfg,version,repo)['vision_core']/'config/vision_algorithm.yaml'))

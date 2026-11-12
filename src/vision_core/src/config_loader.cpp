@@ -328,6 +328,17 @@ void ValidateAlgorithmConfig(const MissionControllerConfig &c) {
   if (!std::isfinite(c.ball_view_line_image_center_u) ||
       c.ball_view_line_image_center_u<0 || c.ball_view_line_image_center_u>=640.0)
     throw std::runtime_error("line.features.ball_view_image_center_u must be in [0,640)");
+  const auto& raised=c.post_hurdle_ball_view;
+  if (raised.pitch_tick<0 || raised.pitch_tick>4095)
+    throw std::runtime_error("post_hurdle_ball_view.pitch_tick must be in [0,4095]");
+  Nonnegative(raised.near_v_px,"post_hurdle_ball_view.near_v_px");
+  Nonnegative(raised.one_step_v_px,"post_hurdle_ball_view.one_step_v_px");
+  if (raised.enabled) {
+    if (!c.race_round2_fast_enabled)
+      throw std::runtime_error("post_hurdle_ball_view requires race_round2_fast_enabled");
+    if (raised.one_step_v_px<=raised.near_v_px)
+      throw std::runtime_error("post_hurdle_ball_view.one_step_v_px must exceed near_v_px");
+  }
   if (c.ball_view_pitch_tick<0 || c.ball_view_pitch_tick>4095)
     throw std::runtime_error("common.camera.ball_view_pitch_tick must be in [0,4095]");
   if (c.line_features.guide_min_points < 3 ||
@@ -689,6 +700,13 @@ MissionControllerConfig LoadAlgorithmConfig(const std::string &path) {
   if (f["ball_view_image_center_u"])
     Assign(f, "ball_view_image_center_u", c.ball_view_line_image_center_u);
   // Legacy flat regression scenarios intentionally omit the new camera mode.
+  if (a["camera"] && a["camera"]["post_hurdle_ball_view"]) {
+    const auto raised=a["camera"]["post_hurdle_ball_view"];
+    Assign(raised,"enabled",c.post_hurdle_ball_view.enabled);
+    Assign(raised,"pitch_tick",c.post_hurdle_ball_view.pitch_tick);
+    Assign(raised,"near_v_px",c.post_hurdle_ball_view.near_v_px);
+    Assign(raised,"one_step_v_px",c.post_hurdle_ball_view.one_step_v_px);
+  }
   if (a["camera"] && a["camera"]["ball_view_pitch_tick"])
     Assign(a["camera"], "ball_view_pitch_tick", c.ball_view_pitch_tick);
   Assign(f, "curve_min_points", c.line_features.curve_min_points);

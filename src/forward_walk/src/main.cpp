@@ -145,6 +145,9 @@ public:
         camera_config_.pitch_id = declare_parameter<int>("camera_pitch_motor_id", 22);
         camera_config_.forward.yaw = declare_parameter<int>("camera_forward_yaw_tick", 2048);
         camera_config_.forward.pitch = declare_parameter<int>("camera_forward_pitch_tick", 1537);
+        camera_config_.post_hurdle_forward={camera_config_.forward.yaw,
+            algorithm.post_hurdle_ball_view.enabled ? algorithm.post_hurdle_ball_view.pitch_tick
+                                                   : camera_config_.forward.pitch};
         camera_config_.down.yaw = declare_parameter<int>("camera_down_yaw_tick", 2048);
         camera_config_.down.pitch = declare_parameter<int>("camera_down_pitch_tick", 2013);
         // Shared algorithm YAML controls BALL_VIEW pitch only; yaw reuses DOWN.
@@ -935,6 +938,7 @@ private:
                     line_scan_elbows_held_=false;
                 }
                 camera_arm_forward_=req==vision::msg::CameraCommand::FORWARD ||
+                    req==vision::msg::CameraCommand::POST_HURDLE_FORWARD ||
                     req==vision::msg::CameraCommand::BALL_VIEW_LINE;
                 const bool special=motion_in_progress_ &&
                     (!UsesOutwardArmPose(current_action_) || shoot_pose_in_progress_);

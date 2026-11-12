@@ -249,6 +249,7 @@ enum class CameraRequest {
   kLineScanRight = 12,
   kGoalScanLeft = 13, // No arm motion; GOAL reference.
   kGoalScanRight = 14,
+  kPostHurdleForward = 15, // FORWARD view with the YAML post-hurdle pitch.
 };
 struct CameraScanFeedback {
   std::uint64_t command_id{0};

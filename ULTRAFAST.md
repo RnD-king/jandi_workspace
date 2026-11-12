@@ -1,0 +1,61 @@
+# 초FAST: 허들 통과 후 높은 공 탐색 시야
+
+브랜치 `race-round2-ultrafast-20261113`은 FAST에서 분리했다. 설치·실행 버전 이름은
+`ultrafast`이며 MAIN/FAST와 다른 `~/jandi_ultrafast` Release를 사용한다.
+공 줍기는 `공_줍고일어나기찐찐.json`이며, 픽업 영역은 합의한 7개 꼭짓점이다.
+
+공 전 허들(첫째/둘째 공 구간)의 실제 HURDLE DONE에서만 높은 FORWARD를 요청한다.
+기존 FAST의 WALK_MODE/카메라 병행과 ACK/DONE 대기를 유지한다. FRAME/ACK/READY만으로
+전환하지 않는다. LINE·곡선 목 탐색에서도 높은 pitch를 유지하고 복귀한다.
+BALL_VIEW가 실제로 완료되면 기존 시야와 기존 공 접근 기준으로 돌아간다. Reset도 해제한다.
+새 카메라 요청 값은 15(POST_HURDLE_FORWARD)이며 기존 요청 번호와 액션 번호는 그대로다.
+
+설정 파일은 Jetson의 **`~/jandi_ultrafast/src/vision_core/config/vision_algorithm.yaml`**이다.
+
+```yaml
+vision_algorithm:
+  common:
+    camera:
+      post_hurdle_ball_view:
+        enabled: true
+        pitch_tick: 1452
+        near_v_px: 240.0
+        one_step_v_px: 410.0
+```
+
+위는 전체 YAML 중 변경할 부분이다. 기본 FORWARD pitch 1537보다 85tick(약 7.5도)
+위쪽을 본다. `near_v_px`는 높은 시야의 근거리 진입, `one_step_v_px`는 이후 전진
+2걸음/1걸음 경계다. 양쪽 측면 구역도 회전 후 같은 경계를 사용한다.
+240/410은 기존 값으로 시작하므로 높아진 시야에서 사용할 값은 이 두 항목에서 조정한다.
+`approach_short_v_px`(100)는 AUTO 원거리 접근에서 사용하지 않는다.
+화면의 근거리 가로선도 실제 FSM과 같은 두 값을 표시한다.
+YAML 값 변경은 노드를 완전히 종료·재실행하면 적용되며 재빌드는 필요 없다.
+
+## 기존 Jetson에서 처음 추가하기 (사용자가 실행)
+
+새 버전을 인식하도록 배포 도구를 한 번 갱신한다. 다음 명령은 기존 `~/jandi`가
+GitHub 저장소인 설치를 기준으로 한다. 기존 MAIN/FAST 저장소·설치 경로는 보존한다.
+
+```bash
+mkdir -p ~/jandi-tools-ultrafast
+git -C ~/jandi fetch origin race-round2-ultrafast-20261113
+git -C ~/jandi show FETCH_HEAD:src/vision/scripts/jandi_deploy.py > ~/jandi-tools-ultrafast/jandi_deploy.py
+/usr/bin/python3 ~/jandi-tools-ultrafast/jandi_deploy.py install --machine jetson
+~/jandi_update.sh ultrafast
+~/run_jandi.sh ultrafast
+```
+
+배포 도구 설치 자체는 로봇/카메라 실행이나 빌드를 하지 않는다. `jandi_update.sh`가
+초FAST 소스를 별도 저장소로 가져와 빌드한다. `run_jandi.sh`의 버전 선택은
+MAIN → FAST → ULTRAFAST 순서로 순환하며, 각 버전의 소스 YAML을 직접 읽는다.
+
+`ros2 run`으로 직접 시험할 때는 같은 초FAST 설치 환경을 활성화하고
+`VISION_CORE_ALGORITHM_CONFIG`를 위 초FAST 소스 YAML로 지정해야 한다.
+기존 MAIN/FAST 바이너리는 새 카메라 요청 15를 지원하지 않으므로 함께 섞어 실행하지 않는다.
+
+## 검증 범위
+
+GitHub CI는 코어·회귀 테스트, 표시 코드, 카메라 모션과 탐색 복귀, 배포 도구의
+모의 테스트를 실행한다. 실제 ROS2 메시지 생성과 forward_walk 전체 빌드는 Jetson에서 한다.
+`executor_integration_test`에도 YAML pitch/팔 자세/중복 DONE 검증을 추가했다.
+PC 원본 소스와 Jetson 파일·설치본은 이 변경 작업에서 수정하지 않았다.

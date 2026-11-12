@@ -1,7 +1,7 @@
 name: Vision core regression
 on:
   push:
-    branches: [main]
+    branches: [main, race-round2-ultrafast-20261113]
     paths:
       - 'src/vision_core/**'
       - 'src/vision/**'
@@ -22,7 +22,7 @@ jobs:
       - name: Install C++ dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libyaml-cpp-dev libopencv-dev pkg-config
+          sudo apt-get install -y build-essential cmake libyaml-cpp-dev libopencv-dev pkg-config python3-yaml
       - name: Configure standalone vision_core with tests enabled by default
         run: |
           cmake -S src/vision_core -B build/shared_vision_core -DCMAKE_BUILD_TYPE=Debug
@@ -72,3 +72,5 @@ jobs:
           /tmp/jandi_scan_motion_test
       - name: Test forward_walk source contracts
         run: python3 src/forward_walk/tests/source_contract_test.py
+      - name: Test versioned deployment and source YAML selection
+        run: /usr/bin/python3 src/vision/tests/jandi_deploy_test.py
