@@ -1,1 +1,0 @@
-bool motion_end_detect
