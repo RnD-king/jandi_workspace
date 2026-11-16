@@ -8,6 +8,10 @@ src/realsense-ros/
 src/DynamixelSDK/
 src/bluespace_ai_xsens_ros_mti_driver/
 
+# Excluded from the final Jandi source backup
+src/robot_msgs/
+src/robot_bringup/
+
 # Local tool/config
 .codex
 .colcon/
