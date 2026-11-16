@@ -668,6 +668,8 @@ private:
     int block_curve_direction{0};
     StationaryScanObservation observation; // CURVE: one 45-degree stationary stop.
     int direction{0}, confirmations{0}, delay_remaining{0};
+    int delay_corrections_completed{0};
+    std::vector<std::uint64_t> delay_corrections_pending;
     int head_attempts{0}, body_attempts{0}, unlock_blocks{0};
     int observed_frames{0}, turns_remaining{0};
     bool turn_left{false};

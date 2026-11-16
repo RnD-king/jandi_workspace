@@ -80,6 +80,12 @@ void MissionController::ObserveLineFeedback(const CommandDeliveryFeedback& feedb
     goal_approach_walk_done_=true;
   line_plan_.Feedback(feedback, now, config_.walk_inter_action_hold_sec);
   if (feedback.done && feedback.action_id != 0) {
+    const auto opposite=std::find(curve_.delay_corrections_pending.begin(),
+        curve_.delay_corrections_pending.end(),feedback.action_id);
+    if(opposite!=curve_.delay_corrections_pending.end()) {
+      curve_.delay_corrections_pending.erase(opposite);
+      ++curve_.delay_corrections_completed;
+    }
     if(curve_.phase==CurveSearchState::Phase::kProbeWalk &&
        feedback.action_id==curve_.probe_action_id) {
       curve_.probe_action_id=0;
@@ -226,6 +232,8 @@ MissionFrameResult MissionController::StepPlannedLine(
               curve_.head_attempts=curve_.body_attempts=0;
               curve_.turns_remaining=0;curve_.correction_action_id=0;curve_.found_yaw.reset();
               curve_.delay_remaining=config_.curve_search.scan_delay_walk_sequences;
+              curve_.delay_corrections_completed=0;
+              curve_.delay_corrections_pending.clear();
               curve_.phase=curve_.delay_remaining>0 ?
                   CurveSearchState::Phase::kDelay : CurveSearchState::Phase::kDrain;
               if(curve_.phase==CurveSearchState::Phase::kDrain) line_plan_.Abort();
@@ -875,11 +883,19 @@ MissionFrameResult MissionController::StepPlannedLine(
     }
     if (active_mission_ == MissionType::kLine) {
       const auto id = input.delivery_feedback.action_id;
-      const bool ready = input.delivery_feedback.ready && !input.delivery_feedback.done &&
+      // A correction is followed by a new decision at its real DONE, never
+      // an unconditional straight successor booked at the correction's READY.
+      const bool defer_delay_correction_ready=curve_.phase==CurveSearchState::Phase::kDelay &&
+          continuous_.mission==MissionType::kNone && !has_ball_ && !input.ball_target &&
+          std::find(curve_.delay_corrections_pending.begin(),curve_.delay_corrections_pending.end(),
+                    id)!=curve_.delay_corrections_pending.end();
+      const bool ready = !defer_delay_correction_ready &&
+          input.delivery_feedback.ready && !input.delivery_feedback.done &&
           command_coordinator_.PendingActionId() == id && !line_plan_.Done(id) &&
           !command_coordinator_.HasQueuedAction();
       const bool final_edge = line_plan_.LastUnit(id) &&
-          (input.delivery_feedback.ready || input.delivery_feedback.done);
+          (input.delivery_feedback.done ||
+           (input.delivery_feedback.ready && !defer_delay_correction_ready));
       const int completing_straight = final_edge && !line_plan_.Done(id) &&
           line_plan_.CruiseFor(id) == MissionAction::kStepForwardFour ? 1 : 0;
       // The previous block may not have reached sensory DONE yet; count the
@@ -943,8 +959,6 @@ MissionFrameResult MissionController::StepPlannedLine(
           mean=line_plan_.Finish(id,input.now_sec,ready_remaining);
         }
         last_ready_line_guide_=mean;
-        if (finish_course && finish_floor_usable && mean && mean->valid)
-          finish_last_stable_guide_ = mean;
         output.line_window_stats=line_plan_.Stats(id);
         decision=mean.value_or(LineGuide{});
         if (finish_course && (!finish_floor_usable || !decision.valid)) decision=raw;
@@ -1108,13 +1122,17 @@ MissionFrameResult MissionController::StepPlannedLine(
           line_auxiliary_id_ = 0;
         }
       }
-      // CONFIRM becomes DRAIN only on the second actual LINE block DONE.
-      // With zero delay, do not prebook a third block at its final READY.
-      // If the next block is not confirmed, LINE resumes normally on DONE.
+      // Confirm on actual DONE before selecting the first delay walk, so its
+      // READY reservation cannot escape the opposite-direction policy.
+      const bool confirms_curve_at_done=curve_.block_curve_direction!=0 &&
+          ((curve_.phase==CurveSearchState::Phase::kIdle &&
+            config_.curve_search.confirm_extra_sequences==0) ||
+           (curve_.phase==CurveSearchState::Phase::kConfirm &&
+            curve_.direction==curve_.block_curve_direction &&
+            curve_.confirmations+1>=config_.curve_search.confirm_extra_sequences));
       const bool defer_curve_confirm_ready=automatic_approach &&
           config_.curve_search.enabled &&
-          config_.curve_search.scan_delay_walk_sequences==0 &&
-          curve_.phase==CurveSearchState::Phase::kConfirm && !has_ball_ &&
+          confirms_curve_at_done && !has_ball_ &&
           continuous_.mission==MissionType::kNone && ready && final_edge &&
           line_plan_.CruiseFor(id)!=MissionAction::kNone;
       if (!observation_wait && !line_failure_pending_done_ &&
@@ -1168,7 +1186,8 @@ MissionFrameResult MissionController::StepPlannedLine(
     bool reference = false;
     request = ComputeLineAction({}, input, false, false, &reference, false);
   }
-  if (finish_course && finish_loss_action_id_ &&
+  // Resume current floor steering when the recovery unit sees a valid LINE again.
+  if (finish_course && finish_loss_action_id_ && !finish_floor_usable &&
       command_coordinator_.PendingActionId() == finish_loss_action_id_ &&
       input.delivery_feedback.action_id == finish_loss_action_id_ &&
       input.delivery_feedback.ready && !input.delivery_feedback.done &&
@@ -1183,6 +1202,22 @@ MissionFrameResult MissionController::StepPlannedLine(
       (!input.advance_line_fsm || (!input.allow_new_line_action && !route.near_final_action)))) request = {};
   if (finish_course && (!input.camera_feedback.settled ||
       input.camera_feedback.actual_mode!=CameraMode::kForward)) request={};
+  bool curve_delay_correction=false;
+  if(automatic_approach && !finish_course && !has_ball_ && !input.ball_target &&
+     continuous_.mission==MissionType::kNone && line_state_==LineState::kNormal &&
+     input.camera_feedback.settled && input.camera_feedback.actual_mode==CameraMode::kForward &&
+     curve_.phase==CurveSearchState::Phase::kDelay &&
+     curve_.delay_corrections_completed<2 && curve_.delay_corrections_pending.empty() &&
+     ((curve_.direction>0 && request.action==MissionAction::kStepForwardRight) ||
+      (curve_.direction<0 && request.action==MissionAction::kStepForwardLeft))) {
+    // First qualifying decision: one opposite turn-and-forward unit.
+    // A later qualifying decision after that DONE: one straight unit.
+    // Other normal decisions do not consume either correction.
+    request.action=curve_.delay_corrections_completed==0
+        ? (curve_.direction>0 ? MissionAction::kStepForwardLeft : MissionAction::kStepForwardRight)
+        : MissionAction::kStepForwardFour;
+    curve_delay_correction=true;
+  }
   const bool wants_fine = request.action == MissionAction::kTurnLeft || request.action == MissionAction::kTurnRight;
   const bool wants_walk = LinePlan::IsCruise(request.action) || LinePlan::IsUnit(request.action) ||
       request.action==MissionAction::kStepForwardOne ||
@@ -1207,7 +1242,7 @@ MissionFrameResult MissionController::StepPlannedLine(
         continuous_.mission==MissionType::kBall ? config_.ball.ready_observation_end_weight :
         continuous_.mission==MissionType::kGoal ? config_.goal.ready_observation_end_weight :
         continuous_.mission==MissionType::kHurdle ? config_.hurdle.ready_observation_end_weight :
-        config_.line_p2p.ready_observation_end_weight);
+        config_.line_p2p.ready_observation_end_weight,curve_delay_correction);
     else request = {};
   }
   if (!input.allow_new_commands) camera = CameraRequest::kNone;
@@ -1226,8 +1261,15 @@ MissionFrameResult MissionController::StepPlannedLine(
      command.action_id!=0 && command.action==request.action)
     curve_.correction_action_id=command.action_id;
   if (LinePlan::IsUnit(command.action)) {
+    const bool new_line_unit=!line_plan_.Contains(command.action_id);
     line_plan_.Issued(command,
       command.control_phase == ControlPhase::kWaitingQueuedActionAck ? parent_id : 0);
+    if(curve_delay_correction && new_line_unit && line_plan_.Contains(command.action_id) &&
+       command.command_type==CommandType::kAction &&
+       command.action_id && command.action==request.action &&
+       std::find(curve_.delay_corrections_pending.begin(),curve_.delay_corrections_pending.end(),
+                 command.action_id)==curve_.delay_corrections_pending.end())
+      curve_.delay_corrections_pending.push_back(command.action_id);
     if (finish_course && finish_loss_request_ && !finish_loss_used_ &&
         request.action == command.action && command.command_type == CommandType::kAction && command.action_id) {
       finish_loss_used_ = true;

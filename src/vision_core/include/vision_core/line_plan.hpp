@@ -29,6 +29,8 @@ public:
   void UpdateConfig(const LineP2pConfig& config) { config_ = config; }
   ActionRequest Begin(MissionAction cruise, std::uint64_t owner = 0, bool probe = false,
                       double end_weight = -1.0);
+  ActionRequest Begin(MissionAction cruise, std::uint64_t owner, bool probe,
+                      double end_weight, bool single_unit);
   ActionRequest Continue(std::uint64_t ready_id = 0) const;
   void Issued(const ControlCommand& command, std::uint64_t parent_id);
   void Feedback(const CommandDeliveryFeedback& feedback, double now, double hold);

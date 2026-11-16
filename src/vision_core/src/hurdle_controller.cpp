@@ -128,8 +128,7 @@ void HurdleController::ObserveFineLine(const LineGuide &guide, int image_width,
 void HurdleController::OnActualMotionDone(MissionAction action, double now_sec) {
   if (mode_ == HurdleMode::kFineLineAlign &&
       fine_line_pending_action_ == action && !fine_line_observation_started_ &&
-      fine_line_repeat_remaining_<=1 &&
-      fine_line_next_side_remaining_==0) {
+      fine_line_repeat_remaining_<=1) {
     const bool turning=action==MissionAction::kTurnLeft ||
                        action==MissionAction::kTurnRight;
     BeginFineLineObservation(now_sec+
@@ -141,9 +140,8 @@ void HurdleController::OnActualMotionDone(MissionAction action, double now_sec) 
 void HurdleController::FinishFineLineAlign(HurdleResult &result) {
   fine_line_history_.clear();
   fine_line_fresh_.reset();
-  fine_line_pending_action_=fine_line_repeat_action_=
-      fine_line_next_side_action_=MissionAction::kNone;
-  fine_line_repeat_remaining_=fine_line_next_side_remaining_=0;
+  fine_line_pending_action_=fine_line_repeat_action_=MissionAction::kNone;
+  fine_line_repeat_remaining_=0;
   fine_line_next_action_sec_=0.0;
   fine_line_pending_stale_ = false;
   fine_line_monitoring_ = false;
@@ -589,9 +587,8 @@ HurdleResult HurdleController::Compute(
       fine_pose_entered_=true; mode_=HurdleMode::kFineLineAlign; ClearTracking();
       fine_line_turns_ = fine_line_side_steps_ = 0;
       fine_line_stale_corrections_ = fine_line_search_steps_ = 0;
-      fine_line_pending_action_=fine_line_repeat_action_=
-          fine_line_next_side_action_=MissionAction::kNone;
-      fine_line_repeat_remaining_=fine_line_next_side_remaining_=0;
+      fine_line_pending_action_=fine_line_repeat_action_=MissionAction::kNone;
+      fine_line_repeat_remaining_=0;
       fine_line_next_action_sec_=0.0;
       BeginFineLineObservation(now_sec);
 
@@ -619,24 +616,12 @@ HurdleResult HurdleController::Compute(
         fine_line_pending_stale_=false;
         const bool turning=completed==MissionAction::kTurnLeft ||
                            completed==MissionAction::kTurnRight;
-        if(fine_line_next_side_remaining_>0) {
-          // Both quantities came from the SAME initial O/H observation.
-          // Preserve post-turn hold, but do not reobserve between batches.
-          fine_line_repeat_action_=fine_line_next_side_action_;
-          fine_line_repeat_remaining_=fine_line_next_side_remaining_;
-          fine_line_next_side_action_=MissionAction::kNone;
-          fine_line_next_side_remaining_=0;
-          fine_line_next_action_sec_=now_sec+
+        fine_line_repeat_action_=MissionAction::kNone;
+        fine_line_next_action_sec_=0.0;
+        if(!fine_line_observation_started_)
+          BeginFineLineObservation(now_sec+
               (turning && MeasuredTurnDeg(config_,completed)>0.0
-                   ? config_.fine_line_post_turn_hold_sec : 0.0);
-        } else {
-          fine_line_repeat_action_=MissionAction::kNone;
-          fine_line_next_action_sec_=0.0;
-          if(!fine_line_observation_started_)
-            BeginFineLineObservation(now_sec+
-                (turning && MeasuredTurnDeg(config_,completed)>0.0
-                     ? config_.fine_line_post_turn_hold_sec : 0.0));
-        }
+                   ? config_.fine_line_post_turn_hold_sec : 0.0));
       }
     }
     if (feedback.action_active && !feedback.action_done) return result;
@@ -678,7 +663,6 @@ HurdleResult HurdleController::Compute(
       return result;
     }
     MissionAction correction = MissionAction::kNone;
-    MissionAction planned_side = MissionAction::kNone;
     if (line && (fresh || fine_line_stale_corrections_ <
                                   config_.fine_line_max_stale_corrections)) {
       const bool heading_outside =
@@ -687,18 +671,17 @@ HurdleResult HurdleController::Compute(
           std::abs(line->offset_px) > config_.fine_line_offset_tolerance_px;
       const bool can_turn=heading_outside &&
           fine_line_turns_<config_.fine_line_max_turns;
-      const bool can_side=offset_outside &&
+      // Side steps always require the new stationary O, never pre-turn memory.
+      const bool can_side=fresh && offset_outside &&
           fine_line_side_steps_<config_.fine_line_max_side_steps;
       if (can_turn) {
         correction = line->heading_deg < 0.0 ? MissionAction::kTurnLeft
                                              : MissionAction::kTurnRight;
-        if(fresh && can_side)
-          planned_side=line->offset_px < 0.0 ? MissionAction::kLeftSideStep
-                                             : MissionAction::kRightSideStep;
       } else if (can_side) {
         correction = line->offset_px < 0.0 ? MissionAction::kLeftSideStep
                                            : MissionAction::kRightSideStep;
-      } else if (heading_outside || offset_outside) {
+      } else if ((heading_outside && fine_line_turns_>=config_.fine_line_max_turns) ||
+                 (offset_outside && fine_line_side_steps_>=config_.fine_line_max_side_steps)) {
         // Every remaining error has exhausted its own correction budget.
         FinishFineLineAlign(result);
         return result;
@@ -738,9 +721,6 @@ HurdleResult HurdleController::Compute(
       };
       fine_line_repeat_action_=correction;
       fine_line_repeat_remaining_=repeats_for(correction);
-      fine_line_next_side_action_=planned_side;
-      fine_line_next_side_remaining_=planned_side==MissionAction::kNone
-          ? 0 : repeats_for(planned_side);
       fine_line_next_action_sec_=0.0;
       fine_line_pending_action_=correction;
       fine_line_pending_stale_=!fresh && correction!=MissionAction::kStepForwardHalf;
@@ -1008,9 +988,8 @@ void HurdleController::ResetToLine(bool clear_ignore) {
   fine_line_monitoring_ = fine_line_observing_ = fine_line_observation_started_ = false;
   fine_line_close_ = false;
   contact_v_ready_ = false;
-  fine_line_pending_action_=fine_line_repeat_action_=
-      fine_line_next_side_action_=MissionAction::kNone;
-  fine_line_repeat_remaining_=fine_line_next_side_remaining_=0;
+  fine_line_pending_action_=fine_line_repeat_action_=MissionAction::kNone;
+  fine_line_repeat_remaining_=0;
   fine_line_next_action_sec_=0.0;
   fine_line_pending_stale_ = false;
   fine_line_observation_start_sec_ = 0.0;

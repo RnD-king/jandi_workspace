@@ -3143,85 +3143,75 @@ ActionRequest MissionController::ComputeMissionLineRecovery(
     const MissionFrameInput &input, const ActionExecutionFeedback &feedback,
     bool *valid, MissionFrameResult *output) {
   *valid = false;
-  if (mission_recovery_failed_) return {};
+  if (mission_recovery_failed_)
+    return {};
   auto features = config_.line_features;
   features.image_center_u = EffectiveLineReferenceU(input, features.image_center_u);
   output->line_reference_u_px = features.image_center_u;
-  output->line_features = ComputeLineFeatures(input.line_centers, input.image_width,
-                                             input.image_height, features);
+  output->line_features = ComputeLineFeatures(
+      input.line_centers, input.image_width, input.image_height, features);
   output->line_computed = true;
   const auto &guide = output->line_features.guide;
-  const bool aligned = guide.valid && std::isfinite(guide.offset) &&
-      std::isfinite(guide.heading_rad) &&
-      std::abs(guide.heading_rad) * kRadToDeg <= config_.mission_recovery_heading_tolerance_deg + 1e-9;
-  const auto clear_window = [&]() {
-    mission_recovery_hits_.clear();
-    mission_recovery_guides_.clear();
-    mission_recovery_found_ = mission_recovery_qualified_ = false;
-  };
-  // Moving images, including a transient zero-H crossing, cannot qualify return.
-  if (feedback.action_active && !feedback.action_done) {
-    clear_window();
-    return {};
-  }
-  if (feedback.action_done && mission_recovery_issued_ &&
-      (last_command_.action == MissionAction::kTurnLeft ||
-       last_command_.action == MissionAction::kTurnRight)) {
-    ++mission_recovery_turns_;
-    mission_recovery_issued_ = false;
-    clear_window();
-    mission_recovery_verifying_ = true;
-    mission_recovery_verify_start_sec_ = std::max(input.now_sec, settle_until_sec_);
-    return {}; // The physical DONE frame itself is not a stationary vote.
-  }
-  if (mission_recovery_verifying_ &&
-      input.now_sec <= mission_recovery_verify_start_sec_ + 1e-9) return {};
-  mission_recovery_hits_.push_back(aligned);
-  mission_recovery_guides_.push_back(aligned ? std::optional<LineGuide>(guide) : std::nullopt);
-  const auto window = static_cast<std::size_t>(config_.line.line_stable_window);
-  while (mission_recovery_hits_.size() > window) {
-    mission_recovery_hits_.pop_front();
-    mission_recovery_guides_.pop_front();
-  }
-  const bool qualified = mission_recovery_hits_.size() == window &&
-      std::count(mission_recovery_hits_.begin(), mission_recovery_hits_.end(), true) >=
-          config_.line.line_stable_min_hits;
   if (mission_recovery_verifying_) {
+    mission_recovery_hits_.push_back(guide.valid);
+    while (mission_recovery_hits_.size() >
+           static_cast<std::size_t>(config_.line.line_stable_window))
+      mission_recovery_hits_.pop_front();
+    if (mission_recovery_hits_.size()==static_cast<std::size_t>(config_.line.line_stable_window) &&
+        std::count(mission_recovery_hits_.begin(),mission_recovery_hits_.end(),true)>=
+            config_.line.line_stable_min_hits)
+      mission_recovery_qualified_=true;
     if (input.now_sec - mission_recovery_verify_start_sec_ + 1e-9 <
-            config_.line_p2p.recovery_observation_sec || mission_recovery_hits_.size() < window)
+            config_.line_p2p.recovery_observation_sec ||
+        mission_recovery_hits_.size() <
+            static_cast<std::size_t>(config_.line.line_stable_window))
       return {};
+    const bool confirmed = mission_recovery_qualified_;
     mission_recovery_verifying_ = false;
-    if (qualified) {
-      LineGuide mean;
-      int count = 0;
-      for (const auto& sample : mission_recovery_guides_) if (sample) {
-        mean.offset += sample->offset;
-        mean.heading_rad += sample->heading_rad;
-        mean.confidence += sample->confidence;
-        ++count;
-      }
-      mean.offset /= count;
-      mean.heading_rad /= count;
-      mean.confidence /= count;
-      mean.valid = true;
-      mission_recovery_line_guide_ = mean;
-      output->line_decision_guide = mean;
+    mission_recovery_qualified_=false;
+    if (confirmed) {
       *valid = true;
       line_state_ = LineState::kNormal;
       line_stability_history_ = mission_recovery_hits_;
       return {};
     }
-    clear_window();
+    mission_recovery_found_ = false;
+    mission_recovery_hits_.clear();
     if (mission_recovery_turns_ >= config_.mission_recovery_max_turns)
       mission_recovery_failed_ = true;
     return {};
   }
-  if (qualified || mission_recovery_turns_ >= config_.mission_recovery_max_turns) {
-    clear_window();
+  mission_recovery_hits_.push_back(guide.valid);
+  while (mission_recovery_hits_.size() >
+         static_cast<std::size_t>(config_.line.line_stable_window))
+    mission_recovery_hits_.pop_front();
+  const int hits = std::count(mission_recovery_hits_.begin(),
+                              mission_recovery_hits_.end(), true);
+  mission_recovery_found_ =
+      mission_recovery_found_ || hits >= config_.line.line_stable_min_hits;
+  if (feedback.action_done && mission_recovery_issued_ &&
+      (last_command_.action == MissionAction::kTurnLeft ||
+       last_command_.action == MissionAction::kTurnRight)) {
+    ++mission_recovery_turns_;
+    mission_recovery_issued_ = false;
+  }
+  *valid = false;
+  if (feedback.action_active && !feedback.action_done)
+    return {};
+  if (mission_recovery_found_ ||
+      mission_recovery_turns_ >= config_.mission_recovery_max_turns) {
     mission_recovery_verifying_ = true;
+    mission_recovery_qualified_=false;
     mission_recovery_verify_start_sec_ = input.now_sec;
+    mission_recovery_hits_.clear();
     return {};
   }
+  if (mission_recovery_turns_ >= config_.mission_recovery_max_turns) {
+    mission_recovery_failed_ = true;
+    return {};
+  }
+  if (mission_recovery_failed_)
+    return {};
   const int index = active_mission_ == MissionType::kBall ? ball_mission_index_
                                                           : goal_mission_index_;
   return RecoveryTurn(UsesAutomaticMissionPolicy() ?
