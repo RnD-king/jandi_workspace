@@ -444,17 +444,20 @@ def choose_start(default):
         elif key=='5':stream=not stream
 
 
+def attach_console(active,args):
+    # Reconnecting to the same live console must not accidentally spawn another version.
+    print('실행 중: '+(active.get('version') or '기존 버전')+' — 기존 JANDI 전체 종료 전 새 실행은 거부합니다.')
+    if args.version and args.version!=active.get('version'):
+        return 1
+    script=Path(active.get('share','/missing')).parent.parent/'lib/vision/run_jandi'
+    if not script.is_file():raise RuntimeError('기존 콘솔 경로를 찾을 수 없습니다. 기존 설치의 콘솔로 연결하세요.')
+    print('기존 콘솔에 다시 연결합니다. 새 노드를 시작하지 않습니다.')
+    return call(['/usr/bin/python3',script,'attach']).returncode
+
+
 def start(cfg,args):
     active=active_plan()
-    if active is not None:
-        # Reconnecting to the same live console must not accidentally spawn another version.
-        print('실행 중: '+(active.get('version') or '기존 버전')+' — 기존 JANDI 전체 종료 전 새 실행은 거부합니다.')
-        if args.version and args.version!=active.get('version'):
-            return 1
-        script=Path(active.get('share','/missing')).parent.parent/'lib/vision/run_jandi'
-        if not script.is_file():raise RuntimeError('기존 콘솔 경로를 찾을 수 없습니다. 기존 설치의 콘솔로 연결하세요.')
-        print('기존 콘솔에 다시 연결합니다. 새 노드를 시작하지 않습니다.')
-        return call(['/usr/bin/python3',script,'attach']).returncode
+    if active is not None:return attach_console(active,args)
     if args.attach:raise RuntimeError('연결할 실행 중 JANDI가 없습니다.')
     selected=choose_start(args.version or cfg.get('selected','main')) if not args.no_menu else (
         args.version or cfg.get('selected','main'),args.opencv,args.terminal,args.http)
@@ -572,6 +575,11 @@ def main(argv=None):
     if args.command=='status':
         print(json.dumps({'active':active_plan(),'selected':cfg.get('selected'),'installs':{
             v:json.loads(release_paths(v)[1].read_text()) if release_paths(v)[1].exists() else None for v in BRANCHES}},indent=2));return 0
+    if args.command=='run':
+        # A foreground console holds operations.lock until it exits. Attaching
+        # only opens another console, so it must work while that lock is held.
+        active=active_plan()
+        if active is not None:return attach_console(active,args)
     with operation_lock():
         if args.command=='select':
             require_stopped();cfg['selected']=version;atomic_json(CONFIG_DIR/'deployment.json',cfg)

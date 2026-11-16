@@ -17,6 +17,10 @@ const LinePlan::Block* LinePlan::Find(std::uint64_t id) const {
   return nullptr;
 }
 ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner, bool probe, double end_weight) {
+  return Begin(cruise, owner, probe, end_weight, false);
+}
+ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner, bool probe, double end_weight,
+                              bool single_unit) {
   if (!IsCruise(cruise)) return {};
   // Retain recent IDs for idempotent late feedback, without unbounded growth.
   while (blocks_.size() >= 32 && blocks_.front().reported) {
@@ -31,7 +35,7 @@ ActionRequest LinePlan::Begin(MissionAction cruise, std::uint64_t owner, bool pr
   const auto unit = left ? MissionAction::kLineLeftUnit :
       right ? static_cast<MissionAction>(config_.right_unit_action) :
            MissionAction::kLineStraightUnit;
-  const int count = left ? config_.left_repetitions :
+  const int count = single_unit ? 1 : left ? config_.left_repetitions :
       right ? config_.right_repetitions : config_.straight_repetitions;
   auto observation_config=config_;
   if (end_weight>0.0) observation_config.ready_observation_end_weight=end_weight;

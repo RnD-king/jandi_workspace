@@ -229,6 +229,7 @@ class DeployTest(unittest.TestCase):
 
     def test_background_uses_explicit_flags_without_mode(self):
         with patch.object(d,'load_config',return_value={'machine':'pc','selected':'main'}), \
+             patch.object(d,'active_plan',return_value=None), \
              patch.object(d,'start',return_value=0) as start:
             self.assertEqual(d.main(['run','--machine','pc','--background','--no-menu','--terminal']),0)
         args=start.call_args[0][1]
@@ -415,6 +416,38 @@ class DeployTest(unittest.TestCase):
         with d.operation_lock():
             with self.assertRaisesRegex(RuntimeError,'진행 중'):
                 with d.operation_lock():pass
+
+    def test_live_console_reconnects_while_operations_lock_is_held(self):
+        release=fixture_release(self.root/'release')
+        active={'version':'fast','share':str(Path(release['ros'])/'vision/share/vision')}
+        script=Path(release['ros'])/'vision/lib/vision/run_jandi'
+        with d.operation_lock(),patch.object(d,'load_config',return_value={'machine':'pc','selected':'main'}), \
+             patch.object(d,'active_plan',return_value=active), \
+             patch.object(d,'start') as start, \
+             patch.object(d,'call',return_value=subprocess.CompletedProcess([],0)) as call, \
+             contextlib.redirect_stdout(io.StringIO()):
+            for argv in (['run'],['run','attach'],['run','fast','--attach']):
+                with self.subTest(argv=argv):
+                    call.reset_mock()
+                    self.assertEqual(d.main(argv),0)
+                    call.assert_called_once_with(['/usr/bin/python3',script,'attach'])
+            call.reset_mock()
+            self.assertEqual(d.main(['run','main']),1)
+            call.assert_not_called()
+            start.assert_not_called()
+            for command in ('update','push','select'):
+                with self.subTest(command=command),self.assertRaisesRegex(RuntimeError,'진행 중'):
+                    d.main([command,'main'])
+
+    def test_missing_live_console_never_bypasses_operations_lock(self):
+        with d.operation_lock(),patch.object(d,'load_config',return_value={'machine':'pc'}), \
+             patch.object(d,'active_plan',return_value=None),patch.object(d,'call') as call:
+            with self.assertRaisesRegex(RuntimeError,'진행 중'):d.main(['run','--attach'])
+            call.assert_not_called()
+        with patch.object(d,'load_config',return_value={'machine':'pc'}), \
+             patch.object(d,'active_plan',return_value=None),patch.object(d,'call') as call:
+            with self.assertRaisesRegex(RuntimeError,'연결할 실행 중'):d.main(['run','--attach'])
+            call.assert_not_called()
 
     def test_compat_wrapper_accepts_version_after_machine_option(self):
         with patch.object(d,'load_config',return_value={'machine':'pc','selected':'main'}), \
