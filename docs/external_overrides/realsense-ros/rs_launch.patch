@@ -1,0 +1,65 @@
+diff --git a/realsense2_camera/launch/rs_launch.py b/realsense2_camera/launch/rs_launch.py
+index d0950ca..189cbbe 100644
+--- a/realsense2_camera/launch/rs_launch.py
++++ b/realsense2_camera/launch/rs_launch.py
+@@ -20,7 +20,9 @@ import launch_ros.actions
+ from launch.actions import DeclareLaunchArgument, OpaqueFunction, LogInfo
+ from launch.substitutions import LaunchConfiguration
+ 
+-configurable_parameters = [{'name': 'camera_name',                  'default': 'camera', 'description': 'camera unique name'},
++configurable_parameters = [
++    {'name': 'rgb_camera.enable_auto_white_balance', 'default': 'true', 'description': 'enable/disable auto white balance for color image'},
++{'name': 'camera_name',                  'default': 'camera', 'description': 'camera unique name'},
+                            {'name': 'camera_namespace',             'default': 'camera', 'description': 'namespace for camera'},
+                            {'name': 'serial_no',                    'default': "''", 'description': 'choose device by serial number'},
+                            {'name': 'usb_port_id',                  'default': "''", 'description': 'choose device by usb port id'},
+@@ -34,14 +36,14 @@ configurable_parameters = [{'name': 'camera_name',                  'default': '
+                            {'name': 'log_level',                    'default': 'info', 'description': 'debug log level [DEBUG|INFO|WARN|ERROR|FATAL]'},
+                            {'name': 'output',                       'default': 'screen', 'description': 'pipe node output [screen|log]'},
+                            {'name': 'enable_color',                 'default': 'true', 'description': 'enable color stream'},
+-                           {'name': 'rgb_camera.color_profile',     'default': '0,0,0', 'description': 'color stream profile'},
++                           {'name': 'rgb_camera.color_profile',     'default': '640x480x15', 'description': 'color stream profile'},
+                            {'name': 'rgb_camera.color_format',      'default': 'RGB8', 'description': 'color stream format'},
+                            {'name': 'rgb_camera.enable_auto_exposure', 'default': 'true', 'description': 'enable/disable auto exposure for color image'},
+                            {'name': 'enable_depth',                 'default': 'true', 'description': 'enable depth stream'},
+                            {'name': 'enable_infra',                 'default': 'false', 'description': 'enable infra0 stream'},
+                            {'name': 'enable_infra1',                'default': 'false', 'description': 'enable infra1 stream'},
+                            {'name': 'enable_infra2',                'default': 'false', 'description': 'enable infra2 stream'},
+-                           {'name': 'depth_module.depth_profile',   'default': '0,0,0', 'description': 'depth stream profile'},
++                           {'name': 'depth_module.depth_profile',   'default': '640x480x15', 'description': 'depth stream profile'},
+                            {'name': 'depth_module.depth_format',    'default': 'Z16', 'description': 'depth stream format'},
+                            {'name': 'depth_module.infra_profile',   'default': '0,0,0', 'description': 'infra streams (0/1/2) profile'},
+                            {'name': 'depth_module.infra_format',    'default': 'RGB8', 'description': 'infra0 stream format'},
+@@ -57,7 +59,7 @@ configurable_parameters = [{'name': 'camera_name',                  'default': '
+                            {'name': 'depth_module.gain.1',          'default': '16', 'description': 'Depth module first gain value. Used for hdr_merge filter'},
+                            {'name': 'depth_module.exposure.2',      'default': '1', 'description': 'Depth module second exposure value. Used for hdr_merge filter'},
+                            {'name': 'depth_module.gain.2',          'default': '16', 'description': 'Depth module second gain value. Used for hdr_merge filter'},
+-                           {'name': 'enable_sync',                  'default': 'false', 'description': "'enable sync mode'"},
++                           {'name': 'enable_sync',                  'default': 'true', 'description': "'enable sync mode'"},
+                            {'name': 'depth_module.inter_cam_sync_mode',               'default': "0", 'description': '[0-Default, 1-Master, 2-Slave]'},
+                            {'name': 'enable_rgbd',                  'default': 'false', 'description': "'enable rgbd topic'"},
+                            {'name': 'enable_gyro',                  'default': 'false', 'description': "'enable gyro stream'"},
+@@ -78,7 +80,7 @@ configurable_parameters = [{'name': 'camera_name',                  'default': '
+                            {'name': 'pointcloud.stream_index_filter','default': '0', 'description': 'texture stream index for pointcloud'},
+                            {'name': 'pointcloud.ordered_pc',        'default': 'false', 'description': ''},
+                            {'name': 'pointcloud.allow_no_texture_points', 'default': 'false', 'description': "''"},
+-                           {'name': 'align_depth.enable',           'default': 'false', 'description': 'enable align depth filter'},
++                           {'name': 'align_depth.enable',           'default': 'true', 'description': 'enable align depth filter'},
+                            {'name': 'colorizer.enable',             'default': 'false', 'description': 'enable colorizer filter'},
+                            {'name': 'decimation_filter.enable',     'default': 'false', 'description': 'enable_decimation_filter'},
+                            {'name': 'rotation_filter.enable',       'default': 'false', 'description': 'enable rotation_filter'},
+@@ -156,7 +158,13 @@ def launch_setup(context, params, param_name_suffix=''):
+             namespace=LaunchConfiguration('camera_namespace' + param_name_suffix),
+             name=LaunchConfiguration('camera_name' + param_name_suffix),
+             executable='realsense2_camera_node',
+-            parameters=[params, params_from_file],
++            parameters=[params, params_from_file, {
++                'rgb_camera.saturation': 64,
++                'rgb_camera.contrast': 50,
++                'rgb_camera.sharpness': 50,
++                'rgb_camera.gamma': 300,
++                'rgb_camera.gain': 64,
++            }],
+             output=_output,
+             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level' + param_name_suffix)],
+             emulate_tty=True,
